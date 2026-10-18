@@ -315,7 +315,7 @@ A module is a subpackage of `candlestack` under `backend/src/candlestack/`.
 | `core` | now | settings, logging, problem errors, Redis, Postgres and HTTP clients, CSRF protection, health endpoint |
 | `data` | now | instrument catalog, candles, sessions, cache, source adapters, rate limits |
 | `accounts` | now | users, GitHub and Google sign-in, sessions, the beta list, Settings (name, sign-in methods, preferences, deleting the account); `CurrentUserDep` for the routes of the signed-in user, `AccountDeletionHook` for what other modules delete with an account |
-| `preprocessing` | later | Renko, Kagi, time windows, normalization, segmentation |
+| `preprocessing` | later | the model's input from its manifest: representation (candles, Renko, Kagi), features, normalization, windows ([preprocessing.md](preprocessing.md)) |
 | `ml` | now | the models users upload: the upload and its static check, the file storage, the list, rename, star, delete; running models later, in a worker (below) |
 | `signals` | started | turn predictions into signals: align them with the candles, thresholds, long only; later smoothing, holding period, sizing, risk limits |
 | `engine` | started | the backtest loop: candles and signals in, trades and an equity series out; `ENGINE_VERSION` names its rules ([engine.md](engine.md)) |
