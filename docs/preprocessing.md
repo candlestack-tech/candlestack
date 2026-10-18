@@ -140,10 +140,37 @@ is_last_bar`.
 | timeframe, representation, brick size, features and their order, indicator parameters, normalization, window | instruments, period, the post-processing (threshold, long only, stop loss, later smoothing, holding period, sizing), fees, slippage, fill, benchmark |
 
 A trained model only works on the input it was trained on, so the builder shows the manifest's
-input as read only. Comparing Renko with Kagi means comparing models trained on each. A mode
-that lets a user change inputs of a trained model (say a brick of 0.2 instead of 0.6 x ATR) is
-left out for now; catalog parameters carry a `tunable` flag from the start, so it can be added
-without changing the schema.
+input as read only. Comparing Renko with Kagi, or one architecture with another (TSMixer,
+StockMixer, the supervisor's MLP), means comparing backtests of models trained on each, on the
+Compare page, not a step of the builder. A mode that lets a user change inputs of a trained
+model (say a brick of 0.2 instead of 0.6 x ATR) is left out for now; catalog parameters carry a
+`tunable` flag from the start, so it can be added without changing the schema.
+
+### The builder
+
+The model comes first, because it fixes the most: the timeframe, the session and the whole
+input.
+
+| Step | What happens |
+| --- | --- |
+| 1. Model | one of the user's models, or Upload model, which opens the upload below and comes back with the new model chosen; models without a manifest are shown but cannot be chosen ("needs a manifest") |
+| 2. Data | instruments and period; the timeframe is the model's. What cannot work is disabled with the reason, such as an instrument without candles for the period and the warm-up |
+| 3. Preprocessing | the manifest's input, read only: "Renko 0.6 x ATR · 23 features · window 25", with the full list on demand |
+| 4. Post-processing | threshold, long only, stop loss, later smoothing, holding period, sizing; free to choose |
+
+### The upload
+
+The model and its manifest are two files, `model.keras` (or `model.onnx`) and `manifest.json`;
+both can be dropped at once, and the app tells which is which.
+
+1. The model file: its check reads the input shape (`[25, 23]`).
+2. How to feed it, one of: upload `manifest.json`; pick a template ("Supervisor NO-VOL
+   25 x 23", "Raw candles 25 x 5"); or build it in a form from the catalog (blocks, order,
+   window). The shape is compared at once: "the manifest gives [25, 23], the model takes
+   [25, 23]".
+3. An example input with its output, optional: the model is `verified` when it matches.
+4. Save. Step 2 can be skipped: the model is kept as `needs_setup`, and its manifest is added
+   later from the Models page.
 
 ## The blocks
 
