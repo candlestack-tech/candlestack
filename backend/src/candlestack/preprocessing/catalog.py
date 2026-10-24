@@ -20,6 +20,8 @@ from candlestack.preprocessing import blocks
 from candlestack.preprocessing.manifest import Window
 
 Step = Literal["representation", "feature", "normalization", "window"]
+# How the app groups the features of a model when it draws the input as rows by columns.
+Group = Literal["Candle", "Bands", "Momentum", "Trend", "Volume", "Brick"]
 
 # The manifest's `input.window` holds the parameters of this block, the only window for now.
 WINDOW = "window@1"
@@ -33,6 +35,10 @@ class Block:
     - ``params``: the model its parameters are checked with;
     - ``warm_up``: how many earlier candles it needs before its first complete value (rows,
       for the window), from its parameters; ``warm_up_rule`` says it in words for the app;
+    - ``group``: a feature's display group; None for the other steps;
+    - ``candles_per_row``: for a representation whose rows span several candles (Renko, Kagi),
+      an estimate of the candles a row takes, from its parameters; None when every candle is a
+      row, which makes the warm-up of a manifest exact;
     - ``tunable``: the parameters a user may change on a trained model, for a later experiment
       mode (docs/preprocessing.md#what-the-user-chooses); none yet.
     """
@@ -44,6 +50,8 @@ class Block:
     params: type[BaseModel] = blocks.NoParams
     warm_up: Callable[[Any], int] = blocks.no_warm_up
     warm_up_rule: str = "0"
+    group: Group | None = None
+    candles_per_row: Callable[[Any], float] | None = None
     tunable: frozenset[str] = field(default_factory=frozenset)
 
 
@@ -53,6 +61,7 @@ def _candle_column(name: str) -> Block:
         step="feature",
         description=f"The {name} of the candle",
         run=blocks.candle_column(name),
+        group="Candle",
     )
 
 
@@ -113,6 +122,14 @@ class BlockOut(BaseModel):
     id: str = Field(description="The versioned name a manifest uses", examples=["candles@1"])
     step: Step = Field(description="The step of the input the block is for")
     description: str = Field(examples=["Every candle a row"])
+    # A string, not an enum: a new group comes with a new block, which must not break clients.
+    group: str | None = Field(
+        description=(
+            "Where the app shows a feature when it draws the input: Candle, Bands, Momentum, "
+            "Trend, Volume or Brick; null for the other steps"
+        ),
+        examples=["Candle"],
+    )
     warm_up: str = Field(
         description=(
             "How many earlier candles the block needs before its first complete value (rows, "
@@ -155,6 +172,7 @@ def _describe(block: Block) -> BlockOut:
         id=block.id,
         step=block.step,
         description=block.description,
+        group=block.group,
         warm_up=block.warm_up_rule,
         params=[
             _param(name, prop, required=name in required, tunable=name in block.tunable)

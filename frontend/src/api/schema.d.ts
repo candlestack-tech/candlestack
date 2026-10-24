@@ -885,6 +885,12 @@ export interface components {
              */
             description: string;
             /**
+             * Group
+             * @description Where the app shows a feature when it draws the input: Candle, Bands, Momentum, Trend, Volume or Brick; null for the other steps
+             * @example Candle
+             */
+            group: string | null;
+            /**
              * Id
              * @description The versioned name a manifest uses
              * @example candles@1

@@ -5,8 +5,18 @@ from typing import Any
 import numpy as np
 import polars as pl
 import pytest
+from pydantic import BaseModel, ConfigDict
 
-from candlestack.preprocessing import build_input, parse_manifest, warm_up
+from candlestack.preprocessing import (
+    CATALOG,
+    Block,
+    WarmUp,
+    build_input,
+    checks,
+    parse_manifest,
+    pipeline,
+    warm_up,
+)
 
 COLUMNS = ["open", "high", "low", "close", "volume"]
 
@@ -147,13 +157,80 @@ def test_candles_that_break_their_rules(
 
 
 @pytest.mark.parametrize(("length", "candles_before"), [(25, 24), (1, 0)])
-def test_the_warm_up_of_raw_candles_is_the_window(
+def test_the_warm_up_of_raw_candles_is_exactly_the_window(
     raw: dict[str, Any], length: int, candles_before: int
 ) -> None:
-    assert warm_up(parse_manifest(with_window(raw, length))) == candles_before
+    assert warm_up(parse_manifest(with_window(raw, length))) == WarmUp(candles_before, "exact")
 
 
-def test_the_warm_up_is_what_the_build_drops(raw: dict[str, Any]) -> None:
+def test_the_exact_warm_up_is_what_the_build_drops(raw: dict[str, Any]) -> None:
     manifest = parse_manifest(raw)
 
-    assert build_input(candles(40), manifest).dropped == warm_up(manifest)
+    assert build_input(candles(40), manifest).dropped == warm_up(manifest).candles
+
+
+class Lag(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    lag: int = 3
+
+
+def lagged(frame: pl.DataFrame, params: Lag) -> pl.Series:
+    """The close ``lag`` candles ago: null for the first ``lag`` candles."""
+    return frame["close"].shift(params.lag)
+
+
+# Blocks made up for the warm-up: a feature with one, and a representation of bricks whose
+# rows take about 2.5 candles each after an ATR of 14 candles.
+LAGGED = Block(
+    id="lagged-close@1",
+    step="feature",
+    description="",
+    run=lagged,
+    params=Lag,
+    warm_up=lambda params: params.lag,
+    group="Momentum",
+)
+BRICKS = Block(
+    id="bricks@1",
+    step="representation",
+    description="",
+    run=lambda frame, _params: frame,
+    warm_up=lambda _params: 14,
+    candles_per_row=lambda _params: 2.5,
+)
+
+
+@pytest.fixture
+def made_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    catalog = {**CATALOG, LAGGED.id: LAGGED, BRICKS.id: BRICKS}
+    monkeypatch.setattr(pipeline, "CATALOG", catalog)
+    monkeypatch.setattr(checks, "CATALOG", catalog)
+
+
+@pytest.mark.usefixtures("made_up")
+def test_the_exact_warm_up_is_the_longest_feature_and_the_window(raw: dict[str, Any]) -> None:
+    raw["input"]["features"][1] = {"name": "lag", "id": "lagged-close@1", "params": {"lag": 5}}
+    manifest = parse_manifest(raw)
+
+    assert warm_up(manifest) == WarmUp(candles=5 + 24, kind="exact")
+    assert build_input(candles(40), manifest).dropped == 29
+
+
+@pytest.mark.usefixtures("made_up")
+def test_rows_of_several_candles_give_an_estimate(raw: dict[str, Any]) -> None:
+    raw["input"]["representation"] = {"id": "bricks@1"}
+
+    # The ATR's 14 candles, then 24 earlier rows of about 2.5 candles each.
+    assert warm_up(parse_manifest(raw)) == WarmUp(candles=14 + 60, kind="estimate")
+
+
+@pytest.mark.usefixtures("made_up")
+def test_the_estimate_rounds_up_and_counts_the_longest_warm_up_once(
+    raw: dict[str, Any],
+) -> None:
+    raw["input"]["representation"] = {"id": "bricks@1"}
+    raw["input"]["features"][0] = {"name": "lag", "id": "lagged-close@1", "params": {"lag": 20}}
+    raw = with_window(raw, 2)
+
+    assert warm_up(parse_manifest(raw)) == WarmUp(candles=20 + 3, kind="estimate")

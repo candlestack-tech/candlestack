@@ -58,9 +58,25 @@ def test_the_catalog_lists_the_blocks_by_step() -> None:
         "id": "candles@1",
         "step": "representation",
         "description": "Every candle a row",
+        "group": None,
         "warm_up": "0",
         "params": [],
     }
+
+
+@pytest.mark.parametrize("block", list(CATALOG.values()), ids=list(CATALOG))
+def test_every_feature_has_a_display_group_and_no_other_block_has_one(block: Block) -> None:
+    assert (block.group is not None) == (block.step == "feature")
+
+
+def test_the_candle_columns_are_in_the_candle_group() -> None:
+    groups = {block.id: block.group for block in describe_catalog().blocks if block.group}
+
+    assert groups == dict.fromkeys(["open@1", "high@1", "low@1", "close@1", "volume@1"], "Candle")
+
+
+def test_only_a_representation_may_span_several_candles_a_row() -> None:
+    assert [block.id for block in CATALOG.values() if block.candles_per_row] == []
 
 
 def test_the_catalog_describes_the_window_and_its_parameters() -> None:

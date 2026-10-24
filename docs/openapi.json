@@ -734,6 +734,21 @@
             "title": "Description",
             "type": "string"
           },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the app shows a feature when it draws the input: Candle, Bands, Momentum, Trend, Volume or Brick; null for the other steps",
+            "examples": [
+              "Candle"
+            ],
+            "title": "Group"
+          },
           "id": {
             "description": "The versioned name a manifest uses",
             "examples": [
@@ -775,6 +790,7 @@
           "id",
           "step",
           "description",
+          "group",
           "warm_up",
           "params"
         ],

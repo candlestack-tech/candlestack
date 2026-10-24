@@ -1,7 +1,9 @@
 """The model's input from candles and a manifest: representation, features, normalization,
 window, each step the block the manifest names."""
 
+import math
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 import polars as pl
@@ -30,26 +32,42 @@ class ModelInput:
     dropped: int
 
 
-def warm_up(manifest: Manifest) -> int:
-    """How many candles before the first sample the input needs: the representation's, the
-    longest of a feature with its normalization, and the window's.
+@dataclass(frozen=True, slots=True)
+class WarmUp:
+    """How many candles before the first sample a manifest needs.
 
-    With ``candles@1`` this is exact. A representation whose rows span several candles will
-    need its own count of candles per row for the window.
+    ``kind`` is ``exact`` when every candle is a row (``candles@1``): then ``candles`` is what
+    the build drops. With rows that span several candles (Renko, Kagi) how many candles the
+    window's rows take is known only from the candles themselves, so it is an ``estimate``: the
+    run loads more and reports how many the warm-up used (``ModelInput.dropped``).
+    """
+
+    candles: int
+    kind: Literal["exact", "estimate"]
+
+
+def warm_up(manifest: Manifest) -> WarmUp:
+    """The candles before the first sample: the longest warm-up of the representation and of a
+    feature with its normalization (all counted in candles), then the window's earlier rows.
 
     Raises:
         KeyError: A block is not in the catalog (``check_manifest`` says so first).
     """
     spec = manifest.input
     rep = CATALOG[spec.representation.id]
-    features = [
-        _warm_up(feature.id, feature.params) + _warm_up(feature.norm.id, feature.norm.params)
-        for feature in spec.features
-    ]
-    return (
-        rep.warm_up(rep.params.model_validate(spec.representation.params))
-        + max(features)
-        + CATALOG[WINDOW].warm_up(spec.window)
+    rep_params = rep.params.model_validate(spec.representation.params)
+    longest = max(
+        rep.warm_up(rep_params),
+        *(
+            _warm_up(feature.id, feature.params) + _warm_up(feature.norm.id, feature.norm.params)
+            for feature in spec.features
+        ),
+    )
+    rows = CATALOG[WINDOW].warm_up(spec.window)
+    if rep.candles_per_row is None:
+        return WarmUp(candles=longest + rows, kind="exact")
+    return WarmUp(
+        candles=longest + math.ceil(rows * rep.candles_per_row(rep_params)), kind="estimate"
     )
 
 

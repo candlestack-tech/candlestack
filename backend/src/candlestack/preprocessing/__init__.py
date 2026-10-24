@@ -15,6 +15,7 @@ from candlestack.preprocessing.catalog import (
     Block,
     BlockOut,
     CatalogOut,
+    Group,
     ParamOut,
     Step,
     describe_catalog,
@@ -29,7 +30,7 @@ from candlestack.preprocessing.checks import (
     unknown_blocks,
 )
 from candlestack.preprocessing.manifest import SCHEMA, Manifest
-from candlestack.preprocessing.pipeline import ModelInput, build_input, warm_up
+from candlestack.preprocessing.pipeline import ModelInput, WarmUp, build_input, warm_up
 
 __all__ = [
     "CATALOG",
@@ -38,12 +39,14 @@ __all__ = [
     "BlockOut",
     "CatalogOut",
     "Check",
+    "Group",
     "InvalidManifest",
     "Manifest",
     "ManifestProblem",
     "ModelInput",
     "ParamOut",
     "Step",
+    "WarmUp",
     "build_input",
     "check_manifest",
     "check_with_model",
