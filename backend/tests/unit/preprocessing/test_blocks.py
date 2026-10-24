@@ -1,0 +1,151 @@
+"""Every block by hand on a few candles."""
+
+import math
+from typing import Literal
+
+import numpy as np
+import polars as pl
+import pytest
+
+from candlestack.preprocessing import CATALOG
+from candlestack.preprocessing.blocks import NoParams, Samples
+from candlestack.preprocessing.manifest import Window
+
+NONE = NoParams()
+# Three 30-minute candles, labelled by their open time; volume as the data module gives it.
+CANDLES = pl.DataFrame(
+    {
+        "ts": [0, 1800, 3600],
+        "open": [10.0, 11.0, 12.0],
+        "high": [11.5, 12.5, 13.5],
+        "low": [9.5, 10.5, 11.5],
+        "close": [11.0, 12.0, 13.0],
+        "volume": [100.0, 200.0, 300.0],
+    }
+)
+
+
+def rows(*features: list[float | None], ts: list[int] | None = None) -> pl.DataFrame:
+    """Rows of the window: ``ts`` and the features ``f0``, ``f1``, ..."""
+    count = len(features[0])
+    return pl.DataFrame(
+        {
+            "ts": ts if ts is not None else [index * 1800 for index in range(count)],
+            **{f"f{index}": values for index, values in enumerate(features)},
+        },
+        schema_overrides={f"f{index}": pl.Float64 for index in range(len(features))},
+    )
+
+
+def window(
+    frame: pl.DataFrame, length: int, last: Literal["closed", "current"] = "closed"
+) -> Samples:
+    return CATALOG["window@1"].run(frame, Window(length=length, last=last))
+
+
+def test_candles_makes_every_candle_a_row_known_at_its_own_close() -> None:
+    result = CATALOG["candles@1"].run(CANDLES.with_columns(trades=pl.lit(5)), NONE)
+
+    # The row of a candle keeps its ts (its open time): it is known at that candle's close.
+    assert result.equals(CANDLES)
+
+
+@pytest.mark.parametrize("name", ["open", "high", "low", "close", "volume"])
+def test_a_candle_column_is_that_column_of_each_candle(name: str) -> None:
+    result = CATALOG[f"{name}@1"].run(CANDLES, NONE)
+
+    assert result.dtype == pl.Float64
+    assert result.to_list() == CANDLES[name].to_list()
+
+
+def test_a_candle_column_is_float64_from_integers() -> None:
+    result = CATALOG["volume@1"].run(CANDLES.with_columns(pl.col("volume").cast(pl.Int64)), NONE)
+
+    assert result.dtype == pl.Float64
+    assert result.to_list() == [100.0, 200.0, 300.0]
+
+
+def test_none_gives_the_column_as_it_is() -> None:
+    column = pl.Series("close", [1.5, None, -2.0])
+
+    assert CATALOG["none@1"].run(column, NONE).equals(column)
+
+
+def test_the_window_gives_the_last_rows_up_to_each_row() -> None:
+    frame = rows([1.0, 2.0, 3.0, 4.0], [10.0, 20.0, 30.0, 40.0])
+
+    made = window(frame, 3)
+
+    assert made.samples.dtype == np.float32
+    assert made.samples.shape == (2, 3, 2)
+    # Rows in time order, features in their order.
+    assert made.samples.tolist() == [
+        [[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]],
+        [[2.0, 20.0], [3.0, 30.0], [4.0, 40.0]],
+    ]
+    # Each sample is known at the close of its last row's candle.
+    assert made.ts.to_list() == [3600, 5400]
+    assert made.dropped == 2
+
+
+def test_a_window_of_one_row_is_every_row() -> None:
+    made = window(rows([1.0, 2.0]), 1)
+
+    assert made.samples.tolist() == [[[1.0]], [[2.0]]]
+    assert made.ts.to_list() == [0, 1800]
+    assert made.dropped == 0
+
+
+def test_the_window_drops_the_incomplete_rows_at_the_start() -> None:
+    # A feature still in its warm-up: null, NaN or infinite, never a sample.
+    frame = rows([None, math.nan, 1.0, 2.0, 3.0], [math.inf, 0.0, 0.5, 0.25, 0.125])
+
+    made = window(frame, 2)
+
+    assert made.samples.tolist() == [[[1.0, 0.5], [2.0, 0.25]], [[2.0, 0.25], [3.0, 0.125]]]
+    assert made.ts.to_list() == [5400, 7200]
+    assert made.dropped == 3
+
+
+def test_the_window_rounds_to_float32() -> None:
+    made = window(rows([0.1]), 1)
+
+    assert made.samples[0, 0, 0] == np.float32(0.1)
+
+
+@pytest.mark.parametrize(
+    "frame",
+    [rows([1.0, 2.0]), rows([None, None, None]), rows([]), rows([None, 1.0, 2.0])],
+    ids=["too-few", "all-incomplete", "empty", "too-few-after-warm-up"],
+)
+def test_rows_without_a_full_window_give_no_sample(frame: pl.DataFrame) -> None:
+    made = window(frame, 3)
+
+    assert made.samples.shape == (0, 3, 1)
+    assert made.samples.dtype == np.float32
+    assert made.ts.is_empty()
+    assert made.dropped == frame.height
+
+
+def test_a_hole_after_the_warm_up_is_an_error() -> None:
+    frame = rows([1.0, 2.0, 3.0, 4.0], [1.0, 2.0, None, 4.0])
+
+    with pytest.raises(
+        ValueError, match="A feature is missing or not finite after the warm-up, at ts 3600"
+    ):
+        window(frame, 2)
+
+
+def test_the_window_refuses_the_row_still_forming() -> None:
+    with pytest.raises(ValueError, match="last: current is not supported yet"):
+        window(rows([1.0]), 1, "current")
+
+
+@pytest.mark.parametrize(("length", "rows_before"), [(1, 0), (25, 24)])
+def test_the_window_needs_length_minus_one_earlier_rows(length: int, rows_before: int) -> None:
+    assert CATALOG["window@1"].warm_up(Window(length=length)) == rows_before
+
+
+@pytest.mark.parametrize("block", [block for block in CATALOG if block != "window@1"])
+def test_the_other_blocks_need_no_earlier_candle(block: str) -> None:
+    assert CATALOG[block].warm_up(NONE) == 0

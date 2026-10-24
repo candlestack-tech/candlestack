@@ -1,0 +1,315 @@
+{
+  "$defs": {
+    "BlockRef": {
+      "additionalProperties": false,
+      "description": "One step: a block of the catalog with its parameters.",
+      "properties": {
+        "id": {
+          "description": "A block of the catalog and its version",
+          "examples": [
+            "candles@1"
+          ],
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*@[1-9][0-9]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "description": "The block's parameters, checked against the catalog",
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "BlockRef",
+      "type": "object"
+    },
+    "Example": {
+      "additionalProperties": false,
+      "description": "A small input with the output the model must give for it (within 1e-4).",
+      "properties": {
+        "input": {
+          "description": "Samples of the shape of `signature.input`",
+          "items": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "minItems": 1,
+          "title": "Input",
+          "type": "array"
+        },
+        "output": {
+          "description": "The model's output for each sample",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "minItems": 1,
+          "title": "Output",
+          "type": "array"
+        }
+      },
+      "required": [
+        "input",
+        "output"
+      ],
+      "title": "Example",
+      "type": "object"
+    },
+    "Feature": {
+      "additionalProperties": false,
+      "description": "One column of the input: its name, the block that computes it and its normalization.",
+      "properties": {
+        "id": {
+          "description": "A block of the catalog and its version",
+          "examples": [
+            "candles@1"
+          ],
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*@[1-9][0-9]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "description": "The column's name, unique in the manifest",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "norm": {
+          "$ref": "#/$defs/BlockRef",
+          "description": "How the column is scaled; without one it is not (none@1)"
+        },
+        "params": {
+          "additionalProperties": true,
+          "description": "The block's parameters, checked against the catalog",
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "id"
+      ],
+      "title": "Feature",
+      "type": "object"
+    },
+    "Input": {
+      "additionalProperties": false,
+      "description": "The candles the model expects and how its input is built from them.",
+      "properties": {
+        "features": {
+          "description": "The columns, in their order",
+          "items": {
+            "$ref": "#/$defs/Feature"
+          },
+          "minItems": 1,
+          "title": "Features",
+          "type": "array"
+        },
+        "representation": {
+          "$ref": "#/$defs/BlockRef",
+          "description": "Which rows the model sees"
+        },
+        "session": {
+          "const": "regular",
+          "description": "`regular`: US trading hours",
+          "title": "Session",
+          "type": "string"
+        },
+        "timeframe": {
+          "enum": [
+            "1m",
+            "5m",
+            "15m",
+            "30m",
+            "1h",
+            "4h",
+            "1d"
+          ],
+          "title": "Timeframe",
+          "type": "string"
+        },
+        "window": {
+          "$ref": "#/$defs/Window"
+        }
+      },
+      "required": [
+        "timeframe",
+        "session",
+        "representation",
+        "features",
+        "window"
+      ],
+      "title": "Input",
+      "type": "object"
+    },
+    "Output": {
+      "additionalProperties": false,
+      "properties": {
+        "dtype": {
+          "const": "float32",
+          "title": "Dtype",
+          "type": "string"
+        },
+        "meaning": {
+          "const": "score",
+          "description": "`score`: the sign is the direction, the size is compared with the threshold",
+          "title": "Meaning",
+          "type": "string"
+        },
+        "shape": {
+          "examples": [
+            [
+              25,
+              5
+            ]
+          ],
+          "items": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Shape",
+          "type": "array"
+        }
+      },
+      "required": [
+        "shape",
+        "dtype",
+        "meaning"
+      ],
+      "title": "Output",
+      "type": "object"
+    },
+    "Signature": {
+      "additionalProperties": false,
+      "description": "What goes into the model and what comes out; must equal what the model file says.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/Tensor"
+        },
+        "output": {
+          "$ref": "#/$defs/Output"
+        }
+      },
+      "required": [
+        "input",
+        "output"
+      ],
+      "title": "Signature",
+      "type": "object"
+    },
+    "Tensor": {
+      "additionalProperties": false,
+      "description": "The shape of one sample without the batch axis, and its type.",
+      "properties": {
+        "dtype": {
+          "const": "float32",
+          "title": "Dtype",
+          "type": "string"
+        },
+        "shape": {
+          "examples": [
+            [
+              25,
+              5
+            ]
+          ],
+          "items": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Shape",
+          "type": "array"
+        }
+      },
+      "required": [
+        "shape",
+        "dtype"
+      ],
+      "title": "Tensor",
+      "type": "object"
+    },
+    "Window": {
+      "additionalProperties": false,
+      "description": "How rows make one sample: the parameters of the catalog's ``window@1``.",
+      "properties": {
+        "last": {
+          "default": "closed",
+          "description": "The last row of a sample: the last finished one (`closed`), or the row still forming (`current`, for representations with rows that span several candles)",
+          "enum": [
+            "closed",
+            "current"
+          ],
+          "title": "Last",
+          "type": "string"
+        },
+        "length": {
+          "description": "How many rows make one sample",
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Length",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "length"
+      ],
+      "title": "Window",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "What a model takes and gives, stored with the model (docs/preprocessing.md).",
+  "properties": {
+    "about": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Free text for people: trained on which instruments, which period, notes",
+      "title": "About",
+      "type": "object"
+    },
+    "example": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Example"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "input": {
+      "$ref": "#/$defs/Input"
+    },
+    "schema": {
+      "const": "candlestack.manifest/1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "signature": {
+      "$ref": "#/$defs/Signature"
+    }
+  },
+  "required": [
+    "schema",
+    "input",
+    "signature"
+  ],
+  "title": "CandleStack model manifest",
+  "type": "object"
+}
