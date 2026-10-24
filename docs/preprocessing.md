@@ -262,19 +262,6 @@ Checks 1 to 3 read the files only and run on upload; 4 and 5 run the model in th
   `indicators`, to `all_renkos`, to `all_triples`, to `normalized`, to the model input
   `candles_x_values`, to his predictions. His data never goes into this repository.
 
-## Build order
-
-1. The module, the catalog, the manifest schema and the no-preprocessing blocks; a small test
-   model on 25 x 5 raw candles; candles, manifest and model to predictions to a backtest, from
-   the command line first (#266).
-2. The manifest on the model, stored with the upload and checked (#267); the worker (#268);
-   running backtests from the API (#269).
-3. The app: the builder (#270), the result page (#271), the manifest on the Models page
-   (#272).
-4. The supervisor's Renko rows (#273), indicators (#274) and normalization (#275), checked step
-   by step against his data; ONNX models (#276).
-5. Time candles with indicators, Kagi; later the other representations.
-
 ## Open questions
 
 Kept for the supervisor until the pipeline is built, then asked together with what else is
