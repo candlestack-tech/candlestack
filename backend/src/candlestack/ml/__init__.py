@@ -11,6 +11,7 @@ startup, sweeps it while the app runs (``keep_incoming_swept``) and registers
 (``no_usage`` counts none).
 """
 
+from candlestack.ml.api import preprocessing_router
 from candlestack.ml.api import router as models_router
 from candlestack.ml.models import Model
 from candlestack.ml.schemas import ModelOut, ModelsOut
@@ -30,4 +31,5 @@ __all__ = [
     "keep_incoming_swept",
     "models_router",
     "no_usage",
+    "preprocessing_router",
 ]
