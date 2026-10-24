@@ -62,3 +62,8 @@ vulnerabilities:
   - id: CVE-2026-97031
     paths: [usr/bin/caddy]
     expired_at: 2026-10-27
+  # Go stdlib in the same binary: the newest official caddy image (2.11.7) is still built with
+  # Go 1.26.8, the fix is in Go 1.26.10.
+  - id: CVE-2026-111943
+    paths: [usr/bin/caddy]
+    expired_at: 2026-10-31
