@@ -137,7 +137,7 @@ is_last_bar`.
 
 | Fixed by the manifest | Chosen for each backtest |
 | --- | --- |
-| timeframe, representation, brick size, features and their order, indicator parameters, normalization, window | instruments, period, the post-processing (threshold, long only, stop loss, later smoothing, holding period, sizing), fees, slippage, fill, benchmark |
+| timeframe, representation, brick size, features and their order, indicator parameters, normalization, window | the instrument (one per backtest), period, how predictions become a signal (calibration, smoothing, threshold, hysteresis or k-means, long only, confirmation, holding period), stop loss, drawdown stop, fill, fees, slippage, benchmark; position sizing later |
 
 A trained model only works on the input it was trained on, so the builder shows the manifest's
 input as read only. Comparing Renko with Kagi, or one architecture with another (TSMixer,
@@ -153,24 +153,29 @@ input.
 
 | Step | What happens |
 | --- | --- |
-| 1. Model | one of the user's models, or Upload model, which opens the upload below and comes back with the new model chosen; models without a manifest are shown but cannot be chosen ("needs a manifest") |
-| 2. Data | instruments and period; the timeframe is the model's. What cannot work is disabled with the reason, such as an instrument without candles for the period and the warm-up |
-| 3. Preprocessing | the manifest's input, read only: "Renko 0.6 x ATR · 23 features · window 25", with the full list on demand |
-| 4. Post-processing | threshold, long only, stop loss, later smoothing, holding period, sizing; free to choose |
+| 1. Model | one of the user's models, or Upload model, which opens the upload below and comes back with the new model chosen. Models without a manifest are shown but cannot be chosen ("needs a manifest", with Add manifest). The preprocessing is one read-only line under the chosen model, from its manifest: "Renko 0.6 x ATR · 23 features · window 25", with the full list on demand |
+| 2. Data | one instrument and the period; the timeframe is the model's. What cannot work is disabled with the reason, such as an instrument without candles for the period and the warm-up |
+| 3. Decision | how predictions become a signal ([engine.md](engine.md#signals)): threshold, long only or long and short, stop loss; under Advanced calibration (z-score, rank), smoothing (EMA), the rule (threshold, hysteresis, k-means), confirmation, minimum hold, drawdown stop |
+| 4. Execution | honest fill (buy at the next candle's open, on by default), fees, slippage, benchmark |
+| 5. Run | a summary of the four steps, each with Edit, the warnings, and Run |
 
 ### The upload
 
 The model and its manifest are two files, `model.keras` (or `model.onnx`) and `manifest.json`;
 both can be dropped at once, and the app tells which is which.
 
-1. The model file: its check reads the input shape (`[25, 23]`).
+1. The model file: its checks run (the model checks below), and it shows what it takes and
+   gives: "input [25, 23] · output [1]".
 2. How to feed it, one of: upload `manifest.json`; pick a template ("Supervisor NO-VOL
    25 x 23", "Raw candles 25 x 5"); or build it in a form from the catalog (blocks, order,
-   window). The shape is compared at once: "the manifest gives [25, 23], the model takes
-   [25, 23]".
+   window). Its checks run at once, and the two are compared side by side: "the manifest
+   gives [25, 23], the model takes [25, 23]".
 3. An example input with its output, optional: the model is `verified` when it matches.
 4. Save. Step 2 can be skipped: the model is kept as `needs_setup`, and its manifest is added
    later from the Models page.
+
+Each check shows as passed or failed with what is wrong, in plain words ("The model has 2
+inputs; CandleStack takes models with one input"). Save is disabled while a check fails.
 
 ## The blocks
 
@@ -226,14 +231,27 @@ preprocessing stays the same.
 
 ## Checking a model with its manifest
 
-1. The file: the static check that runs now ([architecture.md](architecture.md#models)).
-2. The manifest: valid against the schema; every block and parameter in the catalog; the
-   feature names unique; `window.length` x the number of features equal to the model's input
-   shape and the output shape equal to the model's.
-3. A trial run in the worker on built-in candles: finite outputs of the right shape.
-4. With an `example`: the model's output for it within 1e-4 of the expected one. The model is
-   then `verified`. This is the only check that catches columns in the wrong order, which the
-   shape cannot.
+Checks 1 to 3 read the files only and run on upload; 4 and 5 run the model in the worker.
+
+1. **The model file.** The static check that runs now
+   ([architecture.md](architecture.md#models)): a real model of allowed layers, with trained
+   weights. Then its interface, from the file:
+   - exactly one input and one output (a model with several inputs is refused for now);
+   - the input is `[batch, rows, features]`: three axes, a fixed number of rows and of
+     features, `float32`;
+   - the output is `[batch, 1]`: one score per sample.
+2. **The manifest.** Valid against the JSON Schema; every block and version in the catalog,
+   each parameter of the right type and in its range; the feature names unique; the window
+   not longer than the warm-up the run can load; `signature.input` equal to
+   `[window.length, number of features]`.
+3. **The model with the manifest.** `signature.input` equal to the model's input without the
+   batch axis (`[25, 23]` and `[25, 23]`), `signature.output` equal to its output, the dtypes
+   equal.
+4. **A trial run** in the worker on built-in candles: the manifest builds the input, the model
+   answers with finite numbers of the right shape.
+5. **With an `example`:** the model's output for it within 1e-4 of the expected one. The model
+   is then `verified`. This is the only check that catches columns in the wrong order, which
+   the shape cannot.
 
 ## Tests
 
@@ -248,17 +266,23 @@ preprocessing stays the same.
 
 1. The module, the catalog, the manifest schema and the no-preprocessing blocks; a small test
    model on 25 x 5 raw candles; candles, manifest and model to predictions to a backtest, from
-   the command line first.
-2. The manifest on the model: stored with the upload, checked, shown in the app; the worker.
-3. The supervisor's Renko rows and indicators, checked step by step against his data.
-4. Time candles with indicators, Kagi; later the other representations.
+   the command line first (#266).
+2. The manifest on the model, stored with the upload and checked (#267); the worker (#268);
+   running backtests from the API (#269).
+3. The app: the builder (#270), the result page (#271), the manifest on the Models page
+   (#272).
+4. The supervisor's Renko rows (#273), indicators (#274) and normalization (#275), checked step
+   by step against his data; ONNX models (#276).
+5. Time candles with indicators, Kagi; later the other representations.
 
 ## Open questions
 
 Kept for the supervisor until the pipeline is built, then asked together with what else is
-missing: his normalization formulas, the feature order of the 25 x 7 models, the window rule
-of the 25 x 28 and 25 x 7 models, whether Renko is built on the close or the high and low, and
-where his candles come from.
+missing: his normalization formulas, the reward formula and `pocket_pivot`, the feature order
+of the 25 x 7 models, the window rule of the 25 x 28 and 25 x 7 models, whether Renko is built
+on the close or the high and low, and where his candles come from. Until then the research
+tasks derive what they can from his data: normalization (#262), the Renko rules (#263), the
+reward and `pocket_pivot` (#264), and his predictions reproduced from raw candles (#265).
 
 [research #117]: https://github.com/candlestack-tech/research/blob/main/notes/117-supervisor-pipeline.md
 [research #118]: https://github.com/candlestack-tech/research/blob/main/notes/118-indicators.md
