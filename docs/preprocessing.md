@@ -65,6 +65,8 @@ is our own (`candlestack.manifest/1`, a JSON Schema in the repository). It borro
 Catalog names carry a version (`aroon@1`): one indicator name gives different numbers in
 different libraries and versions (the supervisor's Aroon, Keltner and OBV differ from
 `ta` 0.11's, [research #118]), so a manifest names our exact implementation, never "Aroon".
+Names people see (blocks, templates, messages) say what a thing is or which models it belongs
+to, never whose research it came from: the normalization of the BLESK models is `blesk-norm@1`.
 
 ### Example: no preprocessing
 
@@ -114,8 +116,8 @@ formulas are not known.
       "params": {"atr_multiple": 0.6, "atr_window": 14, "atr_at": "brick_start"}
     },
     "features": [
-      {"name": "bb_bbh", "id": "bollinger-high@1", "params": {"window": 20, "dev": 2}, "norm": {"id": "supervisor@1"}},
-      {"name": "rsi", "id": "rsi@1", "params": {"window": 20}, "norm": {"id": "supervisor@1"}},
+      {"name": "bb_bbh", "id": "bollinger-high@1", "params": {"window": 20, "dev": 2}, "norm": {"id": "blesk-norm@1"}},
+      {"name": "rsi", "id": "rsi@1", "params": {"window": 20}, "norm": {"id": "blesk-norm@1"}},
       {"name": "direction", "id": "renko-direction@1"}
     ],
     "window": {"length": 25, "last": "current"}
@@ -166,7 +168,7 @@ both can be dropped at once, and the app tells which is which.
 
 1. The model file: its checks run (the model checks below), and it shows what it takes and
    gives: "input [25, 23] · output [1]".
-2. How to feed it, one of: upload `manifest.json`; pick a template ("Supervisor NO-VOL
+2. How to feed it, one of: upload `manifest.json`; pick a template ("BLESK NO-VOL
    25 x 23", "Raw candles 25 x 5"); or build it in a form from the catalog (blocks, order,
    window). Its checks run at once, and the two are compared side by side: "the manifest
    gives [25, 23], the model takes [25, 23]".
