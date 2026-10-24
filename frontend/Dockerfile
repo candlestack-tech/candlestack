@@ -17,6 +17,9 @@ RUN npm run build
 
 FROM caddy:2-alpine
 
+# The caddy image is rebuilt rarely: take the Alpine fixes published since.
+RUN apk upgrade --no-cache
+
 ARG APP_COMMIT=unknown
 ENV APP_COMMIT=$APP_COMMIT \
     APP_ENV=local \
