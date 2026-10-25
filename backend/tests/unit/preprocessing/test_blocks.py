@@ -65,6 +65,20 @@ def test_a_candle_column_is_float64_from_integers() -> None:
     assert result.to_list() == [100.0, 200.0, 300.0]
 
 
+def test_the_last_candle_of_a_session_is_one_and_the_others_zero() -> None:
+    marked = CANDLES.with_columns(session_last=pl.Series([False, True, False]))
+
+    result = CATALOG["session-last-candle@1"].run(marked, NONE)
+
+    assert result.dtype == pl.Float64
+    assert result.to_list() == [0.0, 1.0, 0.0]
+
+
+def test_the_last_candle_of_a_session_needs_the_marks() -> None:
+    with pytest.raises(ValueError, match="do not mark the last candle of each session"):
+        CATALOG["session-last-candle@1"].run(CANDLES, NONE)
+
+
 def test_none_gives_the_column_as_it_is() -> None:
     column = pl.Series("close", [1.5, None, -2.0])
 
@@ -147,7 +161,17 @@ def test_the_window_needs_length_minus_one_earlier_rows(length: int, rows_before
 
 
 @pytest.mark.parametrize(
-    "block", ["candles@1", "open@1", "high@1", "low@1", "close@1", "volume@1", "none@1"]
+    "block",
+    [
+        "candles@1",
+        "open@1",
+        "high@1",
+        "low@1",
+        "close@1",
+        "volume@1",
+        "session-last-candle@1",
+        "none@1",
+    ],
 )
 def test_the_candle_blocks_need_no_earlier_candle(block: str) -> None:
     assert CATALOG[block].warm_up(NONE) == 0

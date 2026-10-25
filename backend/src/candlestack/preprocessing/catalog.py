@@ -237,7 +237,6 @@ CATALOG: Mapping[str, Block] = MappingProxyType(
                 run=blocks.candles,
             ),
             *(_candle_column(name) for name in blocks.CANDLE_COLUMNS),
-            *_INDICATORS,
             Block(
                 id="session-last-candle@1",
                 step="feature",
@@ -249,6 +248,7 @@ CATALOG: Mapping[str, Block] = MappingProxyType(
                 group="Candle",
                 needs_session=True,
             ),
+            *_INDICATORS,
             Block(
                 id="none@1",
                 step="normalization",
