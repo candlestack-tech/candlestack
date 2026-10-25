@@ -17,7 +17,6 @@ import {
   useManifest,
   useModels,
 } from '@/features/models';
-import { NewBacktestDialog } from '@/features/workspace';
 import { cn } from '@/lib/utils';
 import { usePageTitle } from '@/lib/usePageTitle';
 
@@ -82,14 +81,13 @@ function InputBox({ model, manifest, onAddManifest }: InputProps) {
 // A model's page (#272, mockups/app pageModel), one screen without tabs: the header with the
 // state and the buttons, the facts, the input drawn as a matrix beside the checks, then the
 // backtests that used it. The model comes from the list the Models page reads, its whole manifest
-// from its own request. Backtest with it opens New backtest until the builder exists.
+// from its own request. Backtest with it opens the builder with the model chosen.
 export function ModelPage() {
   const { modelId } = useParams({ from: '/_app/models/$modelId' });
   const navigate = useNavigate();
   const models = useModels();
   const model = models.data?.models.find((item) => item.id === modelId);
   const manifest = useManifest(model);
-  const [backtest, setBacktest] = useState(false);
   const [adding, setAdding] = useState(false);
   usePageTitle(model?.name ?? 'Model');
 
@@ -106,7 +104,9 @@ export function ModelPage() {
           <ModelActions
             model={model}
             manifest={manifest.data}
-            onBacktest={() => setBacktest(true)}
+            onBacktest={() =>
+              void navigate({ to: '/backtests/new', search: { model: model.id }, state: { from: 'models' } })
+            }
             onAddManifest={addManifest}
             onDeleted={() => void navigate({ to: '/models' })}
           />
@@ -119,7 +119,6 @@ export function ModelPage() {
       </div>
       <ModelBacktests name={model.name} />
       <ManifestDialog model={model} open={adding} onOpenChange={setAdding} />
-      <NewBacktestDialog open={backtest} onOpenChange={setBacktest} />
     </>
   );
 }

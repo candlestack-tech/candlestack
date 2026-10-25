@@ -1,9 +1,9 @@
-import { useState, type ReactNode } from 'react';
+import { useNavigate } from '@tanstack/react-router';
+import type { ReactNode } from 'react';
 
 import type { Dashboard } from '@/api';
 import { useStarBacktest } from '@/features/backtests';
 import { useModels, useStarModel } from '@/features/models';
-import { NewBacktestDialog } from '@/features/workspace';
 import { cn } from '@/lib/utils';
 
 import { BestBacktests } from './BestBacktests';
@@ -41,12 +41,12 @@ type Props = { dashboard: Dashboard };
 export function DashboardWidgets({ dashboard }: Props) {
   const { data, error } = useModels();
   const models = data?.models;
-  const [newBacktest, setNewBacktest] = useState(false);
+  const navigate = useNavigate();
   const star = useStarBacktest();
   const starModel = useStarModel();
   const full = dashboard.counts.all > 0;
   const onStar = star.mutate;
-  const openNew = () => setNewBacktest(true);
+  const openNew = () => void navigate({ to: '/backtests/new', state: { from: 'dashboard' } });
   const left = [
     full && <LastBacktests key="last" backtests={dashboard.last} onStar={onStar} />,
     dashboard.best.sharpe.length > 0 && <BestBacktests key="best" best={dashboard.best} />,
@@ -61,7 +61,6 @@ export function DashboardWidgets({ dashboard }: Props) {
     <div className="flex flex-col gap-4">
       {full ? <QuickActions onNewBacktest={openNew} /> : <GetStarted onNewBacktest={openNew} />}
       <Columns left={left} right={right} />
-      <NewBacktestDialog open={newBacktest} onOpenChange={setNewBacktest} />
     </div>
   );
 }

@@ -21,8 +21,15 @@ function Tag({ children }: { children: string }) {
   );
 }
 
+type Props = {
+  value: Benchmark;
+  onChange: (value: Benchmark) => void;
+  // The ones that can be chosen, every one when left out; the others are shown as coming soon.
+  available?: readonly Benchmark[];
+};
+
 // A 300 px button with the tag and the name of the choice; its 340 px list adds what each one is.
-export function BenchmarkSelect({ value, onChange }: { value: Benchmark; onChange: (value: Benchmark) => void }) {
+export function BenchmarkSelect({ value, onChange, available = ORDER }: Props) {
   const chosen = BENCHMARKS[value];
   return (
     <Select value={value} onValueChange={(next) => onChange(next as Benchmark)}>
@@ -33,12 +40,19 @@ export function BenchmarkSelect({ value, onChange }: { value: Benchmark; onChang
       <SelectContent className="w-[340px]">
         {ORDER.map((key) => {
           const { tag, name, about } = BENCHMARKS[key];
+          const usable = available.includes(key);
           return (
-            <SelectItem key={key} value={key} text={name}>
+            <SelectItem
+              key={key}
+              value={key}
+              text={name}
+              disabled={!usable}
+              className="data-disabled:cursor-default data-disabled:opacity-50 data-disabled:hover:bg-transparent"
+            >
               <Tag>{tag}</Tag>
               <span className="flex min-w-0 flex-col">
                 <SelectItemText>{name}</SelectItemText>
-                <span className="text-[11.5px] text-muted-foreground">{about}</span>
+                <span className="text-[11.5px] text-muted-foreground">{usable ? about : 'Coming soon'}</span>
               </span>
             </SelectItem>
           );

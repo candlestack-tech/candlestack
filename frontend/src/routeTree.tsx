@@ -11,6 +11,7 @@ import { NotFoundPage } from '@/pages/NotFoundPage';
 import { SignInPage } from '@/pages/SignInPage';
 import { requireSignedIn, skipSignInWhenSignedIn } from '@/routes/accountGuards';
 import { validateBacktestsSearch } from '@/routes/backtestsSearch';
+import { validateBuilderSearch } from '@/routes/builderSearch';
 import { validateInstrumentSearch } from '@/routes/instrumentSearch';
 import { validateInstrumentsSearch } from '@/routes/instrumentsSearch';
 import { FIRST_SECTION, isSettingsSection, showsPreferences, validateSettingsSearch } from '@/routes/settingsSections';
@@ -114,6 +115,17 @@ const backtestsRoute = createRoute({
   component: lazyRouteComponent(() => import('@/pages/BacktestsPage'), 'BacktestsPage'),
 });
 
+// /backtests/new?model=mdl_7f3k2m9qx4: the builder, without the sidebar (mockups/app, pageBuilder).
+// It starts from the account's Backtest defaults, so they load first.
+const newBacktestRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/backtests/new',
+  validateSearch: validateBuilderSearch,
+  staticData: { sidebar: false },
+  loader: ({ context }) => context.queryClient.ensureQueryData(preferencesQueryOptions()),
+  component: lazyRouteComponent(() => import('@/pages/NewBacktestPage'), 'NewBacktestPage'),
+});
+
 // /backtests/bt_7f3k2m9qx4: one backtest's page, without the sidebar (mockups/app, pageRun). An ID
 // the user has no backtest with says so on the page.
 const backtestRoute = createRoute({
@@ -170,6 +182,7 @@ export const routeTree = rootRoute.addChildren([
   appRoute.addChildren([
     dashboardRoute,
     backtestsRoute,
+    newBacktestRoute,
     backtestRoute,
     modelsRoute,
     modelRoute,

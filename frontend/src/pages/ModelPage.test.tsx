@@ -8,6 +8,7 @@ import {
   backtest,
   backtestsAnswer,
   catalogAnswer,
+  DEFAULT_PREFERENCES,
   failedBacktest,
   manifest,
   MB,
@@ -199,10 +200,17 @@ describe("a model's page", () => {
     expect(await box('Backtests').findByText('None yet')).toBeDefined();
   });
 
-  it('opens New backtest from Backtest with it', async () => {
-    const { user } = await openPage();
+  it('opens the builder with the model chosen from Backtest with it', async () => {
+    const { user, router } = await openPage(READY, {
+      'GET /api/v1/me/preferences': { status: 200, body: DEFAULT_PREFERENCES },
+    });
     await user.click(screen.getByRole('button', { name: 'Backtest with it' }));
-    expect((await screen.findByRole('dialog', { name: 'New backtest' })).textContent).toContain('Coming soon');
+    expect(await screen.findByRole('heading', { level: 1, name: 'New backtest' })).toBeDefined();
+    expect(router.state.location.search).toEqual({ model: READY.id });
+    expect(screen.getByRole('button', { name: new RegExp(`^${READY.name}`) }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(screen.getByRole('link', { name: '← Models' })).toBeDefined();
   });
 
   it('says so for a model the user does not have', async () => {

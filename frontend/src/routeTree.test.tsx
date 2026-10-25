@@ -3,7 +3,7 @@ import { cleanup, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ARSEN, dashboardAnswer, session, stubApi } from '@/test/api';
+import { ARSEN, dashboardAnswer, modelsAnswer, session, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 
 afterEach(() => {
@@ -38,7 +38,7 @@ describe('the signed-in pages', () => {
     await renderApp('/dashboard');
     await vi.waitFor(() => expect(heading()).toBe('Welcome back, Arsen Labovich'));
     expect(screen.getByRole('link', { name: 'CandleStack dashboard' }).getAttribute('href')).toBe('/dashboard');
-    expect(screen.getByRole('button', { name: 'New backtest' })).toBeDefined();
+    expect(screen.getByRole('link', { name: 'New backtest' }).getAttribute('href')).toBe('/backtests/new');
     expect(screen.getByRole('button', { name: 'Account' }).textContent).toBe('AL');
     expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull();
     expect(screen.getByRole('contentinfo').textContent).toContain('API docs');
@@ -74,18 +74,16 @@ describe('the signed-in pages', () => {
     expect(document.title).toBe('Settings · CandleStack');
   });
 
-  it('open the Coming soon dialog from New backtest', async () => {
-    stubApi(session(ARSEN));
-    await renderApp('/dashboard');
+  it('open the builder from New backtest, without the sidebar, its back link to where it was opened', async () => {
+    stubApi({ ...sessionWithPreferences(ARSEN), ...modelsAnswer([]) });
+    const { router } = await renderApp('/models');
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'New backtest' }));
-    const dialog = screen.getByRole('dialog', { name: 'New backtest' });
-    expect(dialog.textContent).toContain(
-      'Pick the data, a representation, a model and a rule, then run it against buy and hold.',
-    );
-    expect(within(dialog).getByText('Coming soon')).toBeDefined();
-    await user.click(within(dialog).getByRole('button', { name: 'Close' }));
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await user.click(screen.getByRole('link', { name: 'New backtest' }));
+    await vi.waitFor(() => expect(heading()).toBe('New backtest'));
+    expect(router.state.location.pathname).toBe('/backtests/new');
+    expect(screen.queryByRole('navigation', { name: 'Workspace' })).toBeNull();
+    expect(screen.getByRole('link', { name: '← Models' }).getAttribute('href')).toBe('/models');
+    expect(document.title).toBe('New backtest · CandleStack');
   });
 });
 

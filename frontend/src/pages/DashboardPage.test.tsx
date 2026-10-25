@@ -94,11 +94,12 @@ describe('the dashboard of a new account', () => {
 
   it('opens New backtest and Upload model from the steps', async () => {
     await open({ ...dashboardAnswer(), ...modelsAnswer([]) });
-    await userEvent.click(await screen.findByRole('button', { name: /^1Build your first backtest/ }));
-    expect(await screen.findByRole('dialog', { name: 'New backtest' })).toBeDefined();
-    await userEvent.keyboard('{Escape}');
-    await userEvent.click(screen.getByRole('button', { name: /^2Upload your own model/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /^2Upload your own model/ }));
     expect(await screen.findByRole('dialog', { name: 'Add a model' })).toBeDefined();
+    await userEvent.keyboard('{Escape}');
+    await userEvent.click(screen.getByRole('button', { name: /^1Build your first backtest/ }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'New backtest' })).toBeDefined();
+    expect(screen.getByRole('link', { name: '← Dashboard' })).toBeDefined();
   });
 
   it('shows Starred models once a model is starred', async () => {
@@ -148,7 +149,7 @@ describe('the dashboard of an account with backtests', () => {
     ).toBeDefined();
     await userEvent.keyboard('{Escape}');
     await userEvent.click(screen.getByRole('button', { name: /^New backtest\s*Pick/ }));
-    expect(await screen.findByRole('dialog', { name: 'New backtest' })).toBeDefined();
+    expect(await screen.findByRole('heading', { level: 1, name: 'New backtest' })).toBeDefined();
   });
 
   it('lists the last backtests, failed ones too, with a link to all of them', async () => {
@@ -239,7 +240,6 @@ describe('the dashboard of an account with backtests', () => {
     const user = userEvent.setup();
     await screen.findByRole('region', { name: 'Best backtests' });
     const openers = [
-      [() => screen.getByRole('button', { name: /^New backtest\s*Pick/ }), 'New backtest'],
       [() => screen.getByRole('button', { name: /^Upload model/ }), 'Add a model'],
       [() => screen.getByRole('button', { name: /^Compare backtests/ }), 'Compare backtests'],
     ] as const;
