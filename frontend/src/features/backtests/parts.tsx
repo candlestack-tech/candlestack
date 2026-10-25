@@ -1,4 +1,4 @@
-import type { Backtest } from '@/api';
+import type { Backtest, BacktestStatus } from '@/api';
 import { FrameworkMini, frameworkOf } from '@/features/models';
 import { useDateStyle } from '@/features/preferences';
 import { formatRecentTime } from '@/lib/dates';
@@ -42,13 +42,31 @@ export function BacktestNumber({ backtest, className }: { backtest: Backtest; cl
   return <span className={cn('font-mono text-[13px]/[normal] font-medium', className)}>#{backtest.number}</span>;
 }
 
-// The red Failed badge (.badge.bad) where a failed backtest has no return.
-export function FailedBadge() {
+const BADGES: Record<BacktestStatus, { text: string; tone: string }> = {
+  finished: { text: 'Finished', tone: 'text-up border-[color-mix(in_srgb,var(--up)_45%,var(--rule))]' },
+  running: { text: 'Running', tone: 'text-primary border-[color-mix(in_srgb,var(--accent)_45%,var(--rule))]' },
+  failed: { text: 'Failed', tone: 'text-down border-[color-mix(in_srgb,var(--down)_45%,var(--rule))]' },
+};
+
+// How far a backtest got (.badge.ok, .badge.run, .badge.bad): Finished in green, Running in the
+// accent, Failed in red.
+export function StatusBadge({ status }: { status: BacktestStatus }) {
+  const { text, tone } = BADGES[status];
   return (
-    <span className="inline-block rounded-[4px] border border-[color-mix(in_srgb,var(--down)_45%,var(--rule))] px-1.5 py-px font-mono text-[11px]/4 font-medium whitespace-nowrap text-down">
-      Failed
+    <span
+      className={cn(
+        'inline-block rounded-[4px] border px-1.5 py-px font-mono text-[11px]/4 font-medium whitespace-nowrap',
+        tone,
+      )}
+    >
+      {text}
     </span>
   );
+}
+
+// The red Failed badge (.badge.bad) where a failed backtest has no return.
+export function FailedBadge() {
+  return <StatusBadge status="failed" />;
 }
 
 // A missing result: a muted en dash.

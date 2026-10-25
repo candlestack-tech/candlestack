@@ -14,10 +14,14 @@ export {
   type SignInMethod,
 } from './accounts';
 export {
+  backtestDownloadUrl,
+  backtestQueryOptions,
   backtestsQueryOptions,
   dashboardQueryOptions,
   updateBacktest,
   type Backtest,
+  type BacktestDocument,
+  type BacktestStatus,
   type BacktestsPage,
   type BacktestsParams,
   type BestMetric,

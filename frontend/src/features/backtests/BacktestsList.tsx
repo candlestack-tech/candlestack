@@ -6,7 +6,6 @@ import { Pager } from '@/components/Pager';
 import { SearchBox } from '@/components/SearchBox';
 import { withSortBy, type BacktestsSearch } from '@/routes/backtestsSearch';
 
-import { useBacktestDialog } from './useBacktestDialog';
 import { BacktestFilters } from './BacktestFilters';
 import { BacktestsTable } from './BacktestsTable';
 import { useStarBacktest } from './useBacktests';
@@ -56,7 +55,6 @@ function Tools({ search, data }: Omit<Props, 'loading'>) {
 export function BacktestsList({ search, data, loading }: Props) {
   const navigate = useNavigate({ from: '/backtests' });
   const star = useStarBacktest();
-  const { dialog, openBacktest } = useBacktestDialog();
   const page = search.page ?? 1;
   useClampPage(page, loading ? undefined : data?.pages);
   return (
@@ -69,13 +67,11 @@ export function BacktestsList({ search, data, loading }: Props) {
             empty={data.counts.all === 0 ? 'No backtests yet' : 'No backtests match'}
             search={search}
             onSort={(column) => void navigate({ search: (prev) => withSortBy(prev, column) })}
-            onOpen={openBacktest}
             onStar={(backtest) => star.mutate(backtest)}
           />
         </div>
       )}
       {data && <Pager from="/backtests" page={page} hasNext={page < data.pages} pages={data.pages} loading={loading} />}
-      {dialog}
     </>
   );
 }

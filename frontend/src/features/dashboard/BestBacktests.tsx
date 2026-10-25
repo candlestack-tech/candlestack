@@ -34,17 +34,17 @@ const METRICS: readonly { metric: BestMetric; label: string; by: string; format:
   { metric: 'win_rate', label: 'Win rate', by: 'win rate', format: (backtest) => formatWinRate(backtest.win_rate) },
 ];
 
-type RowProps = { backtest: Backtest; rank: number; by: BestMetric; onOpen: (backtest: Backtest) => void };
+type RowProps = { backtest: Backtest; rank: number; by: BestMetric };
 
 // The rank, the number with up to two instruments, then the four results; the one ranked by in
 // semibold, the return in its colour.
-function Row({ backtest, rank, by, onOpen }: RowProps) {
+function Row({ backtest, rank, by }: RowProps) {
   return (
     <tr className={ROW}>
       <td className={cn(CELL, 'w-7 font-mono text-xs text-muted-foreground')}>{rank}</td>
       <td className={CELL}>
         <span className="flex items-center gap-1.5">
-          <RowOpener label={`Backtest #${backtest.number}`} onOpen={() => onOpen(backtest)}>
+          <RowOpener backtest={backtest}>
             <BacktestNumber backtest={backtest} />
           </RowOpener>
           <InstrumentChips backtest={backtest} max={2} />
@@ -67,11 +67,11 @@ function Row({ backtest, rank, by, onOpen }: RowProps) {
   );
 }
 
-type Props = { best: Dashboard['best']; onOpen: (backtest: Backtest) => void };
+type Props = { best: Dashboard['best'] };
 
 // The top five finished backtests by a result (mockups/app, ddBest); its headings rank them, the
 // one in use in semibold with ↓. Sharpe first.
-export function BestBacktests({ best, onOpen }: Props) {
+export function BestBacktests({ best }: Props) {
   const [by, setBy] = useState<BestMetric>('sharpe');
   const word = METRICS.find((each) => each.metric === by)?.by;
   return (
@@ -103,7 +103,7 @@ export function BestBacktests({ best, onOpen }: Props) {
           </thead>
           <tbody>
             {best[by].map((backtest, index) => (
-              <Row key={backtest.id} backtest={backtest} rank={index + 1} by={by} onOpen={onOpen} />
+              <Row key={backtest.id} backtest={backtest} rank={index + 1} by={by} />
             ))}
           </tbody>
         </table>

@@ -26,13 +26,13 @@ const COLUMNS = [
   { label: 'When', number: false },
 ];
 
-type RowProps = { backtest: Backtest; onOpen: (backtest: Backtest) => void; onStar: (backtest: Backtest) => void };
+type RowProps = { backtest: Backtest; onStar: (backtest: Backtest) => void };
 
-function Row({ backtest, onOpen, onStar }: RowProps) {
+function Row({ backtest, onStar }: RowProps) {
   return (
     <tr className={ROW}>
       <td className={CELL}>
-        <BacktestCell backtest={backtest} onOpen={onOpen} onStar={onStar} />
+        <BacktestCell backtest={backtest} onStar={onStar} />
       </td>
       <td className={CELL}>
         <InstrumentChips backtest={backtest} max={3} />
@@ -53,7 +53,7 @@ type Props = { backtests: Backtest[] } & Omit<RowProps, 'backtest'>;
 // The six newest backtests, failed ones too (mockups/app, ddLast): the star and the number, up to
 // three instruments, the return, the Sharpe ratio and when it ran. All backtests leads to the
 // whole list.
-export function LastBacktests({ backtests, onOpen, onStar }: Props) {
+export function LastBacktests({ backtests, onStar }: Props) {
   return (
     <Widget icon={ClockIcon} title="Last backtests" aside={<WidgetLink to="/backtests">All backtests</WidgetLink>}>
       <div className="overflow-x-auto">
@@ -69,7 +69,7 @@ export function LastBacktests({ backtests, onOpen, onStar }: Props) {
           </thead>
           <tbody>
             {backtests.map((backtest) => (
-              <Row key={backtest.id} backtest={backtest} onOpen={onOpen} onStar={onStar} />
+              <Row key={backtest.id} backtest={backtest} onStar={onStar} />
             ))}
           </tbody>
         </table>

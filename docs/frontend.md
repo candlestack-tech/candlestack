@@ -310,6 +310,42 @@ delete modals):
 - A model deleted meanwhile (404) closes its Rename or Delete dialog, and its page says it is not
   found.
 
+## Backtest page
+
+`/backtests/<id>` (#271, `src/pages/BacktestPage.tsx`, the parts in
+`src/features/backtests/result/`) follows the compact backtest page of `mockups/app` (`runHead`, `resA`, `runStats`,
+`mountRunCharts`). It takes the whole width, without the sidebar (`staticData: { sidebar: false }`
+on its route). Every row of a list of backtests (the Backtests page, the dashboard, a model's page)
+is a link to it; one opened from the dashboard or a model's page sets `from` in the history state,
+so its back link returns there (else "← Backtests").
+
+- The page reads the result document in the light view (`GET /api/v1/backtests/{id}`,
+  `backtestQueryOptions` under `['account', 'backtest', <id>]`). A running backtest is asked for
+  again every 2 s; a finished or failed one is never asked for again while it is in the cache. When
+  a run the page watched ends, the lists, the dashboard and the models are asked for again.
+- The header: "Backtest #N" with its status, then the symbol, the model (a link while it exists),
+  the period's first and last UTC day, when it ran and how long. A finished one has
+  `[Download JSON | ?]` (the download is `GET /api/v1/backtests/{id}/download`, which the browser
+  saves as `candlestack-backtest-<N>.json`; `?` opens https://candlestack.tech/docs/backtest-json)
+  and Compare, which does nothing yet.
+- Finished: the six first results in a strip (`src/components/FactsStrip.tsx`, the model page's
+  too), then the charts and the trades beside every metric of the engine and the setup (one column
+  up to 980 px). Running: a moving bar and the setup. Failed: the error and the setup. A 404 says
+  there is no such backtest; a test backtest of the seed command says it has no document (the
+  API's `no-document`).
+- The charts are Lightweight Charts, read-only (no scroll or zoom, the whole period in view, also
+  after a resize) in the theme's colours, the times as the instrument chart writes them (a run of
+  days, or the light view's series of days, without the time of day): the strategy's return as a
+  baseline at 0 (green above, red below) with buy and hold dashed, the drawdown under it, and the
+  price with a buy and a sell arrow per trade (a long opens with a buy, a short with a sell; a
+  trade of a series of days on its day). Above 250 trades the arrows are left out, as they would
+  hide the price.
+- The trades, the newest six, all of them after Show all (in a box that scrolls from 480 px). A
+  long-only run has Bought and Sold; one that also goes short Side, Opened and Closed. The box
+  drops the candles and why it closed below 720 px of its own width, the prices below 560 px.
+- The setup in the builder's steps: the model with its manifest in short ("Candles · 30m · 25 ×
+  5"), the data, the decision's rule and steps, the execution with its stops and costs.
+
 ## Instrument icons
 
 `src/components/InstrumentIcon.tsx` shows the icon of `GET /api/v1/data/instruments/{id}/icon`

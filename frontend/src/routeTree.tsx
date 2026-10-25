@@ -114,6 +114,15 @@ const backtestsRoute = createRoute({
   component: lazyRouteComponent(() => import('@/pages/BacktestsPage'), 'BacktestsPage'),
 });
 
+// /backtests/bt_7f3k2m9qx4: one backtest's page, without the sidebar (mockups/app, pageRun). An ID
+// the user has no backtest with says so on the page.
+const backtestRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/backtests/$backtestId',
+  staticData: { sidebar: false },
+  component: lazyRouteComponent(() => import('@/pages/BacktestPage'), 'BacktestPage'),
+});
+
 const modelsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/models',
@@ -158,5 +167,13 @@ const settingsSectionRoute = createRoute({
 
 export const routeTree = rootRoute.addChildren([
   publicRoute.addChildren([homeRoute, instrumentsRoute, instrumentRoute, signInRoute]),
-  appRoute.addChildren([dashboardRoute, backtestsRoute, modelsRoute, modelRoute, settingsRoute, settingsSectionRoute]),
+  appRoute.addChildren([
+    dashboardRoute,
+    backtestsRoute,
+    backtestRoute,
+    modelsRoute,
+    modelRoute,
+    settingsRoute,
+    settingsSectionRoute,
+  ]),
 ]);

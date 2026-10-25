@@ -55,16 +55,16 @@ function Header({ search, onSort }: HeaderProps) {
   );
 }
 
-type RowProps = { backtest: Backtest; onOpen: (backtest: Backtest) => void; onStar: (backtest: Backtest) => void };
+type RowProps = { backtest: Backtest; onStar: (backtest: Backtest) => void };
 
 // A finished backtest shows its results; a failed one the Failed badge and dashes.
-function Row({ backtest, onOpen, onStar }: RowProps) {
+function Row({ backtest, onStar }: RowProps) {
   const done = hasResults(backtest);
   const result = (text: string) => (done ? text : <Missing />);
   return (
     <tr className={ROW}>
       <td className={CELL}>
-        <BacktestCell backtest={backtest} onOpen={onOpen} onStar={onStar} />
+        <BacktestCell backtest={backtest} onStar={onStar} />
       </td>
       <td className={CELL}>
         <InstrumentChips backtest={backtest} max={2} />
@@ -89,19 +89,18 @@ type Props = HeaderProps & {
   backtests: readonly Backtest[];
   // What the one row says when there are none: "No backtests match", or "No backtests yet".
   empty: string;
-  onOpen: (backtest: Backtest) => void;
   onStar: (backtest: Backtest) => void;
 };
 
 // The Backtests page's table (mockups/app, btTable): the star and the number, the instruments as
 // chips, the model by its mark, the results in mono at the right, and when it ran.
-export function BacktestsTable({ backtests, empty, search, onSort, onOpen, onStar }: Props) {
+export function BacktestsTable({ backtests, empty, search, onSort, onStar }: Props) {
   return (
     <table className={TABLE}>
       <Header search={search} onSort={onSort} />
       <tbody>
         {backtests.map((backtest) => (
-          <Row key={backtest.id} backtest={backtest} onOpen={onOpen} onStar={onStar} />
+          <Row key={backtest.id} backtest={backtest} onStar={onStar} />
         ))}
         {backtests.length === 0 && (
           <tr>
