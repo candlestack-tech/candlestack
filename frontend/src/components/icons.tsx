@@ -78,26 +78,7 @@ export function UploadIcon(props: IconProps) {
   );
 }
 
-// Rename: a pencil.
-export function PencilIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M4 20h4L19 9l-4-4L4 16z" />
-      <path d="M13 7l4 4" />
-    </Icon>
-  );
-}
-
-// Delete: a bin with its lid.
-export function TrashIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" />
-    </Icon>
-  );
-}
-
-// Not yet, and Last backtests: a clock.
+// Last backtests: a clock.
 export function ClockIcon(props: IconProps) {
   return (
     <Icon {...props}>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatParameters, formatShape, formatSize, formatUsage, splitExtension } from './format';
+import { formatShape, formatSize, formatUsage, splitExtension } from './format';
 import { ACCEPTED_EXTENSIONS, frameworkOf, frameworkOfFile } from './frameworks';
 
 const MB = 1024 * 1024;
@@ -29,20 +29,6 @@ describe('formatUsage', () => {
   it('never reads full while it is not', () => {
     expect(formatUsage(100 * MB - 1, 100 * MB)).toBe('99.9 MB of 100 MB');
     expect(formatUsage(99.97 * MB, 100 * MB)).toBe('99.9 MB of 100 MB');
-  });
-});
-
-describe('formatParameters', () => {
-  it('writes millions with 2 decimals from 100,000', () => {
-    expect(formatParameters(1_240_000)).toBe('1.24 M');
-    expect(formatParameters(100_000)).toBe('0.10 M');
-    expect(formatParameters(12_345_678)).toBe('12.35 M');
-  });
-
-  it('writes grouped digits below it', () => {
-    expect(formatParameters(9_325)).toBe('9,325');
-    expect(formatParameters(99_999)).toBe('99,999');
-    expect(formatParameters(0)).toBe('0');
   });
 });
 
@@ -89,8 +75,8 @@ describe('frameworkOfFile', () => {
     expect(frameworkOfFile('keras')).toBeNull();
   });
 
-  it('lets the file picker offer every extension', () => {
-    expect(ACCEPTED_EXTENSIONS).toBe('.keras,.h5,.pb,.zip,.pt,.pth,.onnx,.joblib,.pkl,.skops');
+  it('lets the file picker offer the formats the upload names', () => {
+    expect(ACCEPTED_EXTENSIONS).toBe('.keras,.onnx');
   });
 });
 
