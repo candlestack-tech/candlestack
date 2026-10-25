@@ -13,7 +13,7 @@ export MSYS_NO_PATHCONV=1 # Git Bash on Windows: keep /aws/... and /dev/... argu
 CREDENTIALS=${1:?usage: aws-create.sh <tunnel-credentials.json> [git-ref]}
 GIT_REF=${2:-main}
 NAME=candlestack-vm
-INSTANCE_TYPE=${INSTANCE_TYPE:-t3.small}
+INSTANCE_TYPE=${INSTANCE_TYPE:-t3.medium}
 DISK_GB=25
 
 # tr strips the CR that aws.exe adds to its output on Windows.

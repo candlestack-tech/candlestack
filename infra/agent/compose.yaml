@@ -10,7 +10,7 @@ services:
     restart: unless-stopped
     environment:
       DOCKER_URL: http://socket-proxy:2375
-      VM_LABEL: AWS t3.small · eu-north-1
+      VM_LABEL: AWS t3.medium · eu-north-1
     mem_limit: 64m
     read_only: true
     tmpfs:
