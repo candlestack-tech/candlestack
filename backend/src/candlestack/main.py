@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await model_storage.prepare()
     app.state.redis = create_redis(settings.redis_url)
     # The queue of the worker that runs the models, for the backtests.
-    jobs_redis = create_redis(settings.jobs_redis_url)
+    jobs_redis = create_redis(settings.jobs_redis_url.get_secret_value())
     app.state.db = Database(settings.database_url.get_secret_value())
     app.state.rate_limiter = RateLimiter(app.state.redis)
     try:

@@ -22,7 +22,8 @@ services:
       # Bind mounts from Windows or macOS do not deliver file events; poll for changes.
       WATCHFILES_FORCE_POLLING: "true"
       MODEL_STORAGE_DIR: /data/models
-      JOBS_REDIS_URL: &jobs-redis-url redis://queue:6379/0
+      # The queue's password (the queue service's requirepass).
+      JOBS_REDIS_URL: &jobs-redis-url redis://:candlestack@queue:6379/0
       JOB_FILES_DIR: /data/jobs
     ports:
       - 127.0.0.1:8000:8000
@@ -58,11 +59,14 @@ services:
   # network only, which has no way out: it reaches the queue and nothing else. It sees the model
   # files read-only and shares the jobs' files with the backend. A job's process starts from the
   # mounted src/, so a change there applies from the next job; a change of the loop needs
-  # `docker compose restart worker`.
+  # `docker compose restart worker`. Started as root with only the capabilities to change its
+  # user: the loop reads the queue's password, then becomes 65534 for good, so the job's process
+  # cannot read it (docs/architecture.md, "Worker").
   worker:
     build:
       context: backend
       target: worker
+    user: "0:0"
     environment:
       JOBS_REDIS_URL: *jobs-redis-url
       MODEL_STORAGE_DIR: /data/models
@@ -85,6 +89,9 @@ services:
       - /tmp:size=256m
     cap_drop:
       - ALL
+    cap_add:
+      - SETUID
+      - SETGID
     security_opt:
       - no-new-privileges:true
     networks:
@@ -95,10 +102,10 @@ services:
 
   # The job queue between the backend and the worker: a Redis of its own, so the worker sees
   # none of the cache. It never evicts (a job must not vanish) and keeps nothing on disk (a job
-  # lost with it ends as a timeout at the backend).
+  # lost with it ends as a timeout at the backend). Only with the password, as on the VM.
   queue:
     image: redis:8-alpine
-    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "16mb", "--maxmemory-policy", "noeviction"]
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "16mb", "--maxmemory-policy", "noeviction", "--requirepass", "candlestack"]
     networks:
       - jobs
 

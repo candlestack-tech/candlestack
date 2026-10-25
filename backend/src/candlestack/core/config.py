@@ -101,8 +101,9 @@ class Settings(BaseSettings):
 
     # The jobs of the worker that runs the models (candlestack.jobs): a Redis of their own, so
     # the worker reaches none of the cache's keys, and a directory the backend and the worker
-    # share for the candles and the predictions; relative to the working directory.
-    jobs_redis_url: str = "redis://127.0.0.1:6379/1"
+    # share for the candles and the predictions; relative to the working directory. The URL
+    # holds the queue's password where it has one (redis://:<password>@queue:6379/0).
+    jobs_redis_url: SecretStr = SecretStr("redis://127.0.0.1:6379/1")
     job_files_dir: Path = Path("var/jobs")
     # How long the worker lets one job run before it stops it, in seconds.
     job_time_limit: float = Field(default=120, gt=0, le=3600)

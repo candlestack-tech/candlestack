@@ -82,6 +82,15 @@ worker_profile() {
   fi
 }
 
+# queue_password <worker@digest or nothing>: the job queue of compose.yaml requires
+# QUEUE_PASSWORD. Until the environment has one, its queue runs without a password, as before
+# the password: said on every deploy that starts the worker, never failing it.
+queue_password() {
+  if [ -n "$1" ] && [ -z "${QUEUE_PASSWORD:-}" ]; then
+    echo "candlestack-deploy: no QUEUE_PASSWORD: the job queue of $env runs without a password" >&2
+  fi
+}
+
 # prod and stage share the network "edge" with the edge Caddy and the server agent.
 edge_network() {
   case "$1" in
@@ -159,8 +168,8 @@ read_secrets() {
     [[ $line == *=* ]] || fail "expected KEY=VALUE lines after the token on stdin"
     key=${line%%=*}
     value=${line#*=}
-    [[ $key =~ ^(ALPACA_KEY_ID|ALPACA_SECRET_KEY|LOGO_DEV_KEY|SENTRY_DSN|POSTGRES_PASSWORD|OAUTH_(GITHUB|GOOGLE)_CLIENT_(ID|SECRET)|BETA_ALLOWLIST)$ ]] ||
-      fail "only ALPACA_KEY_ID, ALPACA_SECRET_KEY, LOGO_DEV_KEY, SENTRY_DSN, POSTGRES_PASSWORD, the OAUTH_ keys and BETA_ALLOWLIST may follow the token on stdin"
+    [[ $key =~ ^(ALPACA_KEY_ID|ALPACA_SECRET_KEY|LOGO_DEV_KEY|SENTRY_DSN|POSTGRES_PASSWORD|OAUTH_(GITHUB|GOOGLE)_CLIENT_(ID|SECRET)|BETA_ALLOWLIST|QUEUE_PASSWORD)$ ]] ||
+      fail "only ALPACA_KEY_ID, ALPACA_SECRET_KEY, LOGO_DEV_KEY, SENTRY_DSN, POSTGRES_PASSWORD, the OAUTH_ keys, BETA_ALLOWLIST and QUEUE_PASSWORD may follow the token on stdin"
     # The beta list is comma-separated emails, one per team member and tester: it may be longer.
     max=256
     [ "$key" != BETA_ALLOWLIST ] || max=4096
@@ -169,6 +178,9 @@ read_secrets() {
     # The database URL holds the password as it is: only characters a URL keeps as they are.
     [[ $key != POSTGRES_PASSWORD || $value =~ ^[A-Za-z0-9._~-]{16,256}$ ]] ||
       fail "POSTGRES_PASSWORD must be 16 to 256 letters, digits or the characters . _ ~ -"
+    # So does the job queue's URL; empty, the queue runs without a password (see queue_password).
+    [[ $key != QUEUE_PASSWORD || $value =~ ^([A-Za-z0-9._~-]{16,256})?$ ]] ||
+      fail "QUEUE_PASSWORD must be empty or 16 to 256 letters, digits or the characters . _ ~ -"
     export "$key=$value"
   done
 }
@@ -207,6 +219,7 @@ case "${action:-}" in
     redis_memory "$env"
     edge_network "$env"
     worker_profile "$worker"
+    queue_password "$worker"
     export ENV_NAME=$env APP_VERSION=$version BACKEND_IMAGE=$backend FRONTEND_IMAGE=$frontend
     compose up --detach --remove-orphans
     # compose leaves the services of a profile it was not given running: the worker of an

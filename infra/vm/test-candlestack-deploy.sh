@@ -29,7 +29,7 @@ case $1 in
     if [[ $file != /opt/candlestack/* ]]; then
       echo "  file $(head -n 1 "$file")" >>"$CALLS"
     fi
-    env | grep -E '^(ENV_NAME|APP_VERSION|BACKEND_IMAGE|FRONTEND_IMAGE|WORKER_IMAGE|COMPOSE_PROFILES|IMAGE|EDGE_NETWORK|REDIS_[A-Z_]+|POSTGRES_PASSWORD|ALPACA_[A-Z_]+|LOGO_DEV_KEY|SENTRY_DSN|OAUTH_[A-Z_]+|BETA_ALLOWLIST)=' |
+    env | grep -E '^(ENV_NAME|APP_VERSION|BACKEND_IMAGE|FRONTEND_IMAGE|WORKER_IMAGE|COMPOSE_PROFILES|IMAGE|EDGE_NETWORK|REDIS_[A-Z_]+|POSTGRES_PASSWORD|QUEUE_PASSWORD|ALPACA_[A-Z_]+|LOGO_DEV_KEY|SENTRY_DSN|OAUTH_[A-Z_]+|BETA_ALLOWLIST)=' |
       sort | sed 's/^/  env /' >>"$CALLS"
     [[ $FAKE_DOCKER != fail-up || $* != *" up "* ]]
     ;;
@@ -83,6 +83,7 @@ ALPACA_SECRET_KEY=$SECRET"
 DSN=https://0123abcd@o1.ingest.de.sentry.io/2
 LOGO_KEY=pk_test_logo
 DB_PASSWORD=pg_test_password
+QUEUE_PW=queue_test_password
 OAUTH="OAUTH_GITHUB_CLIENT_ID=Iv1.test
 OAUTH_GITHUB_CLIENT_SECRET=gh_test_secret
 OAUTH_GOOGLE_CLIENT_ID=g.test.apps
@@ -122,8 +123,8 @@ failed() {
 # The script's output never shows the token or a secret value, whatever happened.
 quiet() {
   local value
-  for value in "$TOKEN" "$KEY_ID" "$SECRET" "$DSN" "$DB_PASSWORD" gh_test_secret g_test_secret \
-    "${@:2}"; do
+  for value in "$TOKEN" "$KEY_ID" "$SECRET" "$DSN" "$DB_PASSWORD" "$QUEUE_PW" gh_test_secret \
+    g_test_secret "${@:2}"; do
     if [[ $output == *"$value"* ]]; then
       failed "$1" "the output shows '$value': $output"
       return 1
@@ -218,7 +219,8 @@ up_calls() {
   echo "docker image prune --all --force"
 }
 
-# up_env <up_calls' arguments>: the variables compose gets from "up", sorted (uses $worker).
+# up_env <up_calls' arguments>: the variables compose gets from "up", sorted (uses $worker, and
+# $queue_password: the value of QUEUE_PASSWORD when stdin has one).
 up_env() {
   if [[ -n ${5:-} ]]; then
     echo "  env ALPACA_KEY_ID=$KEY_ID"
@@ -246,6 +248,9 @@ up_env() {
   fi
   if [[ -n ${8:-} ]]; then
     echo "  env POSTGRES_PASSWORD=$DB_PASSWORD"
+  fi
+  if [[ -n ${queue_password+set} ]]; then
+    echo "  env QUEUE_PASSWORD=$queue_password"
   fi
   echo "  env REDIS_MAXMEMORY=$3"
   echo "  env REDIS_MEM_LIMIT=$4"
@@ -307,6 +312,10 @@ LOGO_DEV_KEY=$LOGO_KEY
 SENTRY_DSN=$DSN
 POSTGRES_PASSWORD=$DB_PASSWORD
 $OAUTH" "$(up_calls stage main-0123abc 256mb 288m with-secrets with-dsn with-logo with-db with-oauth)"
+queue_password=$QUEUE_PW allowed "stage: up stage with the job queue's password" stage \
+  "up stage main-0123abc $STAGE_IMAGES" "$TOKEN
+$SECRETS
+QUEUE_PASSWORD=$QUEUE_PW" "$(queue_password=$QUEUE_PW up_calls stage main-0123abc 256mb 288m with-secrets)"
 allowed "stage: up stage without secrets" stage "up stage main-0123abc $STAGE_IMAGES" "$TOKEN" \
   "$(up_calls stage main-0123abc 256mb 288m)"
 allowed "stage: edge" stage "edge" "" \
@@ -379,10 +388,13 @@ printed() {
 
 rm -f "$RECORD"
 recorded "stage: up stage starts the record" "main-$COMMIT $OLD_STAGE_IMAGES" \
-  stage "up stage main-$COMMIT $OLD_STAGE_IMAGES" "$TOKEN"
+  stage "up stage main-$COMMIT $OLD_STAGE_IMAGES" "$TOKEN
+QUEUE_PASSWORD=$QUEUE_PW"
 printed "stage: up prints the images it runs, the worker's too" "images $OLD_STAGE_IMAGES"
 recorded "stage: every up stage adds a line" "main-$COMMIT $OLD_STAGE_IMAGES
 main-0123abc $OLD_STAGE_IMAGES" stage "up stage main-0123abc $OLD_STAGE_IMAGES" "$TOKEN"
+printed "stage: up without the job queue's password says so" "candlestack-deploy: no QUEUE_PASSWORD: the job queue of stage runs without a password
+images $OLD_STAGE_IMAGES"
 recorded "stage: the same commit again" "main-$COMMIT $OLD_STAGE_IMAGES
 main-0123abc $OLD_STAGE_IMAGES
 main-$COMMIT $STAGE_IMAGES" stage "up stage main-$COMMIT $STAGE_IMAGES" "$TOKEN"
@@ -445,7 +457,7 @@ refused "agent image" stage "agent ${AGENT%@*}:latest" "$TOKEN" \
   "image must be a GHCR digest reference: '${AGENT%@*}:latest'"
 
 echo "# stdin: the token, then only the environment's secrets, with safe values"
-only_secrets="only ALPACA_KEY_ID, ALPACA_SECRET_KEY, LOGO_DEV_KEY, SENTRY_DSN, POSTGRES_PASSWORD, the OAUTH_ keys and BETA_ALLOWLIST may follow the token on stdin"
+only_secrets="only ALPACA_KEY_ID, ALPACA_SECRET_KEY, LOGO_DEV_KEY, SENTRY_DSN, POSTGRES_PASSWORD, the OAUTH_ keys, BETA_ALLOWLIST and QUEUE_PASSWORD may follow the token on stdin"
 refused "up without a token" stage "up stage v1 $STAGE_IMAGES" "" "expected a GHCR token on stdin"
 refused "agent without a token" stage "agent $AGENT" "" "expected a GHCR token on stdin"
 refused "another variable" stage "up stage v1 $STAGE_IMAGES" "$TOKEN
@@ -469,6 +481,14 @@ for value in 'p@ss-0123456789abcdef' 'pass%40-0123456789abc' 'pass/0123456789abc
 POSTGRES_PASSWORD=$value" \
     "POSTGRES_PASSWORD must be 16 to 256 letters, digits or the characters . _ ~ -" ${value:+"$value"}
 done
+# The job queue's password goes into its URL as it is too; empty is none.
+for value in 'p@ss-0123456789abcdef' 'pass/0123456789abcdef' 'short-0123456'; do
+  refused "queue password ${value:0:12}" stage "up stage v1 $STAGE_IMAGES" "$TOKEN
+QUEUE_PASSWORD=$value" \
+    "QUEUE_PASSWORD must be empty or 16 to 256 letters, digits or the characters . _ ~ -" "$value"
+done
+queue_password='' allowed "an empty queue password" stage "up stage v1 $STAGE_IMAGES" "$TOKEN
+QUEUE_PASSWORD=" "$(queue_password='' up_calls stage v1 256mb 288m)"
 secret=$SECRET
 SECRET=$(printf '~%.0s' {1..256})
 allowed "secret value of 256 characters, blank lines" stage "up stage v1 $STAGE_IMAGES" "$TOKEN

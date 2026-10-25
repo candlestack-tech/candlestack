@@ -2,6 +2,8 @@
 the loop that goes on through an empty queue, Redis out of reach, jobs nobody waits for and a
 stop in the middle of a job."""
 
+import ctypes
+import errno
 import json
 import logging
 import os
@@ -9,6 +11,7 @@ import runpy
 import signal
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +27,7 @@ from candlestack.worker.service import (
     INTERNAL,
     OUTLIVED,
     STOPPED,
+    WORKER_USER,
     JobProcess,
     Paths,
     Worker,
@@ -207,6 +211,110 @@ def test_the_jobs_process_gets_no_secrets(monkeypatch: pytest.MonkeyPatch) -> No
     assert environment["PATH"] == "/usr/bin"
     assert environment["KERAS_BACKEND"] == "jax"
     assert environment["KERAS_HOME"] == "/tmp/keras"
+
+
+def test_started_as_root_the_loop_becomes_nobody_for_good(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[Any] = []
+    monkeypatch.setattr(service.sys, "platform", "linux")
+    monkeypatch.setattr(service.os, "getuid", lambda: 0, raising=False)
+    for name in ("setgroups", "setresgid", "setresuid"):
+        monkeypatch.setattr(
+            service.os, name, lambda *ids, name=name: calls.append((name, *ids)), raising=False
+        )
+    monkeypatch.setattr(service, "_not_dumpable", lambda: calls.append(("not dumpable",)))
+
+    service.drop_privileges(Settings(app_env="test", jobs_redis_url="redis://:secret@queue/0"))
+
+    nobody = (WORKER_USER, WORKER_USER, WORKER_USER)
+    assert calls == [
+        ("setgroups", []),
+        ("setresgid", *nobody),
+        ("setresuid", *nobody),
+        ("not dumpable",),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("url", "warned"), [("redis://:secret@queue:6379/0", True), ("redis://queue:6379/0", False)]
+)
+def test_not_started_as_root_the_loop_warns_when_the_queue_has_a_password(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, url: str, warned: bool
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(service.sys, "platform", "linux")
+    monkeypatch.setattr(service.os, "getuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(service, "_not_dumpable", lambda: calls.append("not dumpable"))
+
+    with caplog.at_level(logging.WARNING):
+        service.drop_privileges(Settings(app_env="test", jobs_redis_url=url))
+
+    assert calls == ["not dumpable"]
+    assert ("can read the job queue's password" in caplog.text) is warned
+    assert "secret" not in caplog.text
+
+
+def test_off_linux_the_loop_changes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(service.sys, "platform", "win32")
+    monkeypatch.setattr(service, "_not_dumpable", lambda: pytest.fail("changed"))
+
+    service.drop_privileges(Settings(app_env="test"))
+
+
+def test_a_loop_that_stays_dumpable_does_not_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Libc:
+        def prctl(self, *arguments: int) -> int:
+            return -1
+
+    monkeypatch.setattr(service.ctypes, "CDLL", lambda *_, **__: Libc())
+    monkeypatch.setattr(service.ctypes, "get_errno", lambda: errno.EINVAL)
+
+    with pytest.raises(OSError, match="Invalid argument"):
+        service._not_dumpable()
+
+
+# Reads the environment of its parent, the loop, in /proc, writes what happened to the file
+# named by its argument and gives a result.
+READS_THE_LOOP = """
+import json, os, sys, time
+job = json.load(sys.stdin)["job"]
+try:
+    open(f"/proc/{os.getppid()}/environ", "rb").read()
+    seen = "read"
+except PermissionError:
+    seen = "refused"
+open(sys.argv[1], "w").write(seen)
+result = {"id": job["id"], "kind": job["kind"], "status": "done"}
+print(json.dumps({"result": result, "began_at": time.time()}))
+"""
+
+
+@pytest.fixture
+def dumpable() -> Iterator[None]:
+    """Makes the test's process dumpable again once a test made it not dumpable."""
+    yield
+    ctypes.CDLL(None).prctl(4, 1, 0, 0, 0)
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or os.getuid() == 0, reason="/proc; as root it would drop to nobody"
+)
+@pytest.mark.usefixtures("dumpable")
+async def test_the_jobs_process_cannot_read_the_loops_environment(tmp_path: Path) -> None:
+    seen = tmp_path / "seen"
+    probe = JobProcess(
+        Paths(tmp_path / "models", tmp_path / "jobs"),
+        20,
+        [sys.executable, "-c", READS_THE_LOOP, str(seen)],
+    )
+    # A process of the loop's user reads its environment: where the password is.
+    await probe.run(job())
+    assert seen.read_text() == "read"
+
+    service.drop_privileges(Settings(app_env="test"))
+    result = await probe.run(job())
+
+    assert result.status == "done"
+    assert seen.read_text() == "refused"
 
 
 class FakeQueue:
@@ -467,14 +575,20 @@ async def test_sigterm_stops_the_loop(caplog: pytest.LogCaptureFixture) -> None:
     assert "The worker stops (SIGTERM)" in caplog.text
 
 
-def test_main_sets_up_logging_and_sentry_and_serves(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_sets_up_logging_drops_privileges_and_serves(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[Any] = []
     settings = Settings(app_env="test", log_level="WARNING")
     monkeypatch.setattr(service, "get_settings", lambda: settings)
     monkeypatch.setattr(service, "setup_logging", lambda level: calls.append(("logging", level)))
+    monkeypatch.setattr(service, "drop_privileges", lambda got: calls.append(("drop", got)))
     monkeypatch.setattr(service, "setup_sentry", lambda got: calls.append(("sentry", got)))
     monkeypatch.setattr(service.anyio, "run", lambda function, got: calls.append((function, got)))
 
     runpy.run_module("candlestack.worker", run_name="__main__")
 
-    assert calls == [("logging", "WARNING"), ("sentry", settings), (service.serve, settings)]
+    assert calls == [
+        ("logging", "WARNING"),
+        ("drop", settings),
+        ("sentry", settings),
+        (service.serve, settings),
+    ]

@@ -153,6 +153,7 @@ jobs:
             OAUTH_GOOGLE_CLIENT_ID=${{ secrets.OAUTH_GOOGLE_CLIENT_ID }}
             OAUTH_GOOGLE_CLIENT_SECRET=${{ secrets.OAUTH_GOOGLE_CLIENT_SECRET }}
             BETA_ALLOWLIST=${{ secrets.BETA_ALLOWLIST }}
+            QUEUE_PASSWORD=${{ secrets.QUEUE_PASSWORD }}
           health-url: https://stage.candlestack.tech/api/health
           health-expect: ${{ github.sha }}
 
