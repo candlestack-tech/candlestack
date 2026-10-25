@@ -73,6 +73,7 @@ STOPPED = (
     "more memory than the worker has. Choose a shorter period or a smaller model."
 )
 EXPIRED = "The job waited for the worker longer than its caller waited for it, so it did not run."
+OUTLIVED = "The job ran past the time its caller waited for it, so it was stopped."
 INTERNAL = "The worker failed on this job. This is a bug of CandleStack and it was reported."
 
 
@@ -85,7 +86,8 @@ class Paths:
 
 
 class JobProcess:
-    """Runs one job in a fresh process (``RUNNER``), stopped after ``time_limit`` seconds."""
+    """Runs one job in a fresh process (``RUNNER``), stopped after ``time_limit`` seconds or
+    at the job's deadline, whichever comes first: past it nobody reads the result."""
 
     def __init__(self, paths: Paths, time_limit: float, command: Sequence[str] = RUNNER) -> None:
         self._paths = paths
@@ -96,22 +98,40 @@ class JobProcess:
         """The job's result; never raises but for cancellation, which stops the process."""
         request = Request(job=job, models_dir=self._paths.models, files_dir=self._paths.files)
         spawned = time.time()
+        limit = min(self._time_limit, max(job.deadline - spawned, 0))
+        # A session of its own, so whatever the process started goes with it (_stop_group).
         async with await anyio.open_process(
             self._command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=None,
             env=child_environment(),
+            start_new_session=True,
         ) as process:
-            with anyio.move_on_after(self._time_limit) as scope:
-                output = await _communicate(process, request.model_dump_json().encode())
-                code = await process.wait()
+            try:
+                with anyio.move_on_after(limit) as scope:
+                    output = await _communicate(process, request.model_dump_json().encode())
+                    code = await process.wait()
+            finally:
+                _stop_group(process)
             if scope.cancelled_caught:
-                process.kill()
+                if limit < self._time_limit:
+                    return JobResult.failed(job.id, job.kind, "expired", OUTLIVED)
                 return JobResult.failed(
                     job.id, job.kind, "time-limit", TIME_LIMIT.format(seconds=self._time_limit)
                 )
         return _result(job, output, code, spawned)
+
+
+def _stop_group(process: Process) -> None:
+    """Kills the job's process and anything it started that is still running (Linux: its
+    process group), so no part of one model outlives its job."""
+    if sys.platform == "win32":
+        with suppress(ProcessLookupError):
+            process.kill()
+        return
+    with suppress(ProcessLookupError, PermissionError):
+        os.killpg(process.pid, signal.SIGKILL)
 
 
 def child_environment() -> dict[str, str]:

@@ -22,6 +22,7 @@ from candlestack.worker import service
 from candlestack.worker.service import (
     EXPIRED,
     INTERNAL,
+    OUTLIVED,
     STOPPED,
     JobProcess,
     Paths,
@@ -98,6 +99,64 @@ async def test_a_job_over_its_time_limit_is_stopped(tmp_path: Path) -> None:
         "smaller model."
     )
     assert time.monotonic() - started < 10
+
+
+async def test_a_job_stops_at_its_deadline_when_that_comes_first(tmp_path: Path) -> None:
+    started = time.monotonic()
+    late = job(deadline=time.time() + 0.5)
+
+    result = await process(tmp_path, "import time; time.sleep(30)").run(late)
+
+    assert (result.status, result.reason, result.error) == ("failed", "expired", OUTLIVED)
+    assert time.monotonic() - started < 10
+
+
+# Starts a child that outlives the job's process unless it is stopped with it, then answers.
+LEAVES_A_CHILD = """
+import json, subprocess, sys, time
+child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+open(sys.argv[1], "w").write(str(child.pid))
+job = json.load(sys.stdin)["job"]
+result = {"id": job["id"], "kind": job["kind"], "status": "done"}
+print(json.dumps({"result": result, "began_at": time.time()}))
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="process groups")
+@pytest.mark.parametrize("time_limit", [20, 0.5])
+async def test_nothing_the_jobs_process_started_outlives_it(
+    tmp_path: Path, time_limit: float
+) -> None:
+    pid_file = tmp_path / "child.pid"
+    script = LEAVES_A_CHILD
+    if time_limit < 1:
+        script += "time.sleep(30)\n"
+    command = [sys.executable, "-c", script, str(pid_file)]
+    runner = JobProcess(Paths(tmp_path / "models", tmp_path / "jobs"), time_limit, command)
+
+    await runner.run(job())
+
+    child = int(pid_file.read_text())
+    for _ in range(100):
+        if not _alive(child):
+            break
+        await anyio.sleep(0.05)
+    assert not _alive(child)
+
+
+def _alive(pid: int) -> bool:
+    """Whether ``pid`` still runs (a zombie, killed but not yet reaped, does not)."""
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except FileNotFoundError:
+        return False
+    except OSError:  # no /proc (macOS)
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        return True
+    return state != "Z"
 
 
 async def test_a_process_that_ends_without_a_result_is_a_bug(
