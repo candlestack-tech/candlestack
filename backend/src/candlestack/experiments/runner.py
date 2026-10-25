@@ -53,7 +53,7 @@ UNREACHABLE = (
     "The worker that runs the models cannot be reached right now. Try again in a few minutes."
 )
 JOB_FAILED = "The model could not run on the candles. Try again later."
-MODEL_GONE = "The model was deleted before the backtest ran."
+MODEL_GONE = "The model was deleted before the backtest could run it."
 
 
 class RunFailed(Exception):
@@ -146,7 +146,7 @@ class BacktestRunner:
         timings["candles"] = _ms(clock)
         # The file as the model storage keeps it (ml.LocalModelStorage).
         model = f"{backtest.user_id}/{backtest.model_id}.keras"
-        result, predictions = await self._predict(model, spec, candles.frame)
+        result, predictions = await self._predict(backtest_id, model, spec, candles.frame)
         timings.update({f"job_{name}": value for name, value in result.timings})
         clock = time.monotonic()
         period = spec.data.period
@@ -184,7 +184,7 @@ class BacktestRunner:
             raise RunFailed("candles", error.detail) from error
 
     async def _predict(
-        self, model: str, spec: RunSpec, candles: pl.DataFrame
+        self, backtest_id: str, model: str, spec: RunSpec, candles: pl.DataFrame
     ) -> tuple[JobResult, pl.DataFrame]:
         """The worker's predictions on the candles of the model's file ``model``."""
         try:
@@ -199,8 +199,16 @@ class BacktestRunner:
             logger.warning("A backtest could not reach the worker (%s)", type(error).__name__)
             raise RunFailed("worker-unreachable", UNREACHABLE) from error
         if result.status != "done" or predictions is None:
+            # A model deleted while the run went on takes its file along: the worker cannot
+            # find it, and the user should read why.
+            if await self._model_gone(backtest_id):
+                raise RunFailed("model-deleted", MODEL_GONE)
             raise RunFailed(f"job {result.reason}", result.error or JOB_FAILED)
         return result, predictions
+
+    async def _model_gone(self, backtest_id: str) -> bool:
+        async with self._db.sessions() as session:
+            return await BacktestStore(session).model_of(backtest_id) is None
 
     async def _finish(self, backtest_id: str, done: Run, report: RunReport, blob: bytes) -> None:
         """Stores the results while the backtest is still running and there (its account may
