@@ -205,8 +205,8 @@ it (`PUT /api/v1/models/{model_id}/manifest`, [architecture.md](architecture.md#
 
 Each check shows as passed or failed with what is wrong, in plain words ("The model has 2
 inputs; CandleStack takes models with one input"), one sentence for each thing wrong: at most
-10, then how many more, so a manifest wrong throughout cannot flood the page. Add model is
-disabled while a check fails.
+10, then how many more, so a manifest wrong throughout cannot flood the page. Add model (Save,
+when a manifest is added later) is disabled while a check fails.
 
 ## The blocks
 
