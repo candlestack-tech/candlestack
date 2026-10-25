@@ -249,7 +249,8 @@ flowchart LR
   and the example (`check_manifest`), a text holding the character NUL (JSON takes it, a
   JSONB column cannot keep it), then the signature against the input and output shapes
   the upload's check stored (`check_with_model`). Only a manifest that passed all of them is
-  kept, in the JSONB column `models.manifest`, under the lock of the user's models; else the
+  kept, in the JSONB column `models.manifest`, under the lock of the user's models (which a
+  deletion takes too, so it never removes the row in between); else the
   answer is `422 manifest-check-failed` with one sentence for each thing wrong in `problems`
   (`check`, `detail`), at most 10, `more_problems` counting the rest and `unknown_blocks`
   naming the blocks the catalog does not have. A large document wrong throughout stays cheap:

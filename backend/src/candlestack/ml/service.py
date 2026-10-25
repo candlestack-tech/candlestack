@@ -498,6 +498,9 @@ class ModelsService:
         Raises:
             ModelNotFound: The user has no model with the ID.
         """
+        # Under the lock of the user's models, so a rename or a manifest being kept finishes
+        # first instead of updating a row that is gone.
+        await self._store.lock_user(user_id)
         if not await self._store.delete(user_id, model_id):
             raise ModelNotFound
         await self._store.commit()

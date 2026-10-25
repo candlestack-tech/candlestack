@@ -154,3 +154,37 @@ def test_a_text_holding_nul_is_a_problem_of_the_form() -> None:
             ),
         )
     ]
+
+
+class RecordingStore:
+    """What a deletion asks of the store, in order."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def lock_user(self, user_id: str) -> None:
+        self.calls.append("lock_user")
+
+    async def delete(self, user_id: str, model_id: str) -> bool:
+        self.calls.append("delete")
+        return True
+
+    async def commit(self) -> None:
+        self.calls.append("commit")
+
+
+class NoFiles:
+    async def delete(self, user_id: str, model_id: str) -> None:
+        pass
+
+
+async def test_a_deletion_waits_for_the_lock_of_the_users_models() -> None:
+    # Else a rename or a manifest being kept would update a row that is gone (a 500).
+    store = RecordingStore()
+    service = ModelsService(
+        cast("ModelStore", store), cast("ModelStorage", NoFiles()), cast("UploadLocks", None)
+    )
+
+    await service.delete("usr_7f3k2m9qx4", "mdl_7f3k2m9qx4")
+
+    assert store.calls == ["lock_user", "delete", "commit"]

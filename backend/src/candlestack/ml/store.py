@@ -35,9 +35,10 @@ class ModelStore:
         await self._db.commit()
 
     async def lock_user(self, user_id: str) -> None:
-        """Takes the lock of the user's models until the transaction ends, so the uploads and
-        renames of one user run one after the other: two uploads cannot both pass the quota,
-        nor take the same name. An advisory lock, as the rows to lock may not exist yet."""
+        """Takes the lock of the user's models until the transaction ends, so the uploads,
+        renames, manifests and deletions of one user run one after the other: two uploads
+        cannot both pass the quota, nor take the same name, and nothing updates a row a
+        deletion removed. An advisory lock, as the rows to lock may not exist yet."""
         await self._db.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
             {"key": f"ml:models:{user_id}"},
