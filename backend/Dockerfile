@@ -77,7 +77,8 @@ ARG APP_COMMIT=unknown
 ENV APP_COMMIT=$APP_COMMIT
 CMD ["python", "-m", "candlestack.worker"]
 
-# Keep last: build.yml, the CI e2e build and tests/e2e/compose.yaml build the last stage.
+# Keep last: build.yml (without a target), the CI e2e build and tests/e2e/compose.yaml build the
+# last stage.
 # The app runs from /app/src on PYTHONPATH, next to the dependencies' venv; the same image runs
 # `alembic upgrade head` (the migrate service), which reads [tool.alembic] in pyproject.toml and
 # the migrations next to it. MALLOC_ARENA_MAX:
