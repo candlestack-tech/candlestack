@@ -26,6 +26,7 @@ import polars as pl
 import pytest
 import redis
 from fastapi import FastAPI
+from pydantic import SecretStr
 
 from candlestack.core import Settings, create_redis
 from candlestack.data import (
@@ -74,7 +75,7 @@ def settings(settings: Settings, redis_url: str, tmp_path: Path) -> Settings:
     with redis.Redis.from_url(redis_url) as queue:
         queue.flushdb()
     return settings.model_copy(
-        update={"jobs_redis_url": redis_url, "job_files_dir": tmp_path / "jobs"}
+        update={"jobs_redis_url": SecretStr(redis_url), "job_files_dir": tmp_path / "jobs"}
     )
 
 
@@ -246,7 +247,7 @@ class FakeWorker:
 
 @pytest.fixture
 def worker(settings: Settings, market: FakeMarket) -> Iterator[FakeWorker]:
-    with FakeWorker(settings.jobs_redis_url, settings.job_files_dir) as fake:
+    with FakeWorker(settings.jobs_redis_url.get_secret_value(), settings.job_files_dir) as fake:
         yield fake
 
 
@@ -256,7 +257,7 @@ def real_worker(settings: Settings, market: FakeMarket) -> Iterator[None]:
     stop = threading.Event()
 
     async def serve() -> None:
-        client = create_redis(settings.jobs_redis_url)
+        client = create_redis(settings.jobs_redis_url.get_secret_value())
         loop = Worker(
             JobQueue(client),
             JobFiles(settings.job_files_dir),
