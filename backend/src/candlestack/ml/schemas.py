@@ -45,8 +45,7 @@ class ModelCheck(StrEnum):
 class ModelState(StrEnum):
     """How far a model got: `needs_setup` (no manifest yet, so it cannot run), `ready` (its
     manifest passed every check that reads the files, against this model too) or `verified`
-    (a trial run in the worker gave the output of the manifest's example; set by the worker,
-    not yet)."""
+    (a trial run in the worker gave the output of the manifest's example)."""
 
     needs_setup = "needs_setup"
     ready = "ready"
@@ -122,6 +121,13 @@ class ModelOut(BaseModel):
     state: ModelState
     manifest_summary: ManifestSummary | None = Field(
         description="What its manifest says, in short; null without one"
+    )
+    check_error: str | None = Field(
+        description=(
+            "Why the trial run of its manifest in the worker failed, in plain sentences; null "
+            "when it passed or has not run (the model stays `ready`)"
+        ),
+        examples=[None],
     )
 
 

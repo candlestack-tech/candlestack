@@ -88,6 +88,7 @@ def test_upload(ada, sql, storage, caplog) -> None:
         "best_sharpe": None,
         "state": "needs_setup",
         "manifest_summary": None,
+        "check_error": None,
     }
     model_id = response.json()["id"]
     [row] = sql(

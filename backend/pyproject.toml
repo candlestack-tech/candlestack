@@ -348,10 +348,11 @@ layers = [
     "models | errors | schemas",
 ]
 
-# Inside ml, the same: routes, their dependencies, the service, then the queries, the file
-# storage, the upload locks and the runner of the upload check, the check itself (which runs in
-# a child process with the allowlist alone), then the table, the errors, the allowlist and what
-# the backtests' usage of a model looks like, and the bodies at the bottom.
+# Inside ml, the same: routes, their dependencies, the service and the checks of the models in
+# the worker, then the queries, the file storage, the upload locks and the runner of the upload
+# check, the check itself (which runs in a child process with the allowlist alone), then the
+# table, the errors, the allowlist and what the backtests' usage of a model looks like, and the
+# bodies at the bottom.
 [[tool.importlinter.contracts]]
 name = "Inside ml: HTTP -> dependencies -> service -> store, storage and check -> models"
 type = "layers"
@@ -359,7 +360,7 @@ containers = ["candlestack.ml"]
 layers = [
     "api",
     "dependencies",
-    "service",
+    "service | checks",
     "store | storage | uploads | sandbox",
     "inspect",
     "models | errors | allowlist | usage",

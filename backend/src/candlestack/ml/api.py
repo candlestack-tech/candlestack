@@ -8,7 +8,8 @@ anything from it; a failed check answers 422 ``model-check-failed`` naming the c
 
 A model's manifest is its own resource, ``/api/v1/models/{model_id}/manifest``: added or
 replaced with PUT, which keeps it only when every check passed (else 422
-``manifest-check-failed`` with the problems), and read back with GET.
+``manifest-check-failed`` with the problems) and then starts its trial run in the worker
+(``checks.py``), and read back with GET.
 """
 
 import logging
@@ -19,7 +20,7 @@ from fastapi import APIRouter, Depends, Path, Query, Request, Response
 
 from candlestack.accounts import CurrentUserDep
 from candlestack.core import NO_STORE, ProblemError, problem_doc, require_same_origin
-from candlestack.ml.dependencies import ModelsServiceDep
+from candlestack.ml.dependencies import ModelChecksDep, ModelsServiceDep
 from candlestack.ml.errors import (
     AccountGone,
     ManifestCheckFailed,
@@ -389,20 +390,23 @@ async def delete_model(model_id: ModelId, user: CurrentUserDep, service: ModelsS
 )
 async def set_manifest(
     model_id: ModelId,
+    *,
     request: Request,
     user: CurrentUserDep,
     service: ModelsServiceDep,
+    checks: ModelChecksDep,
     response: Response,
 ) -> ModelOut:
     """Adds the model's manifest, or replaces the one it has; the body is the manifest. It is
     kept only when every check passes: its form, the catalog (every block exists, in its
     step), the blocks' parameters, the names of the columns, the signature against the window
     and the columns, the shapes of the example, and the signature against the input and
-    output the upload read from the model file. The model is then `ready`; a trial run
-    makes it `verified` (not yet)."""
+    output the upload read from the model file. The model is then `ready`. A trial run in the
+    worker follows after the answer: the model becomes `verified` when it gives the output of
+    the manifest's example, and a failed run leaves it `ready` with its `check_error`."""
     response.headers.update(NO_STORE)
     try:
-        return await service.set_manifest(
+        model = await service.set_manifest(
             user.id, model_id, _declared_size(request), request.stream()
         )
     except ModelNotFound:
@@ -416,9 +420,11 @@ async def set_manifest(
             "CandleStack keeps. Give it a smaller example.",
         ) from None
     except ManifestCheckFailed as failed:
-        checks = ", ".join(dict.fromkeys(problem.check for problem in failed.problems))
-        logger.info("A manifest of user %s was refused (%s)", user.id, checks)
+        failed_checks = ", ".join(dict.fromkeys(problem.check for problem in failed.problems))
+        logger.info("A manifest of user %s was refused (%s)", user.id, failed_checks)
         raise _manifest_problem(failed) from None
+    checks.start(user.id, model.id)
+    return model
 
 
 @router.get(

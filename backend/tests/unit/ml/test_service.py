@@ -113,12 +113,21 @@ def test_a_model_without_a_manifest_needs_setup() -> None:
     out = _out(model())
 
     assert out.state == ModelState.needs_setup
-    assert out.manifest_summary is None
+    assert (out.manifest_summary, out.check_error) == (None, None)
 
 
 def test_a_model_with_a_manifest_is_ready_until_a_trial_run_verifies_it(raw: Manifest) -> None:
     assert _out(model(), manifest=raw).state == ModelState.ready
     assert _out(model(datetime.now(UTC)), manifest=raw).state == ModelState.verified
+
+
+def test_a_failed_trial_run_leaves_the_model_ready_with_its_error(raw: Manifest) -> None:
+    failed = model()
+    failed.check_error = "The model failed on its input."
+
+    out = _out(failed, manifest=raw)
+
+    assert (out.state, out.check_error) == (ModelState.ready, "The model failed on its input.")
 
 
 def test_the_summary_says_what_the_manifest_reads(raw: Manifest) -> None:

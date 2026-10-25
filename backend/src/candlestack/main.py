@@ -37,6 +37,7 @@ from candlestack.experiments import BacktestRunner, backtests_router, model_usag
 from candlestack.jobs import JobClient, JobFiles, JobQueue
 from candlestack.ml import (
     LocalModelStorage,
+    ModelChecks,
     ModelsAccountDeletion,
     ModelStorage,
     keep_incoming_swept,
@@ -87,31 +88,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ``STATS_REFRESH`` (prod and stage) the instrument stats are refreshed in a background task
     while the app runs. The model storage is made ready, and what crashed uploads left there
     is removed now and every 10 minutes. The ``backtest_runner`` runs the backtests users start;
-    those a stopped process left running fail now. On shutdown the runs stop (failed), then the
-    data service's lookups in the background, before the clients close."""
+    those a stopped process left running fail now. The ``model_checks`` run the trial runs of the
+    models in the worker; at startup they check the models a stopped process left unchecked. On
+    shutdown the runs stop (failed), then the data service's lookups in the background and the
+    checks, before the clients close."""
     settings: Settings = app.state.settings
     model_storage: ModelStorage = app.state.model_storage
     await model_storage.prepare()
     app.state.redis = create_redis(settings.redis_url)
-    # The queue of the worker that runs the models, for the backtests.
+    # The queue of the worker that runs the models, for the backtests and the models' checks.
     jobs_redis = create_redis(settings.jobs_redis_url.get_secret_value())
     app.state.db = Database(settings.database_url.get_secret_value())
+    jobs = JobClient(JobQueue(jobs_redis), JobFiles(settings.job_files_dir))
+    app.state.model_checks = ModelChecks(app.state.db, jobs)
     app.state.rate_limiter = RateLimiter(app.state.redis)
     try:
         async with create_http_client(settings) as http:
             app.state.http = http
             data_service = build_data_service(settings, app.state.redis, http)
             app.state.data_service = data_service
-            runner = BacktestRunner(
-                app.state.db,
-                data_service,
-                JobClient(JobQueue(jobs_redis), JobFiles(settings.job_files_dir)),
-            )
+            runner = BacktestRunner(app.state.db, data_service, jobs)
             app.state.backtest_runner = runner
             await runner.recover()
             async with (
                 _background(data_service, stats=settings.stats_refresh),
                 _running(keep_incoming_swept(model_storage), "The sweep of incoming model files"),
+                _checking(app.state.model_checks),
             ):
                 try:
                     yield
@@ -153,6 +155,16 @@ async def _running(work: Coroutine[Any, Any, None], what: str) -> AsyncIterator[
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
+
+
+@asynccontextmanager
+async def _checking(checks: ModelChecks) -> AsyncIterator[None]:
+    """Checks the models left unchecked while the app runs; stops the checks on shutdown."""
+    checks.recover()
+    try:
+        yield
+    finally:
+        await checks.close()
 
 
 @asynccontextmanager

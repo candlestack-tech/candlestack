@@ -13,6 +13,7 @@ from sqlalchemy import (
     Index,
     LargeBinary,
     String,
+    Text,
     false,
     func,
 )
@@ -61,6 +62,12 @@ class Model(Base):
     # When the worker's trial run gave the output of the manifest's example (#268); null until
     # then, and again when the manifest is replaced.
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the worker's trial run of this manifest came to an end that says something about the
+    # model (passed or failed, not a worker that did not answer), and why it failed in plain
+    # sentences for the Models page; both null until then, and again when the manifest is
+    # replaced. A model with a manifest and no checked_at is checked again at startup (checks.py).
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    check_error: Mapped[str | None] = mapped_column(Text)
     # The manifest without its example and notes, what the model's summary is made of: loaded
     # by the queries of store.py that ask for it, None where they do not.
     manifest_spec: Mapped[dict[str, Any] | None] = query_expression()
