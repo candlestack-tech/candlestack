@@ -120,7 +120,7 @@ class AgentTest(unittest.TestCase):
 
         for name, value in {
             "DOCKER_URL": docker_url,
-            "VM_LABEL": "AWS t3.small · eu-north-1",
+            "VM_LABEL": "AWS t3.medium · eu-north-1",
             "Path": path,
             "time": SimpleNamespace(time=lambda: self.clock[0], monotonic=time.monotonic),
             "_prev_cpu": {},
@@ -212,7 +212,7 @@ class AgentTest(unittest.TestCase):
         self.assertEqual(
             snapshot["host"],
             {
-                "label": "AWS t3.small · eu-north-1",
+                "label": "AWS t3.medium · eu-north-1",
                 "cpus": 2,
                 "uptime": 71018.7,
                 "cpu": 64.3,  # 600 of 933 jiffies busy, rounded

@@ -57,7 +57,7 @@ flowchart LR
 | `redis` | `redis:8-alpine` | private network of the environment, no persistence, `allkeys-lru` |
 | `postgres` | `postgres:18-alpine` | private network of the environment, data in a volume; migrated by a one-shot `migrate` container (the backend image, `alembic upgrade head`) before the backend starts; prod and stage dump it every night (`backup`) |
 | `models-backup` | `offen/docker-volume-backup` | archives the `models` volume (read-only) every night at 00:30 UTC into the volume `model_backups`, keeps 7 days; no network |
-| `worker` | the stage `worker` of `backend/Dockerfile` | runs the uploaded models ([Worker](#worker)); only on the internal network `jobs`, the `models` volume read-only, the `jobs` volume shared with the backend, a read-only root filesystem, 512 MB without swap, one CPU; in `compose.yaml` now, on the VM on stage only, once the deploy starts the profile `worker` there ([infra/README.md](../infra/README.md#worker)) |
+| `worker` | the stage `worker` of `backend/Dockerfile` | runs the uploaded models ([Worker](#worker)); only on the internal network `jobs`, the `models` volume read-only, the `jobs` volume shared with the backend, a read-only root filesystem, 1 GB without swap, one CPU; in `compose.yaml` now, on the VM on stage only, once the deploy starts the profile `worker` there ([infra/README.md](../infra/README.md#worker)) |
 | `queue` | `redis:8-alpine` | the job queue: only on the network `jobs`, no persistence, `noeviction`; with the worker |
 
 ## HTTP surface
@@ -372,8 +372,8 @@ sequenceDiagram
   model that crashes, hangs or exhausts the memory fails its job, and the loop takes the next
   one. Starting the process and importing Keras takes 2 to 4 s; loading the raw-candles test
   model about 0.5 s, its predictions for 50000 candles about 0.3 s, the container about 300 MB
-  at its peak then. A 25 x 28 model runs on about 45000 candles within the container's 512 MB
-  ([infra/README.md](../infra/README.md#memory)).
+  at its peak then. A 25 x 28 model runs on the 50000 candles a backtest may load within the
+  container's 1 GB, about 600 MB at its peak ([infra/README.md](../infra/README.md#memory)).
 - **What a model could still reach** if it broke out of Keras' safe mode: the container has no
   way out, but the job's process shares the loop's network and user, so it could reach the
   queue (`queue:6379`, without a password), the other jobs' files and every model file

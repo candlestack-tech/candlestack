@@ -31,7 +31,7 @@ compresses the responses (zstd or gzip) on the way to Cloudflare.
 | `migrate` | the backend image, `alembic upgrade head` | runs once per deploy, before the backend starts | `160m` |
 | `backup` | `prodrigestivill/postgres-backup-local:18-alpine`, pinned by digest | nothing reaches it | `32m` |
 | `models-backup` | `offen/docker-volume-backup`, pinned by digest | nothing reaches it, no network | `32m` |
-| `worker` | the stage `worker` of `backend/Dockerfile`; stage only, not deployed yet ([Worker](#worker)) | nothing reaches it; it reaches only `queue`, on the internal network `<env>_jobs` | `512m`, no swap, one CPU |
+| `worker` | the stage `worker` of `backend/Dockerfile`; stage only, not deployed yet ([Worker](#worker)) | nothing reaches it; it reaches only `queue`, on the internal network `<env>_jobs` | `1g`, no swap, one CPU |
 | `queue` | `redis:8-alpine`, pinned by digest; stage only, not deployed yet | `queue:6379` on `<env>_jobs` only | `32m` |
 
 The frontend image holds the app, built with Node in the image's build stage and served by its
@@ -67,8 +67,10 @@ services as root, which owns their volumes, but also without any capability.
 
 ### Memory
 
-The VM has 2 GB of memory and a 2 GB swap file. The limits are ceilings, not reservations:
-together they are above the memory, which is fine as long as what runs stays far below them.
+The VM has 4 GB of memory (3.8 GB that the system sees) and a 2 GB swap file. The limits are
+ceilings, not reservations: together they stay below the memory, and what runs stays far below
+them. After the resize to 4 GB (2026-10-25, the worker not deployed yet), the VM used about
+1.05 GB, with 2.78 GB available and 4 MB in swap.
 
 | Container | Limit per environment | Measured |
 | --- | --- | --- |
@@ -78,7 +80,7 @@ together they are above the memory, which is fine as long as what runs stays far
 | `postgres` | `128m` | about 30 MB with the backend's pool connected |
 | `backup`, `models-backup` | `32m` each | about 2 MB between their nightly runs; the models archive took under 32 MB for 300 MB of files |
 | `migrate` | `160m` | runs only during a deploy |
-| `worker` (stage only, not deployed yet) | `512m`, no swap | about 85 MB idle (the loop); a job adds a process with Keras and JAX (below) |
+| `worker` (stage only, not deployed yet) | `1g`, no swap | about 85 MB idle (the loop); a job adds a process with Keras and JAX (below) |
 | `queue` (stage only, not deployed yet) | `32m` (`maxmemory` 16 MB) | a few MB idle, a few kilobytes per job |
 
 The limits of one environment add up to 896 MB without `migrate`, 1.79 GB for prod and stage,
@@ -89,17 +91,17 @@ backend's 384 MB hold the app (about 150 MB at its peak so far) and the check's 
 limits itself to 192 MB of data (`RLIMIT_DATA`; a real model's check takes about 45 MB): about
 40 MB stay free even when both are at their limits.
 
-With the worker on stage, stage's limits add up to 1.44 GB (the 896 MB above, the worker's
-512 MB and the queue's 32 MB) and the VM's to 2.34 GB with prod's 896 MB, before the edge,
+With the worker on stage, stage's limits add up to 1.95 GB (the 896 MB above, the worker's
+1 GB and the queue's 32 MB) and the VM's to 2.85 GB with prod's 896 MB, before the edge,
 cloudflared, the agent and the system. What runs is far less, except while a job runs:
 
 | | prod | stage with the worker |
 | --- | --- | --- |
 | idle, cache empty | about 200 MB | about 290 MB (the worker's loop 85 MB, the queue a few MB) |
 | idle, cache full | about 460 MB | about 550 MB |
-| a job running, cache full | about 460 MB | up to 980 MB (the worker at its 512 MB) |
+| a job running, cache full | about 460 MB | up to 1.49 GB (the worker at its 1 GB) |
 
-That is up to about 1.45 GB for both environments, which leaves about 500 MB of the 2 GB for
+That is up to about 1.95 GB for both environments, which leaves about 1.9 GB of the 3.8 GB for
 the edge, cloudflared, the agent, the system and the page cache (those not measured here). The
 worker has no swap (`memswap_limit` equal to `mem_limit`): a model over its limit fails its job
 (`stopped`) instead of pushing the other containers into the 2 GB swap file. What goes to swap
@@ -109,20 +111,22 @@ prod slow, lower stage's Redis (`redis_memory` in `vm/candlestack-deploy`, 256 M
 What a job takes, measured with the worker image locally (Docker on WSL2; the container's
 `memory.peak`, which counts the page cache of Keras' and JAX' libraries too):
 
-| Job | Peak of the worker | Under `512m` |
+| Job | Peak of the worker | Under `1g` |
 | --- | --- | --- |
 | `check`, a 25 x 28 model of the research repository (a 5 MB file) | 276 MB | `done` |
 | `predict`, the raw-candles test model (25 x 5), 50000 candles | 303 MB | `done` |
 | `predict`, the 25 x 28 model, 20000 / 30000 / 40000 candles | 396 / 436 / 487 MB | `done` |
-| `predict`, the 25 x 28 model, 50000 candles | 602 MB (under `768m`) | `stopped`: the kernel killed the job's process, the loop went on |
+| `predict`, the 25 x 28 model, 50000 candles | 602 MB | `done` (measured under `768m`; under the earlier `512m` `stopped`: the kernel killed the job's process, the loop went on) |
 
-The same jobs with `env/compose.yaml` itself (stage, the profile `worker`) ended the same way.
-A peak at the limit without a kill is the page cache, which the kernel gives back first.
+The same jobs with `env/compose.yaml` itself (stage, the profile `worker`, at the earlier
+`512m`) ended the same way. A peak at the limit without a kill is the page cache, which the
+kernel gives back first.
 
 The job's process imports Keras and JAX (about 245 MB), loads the model and builds its input,
 25 x 28 float32 per candle for that model (134 MB for 50000 candles, plus the frames it is
-built from). So at `512m` a model of that size runs on about 45000 candles at most, fewer than
-the 50000 a backtest may load (`CANDLES_MAX`); a model with a smaller input goes further.
+built from). So at `1g` a model of that size runs on the 50000 candles a backtest may load
+(`CANDLES_MAX`) with about 400 MB to spare; a model with up to about twice its input per candle
+should fit too (an estimate, not measured).
 
 The jobs' files (the volume `<env>_jobs`) are a tmpfs of at most 64 MB: they take memory, not
 disk, about 2 MB of candles and 0.5 MB of predictions for a `predict` of 50000 candles. The
@@ -134,12 +138,12 @@ after a deploy.
 
 #### CPU
 
-The VM is a t3.small: 2 vCPUs with burstable CPU credits, in the credit mode `standard`
-(`vm/aws-create.sh`). It earns 24 credits an hour (one credit is one vCPU at 100% for a
-minute; the baseline is 20% of each vCPU, 0.4 vCPU together) and keeps at most 576. Once the
-balance is spent, the whole VM, prod included, runs at that baseline until it earns credits
-again: slower, never an extra cost (the mode `unlimited` would bill the vCPU hours above the
-baseline instead).
+The VM is a t3.medium: 2 vCPUs with burstable CPU credits, in the credit mode `standard`
+(`vm/aws-create.sh`); the resize from a t3.small added memory, not CPU. It earns 24 credits
+an hour (one credit is one vCPU at 100% for a minute; the baseline is 20% of each vCPU, 0.4
+vCPU together) and keeps at most 576. Once the balance is spent, the whole VM, prod included,
+runs at that baseline until it earns credits again: slower, never an extra cost (the mode
+`unlimited` would bill the vCPU hours above the baseline instead).
 
 The worker runs one job at a time on at most one vCPU (`cpus: 1`): JAX' threads would take both,
 and the backend and Postgres keep the other. Measured locally, a job ran at that limit
@@ -150,7 +154,7 @@ slower vCPUs that is about 0.1 to 0.15 credits per job (an estimate), so a few d
 hour cost a few of the 24 credits earned. The most a job can take is its time limit, 120 s of
 one vCPU: 2 credits. Jobs back to back at that limit spend 60 credits an hour, so a full
 balance lasts about 16 hours of them, less what prod and stage spend anyway. One job at a time
-is the right cap on this VM: a second one would need another 512 MB and share the same vCPU.
+is the right cap on this VM: a second one would need another 1 GB and share the same vCPU.
 Once the worker runs, watch the balance (`CPUCreditBalance` in CloudWatch).
 
 ### Backups
@@ -231,7 +235,7 @@ its job queue (`worker`, `queue`) in the profile `worker`, and the backend alrea
 network `<env>_jobs` (internal: nothing on it reaches the internet) with the volume
 `<env>_jobs` for the jobs' files. The worker sees the models volume read-only, runs as `65534`
 with a read-only root filesystem (a tmpfs `/tmp` of 256 MB for Keras and the copy of a model),
-no capabilities, `no-new-privileges`, an init, at most 512 processes and threads, 512 MB
+no capabilities, `no-new-privileges`, an init, at most 512 processes and threads, 1 GB
 without swap and one CPU ([Memory](#memory), [CPU](#cpu)). Its job process is the first the
 kernel stops at that limit, so a model that needs more fails its job and the worker goes on.
 The queue is a Redis of its own, so the worker reaches none of the cache's keys: `noeviction`
@@ -393,7 +397,7 @@ The other commands are `edge` and `agent <image@digest>` (stage key); the header
 | Path | What it is |
 | --- | --- |
 | `vm/cloud-init.yaml` | Provider-neutral bootstrap: Docker, swap, cloudflared, edge, deploy user |
-| `vm/aws-create.sh` | Creates the VM on AWS EC2 (t3.small, no inbound, SSM shell access) |
+| `vm/aws-create.sh` | Creates the VM on AWS EC2 (t3.medium, no inbound, SSM shell access) |
 | `vm/candlestack-deploy` | The only command the deploy keys can run |
 | `vm/test-candlestack-deploy.sh` | Tests of `candlestack-deploy` (see [Tests](#tests)) |
 | `vm/deploy_authorized_keys` | Public deploy keys with their scopes |
@@ -445,6 +449,10 @@ infra/vm/aws-create.sh ~/.cloudflared/<tunnel-id>.json main
 
 Shell on the VM: `aws ssm start-session --profile candlestack --region eu-north-1 --target <instance-id>`
 (needs the AWS Session Manager plugin), or EC2 console > the instance > Connect > Session Manager.
+
+The account is on AWS's Paid plan, with a monthly spend limit of $26 above the credits (early
+cost controls on); about $158 of credits were left on 2026-10-25. The t3.medium costs about
+$0.0432 an hour in eu-north-1, about $32 a month, plus the 25 GB gp3 disk.
 
 ## Replace the VM
 
