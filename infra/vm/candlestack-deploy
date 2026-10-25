@@ -4,12 +4,14 @@
 #
 #   scope    command
 #   prod     up prod <version>
-#   stage    up stage <version> <backend@digest> <frontend@digest>   |   edge   |   agent <image@digest>
+#   stage    up stage <version> <backend@digest> <frontend@digest> [<worker@digest>]
+#            |   edge   |   agent <image@digest>
 #
 # "up" and "agent" read a GHCR token from the first line of stdin and use it only for this
 # one pull. "up" then reads the environment's secrets as KEY=VALUE lines (only the keys
 # read_secrets accepts) and passes them to compose in its environment: no file, never printed.
-# Once the containers run, "up" prints "images <backend@digest> <frontend@digest>".
+# Once the containers run, "up" prints "images <backend@digest> <frontend@digest>", followed
+# by the worker's image when it started the worker (see runs_worker).
 # "up stage" also records its images in the stage record (see stage_images). "up prod" takes
 # no images: it runs the ones stage last ran for the commit of the release tag named by
 # <version>, as that record has them. Any workflow that may write packages can move a registry
@@ -22,14 +24,15 @@ set -euo pipefail
 export LC_ALL=C # byte-wise character ranges in the input checks below
 
 scope=${1:?scope}
-read -r action env version backend frontend _ <<<"${SSH_ORIGINAL_COMMAND:-}"
+read -r action env version backend frontend worker _ <<<"${SSH_ORIGINAL_COMMAND:-}"
 repo=/opt/candlestack
 # Both names of the organization while it is renamed to candlestack-tech: the images built
 # before the rename keep the old path (until the old name is dropped here).
 image_re='^ghcr\.io/(candlestack-fei-stu|candlestack-tech)/candlestack/[a-z0-9._-]+@sha256:[0-9a-f]{64}$'
 compose_file=$repo/infra/env/compose.yaml
-# One line "<version> <backend@digest> <frontend@digest>" per "up stage", in the deploy user's
-# home: outside the checkout, which "edge" resets.
+# One line "<version> <backend@digest> <frontend@digest> <worker@digest>" per "up stage", in
+# the deploy user's home: outside the checkout, which "edge" resets. A line of an "up stage"
+# without a worker image (all lines from before the worker) has only the first three fields.
 stage_images=${HOME:?}/stage-images
 
 # Temporary directories to remove on exit (DOCKER_CONFIG of pull(), the tag's compose file
@@ -60,6 +63,23 @@ redis_memory() {
     stage) REDIS_MAXMEMORY=256mb REDIS_MEM_LIMIT=288m ;;
   esac
   export REDIS_MAXMEMORY REDIS_MEM_LIMIT
+}
+
+# The worker and its queue (the profile "worker" of compose.yaml) run on stage only: prod runs
+# without them until the tech lead decides otherwise. Once it runs them, "up prod" takes the
+# worker's image from the stage record like the other two (stage_images_of reads it already).
+runs_worker() {
+  [ "$1" = stage ]
+}
+
+# worker_profile <worker@digest or nothing>: compose starts the worker and its queue only with
+# an image for the worker.
+worker_profile() {
+  if [ -n "$1" ]; then
+    export COMPOSE_PROFILES=worker WORKER_IMAGE=$1
+  else
+    unset COMPOSE_PROFILES WORKER_IMAGE
+  fi
 }
 
 # prod and stage share the network "edge" with the edge Caddy and the server agent.
@@ -114,13 +134,13 @@ release_compose_file() {
   release_commit=$commit
 }
 
-# stage_images_of <commit>: sets backend and frontend to the images of the last "up stage
-# main-<commit>" in the stage record.
+# stage_images_of <commit>: sets backend, frontend and worker to the images of the last "up
+# stage main-<commit>" in the stage record; worker is empty for a line without one.
 stage_images_of() {
   local line
   line=$(grep "^main-$1 " "$stage_images" 2>/dev/null | tail -n 1) || true
   [ -n "$line" ] || fail "stage has not run $1: release a commit of main that stage deployed"
-  read -r _ backend frontend _ <<<"$line"
+  read -r _ backend frontend worker _ <<<"$line"
 }
 
 check_image() {
@@ -175,19 +195,29 @@ case "${action:-}" in
       release_compose_file "$version"
       stage_images_of "$release_commit"
     fi
+    runs_worker "$env" || worker=
     check_image "$backend"
     check_image "$frontend"
+    # Without a worker image (a stage workflow run from before the worker) the environment runs
+    # without the worker and its queue.
+    [ -z "$worker" ] || check_image "$worker"
     read_token
     read_secrets
-    pull "$backend" "$frontend"
+    pull "$backend" "$frontend" ${worker:+"$worker"}
     redis_memory "$env"
     edge_network "$env"
-    ENV_NAME=$env APP_VERSION=$version BACKEND_IMAGE=$backend FRONTEND_IMAGE=$frontend \
-      compose up --detach --remove-orphans
-    if [ "$env" = stage ]; then
-      echo "$version $backend $frontend" >>"$stage_images"
+    worker_profile "$worker"
+    export ENV_NAME=$env APP_VERSION=$version BACKEND_IMAGE=$backend FRONTEND_IMAGE=$frontend
+    compose up --detach --remove-orphans
+    # compose leaves the services of a profile it was not given running: the worker of an
+    # earlier deploy would go on next to a backend it was not built with.
+    if runs_worker "$env" && [ -z "$worker" ]; then
+      compose rm --stop --force worker queue
     fi
-    echo "images $backend $frontend"
+    if [ "$env" = stage ]; then
+      echo "$version $backend $frontend${worker:+ $worker}" >>"$stage_images"
+    fi
+    echo "images $backend $frontend${worker:+ $worker}"
     prune_images
     ;;
   edge)

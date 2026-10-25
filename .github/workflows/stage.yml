@@ -2,7 +2,8 @@ name: Stage
 
 # Every push to main is built once and deployed to stage.candlestack.tech,
 # together with the edge proxy and the server agent (vm.candlestack.tech, read by ops).
-# The same backend and frontend images are later promoted to prod by a v* tag (release.yml).
+# The same backend and frontend images are later promoted to prod by a v* tag (release.yml);
+# the worker that runs the models runs on stage only (infra/README.md, "Worker").
 on:
   push:
     branches: [main]
@@ -31,6 +32,20 @@ jobs:
       tag: sha-${{ github.sha }}
       commit: ${{ github.sha }}
 
+  # The stage `worker` of the backend's Dockerfile.
+  build-worker:
+    needs: no-ai-signs
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      name: worker
+      context: backend
+      target: worker
+      tag: sha-${{ github.sha }}
+      commit: ${{ github.sha }}
+
   build-frontend:
     needs: no-ai-signs
     uses: ./.github/workflows/build.yml
@@ -56,7 +71,7 @@ jobs:
       commit: ${{ github.sha }}
 
   deploy:
-    needs: [build-backend, build-frontend, build-agent]
+    needs: [build-backend, build-worker, build-frontend, build-agent]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
@@ -121,6 +136,7 @@ jobs:
           command: >-
             up stage main-${{ github.sha }}
             ${{ needs.build-backend.outputs.image }} ${{ needs.build-frontend.outputs.image }}
+            ${{ needs.build-worker.outputs.image }}
           ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
           known-hosts: ${{ vars.DEPLOY_KNOWN_HOSTS }}
           access-client-id: ${{ secrets.CF_ACCESS_CLIENT_ID }}

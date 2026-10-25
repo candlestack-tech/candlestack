@@ -44,7 +44,9 @@ CONTAINERS = [
     container("agent", "socket-proxy"),
     container("prod", "redis"),
     container("stage", "backend", "main-0123abc"),
+    container("stage", "worker", "main-0123abc"),
     container("edge", "caddy"),
+    container("stage", "queue"),
     container("prod", "backend", "v0.2.0"),
     container("agent", "agent"),
     container("prod", "frontend", "v0.2.0"),
@@ -252,6 +254,11 @@ class AgentTest(unittest.TestCase):
                 "version": None,
             },
         )
+        # stage's worker carries the version of its deploy, its queue (Redis) none.
+        self.assertEqual(
+            (rows["stage", "worker"]["version"], rows["stage", "queue"]["version"]),
+            ("main-0123abc", None),
+        )
 
     def test_containers_are_ordered_environments_then_services(self):
         snapshot = agent.sample()
@@ -263,6 +270,8 @@ class AgentTest(unittest.TestCase):
                 ("prod", "frontend"),
                 ("prod", "redis"),
                 ("stage", "backend"),
+                ("stage", "queue"),
+                ("stage", "worker"),
                 ("edge", "caddy"),
                 ("agent", "agent"),
                 ("agent", "socket-proxy"),

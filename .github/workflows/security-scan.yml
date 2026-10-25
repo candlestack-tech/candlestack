@@ -2,9 +2,10 @@ name: Security scan
 
 # Once a week, the images that run on the VM are scanned for vulnerabilities again: new ones are
 # found after an image was built. Ours as prod (the latest release tag) and stage (main) run
-# them, and the ones the compose files pin (edge Caddy, Redis, the agent's Docker proxy). Every
-# fixable HIGH or CRITICAL finding, the ones .trivyignore.yaml accepts for CI included, goes to
-# the Security tab of the repository as a code scanning alert; the run itself passes.
+# them (the worker on stage only), and the ones the compose files pin (edge Caddy, Redis, the
+# agent's Docker proxy). Every fixable HIGH or CRITICAL finding, the ones .trivyignore.yaml
+# accepts for CI included, goes to the Security tab of the repository as a code scanning alert;
+# the run itself passes.
 on:
   schedule:
     - cron: '23 5 * * 1'
@@ -38,6 +39,7 @@ jobs:
               echo "frontend-prod $registry/frontend:$release"
               echo "backend-stage $registry/backend:$stage"
               echo "frontend-stage $registry/frontend:$stage"
+              echo "worker-stage $registry/worker:$stage"
               echo "agent $registry/agent:$stage"
               # The images the compose files name directly, e.g. "image: redis:8-alpine@sha256:...".
               sed -n 's/^ *image: *\([^$ ]*\)$/\1/p' infra/*/compose.yaml |

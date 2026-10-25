@@ -11,6 +11,11 @@ on:
         description: Docker build context
         required: true
         type: string
+      target:
+        description: Stage of the Dockerfile to build; empty builds the last one
+        required: false
+        type: string
+        default: ''
       tag:
         description: Image tag to push
         required: true
@@ -54,6 +59,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ inputs.context }}
+          target: ${{ inputs.target }}
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:${{ inputs.tag }}
