@@ -105,6 +105,8 @@ class BacktestRuns:
         # Before the slower checks; again under the lock below, where it counts.
         if await self._store.running(user_id):
             raise BacktestRunning
+        # The reads so far end here, so no connection waits on the queue and the data module.
+        await self._store.commit()
         try:
             await self._runner.ping()
         except RedisError as error:
@@ -113,6 +115,9 @@ class BacktestRuns:
         await self._store.lock_user(user_id)
         if await self._store.running(user_id):
             raise BacktestRunning
+        # The model may have been deleted meanwhile; held now until the backtest is stored.
+        if not await self._store.hold_model(user_id, model.id):
+            raise ModelNotFound
         backtest = Backtest(
             id=new_backtest_id(),
             user_id=user_id,
@@ -193,6 +198,8 @@ class BacktestRuns:
         report = RunReport.model_validate(backtest.report)
         blob = await self._store.predictions(backtest.id)
         assert blob is not None  # a finished run stored them
+        # The reads end here, so no connection waits on the data module and the build.
+        await self._store.commit()
         candles = await self._data.candles(
             InstrumentId.parse(spec.data.instrument.id),
             Timeframe(spec.data.timeframe),

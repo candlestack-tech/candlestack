@@ -279,6 +279,20 @@ class BacktestStore:
             .where(Model.id == model_id, Model.user_id == user_id)
         )
 
+    async def hold_model(self, user_id: str, model_id: str) -> bool:
+        """Whether the user still has the model; it cannot be deleted until the transaction
+        ends (a backtest stored with it would fail its foreign key)."""
+        found = await self._db.scalar(
+            select(Model.id)
+            .where(Model.id == model_id, Model.user_id == user_id)
+            .with_for_update(read=True, key_share=True)
+        )
+        return found is not None
+
+    async def model_of(self, backtest_id: str) -> str | None:
+        """The ID of the backtest's model; None once the model is deleted."""
+        return await self._db.scalar(select(Backtest.model_id).where(Backtest.id == backtest_id))
+
     async def with_run(self, user_id: str, backtest_id: str) -> Backtest | None:
         """The user's backtest with what its run stored, its predictions aside."""
         return await self._db.scalar(

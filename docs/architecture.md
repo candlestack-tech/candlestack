@@ -473,7 +473,8 @@ sequenceDiagram
   document, so a document sent back runs the backtest again (the groups' other fields are
   ignored): `model` (`id`), `data` (`instrument.id` and `period`, `[start, end)` in epoch
   seconds; the timeframe and session are the model's), `decision` (the post-processing steps
-  as `run.json` records them, threshold 0 by default), `execution` (the engine's `Settings`)
+  as `run.json` records them, threshold 0 by default, windows bounded as
+  [engine.md](engine.md#the-shape) says), `execution` (the engine's `Settings`)
   and `benchmarks` (none, or buy and hold of the instrument). Checked before anything is
   stored, each a problem ([HTTP surface](#http-surface)): the model is the user's and has a
   manifest (`ready` or `verified`), its timeframe is one the list can show (5m, 30m, 1h, 1d),
@@ -482,8 +483,10 @@ sequenceDiagram
   queue answers a ping (prod has no worker yet: `503 backtests-unavailable` at once, never a
   wait), and the period with the manifest's warm-up before it fits the data
   (`DataService.warm_up_start`: the period as the candles endpoint checks it, the warm-up's
-  candles before `start`, and all of them against `CANDLES_MAX`). The answer is the result
-  document of the new backtest, `running`, with `Location`.
+  candles before `start`, and all of them against `CANDLES_MAX`). The model is held under
+  that lock until the backtest is stored, so one deleted meanwhile is `404 not-found`. The
+  reads end before the queue and the data module are asked, so no connection waits on them.
+  The answer is the result document of the new backtest, `running`, with `Location`.
 - **The run** (`experiments/runner.py`, `BacktestRunner` on `app.state.backtest_runner`) is a
   task of the API process, so it outlives the request: the candles with the warm-up from the
   data module, a `predict` job through `JobClient` (the model's file, its SHA-256 and the copy
@@ -493,8 +496,8 @@ sequenceDiagram
   periods a year for stocks and 365 for crypto, and the result stored with its summary
   columns and the short equity series. It holds no database connection while the worker runs.
   A failure anywhere fails the backtest with a plain sentence for the user: the data module's
-  detail, the job's `error`, a worker out of reach or not answering, no prediction in the
-  period; a bug of ours is logged as an error (a Sentry issue) and the user reads that it was
+  detail, the job's `error`, a worker out of reach or not answering, the model deleted while
+  it ran, no prediction in the period; a bug of ours is logged as an error (a Sentry issue) and the user reads that it was
   reported. The API runs in one process, so on its start the backtests still `running` were
   left by a process that stopped and fail ("The server restarted..."), and on shutdown the
   runs it stops fail the same way.
