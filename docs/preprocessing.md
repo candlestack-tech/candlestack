@@ -59,7 +59,7 @@ is our own (`candlestack.manifest/1`). It borrows from:
 | Field | Meaning |
 | --- | --- |
 | `schema` | `candlestack.manifest/1` |
-| `input.timeframe`, `input.session` | the candles the model expects: `30m`, `regular` (US trading hours) |
+| `input.timeframe`, `input.session` | the candles the model expects: a timeframe of the market data (`30m`), and `regular` (US trading hours) or `24/7` (around the clock, as crypto trades) |
 | `input.representation` | which rows the model sees: a catalog block and its parameters (`candles@1`, `renko@1`, ...) |
 | `input.features` | the columns in their exact order: each a name (not `ts`, the time of a row), a catalog block (`rsi@1`), its parameters and its normalization (`none@1` when left out) |
 | `input.window` | the parameters of `window@1`: `length`, how many rows make one sample (1 to 1000), and `last`, the rule for the last row (`closed`, the default, or `current`) |

@@ -121,8 +121,11 @@
           "description": "Which rows the model sees"
         },
         "session": {
-          "const": "regular",
-          "description": "`regular`: US trading hours",
+          "description": "`regular`: US trading hours; `24/7`: around the clock, as crypto trades",
+          "enum": [
+            "regular",
+            "24/7"
+          ],
           "title": "Session",
           "type": "string"
         },
