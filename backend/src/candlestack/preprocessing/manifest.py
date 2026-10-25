@@ -89,7 +89,9 @@ class Input(_Strict):
     """The candles the model expects and how its input is built from them."""
 
     timeframe: Timeframe
-    session: Literal["regular"] = Field(description="`regular`: US trading hours")
+    session: Literal["regular", "24/7"] = Field(
+        description="`regular`: US trading hours; `24/7`: around the clock, as crypto trades"
+    )
     representation: BlockRef = Field(description="Which rows the model sees")
     features: list[Feature] = Field(min_length=1, description="The columns, in their order")
     window: Window

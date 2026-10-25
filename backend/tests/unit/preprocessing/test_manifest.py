@@ -132,6 +132,10 @@ def test_every_problem_of_the_form_is_one_sentence_of_one_message(raw: dict[str,
             "input.timeframe: Input should be '1m', '5m', '15m', '30m', '1h', '4h' or '1d'.",
         ),
         (
+            lambda m: m["input"].update(session="crypto"),
+            "input.session: Input should be 'regular' or '24/7'.",
+        ),
+        (
             lambda m: m["input"]["representation"].update(id="Candles"),
             (
                 "input.representation.id: String should match pattern "
@@ -166,6 +170,12 @@ def test_a_value_of_the_wrong_type_or_out_of_range(
     edit(raw)
 
     assert schema_problem(raw) == message
+
+
+def test_a_crypto_model_trades_around_the_clock(raw: dict[str, Any]) -> None:
+    raw["input"]["session"] = "24/7"
+
+    assert parse_manifest(raw).input.session == "24/7"
 
 
 def test_the_python_name_of_the_schema_field_is_not_a_field(raw: dict[str, Any]) -> None:
