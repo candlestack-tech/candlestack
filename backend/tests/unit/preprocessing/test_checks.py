@@ -59,9 +59,16 @@ def test_blocks_still_to_come_parse_but_cannot_run() -> None:
     assert check_manifest(manifest) == [
         ManifestProblem(
             "catalog",
-            "The catalog has no blocks renko-triples@1, blesk-norm@1 and rsi@1 yet, so it "
-            'cannot run. The window option last "current" is not supported yet. It needs rows '
-            "that span several candles, such as Renko bricks.",
+            (
+                (
+                    "The catalog has no blocks renko-triples@1, blesk-norm@1 and rsi@1 yet, so "
+                    "it cannot run."
+                ),
+                (
+                    'The window option last "current" is not supported yet. It needs rows that '
+                    "span several candles, such as Renko bricks."
+                ),
+            ),
         )
     ]
 
@@ -191,24 +198,24 @@ def test_the_manifest_and_the_model_agree(raw: dict[str, Any]) -> None:
 
 
 @pytest.mark.parametrize(
-    ("input_shape", "output_shape", "message"),
+    ("input_shape", "output_shape", "sentences"),
     [
-        ([25, 23], [1], "The manifest gives [25, 5], the model takes [25, 23]."),
-        ([25, 5], [3], "The manifest says the model gives [1], the model gives [3]."),
+        ([25, 23], [1], ("The manifest gives [25, 5], the model takes [25, 23].",)),
+        ([25, 5], [3], ("The manifest says the model gives [1], the model gives [3].",)),
         (
             [5, 25],
             [25, 1],
             (
-                "The manifest gives [25, 5], the model takes [5, 25]. The manifest says the "
-                "model gives [1], the model gives [25, 1]."
+                "The manifest gives [25, 5], the model takes [5, 25].",
+                "The manifest says the model gives [1], the model gives [25, 1].",
             ),
         ),
         (
             None,
             None,
             (
-                "The model file does not say the shape of its input, so it cannot be compared. "
-                "The model file does not say the shape of its output, so it cannot be compared."
+                "The model file does not say the shape of its input, so it cannot be compared.",
+                "The model file does not say the shape of its output, so it cannot be compared.",
             ),
         ),
     ],
@@ -217,10 +224,10 @@ def test_the_manifest_and_the_model_differ(
     raw: dict[str, Any],
     input_shape: list[int] | None,
     output_shape: list[int] | None,
-    message: str,
+    sentences: tuple[str, ...],
 ) -> None:
     assert check_with_model(parse_manifest(raw), input_shape, output_shape) == [
-        ManifestProblem("model", message)
+        ManifestProblem("model", sentences)
     ]
 
 

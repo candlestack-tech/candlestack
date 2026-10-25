@@ -5,6 +5,10 @@ An upload is the file itself as the request body (``application/octet-stream``) 
 in ``?name=``, so the server streams it to disk instead of holding a multipart form in memory.
 It runs two checks on the file, ``opens`` and ``weights`` (``ModelCheck``), without executing
 anything from it; a failed check answers 422 ``model-check-failed`` naming the check.
+
+A model's manifest is its own resource, ``/api/v1/models/{model_id}/manifest``: added or
+replaced with PUT, which keeps it only when every check passed (else 422
+``manifest-check-failed`` with the problems), and read back with GET.
 """
 
 import logging
@@ -18,10 +22,13 @@ from candlestack.core import NO_STORE, ProblemError, problem_doc, require_same_o
 from candlestack.ml.dependencies import ModelsServiceDep
 from candlestack.ml.errors import (
     AccountGone,
+    ManifestCheckFailed,
+    ManifestTooLarge,
     ModelCheckFailed,
     ModelNameTaken,
     ModelNotFound,
     ModelTooLarge,
+    NoManifest,
     StorageFull,
     TooManyModels,
     UnsupportedModelFormat,
@@ -30,6 +37,7 @@ from candlestack.ml.errors import (
 )
 from candlestack.ml.schemas import (
     FILE_MAX_BYTES,
+    MANIFEST_MAX_BYTES,
     MB,
     MODELS_MAX,
     ModelOut,
@@ -37,7 +45,7 @@ from candlestack.ml.schemas import (
     ModelUpdate,
 )
 from candlestack.ml.service import RECEIVE_TIMEOUT
-from candlestack.preprocessing import CatalogOut, describe_catalog
+from candlestack.preprocessing import CatalogOut, Manifest, describe_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +56,9 @@ preprocessing_router = APIRouter(tags=["preprocessing"])
 
 # The catalog is code: it changes only with a release.
 _CATALOG = describe_catalog()
+# The problems of a failed manifest shown at most, so a manifest wrong throughout does not
+# flood the page; the rest are counted.
+PROBLEMS_SHOWN = 10
 
 
 ModelId = Annotated[str, Path(description="Public ID of the model", examples=["mdl_7f3k2m9qx4"])]
@@ -74,6 +85,15 @@ _UPLOAD_BODY = {
         "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
     }
 }
+# The manifest is read by the preprocessing checks, which say what is wrong in plain words,
+# rather than by the route's validation.
+_MANIFEST_BODY = {
+    "requestBody": {
+        "required": True,
+        "description": "The manifest (docs/preprocessing.md), as JSON",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Manifest"}}},
+    }
+}
 
 
 def _megabytes(size: int) -> str:
@@ -95,7 +115,10 @@ def _unsupported(_error: Exception) -> ProblemError:
         415,
         "unsupported-model-format",
         "Unsupported model format",
-        "Support for this format is coming soon. For now CandleStack takes Keras models (.keras).",
+        "This file is not supported. CandleStack takes Keras models (.keras) now and ONNX "
+        "models (.onnx) later. Export PyTorch, TensorFlow and scikit-learn models to ONNX. "
+        "Pickle-based files (.pt, .pth, .pkl, .joblib) are never taken, as loading them can "
+        "run any code.",
     )
 
 
@@ -210,6 +233,29 @@ def _upload_problem(user_id: str, error: Exception) -> ProblemError:
     return problem
 
 
+def _manifest_problem(error: ManifestCheckFailed) -> ProblemError:
+    """The problem of a refused manifest: one sentence for each thing wrong, the first
+    ``PROBLEMS_SHOWN`` of them, and how many more there are."""
+    found = [
+        (problem.check, sentence) for problem in error.problems for sentence in problem.sentences
+    ]
+    shown, more = found[:PROBLEMS_SHOWN], len(found) - PROBLEMS_SHOWN
+    detail = " ".join(sentence for _, sentence in shown)
+    if more > 0:
+        detail += f" And {more} more {'problem' if more == 1 else 'problems'}."
+    return ProblemError(
+        422,
+        "manifest-check-failed",
+        "Manifest check failed",
+        detail,
+        extensions={
+            "problems": [{"check": check, "detail": sentence} for check, sentence in shown],
+            "more_problems": max(more, 0),
+            "unknown_blocks": error.unknown_blocks,
+        },
+    )
+
+
 @router.get("/api/v1/models", responses=_NOT_SIGNED_IN)
 async def list_models(
     user: CurrentUserDep, service: ModelsServiceDep, response: Response
@@ -241,8 +287,8 @@ async def list_models(
         **problem_doc(413, "The file is larger than 50 MB (`model-too-large`)."),
         **problem_doc(
             415,
-            "Not a format the app takes yet, only Keras (`.keras`) for now "
-            "(`unsupported-model-format`).",
+            "Not a format the app takes: Keras (`.keras`) now, ONNX (`.onnx`) later, never "
+            "pickle-based files (`unsupported-model-format`).",
         ),
         **problem_doc(
             422,
@@ -263,7 +309,8 @@ async def upload_model(
     """Uploads a model file: the body is the file, `name` its file name. The file is checked
     before it is kept: `opens` (a real Keras model with no custom code inside, nothing from
     the file is executed) and `weights` (it holds trained weights). A file with a name the user
-    already has gets a number, as `lstm (2).keras`."""
+    already has gets a number, as `lstm (2).keras`. The model is `needs_setup` until its
+    manifest is added (`PUT /api/v1/models/{model_id}/manifest`)."""
     response.headers.update(NO_STORE)
     try:
         return await service.upload(user.id, name, _declared_size(request), request.stream())
@@ -316,6 +363,93 @@ async def delete_model(model_id: ModelId, user: CurrentUserDep, service: ModelsS
         await service.delete(user.id, model_id)
     except ModelNotFound:
         raise _not_found() from None
+
+
+@router.put(
+    "/api/v1/models/{model_id}/manifest",
+    responses={
+        **_NOT_SIGNED_IN,
+        **_CROSS_ORIGIN,
+        **_NOT_FOUND,
+        **problem_doc(
+            413,
+            f"The manifest is larger than {_megabytes(MANIFEST_MAX_BYTES)} (`manifest-too-large`).",
+        ),
+        **problem_doc(
+            422,
+            "A check failed (`manifest-check-failed`): `problems` lists what is wrong, at most "
+            f"{PROBLEMS_SHOWN}, each with its `check` (`schema`, `catalog`, `params`, `names`, "
+            "`signature`, `example` or `model`) and a `detail` of one sentence; "
+            "`more_problems` counts the rest and `unknown_blocks` names the blocks the catalog "
+            "does not have. `detail` says the same in words.",
+        ),
+    },
+    dependencies=[Depends(require_same_origin)],
+    openapi_extra=_MANIFEST_BODY,
+)
+async def set_manifest(
+    model_id: ModelId,
+    request: Request,
+    user: CurrentUserDep,
+    service: ModelsServiceDep,
+    response: Response,
+) -> ModelOut:
+    """Adds the model's manifest, or replaces the one it has; the body is the manifest. It is
+    kept only when every check passes: its form, the catalog (every block exists, in its
+    step), the blocks' parameters, the names of the columns, the signature against the window
+    and the columns, the shapes of the example, and the signature against the input and
+    output the upload read from the model file. The model is then `ready`; a trial run
+    makes it `verified` (not yet)."""
+    response.headers.update(NO_STORE)
+    try:
+        return await service.set_manifest(
+            user.id, model_id, _declared_size(request), request.stream()
+        )
+    except ModelNotFound:
+        raise _not_found() from None
+    except ManifestTooLarge:
+        raise ProblemError(
+            413,
+            "manifest-too-large",
+            "Manifest too large",
+            f"The manifest is larger than {_megabytes(MANIFEST_MAX_BYTES)}, the largest one "
+            "CandleStack keeps. Give it a smaller example.",
+        ) from None
+    except ManifestCheckFailed as failed:
+        checks = ", ".join(dict.fromkeys(problem.check for problem in failed.problems))
+        logger.info("A manifest of user %s was refused (%s)", user.id, checks)
+        raise _manifest_problem(failed) from None
+
+
+@router.get(
+    "/api/v1/models/{model_id}/manifest",
+    responses={
+        **_NOT_SIGNED_IN,
+        **problem_doc(
+            404,
+            "The user has no model with this ID (`not-found`), or the model has no manifest "
+            "yet (`no-manifest`).",
+        ),
+    },
+    response_model_exclude_unset=True,
+)
+async def get_manifest(
+    model_id: ModelId, user: CurrentUserDep, service: ModelsServiceDep, response: Response
+) -> Manifest:
+    """The model's manifest as it was given, without the defaults it left out."""
+    response.headers.update(NO_STORE)
+    try:
+        return await service.manifest(user.id, model_id)
+    except ModelNotFound:
+        raise _not_found() from None
+    except NoManifest:
+        raise ProblemError(
+            404,
+            "no-manifest",
+            "No manifest",
+            "This model has no manifest yet. Add one to tell CandleStack how to build its input.",
+            headers=NO_STORE,
+        ) from None
 
 
 @preprocessing_router.get("/api/v1/preprocessing/catalog")

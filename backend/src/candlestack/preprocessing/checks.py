@@ -27,12 +27,24 @@ SCORE_SHAPE = [1]
 OLD_VERSION_FIELD = "schema"
 
 
+# More errors of the form than this are counted, not read: reading each into Python takes
+# seconds and hundreds of MB for a document wrong throughout, such as one with a thousand
+# unknown fields.
+SCHEMA_ERRORS_MAX = 100
+
+
 @dataclass(frozen=True, slots=True)
 class ManifestProblem:
-    """A failed check: which one (``check``) and what is wrong, in sentences (``message``)."""
+    """A failed check: which one (``check``) and what is wrong, one sentence (or two, when the
+    second says what to do) for each thing (``sentences``)."""
 
     check: Check
-    message: str
+    sentences: tuple[str, ...]
+
+    @property
+    def message(self) -> str:
+        """The sentences as one text."""
+        return " ".join(self.sentences)
 
 
 class InvalidManifest(ValueError):
@@ -62,6 +74,12 @@ def parse_manifest(document: str | bytes | Mapping[str, Any]) -> Manifest:
             return Manifest.model_validate_json(document)
         return Manifest.model_validate(document)
     except ValidationError as error:
+        if error.error_count() > SCHEMA_ERRORS_MAX:
+            sentence = (
+                f"The manifest has {error.error_count()} mistakes in its form, too many to list. "
+                "Check that the file is a CandleStack manifest."
+            )
+            raise InvalidManifest(ManifestProblem("schema", (sentence,))) from None
         details = error.errors(include_url=False)
         sentences = []
         if any(_is_old_version_field(detail) for detail in details):
@@ -77,7 +95,7 @@ def parse_manifest(document: str | bytes | Mapping[str, Any]) -> Manifest:
                 and (detail["loc"], detail["type"]) != (("version",), "missing")
             ]
         sentences += [_sentence(detail) for detail in details]
-        raise InvalidManifest(ManifestProblem("schema", " ".join(sentences))) from None
+        raise InvalidManifest(ManifestProblem("schema", tuple(sentences))) from None
 
 
 def _is_old_version_field(detail: ErrorDetails) -> bool:
@@ -93,7 +111,7 @@ def check_manifest(manifest: Manifest) -> list[ManifestProblem]:
         ("signature", _signature(manifest)),
         ("example", _example(manifest)),
     ]
-    return [ManifestProblem(check, " ".join(found)) for check, found in checks if found]
+    return [ManifestProblem(check, tuple(found)) for check, found in checks if found]
 
 
 def check_with_model(
@@ -117,7 +135,7 @@ def check_with_model(
         ),
     )
     found = [sentence for sentence in compared if sentence is not None]
-    return [ManifestProblem("model", " ".join(found))] if found else []
+    return [ManifestProblem("model", tuple(found))] if found else []
 
 
 def _compared(

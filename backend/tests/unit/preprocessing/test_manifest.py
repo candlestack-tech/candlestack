@@ -1,6 +1,7 @@
 """The form of a manifest (version 1): what parses, and the plain words of what does not."""
 
 import json
+import math
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -90,11 +91,37 @@ def test_every_problem_of_the_form_is_one_sentence_of_one_message(raw: dict[str,
     raw["input"]["features"][2]["name"] = ""
     raw["input"]["window"]["size"] = 25
 
+    with pytest.raises(InvalidManifest) as invalid:
+        parse_manifest(raw)
+
+    assert invalid.value.problem.sentences == (
+        "This manifest has version 2. CandleStack reads version 1.",
+        "input.features[2].name: String should have at least 1 character.",
+        "input.window.size is not a field of the manifest.",
+        "signature is missing.",
+    )
+    assert invalid.value.problem.message == " ".join(invalid.value.problem.sentences)
+
+
+def test_an_example_full_of_nan_is_one_problem(raw: dict[str, Any]) -> None:
+    sample = [[math.nan] * 5 for _ in range(25)]
+    raw["example"] = {"input": [sample] * 100, "output": [[math.nan]] * 100}
+
+    with pytest.raises(InvalidManifest) as invalid:
+        parse_manifest(raw)
+
+    assert invalid.value.problem.sentences == (
+        "example.input[0][0][0]: Input should be a finite number.",
+        "example.output[0][0]: Input should be a finite number.",
+    )
+
+
+def test_a_document_wrong_throughout_is_counted_not_listed(raw: dict[str, Any]) -> None:
+    raw["about"] = {f"note {number}": number for number in range(1000)}
+
     assert schema_problem(raw) == (
-        "This manifest has version 2. CandleStack reads version 1. "
-        "input.features[2].name: String should have at least 1 character. "
-        "input.window.size is not a field of the manifest. "
-        "signature is missing."
+        "The manifest has 1000 mistakes in its form, too many to list. Check that the file is "
+        "a CandleStack manifest."
     )
 
 
@@ -160,6 +187,26 @@ def test_every_problem_of_the_form_is_one_sentence_of_one_message(raw: dict[str,
         (
             lambda m: m.update(example={"input": [[[1, "2"]]], "output": [[0.1]]}),
             "example.input[0][0][1]: Input should be a valid number.",
+        ),
+        # What a manifest lists is capped, so its checks stay a few sentences.
+        (
+            lambda m: m["input"].update(features=m["input"]["features"] * 52),
+            "input.features: List should have at most 256 items after validation, not 260.",
+        ),
+        (
+            lambda m: m["input"]["features"][0].update(params=dict.fromkeys(map(str, range(33)))),
+            (
+                "input.features[0].params: Dictionary should have at most 32 items after "
+                "validation, not 33."
+            ),
+        ),
+        (
+            lambda m: m["signature"]["input"].update(shape=[1] * 9),
+            "signature.input.shape: List should have at most 8 items after validation, not 9.",
+        ),
+        (
+            lambda m: m["input"]["representation"].update(id="a" * 63 + "@1"),
+            "input.representation.id: String should have at most 64 characters.",
         ),
     ],
 )

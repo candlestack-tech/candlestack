@@ -1,7 +1,9 @@
 """Keeping a checked upload when Postgres refuses the row: a name its unique index compares as
-taken is a taken name, anything else goes on as it is. The flows with a real Postgres:
-tests/integration/ml."""
+taken is a taken name, anything else goes on as it is; the state and the summary of a model's
+manifest. The flows with a real Postgres: tests/integration/ml."""
 
+import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -10,7 +12,10 @@ from sqlalchemy.exc import IntegrityError
 
 from candlestack.ml.errors import ModelNameTaken
 from candlestack.ml.inspect import ModelFacts
-from candlestack.ml.service import ModelsService
+from candlestack.ml.models import Model
+from candlestack.ml.schemas import ModelState
+from candlestack.ml.service import ModelsService, _checked_alone, _out
+from candlestack.preprocessing import Manifest, ManifestProblem, parse_manifest
 
 if TYPE_CHECKING:
     from candlestack.ml.storage import ModelStorage
@@ -79,3 +84,107 @@ async def test_another_integrity_error_goes_on(tmp_path: Path) -> None:
 
     with pytest.raises(IntegrityError):
         await keep(tmp_path, refusal)
+
+
+FIXTURES = Path(__file__).parents[2] / "fixtures" / "keras"
+
+
+@pytest.fixture
+def raw() -> Manifest:
+    return parse_manifest((FIXTURES / "raw_candles.manifest.json").read_bytes())
+
+
+def model(verified_at: datetime | None = None) -> Model:
+    return Model(
+        id="mdl_7f3k2m9qx4",
+        name="raw.keras",
+        framework="keras",
+        size_bytes=10,
+        parameters=1,
+        input_shape=[25, 5],
+        output_shape=[1],
+        starred=False,
+        created_at=datetime(2026, 10, 25, tzinfo=UTC),
+        verified_at=verified_at,
+    )
+
+
+def test_a_model_without_a_manifest_needs_setup() -> None:
+    out = _out(model())
+
+    assert out.state == ModelState.needs_setup
+    assert out.manifest_summary is None
+
+
+def test_a_model_with_a_manifest_is_ready_until_a_trial_run_verifies_it(raw: Manifest) -> None:
+    assert _out(model(), manifest=raw).state == ModelState.ready
+    assert _out(model(datetime.now(UTC)), manifest=raw).state == ModelState.verified
+
+
+def test_the_summary_says_what_the_manifest_reads(raw: Manifest) -> None:
+    summary = _out(model(), manifest=raw).manifest_summary
+
+    assert summary is not None
+    assert json.loads(summary.model_dump_json()) == {
+        "representation": {"id": "candles@1", "params": {}},
+        "timeframe": "30m",
+        "session": "regular",
+        "input_shape": [25, 5],
+        "warm_up": {"candles": 24, "kind": "exact"},
+    }
+
+
+def test_a_text_holding_nul_is_a_problem_of_the_form() -> None:
+    # JSON takes the character, but Postgres cannot keep it in a JSONB column.
+    document = json.loads((FIXTURES / "raw_candles.manifest.json").read_bytes())
+    document["input"]["features"][0]["name"] = "open\u0000"
+    document["about"] = {"note": "a\u0000b", "trained\u0000on": "AAPL"}
+
+    manifest, problems = _checked_alone(json.dumps(document).encode())
+
+    assert manifest is not None
+    cannot_keep = "holds the character NUL, which CandleStack cannot keep. Remove it."
+    assert problems == [
+        ManifestProblem(
+            "schema",
+            (
+                f"input.features[0].name {cannot_keep}",
+                f"A field name in about {cannot_keep}",
+                f"about.note {cannot_keep}",
+            ),
+        )
+    ]
+
+
+class RecordingStore:
+    """What a deletion asks of the store, in order."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def lock_user(self, user_id: str) -> None:
+        self.calls.append("lock_user")
+
+    async def delete(self, user_id: str, model_id: str) -> bool:
+        self.calls.append("delete")
+        return True
+
+    async def commit(self) -> None:
+        self.calls.append("commit")
+
+
+class NoFiles:
+    async def delete(self, user_id: str, model_id: str) -> None:
+        pass
+
+
+async def test_a_deletion_waits_for_the_lock_of_the_users_models() -> None:
+    # Else a rename or a manifest being kept would update a row that is gone (a 500).
+    store = RecordingStore()
+    service = ModelsService(
+        cast("ModelStore", store), cast("ModelStorage", NoFiles()), cast("UploadLocks", None)
+    )
+
+    await service.delete("usr_7f3k2m9qx4", "mdl_7f3k2m9qx4")
+
+    assert store.calls == ["lock_user", "delete", "commit"]
