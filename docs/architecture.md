@@ -444,7 +444,10 @@ lock of the user's models and only while the stored manifest has the result's
 | `failed` on the model (`manifest`, `candles`, `load`, `predict`, `output`, `example`, `time-limit`, `stopped`, `model-changed`) | null | now | the result's `error` | `ready` |
 | `failed` on the worker (`expired`, `worker-stopped`, `internal`, `model-missing`), or the queue out of reach | unchanged (null) | unchanged (null) | unchanged (null) | `ready` |
 
-Replacing the manifest clears all three. A worker that cannot be reached or does not answer
+Replacing the manifest clears all three. A user's checks run one after the other, as their
+backtests do: a manifest set while one of the user's checks runs waits for it (a model set
+again before its turn is checked once, with the manifest it has then), so a user who keeps
+replacing manifests holds at most one job in the worker's queue. A worker that cannot be reached or does not answer
 says nothing about the model, so it stays `ready` and unchecked: prod has no queue yet (its
 `queue` host is not there, the job fails at once with a warning), and on stage a stopped
 worker costs one wait of 180 s per check. `checked_at` null with a manifest marks a model whose

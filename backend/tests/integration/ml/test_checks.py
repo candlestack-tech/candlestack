@@ -131,7 +131,8 @@ def test_a_manifest_replaced_while_its_check_ran_keeps_the_model_ready(
     model = with_manifest(ada, "First")
     until(lambda: queued(settings) == 1)
     ada.set_manifest(model["id"], json.dumps(raw_manifest("Second")))
-    until(lambda: queued(settings) == 2)
+    # The second check waits for the first: one job of the user's in the queue.
+    assert queued(settings) == 1
     # The check of the first manifest would verify the model, the second's fails.
     worker.answer = lambda job: (
         passed(job) if job.manifest["about"]["note"] == "First" else failed_on_the_example(job)

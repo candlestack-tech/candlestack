@@ -111,3 +111,42 @@ async def test_close_stops_the_checks(monkeypatch: pytest.MonkeyPatch) -> None:
     await model_checks.close()
 
     assert model_checks._tasks == set()
+    assert model_checks._waiting == {}
+
+
+@pytest.mark.anyio
+async def test_a_users_checks_run_one_after_the_other(monkeypatch: pytest.MonkeyPatch) -> None:
+    running, release, other_user_checked = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    calls: list[tuple[str, str]] = []
+
+    async def check(user_id: str, model_id: str) -> bool:
+        calls.append((user_id, model_id))
+        if user_id == "usr_bbbbbbbbbb":
+            other_user_checked.set()
+        elif len(calls) == 1:
+            running.set()
+            await release.wait()
+        return True
+
+    model_checks = checks()
+    monkeypatch.setattr(model_checks, "_check", check)
+    model_checks.start("usr_adaaaaaaaa", "mdl_first00000")
+    await asyncio.wait_for(running.wait(), 5)
+    model_checks.start("usr_adaaaaaaaa", "mdl_second0000")
+    # Set again while its check runs, and again before its turn.
+    model_checks.start("usr_adaaaaaaaa", "mdl_first00000")
+    model_checks.start("usr_adaaaaaaaa", "mdl_second0000")
+    model_checks.start("usr_bbbbbbbbbb", "mdl_other00000")
+
+    # Another user's check does not wait for them.
+    await asyncio.wait_for(other_user_checked.wait(), 5)
+    assert calls == [("usr_adaaaaaaaa", "mdl_first00000"), ("usr_bbbbbbbbbb", "mdl_other00000")]
+    release.set()
+    await asyncio.gather(*model_checks._tasks)
+
+    assert [model for user, model in calls if user == "usr_adaaaaaaaa"] == [
+        "mdl_first00000",
+        "mdl_second0000",
+        "mdl_first00000",
+    ]
+    assert model_checks._waiting == {}

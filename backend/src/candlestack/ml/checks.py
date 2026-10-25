@@ -6,7 +6,11 @@ Each check runs in a task of the API process, outside the request that added the
 it reads the model's file SHA-256 and manifest, lets the session go, has the worker run the
 ``check`` job through the job queue (``jobs.JobClient``) and keeps what it came to in another
 session, under the lock of the user's models and only while the stored manifest is still the
-one the job ran with (a manifest replaced meanwhile gets a check of its own).
+one the job ran with (a manifest replaced meanwhile gets a check of its own). A user's checks
+run one after the other, as their backtests do: a manifest set while one of the user's checks
+runs waits for it, so a user who keeps replacing manifests holds at most one job in the
+worker's queue, and a model set again before its turn is checked once, with the manifest it
+has then.
 
 A check that says something about the model sets ``checked_at``: passed (``verified_at`` too,
 when the example matched) or failed (``check_error``, the worker's sentences for the user). A
@@ -56,10 +60,19 @@ class ModelChecks:
         self._jobs = jobs
         self._wait = wait
         self._tasks: set[asyncio.Task[Any]] = set()
+        # The models each user's task has yet to check, in the order they were set (a dict as
+        # an ordered set); a user is here while their task runs.
+        self._waiting: dict[str, dict[str, None]] = {}
 
     def start(self, user_id: str, model_id: str) -> None:
-        """Checks the user's model with the manifest it has, in a task of its own."""
-        self._spawn(self._check(user_id, model_id), f"check {model_id}")
+        """Checks the user's model with the manifest it has, after the user's checks that
+        run or wait, in the user's task."""
+        waiting = self._waiting.get(user_id)
+        if waiting is not None:
+            waiting[model_id] = None
+            return
+        self._waiting[user_id] = {model_id: None}
+        self._spawn(self._check_waiting(user_id), f"check the models of {user_id}")
 
     def recover(self) -> None:
         """Checks, in a task of its own, the models whose check a stopped process lost or that
@@ -77,6 +90,16 @@ class ModelChecks:
         task = asyncio.create_task(work, name=name)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+
+    async def _check_waiting(self, user_id: str) -> None:
+        waiting = self._waiting[user_id]
+        try:
+            while waiting:
+                model_id = next(iter(waiting))
+                del waiting[model_id]
+                await self._check(user_id, model_id)
+        finally:
+            del self._waiting[user_id]
 
     async def _recover(self) -> None:
         try:
