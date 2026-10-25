@@ -54,4 +54,4 @@ export function decisionLine(form: BuilderForm): string {
 export const fillLine = (honest: boolean) => (honest ? "Next candle's open" : 'Same close');
 
 export const costsLine = (form: BuilderForm) =>
-  `fees ${form.fees.trim()} % · slippage ${form.slippage.trim()} % · vs Buy and hold`;
+  `fees ${form.fees.trim()} % · slippage ${form.slippage.trim()} % · vs buy and hold`;

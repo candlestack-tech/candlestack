@@ -10,6 +10,7 @@ import {
   modelsAnswer,
   problem,
   rawCandlesSummary,
+  runningDocument,
   sentBody,
   sessionWithPreferences,
   stubApi,
@@ -71,7 +72,11 @@ const LISTS = {
   'GET /api/v1/data/instruments?limit=20&offset=0&market=stock': search([AAPL]),
 };
 const RUN = 'POST /api/v1/backtests';
-const STARTED = { status: 201, body: { backtest: { id: 'bt_n3w8a9c4k2', number: 13, status: 'running' } } };
+const started = runningDocument();
+const STARTED = {
+  status: 201,
+  body: { ...started, backtest: { ...started.backtest, id: 'bt_n3w8a9c4k2', number: 13 } },
+};
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -212,13 +217,16 @@ describe('the backtest builder', () => {
       'Model: btc-1h.kerasCandles · 1h · 5 features · window 25',
       'Data: BTCUSDT4 Jan 2021 – 31 Dec 2024',
       'Decision: threshold 0.05 · long only · stop 7 %',
-      "Execution: Next candle's openfees 0.1 % · slippage 0.02 % · vs Buy and hold",
+      "Execution: Next candle's openfees 0.1 % · slippage 0.02 % · vs buy and hold",
     ]);
     await user.click(screen.getByRole('button', { name: 'Edit decision' }));
     expect(step()).toBe('Decision');
     await user.click(screen.getByRole('button', { name: 'Run' }));
     await user.click(screen.getByRole('button', { name: 'Run backtest' }));
     await vi.waitFor(() => expect(router.state.location.pathname).toBe('/backtests/bt_n3w8a9c4k2'));
+    // The answer is on the backtest's page at once, running.
+    expect((await screen.findByRole('heading', { level: 1, name: 'Backtest #13' })).textContent).toBe('Backtest #13');
+    expect(screen.getByText('Running', { selector: 'span' })).toBeDefined();
     expect(sentBody(fetch, RUN)).toEqual({
       model: { id: CRYPTO.id },
       data: {
