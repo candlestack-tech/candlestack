@@ -5,6 +5,7 @@ volume; the worker, which has neither, reads them there and writes the predictio
 them. The job's files go once the result is read, whatever it is.
 """
 
+import logging
 import time
 from typing import Any
 
@@ -12,8 +13,10 @@ import anyio
 import polars as pl
 
 from candlestack.jobs.files import JobFiles
-from candlestack.jobs.protocol import DEFAULT_WAIT, Job, JobKind, JobResult
+from candlestack.jobs.protocol import DEFAULT_WAIT, Job, JobKind, JobResult, manifest_sha256
 from candlestack.jobs.queue import JobQueue
+
+logger = logging.getLogger(__name__)
 
 NO_ANSWER = (
     "The worker did not answer in time. It may be busy with other models. Try again in a few "
@@ -64,7 +67,13 @@ class JobClient:
     async def _run(self, job: Job, wait: float) -> JobResult:
         await self._queue.submit(job)
         result = await self._queue.result(job.id, wait)
-        return result or JobResult.failed(job.id, job.kind, "expired", NO_ANSWER)
+        if result is None:
+            result = JobResult.failed(job.id, job.kind, "expired", NO_ANSWER)
+        elif result.reason == "internal":
+            # The worker has no way to Sentry (no network): its bug becomes an issue here, and
+            # its log has the traceback under the job's ID.
+            logger.error("Job %s failed with an error of the worker", job.id)
+        return result.model_copy(update={"manifest_sha256": manifest_sha256(job.manifest)})
 
 
 def _job(kind: JobKind, model: str, sha256: str, manifest: dict[str, Any], wait: float) -> Job:

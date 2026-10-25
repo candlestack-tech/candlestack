@@ -21,6 +21,7 @@ from candlestack.jobs.protocol import (
     Reason,
     Runner,
     Timings,
+    manifest_sha256,
 )
 from candlestack.jobs.queue import WORKER_STOPPED, Claimed, JobQueue
 
@@ -42,4 +43,5 @@ __all__ = [
     "Reason",
     "Runner",
     "Timings",
+    "manifest_sha256",
 ]

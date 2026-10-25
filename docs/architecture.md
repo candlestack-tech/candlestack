@@ -57,7 +57,7 @@ flowchart LR
 | `redis` | `redis:8-alpine` | private network of the environment, no persistence, `allkeys-lru` |
 | `postgres` | `postgres:18-alpine` | private network of the environment, data in a volume; migrated by a one-shot `migrate` container (the backend image, `alembic upgrade head`) before the backend starts; prod and stage dump it every night (`backup`) |
 | `models-backup` | `offen/docker-volume-backup` | archives the `models` volume (read-only) every night at 00:30 UTC into the volume `model_backups`, keeps 7 days; no network |
-| `worker` | the stage `worker` of `backend/Dockerfile` | runs the uploaded models ([Worker](#worker)); only on the internal network `jobs`, the `models` volume read-only, the `jobs` volume shared with the backend, a read-only root filesystem, 768 MB without swap, one CPU; in `compose.yaml` now, on the VM once the deploy starts the profile `worker` ([infra/README.md](../infra/README.md#worker)) |
+| `worker` | the stage `worker` of `backend/Dockerfile` | runs the uploaded models ([Worker](#worker)); only on the internal network `jobs`, the `models` volume read-only, the `jobs` volume shared with the backend, a read-only root filesystem, 512 MB without swap, one CPU; in `compose.yaml` now, on the VM on stage only, once the deploy starts the profile `worker` there ([infra/README.md](../infra/README.md#worker)) |
 | `queue` | `redis:8-alpine` | the job queue: only on the network `jobs`, no persistence, `noeviction`; with the worker |
 
 ## HTTP surface
@@ -346,25 +346,39 @@ sequenceDiagram
   `error` of a failed one (a slug and plain sentences for the user), `samples` and `dropped`
   (the predictions made, the warm-up's candles), `verified` and `example_difference` of a
   `check` (the model gave the manifest's `example` within 1e-4, the largest difference), the
-  `runner` (the Keras release, its backend and the backend's release) and the `timings` in
-  milliseconds (`queued`, `start` of the process, `load`, `input`, `predict`, `total`).
+  `runner` (the Keras release, its backend and the backend's release), the `timings` in
+  milliseconds (`queued`, `start` of the process, `load`, `input`, `predict`, `total`) and
+  `manifest_sha256`, the digest of the manifest the job ran with (`jobs.manifest_sha256`: the
+  SHA-256 of its JSON with sorted keys and no spaces), which `JobClient` sets on every result.
 - **The reasons**: `model-missing`, `model-changed` (SHA-256), `manifest`, `candles` (they
   break their rules or make no sample), `load` (Keras refused the file), `predict` (the model
   failed on its input), `output` (not one finite score per sample), `example`, `time-limit`,
-  `stopped` (the job's process was killed, mostly at the memory limit), `worker-stopped`,
-  `expired` (the backend no longer waits: a job past its deadline does not run, a job without
-  an answer within the wait fails at the backend) and `internal` (a bug of ours).
+  `stopped` (the job's process was killed, mostly at the memory limit, or an allocation
+  larger than the memory failed), `worker-stopped`, `expired` (the backend no longer waits: a
+  job past its deadline does not run, a running one stops at it, a job without an answer
+  within the wait fails at the backend) and `internal` (a bug of ours).
 - **A `check`** builds the input from built-in candles (a seeded random walk, enough for the
   manifest's warm-up and 64 samples), runs the model, wants one finite score per sample and,
-  with an `example`, its output within 1e-4. #267 sets a model's state from it.
+  with an `example`, its output within 1e-4. The code that sets `models.verified_at` from a
+  `check` (with the backtests, #269) sets it only when the result is `done` with `verified`
+  true and, under the lock of the user's models, the model's stored manifest still has the
+  result's `manifest_sha256`: a manifest replaced while the job ran keeps the model `ready`.
 - **One job at a time** per worker, each in a fresh process (`worker/runner.py`) that the loop
-  (`worker/service.py`) starts with the job on stdin and stops at `JOB_TIME_LIMIT` (120 s). The
-  process is the only one that imports Keras; it gets no keys, no Redis URL, no core dumps and
-  no file over 512 MB, and it is the first the kernel stops when the container runs out of
-  memory. A model that crashes, hangs or exhausts the memory fails its job, and the loop takes
-  the next one. Starting the process and importing Keras takes 2 to 4 s; loading the
-  raw-candles test model about 0.7 s, its predictions for 50000 candles about 0.5 s, the
-  container about 300 MB at its peak then.
+  (`worker/service.py`) starts with the job on stdin and stops at `JOB_TIME_LIMIT` (120 s) or
+  at the job's deadline, whichever comes first. The process runs in a session of its own, and
+  its whole process group is killed after the job, so nothing it started outlives it. It is
+  the only one that imports Keras; it gets no keys, no Redis URL, no core dumps and no file
+  over 512 MB, and it is the first the kernel stops when the container runs out of memory. A
+  model that crashes, hangs or exhausts the memory fails its job, and the loop takes the next
+  one. Starting the process and importing Keras takes 2 to 4 s; loading the raw-candles test
+  model about 0.5 s, its predictions for 50000 candles about 0.3 s, the container about 300 MB
+  at its peak then. A 25 x 28 model runs on about 45000 candles within the container's 512 MB
+  ([infra/README.md](../infra/README.md#memory)).
+- **What a model could still reach** if it broke out of Keras' safe mode: the container has no
+  way out, but the job's process shares the loop's network and user, so it could reach the
+  queue (`queue:6379`, without a password), the other jobs' files and every model file
+  (read-only). Each job running alone in a fresh process, killed with all it started, keeps
+  such a model to its own job's time.
 - **A worker that stops** while a job runs: on SIGTERM (a deploy, `docker stop`) it fails the
   job as `worker-stopped` and ends. Killed, it leaves a job without a lease, which the next
   sweep (every 10 s by any worker, after the lease's 30 s) fails as `worker-stopped`. Such a job
@@ -373,10 +387,14 @@ sequenceDiagram
 - **Files**: the backend removes a job's directory once it has the result, whatever it is; the
   worker removes the directories older than an hour (a backend that stopped waiting) at its
   start and every 10 minutes. A job's directory is writable by both (the dev backend runs as
-  root, the worker as 65534).
+  root, the worker as 65534). On the VM the volume is a tmpfs of 64 MB, so no job can fill
+  the disk through it.
 - **Logs**: a line per job (`job_id`, `kind`, `status`, `reason`, `duration_ms`), never the
-  model's path, its manifest or the candles. A bug of ours (`internal`) is an error, with the
-  job process' traceback, so it becomes a Sentry issue; what a model does wrong is not.
+  model's path, its manifest or the candles. A bug of ours (`internal`) is an error in the
+  worker's log, with the job process' traceback. The worker cannot reach Sentry (it has no
+  network, and no `SENTRY_DSN` on the VM): `JobClient` logs an `internal` result as an error in
+  the backend, which makes it a Sentry issue naming the job's ID. What a model does wrong is
+  no error.
 
 ## Backtests
 
@@ -587,10 +605,10 @@ What the backend sends to Sentry (only prod and stage have a DSN), set up in
   failed, never the account.
 - At most 100 error events an hour per process, so an error in a loop cannot use up the
   month's quota (50,000 errors, no pay-as-you-go).
-- The worker logs and reports the same way (`setup_logging`, `setup_sentry`, the same
-  `SENTRY_DSN`): a line per job and an error for a bug of ours, never a model's path, its
-  manifest or the candles ([Worker](#worker)). Its job process sends nothing itself: the loop
-  logs what it reports.
+- The worker logs the same way (`setup_logging`): a line per job and an error for a bug of
+  ours, never a model's path, its manifest or the candles ([Worker](#worker)). Without network
+  it sends nothing to Sentry: the backend reports its bugs, as an error for each job whose
+  result is `internal`.
 
 Alerts are e-mails to the tech lead only: a new, regressed or reappearing issue on prod (at
 most every 30 minutes), 50 events of one issue in an hour on prod, and prod down. Stage sends

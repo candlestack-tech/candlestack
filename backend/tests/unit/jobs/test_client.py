@@ -1,12 +1,13 @@
 """The backend's side of a job: the candles go to the volume, the job to the queue, and the
 files go once the result is in, whatever it is."""
 
+import logging
 from pathlib import Path
 
 import polars as pl
 import pytest
 
-from candlestack.jobs import NO_ANSWER, Job, JobClient, JobFiles, JobResult
+from candlestack.jobs import NO_ANSWER, Job, JobClient, JobFiles, JobResult, manifest_sha256
 
 pytestmark = pytest.mark.anyio
 
@@ -35,6 +36,8 @@ class FakeQueue:
             return None
         if self.answer == "failed":
             return JobResult.failed(job_id, job.kind, "load", "Keras could not load it.")
+        if self.answer == "internal":
+            return JobResult.failed(job_id, job.kind, "internal", "A bug.")
         if job.kind == "predict":
             assert self.files.read_candles(job_id).equals(CANDLES)
             self.files.write_predictions(job_id, PREDICTIONS)
@@ -105,3 +108,38 @@ async def test_check_writes_no_files(tmp_path: Path) -> None:
     assert result.status == "done"
     assert queue.submitted[0].kind == "check"
     assert leftovers(tmp_path) == []
+
+
+@pytest.mark.parametrize("answer", ["done", "failed", "none"])
+async def test_every_result_names_the_manifest_the_job_ran_with(
+    tmp_path: Path, answer: str
+) -> None:
+    jobs, _, _ = client(tmp_path, answer)
+
+    result = await jobs.check(model="u/m.keras", sha256=SHA256, manifest=MANIFEST, wait=0.1)
+
+    assert result.manifest_sha256 == manifest_sha256(MANIFEST)
+
+
+async def test_a_bug_of_the_worker_is_an_error_here(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    jobs, _, _ = client(tmp_path, "internal")
+
+    with caplog.at_level(logging.ERROR, logger="candlestack.jobs.client"):
+        result = await jobs.check(model="u/m.keras", sha256=SHA256, manifest=MANIFEST)
+
+    assert result.reason == "internal"
+    (record,) = caplog.records
+    assert record.getMessage() == f"Job {result.id} failed with an error of the worker"
+
+
+async def test_a_failure_of_the_model_is_no_error_here(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    jobs, _, _ = client(tmp_path, "failed")
+
+    with caplog.at_level(logging.WARNING, logger="candlestack.jobs.client"):
+        await jobs.check(model="u/m.keras", sha256=SHA256, manifest=MANIFEST)
+
+    assert caplog.records == []

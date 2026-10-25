@@ -7,8 +7,11 @@ of the shared volume (``files.py``). Both are JSON in Redis; neither holds candl
 predictions, which go through the volume.
 """
 
+import hashlib
+import json
 import time
 import uuid
+from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -56,6 +59,14 @@ RESULT_TTL = 600
 # extension.
 MODEL_PATH = r"^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*\.keras$"
 SHA256 = r"^[0-9a-f]{64}$"
+
+
+def manifest_sha256(manifest: Mapping[str, Any]) -> str:
+    """The SHA-256 of a manifest's JSON with sorted keys and no spaces: the same for the same
+    document whatever the order of its keys, so also for the one Postgres gives back from
+    ``models.manifest`` (JSONB)."""
+    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 class _Frozen(BaseModel):
@@ -115,7 +126,11 @@ class JobResult(_Frozen):
     - ``verified`` (``check``): the model gave the manifest's ``example`` output within
       ``EXAMPLE_TOLERANCE``; False without an example, None when the check failed earlier;
     - ``example_difference`` (``check``): the largest difference from the example's output;
-    - ``error``: what went wrong in plain sentences, for the user; ``reason`` names it.
+    - ``error``: what went wrong in plain sentences, for the user; ``reason`` names it;
+    - ``manifest_sha256``: ``manifest_sha256`` of the manifest the job ran with, set by
+      ``JobClient``. A ``check`` verifies the model with that manifest only: the code that
+      sets ``models.verified_at`` from it does so only while the model's manifest still has
+      this digest (it may have been replaced while the job ran).
     """
 
     id: str
@@ -129,6 +144,7 @@ class JobResult(_Frozen):
     example_difference: float | None = None
     runner: Runner | None = None
     timings: Timings = Timings()
+    manifest_sha256: Annotated[str, Field(pattern=SHA256)] | None = None
 
     @classmethod
     def failed(cls, job_id: str, kind: JobKind, reason: Reason, error: str) -> "JobResult":

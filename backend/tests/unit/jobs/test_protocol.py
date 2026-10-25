@@ -5,7 +5,7 @@ import time
 import pytest
 from pydantic import ValidationError
 
-from candlestack.jobs import Job, JobResult
+from candlestack.jobs import Job, JobResult, manifest_sha256
 
 SHA256 = "ab" * 32
 
@@ -72,3 +72,18 @@ def test_a_failed_result_names_its_reason() -> None:
     assert (result.status, result.reason, result.error) == ("failed", "time-limit", "Too long.")
     assert result.timings.total is None
     assert JobResult.model_validate_json(result.model_dump_json()) == result
+
+
+def test_the_manifest_digest_ignores_the_order_of_keys_only() -> None:
+    manifest = {"version": 1, "input": {"timeframe": "1h", "window": {"length": 25}}}
+    reordered = {"input": {"window": {"length": 25}, "timeframe": "1h"}, "version": 1}
+    changed = {"version": 1, "input": {"timeframe": "1h", "window": {"length": 26}}}
+
+    assert manifest_sha256(manifest) == manifest_sha256(reordered)
+    assert manifest_sha256(manifest) != manifest_sha256(changed)
+    assert len(manifest_sha256(manifest)) == 64
+
+
+def test_a_result_names_a_manifest_by_its_sha256_only() -> None:
+    with pytest.raises(ValidationError):
+        JobResult(id="a" * 32, kind="check", status="done", manifest_sha256="not a digest")
