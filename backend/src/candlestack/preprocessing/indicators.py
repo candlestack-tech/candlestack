@@ -28,6 +28,12 @@ WILDER_WINDOWS = 14
 # ADX smooths Wilder's smoothing once more: its start's weight falls as k / n * (1 - 1 / n) ** k,
 # under 1e-6 after about 18 windows, and its first value comes after 2 windows.
 ADX_WINDOWS = 20
+# Under this sum of the mean rise and the mean fall the closes count as flat and the RSI is 0,
+# as in the data the BLESK models were trained on: on a long stretch of one close (a stock not
+# yet listed, or suspended) both means fade towards 0 at the same pace, and their ratio alone
+# would hold the last RSI for good. After a move of one cent, the sum falls under it only once
+# the close stayed the same for about 480 candles (the default window of 20).
+RSI_FLAT = 1e-14
 
 Window = Annotated[int, Field(ge=2, le=1000)]
 Multiple = Annotated[float, Field(gt=0, le=10)]
@@ -179,12 +185,19 @@ def rsi_warm_up(params: Rsi) -> int:
 
 def rsi(frame: pl.DataFrame, params: Rsi) -> pl.Series:
     """``rsi@1``: the relative strength index with Wilder's smoothing from the first candle,
-    whose change ``ta`` counts as 0; 100 while no close fell."""
+    whose change ``ta`` counts as 0; 100 while no close fell, and 0 once the closes stayed
+    flat so long that the mean rise and the mean fall add up to less than ``RSI_FLAT``."""
     change = CLOSE.diff()
     alpha = 1 / params.window
     up = pl.when(change > 0).then(change).otherwise(0.0).ewm_mean(alpha=alpha, adjust=False)
     down = pl.when(change < 0).then(-change).otherwise(0.0).ewm_mean(alpha=alpha, adjust=False)
-    value = pl.when(down == 0).then(100.0).otherwise(100 - 100 / (1 + up / down))
+    value = (
+        pl.when(up + down < RSI_FLAT)
+        .then(0.0)
+        .when(down == 0)
+        .then(100.0)
+        .otherwise(100 - 100 / (1 + up / down))
+    )
     return _values(frame, value, rsi_warm_up(params))
 
 

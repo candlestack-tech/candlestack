@@ -245,6 +245,37 @@ def test_the_rsi_is_100_while_closes_rise_and_0_while_they_fall() -> None:
     assert run("rsi@1", steady(40, -0.5), window=2)[-1] == pytest.approx(0.0)
 
 
+def closes(values: list[float]) -> pl.DataFrame:
+    """Candles of these closes, with a range of 2 around each."""
+    return pl.DataFrame(
+        {
+            "ts": [row * 1800 for row in range(len(values))],
+            "open": values,
+            "high": [value + 1 for value in values],
+            "low": [value - 1 for value in values],
+            "close": values,
+            "volume": [1.0] * len(values),
+        }
+    )
+
+
+def test_the_rsi_of_closes_that_never_moved_is_0() -> None:
+    # ta says 100 here (no fall); the BLESK data says 0.
+    assert run("rsi@1", steady(60, 0.0), window=2)[28:] == [0.0] * 32
+
+
+def test_the_rsi_holds_while_the_closes_stay_flat_then_falls_to_0() -> None:
+    # A rise of 1 and a fall of 0.5 leave a mean rise and a mean fall of 0.25 each (RSI 50),
+    # which halve on every flat candle: from the candle 48 on they add up to under 1e-14.
+    rsi = run("rsi@1", closes([100.0, 101.0, 100.5] + [100.5] * 80), window=2)
+
+    assert rsi[28:48] == [50.0] * 20
+    assert rsi[48:] == [0.0] * 35
+    # The next move counts again.
+    moved = run("rsi@1", closes([100.0, 101.0, 100.5] + [100.5] * 80 + [101.0]), window=2)
+    assert moved[-1] == 100.0
+
+
 def test_the_tsi_is_100_while_closes_rise() -> None:
     assert run("tsi@1", steady(60, 0.5), slow=3, fast=2)[-1] == pytest.approx(100.0)
 

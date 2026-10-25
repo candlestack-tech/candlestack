@@ -263,7 +263,7 @@ Polars and NumPy, without `ta`. The defaults are the BLESK parameters; `ema20` a
 | `bb_bbh`, `bb_bbl` | `bollinger-high@1`, `bollinger-low@1`: the mean close plus and minus `dev` standard deviations of the population | `window` 20, `dev` 2 | `window - 1` | Bands |
 | `kch_high`, `kch_low` | `keltner-high@1`, `keltner-low@1`: `ta`'s original Keltner channel, the means of `(4 high - 2 low + close) / 3` and `(4 low - 2 high + close) / 3`, without an ATR or a multiplier | `window` 20 | `window - 1` | Bands |
 | `squeeze` | `squeeze@1`: 1 when both Bollinger bands lie inside the channel of the mean close plus and minus `keltner_multiplier` mean true ranges, else 0 | `bollinger_window` 20, `bollinger_dev` 2, `keltner_window` 20, `keltner_atr_window` 20, `keltner_multiplier` 1.5 | `max(bollinger_window - 1, keltner_window - 1, keltner_atr_window)` | Bands |
-| `rsi` | `rsi@1`: Wilder's smoothing of the rises and falls of the close | `window` 20 | `14 * window` | Momentum |
+| `rsi` | `rsi@1`: Wilder's smoothing of the rises and falls of the close; 0 once the close stayed the same so long that the mean rise and the mean fall add up to less than 1e-14 (a stock not yet listed, or suspended), as in the BLESK data | `window` 20 | `14 * window` | Momentum |
 | `roc` | `roc@1`: the change of the close from `window` candles before, in percent | `window` 20 | `window` | Momentum |
 | `tsi` | `tsi@1`: the close's change smoothed by an EMA of `slow`, then of `fast` candles, over its absolute value smoothed the same way, in percent | `slow` 25, `fast` 13 | `7 * (slow + fast)` | Momentum |
 | `atr` | `atr@1`: Wilder's smoothing of the true range, seeded with the mean of the first `window` | `window` 14 | `15 * window - 1` | Bands |
