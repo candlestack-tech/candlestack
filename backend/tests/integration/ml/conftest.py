@@ -65,6 +65,12 @@ class ModelsUser:
     def delete(self, model_id: str) -> httpx2.Response:
         return self.request("DELETE", f"/api/v1/models/{model_id}")
 
+    def set_manifest(self, model_id: str, content: bytes | Any) -> httpx2.Response:
+        return self.request("PUT", f"/api/v1/models/{model_id}/manifest", content=content)
+
+    def manifest(self, model_id: str) -> httpx2.Response:
+        return self.request("GET", f"/api/v1/models/{model_id}/manifest")
+
 
 @pytest.fixture
 def ada(account: Callable[[str], Any]) -> ModelsUser:

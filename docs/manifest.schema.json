@@ -9,6 +9,7 @@
           "examples": [
             "candles@1"
           ],
+          "maxLength": 64,
           "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*@[1-9][0-9]*$",
           "title": "Id",
           "type": "string"
@@ -16,6 +17,7 @@
         "params": {
           "additionalProperties": true,
           "description": "The block's parameters, checked against the catalog",
+          "maxProperties": 32,
           "title": "Params",
           "type": "object"
         }
@@ -74,6 +76,7 @@
           "examples": [
             "candles@1"
           ],
+          "maxLength": 64,
           "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*@[1-9][0-9]*$",
           "title": "Id",
           "type": "string"
@@ -92,6 +95,7 @@
         "params": {
           "additionalProperties": true,
           "description": "The block's parameters, checked against the catalog",
+          "maxProperties": 32,
           "title": "Params",
           "type": "object"
         }
@@ -112,6 +116,7 @@
           "items": {
             "$ref": "#/$defs/Feature"
           },
+          "maxItems": 256,
           "minItems": 1,
           "title": "Features",
           "type": "array"
@@ -181,6 +186,7 @@
             "minimum": 1,
             "type": "integer"
           },
+          "maxItems": 8,
           "minItems": 1,
           "title": "Shape",
           "type": "array"
@@ -232,6 +238,7 @@
             "minimum": 1,
             "type": "integer"
           },
+          "maxItems": 8,
           "minItems": 1,
           "title": "Shape",
           "type": "array"

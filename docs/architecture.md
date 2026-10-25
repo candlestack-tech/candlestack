@@ -169,7 +169,9 @@ flowchart LR
 
 - **Upload**: `POST /api/v1/models?name=<file name>` with the file as the body, so the server
   streams it to disk instead of holding a multipart form in memory (the backend has 384 MB).
-  Only Keras files (`.keras`) for now: another extension is a 415 before anything is read. A
+  Only Keras files (`.keras`) for now: another extension is a 415 before anything is read,
+  whose detail says the file is not supported and what is: Keras now, ONNX later, PyTorch,
+  TensorFlow and scikit-learn models through ONNX, pickle-based files never. A
   `Content-Length` over 50 MB is a 413 at once. A user uploads one file at a time: a lock in
   Redis (`SET NX EX 300`, released when the upload ends) turns a second upload away with
   `409 upload-in-progress`, so nobody fills the disk with uploads side by side. While Redis
@@ -235,6 +237,32 @@ flowchart LR
   passes `custom_objects` with a no-op stub for every user object under `*_regularizer` and
   `*_constraint` (a regularizer that adds no loss, a constraint that returns its input). It
   runs without network access and with the same kind of limits as the check.
+- **Manifest** ([preprocessing.md](preprocessing.md#the-manifest)): a model is kept without
+  one and gets it with its own request, `PUT /api/v1/models/{model_id}/manifest` with the
+  manifest as the JSON body, which adds it or replaces the one the model had; `GET` on the same
+  path reads it back as it was given, without the defaults it left out (`404 no-manifest`
+  without one). There is no DELETE: the app replaces a manifest, never removes it. The body is
+  at most 1 MB (`413 manifest-too-large`, by its `Content-Length` at once, else where the
+  stream passes it). The PUT runs the checks that read the files
+  ([preprocessing.md](preprocessing.md#checking-a-model-with-its-manifest), 2 and 3) in the
+  request: the form (`parse_manifest`), the catalog, the parameters, the names, the signature
+  and the example (`check_manifest`), then the signature against the input and output shapes
+  the upload's check stored (`check_with_model`). Only a manifest that passed all of them is
+  kept, in the JSONB column `models.manifest`, under the lock of the user's models; else the
+  answer is `422 manifest-check-failed` with one sentence for each thing wrong in `problems`
+  (`check`, `detail`), at most 10, `more_problems` counting the rest and `unknown_blocks`
+  naming the blocks the catalog does not have. A large document wrong throughout stays cheap:
+  the form caps what a manifest lists (256 features, 32 parameters a block, 8 axes, block ids
+  of 64 characters), a list stops at its first wrong item (an example full of NaN is one
+  error), and more than 100 errors of the form are counted, not read.
+- **States**: each model says its `state`: `needs_setup` without a manifest, `ready` with one
+  (it passed every check above), `verified` once `models.verified_at` is set. The worker's
+  trial run (#268) will set it when the model gives the output of the manifest's `example`,
+  and only while the manifest is still the one it ran with; replacing the manifest clears it.
+  Each model also carries `manifest_summary` (the representation, timeframe, session, input
+  shape and warm-up), so the Models tiles and the model's page need no second request. The
+  column `manifest` is deferred: the queries of the list and of a change read
+  `manifest - ARRAY['example', 'about']`, so a list of 100 models never reads their examples.
 - **Files**: `ModelStorage` (`ml/storage.py`) is what the service uses: save a finished incoming
   file, delete one, delete a user's, sweep what crashed uploads left. `LocalModelStorage` keeps
   them in `MODEL_STORAGE_DIR` as `<user_id>/<model_id>.keras` and the uploads in progress as

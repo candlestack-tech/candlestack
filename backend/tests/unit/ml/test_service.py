@@ -1,7 +1,9 @@
 """Keeping a checked upload when Postgres refuses the row: a name its unique index compares as
-taken is a taken name, anything else goes on as it is. The flows with a real Postgres:
-tests/integration/ml."""
+taken is a taken name, anything else goes on as it is; the state and the summary of a model's
+manifest. The flows with a real Postgres: tests/integration/ml."""
 
+import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -10,7 +12,10 @@ from sqlalchemy.exc import IntegrityError
 
 from candlestack.ml.errors import ModelNameTaken
 from candlestack.ml.inspect import ModelFacts
-from candlestack.ml.service import ModelsService
+from candlestack.ml.models import Model
+from candlestack.ml.schemas import ModelState
+from candlestack.ml.service import ModelsService, _out
+from candlestack.preprocessing import Manifest, parse_manifest
 
 if TYPE_CHECKING:
     from candlestack.ml.storage import ModelStorage
@@ -79,3 +84,51 @@ async def test_another_integrity_error_goes_on(tmp_path: Path) -> None:
 
     with pytest.raises(IntegrityError):
         await keep(tmp_path, refusal)
+
+
+FIXTURES = Path(__file__).parents[2] / "fixtures" / "keras"
+
+
+@pytest.fixture
+def raw() -> Manifest:
+    return parse_manifest((FIXTURES / "raw_candles.manifest.json").read_bytes())
+
+
+def model(verified_at: datetime | None = None) -> Model:
+    return Model(
+        id="mdl_7f3k2m9qx4",
+        name="raw.keras",
+        framework="keras",
+        size_bytes=10,
+        parameters=1,
+        input_shape=[25, 5],
+        output_shape=[1],
+        starred=False,
+        created_at=datetime(2026, 10, 25, tzinfo=UTC),
+        verified_at=verified_at,
+    )
+
+
+def test_a_model_without_a_manifest_needs_setup() -> None:
+    out = _out(model())
+
+    assert out.state == ModelState.needs_setup
+    assert out.manifest_summary is None
+
+
+def test_a_model_with_a_manifest_is_ready_until_a_trial_run_verifies_it(raw: Manifest) -> None:
+    assert _out(model(), manifest=raw).state == ModelState.ready
+    assert _out(model(datetime.now(UTC)), manifest=raw).state == ModelState.verified
+
+
+def test_the_summary_says_what_the_manifest_reads(raw: Manifest) -> None:
+    summary = _out(model(), manifest=raw).manifest_summary
+
+    assert summary is not None
+    assert json.loads(summary.model_dump_json()) == {
+        "representation": {"id": "candles@1", "params": {}},
+        "timeframe": "30m",
+        "session": "regular",
+        "input_shape": [25, 5],
+        "warm_up": {"candles": 24, "kind": "exact"},
+    }

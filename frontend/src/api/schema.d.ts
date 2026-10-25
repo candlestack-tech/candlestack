@@ -438,7 +438,8 @@ export interface paths {
          * @description Uploads a model file: the body is the file, `name` its file name. The file is checked
          *     before it is kept: `opens` (a real Keras model with no custom code inside, nothing from
          *     the file is executed) and `weights` (it holds trained weights). A file with a name the user
-         *     already has gets a number, as `lstm (2).keras`.
+         *     already has gets a number, as `lstm (2).keras`. The model is `needs_setup` until its
+         *     manifest is added (`PUT /api/v1/models/{model_id}/manifest`).
          */
         post: operations["upload_model_api_v1_models_post"];
         delete?: never;
@@ -469,6 +470,35 @@ export interface paths {
          * @description Renames the model (the extension stays) or stars and unstars it.
          */
         patch: operations["update_model_api_v1_models__model_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/models/{model_id}/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Manifest
+         * @description The model's manifest as it was given, without the defaults it left out.
+         */
+        get: operations["get_manifest_api_v1_models__model_id__manifest_get"];
+        /**
+         * Set Manifest
+         * @description Adds the model's manifest, or replaces the one it has; the body is the manifest. It is
+         *     kept only when every check passes: its form, the catalog (every block exists, in its
+         *     step), the blocks' parameters, the names of the columns, the signature against the window
+         *     and the columns, the shapes of the example, and the signature against the input and
+         *     output the upload read from the model file. The model is then `ready`; a trial run
+         *     makes it `verified` (not yet).
+         */
+        put: operations["set_manifest_api_v1_models__model_id__manifest_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/preprocessing/catalog": {
@@ -915,6 +945,42 @@ export interface components {
              */
             warm_up: string;
         };
+        /**
+         * BlockRef
+         * @description One step: a block of the catalog with its parameters.
+         */
+        BlockRef: {
+            /**
+             * Id
+             * @description A block of the catalog and its version
+             * @example candles@1
+             */
+            id: string;
+            /**
+             * Params
+             * @description The block's parameters, checked against the catalog
+             */
+            params?: {
+                [key: string]: unknown;
+            };
+        };
+        /** BlockUse */
+        BlockUse: {
+            /**
+             * Id
+             * @description A block of the catalog and its version
+             * @example candles@1
+             */
+            id: string;
+            /**
+             * Params
+             * @description Its parameters as the manifest gives them
+             * @example {}
+             */
+            params: {
+                [key: string]: unknown;
+            };
+        };
         /** CandlesMeta */
         CandlesMeta: {
             /**
@@ -1126,6 +1192,22 @@ export interface components {
             strategy: number[];
         };
         /**
+         * Example
+         * @description A small input with the output the model must give for it (within 1e-4).
+         */
+        Example: {
+            /**
+             * Input
+             * @description Samples of the shape of `signature.input`
+             */
+            input: number[][][];
+            /**
+             * Output
+             * @description The model's output for each sample
+             */
+            output: number[][];
+        };
+        /**
          * Exchange
          * @description Where the instruments of the catalog trade: for stocks the listing exchanges Alpaca
          *     reports for tradable US equities without OTC (docs/data.md, "Alpaca"), for crypto pairs
@@ -1133,6 +1215,32 @@ export interface components {
          * @enum {string}
          */
         Exchange: "AMEX" | "ARCA" | "BATS" | "BINANCE" | "NASDAQ" | "NYSE";
+        /**
+         * Feature
+         * @description One column of the input: its name, the block that computes it and its normalization.
+         */
+        Feature: {
+            /**
+             * Id
+             * @description A block of the catalog and its version
+             * @example candles@1
+             */
+            id: string;
+            /**
+             * Name
+             * @description The column's name, unique in the manifest
+             */
+            name: string;
+            /** @description How the column is scaled; without one it is not (none@1) */
+            norm?: components["schemas"]["BlockRef"];
+            /**
+             * Params
+             * @description The block's parameters, checked against the catalog
+             */
+            params?: {
+                [key: string]: unknown;
+            };
+        };
         /**
          * Framework
          * @description The framework a model file belongs to; only Keras is accepted for now.
@@ -1162,6 +1270,31 @@ export interface components {
             status: "ok" | "error";
             /** Version */
             version: string;
+        };
+        /**
+         * Input
+         * @description The candles the model expects and how its input is built from them.
+         */
+        Input: {
+            /**
+             * Features
+             * @description The columns, in their order
+             */
+            features: components["schemas"]["Feature"][];
+            /** @description Which rows the model sees */
+            representation: components["schemas"]["BlockRef"];
+            /**
+             * Session
+             * @description `regular`: US trading hours; `24/7`: around the clock, as crypto trades
+             * @enum {string}
+             */
+            session: "regular" | "24/7";
+            /**
+             * Timeframe
+             * @enum {string}
+             */
+            timeframe: "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d";
+            window: components["schemas"]["Window"];
         };
         /**
          * InstrumentDetailOut
@@ -1401,6 +1534,59 @@ export interface components {
          */
         InstrumentSort: "volume" | "change" | "-change" | "symbol";
         /**
+         * CandleStack model manifest
+         * @description What a model takes and gives, stored with the model (docs/preprocessing.md).
+         */
+        Manifest: {
+            /**
+             * About
+             * @description Free text for people: trained on which instruments, which period, notes
+             */
+            about?: {
+                [key: string]: string;
+            };
+            example?: components["schemas"]["Example"] | null;
+            input: components["schemas"]["Input"];
+            signature: components["schemas"]["Signature"];
+            /**
+             * Version
+             * @description The version of the manifest's form
+             * @constant
+             */
+            version: 1;
+        };
+        /**
+         * ManifestSummary
+         * @description What the model's manifest says, in short; the whole manifest is
+         *     `GET /api/v1/models/{model_id}/manifest`.
+         */
+        ManifestSummary: {
+            /**
+             * Input Shape
+             * @description One sample: rows by columns (the features, in their order)
+             * @example [
+             *       25,
+             *       5
+             *     ]
+             */
+            input_shape: number[];
+            /** @description Which rows the model sees */
+            representation: components["schemas"]["BlockUse"];
+            /**
+             * Session
+             * @description `regular` (US trading hours) or `24/7` (around the clock)
+             * @example regular
+             */
+            session: string;
+            /**
+             * Timeframe
+             * @description The timeframe of the candles it reads
+             * @example 30m
+             */
+            timeframe: string;
+            warm_up: components["schemas"]["WarmUpOut"];
+        };
+        /**
          * Market
          * @enum {string}
          */
@@ -1518,6 +1704,8 @@ export interface components {
              *     ]
              */
             input_shape: number[] | null;
+            /** @description What its manifest says, in short; null without one */
+            manifest_summary: components["schemas"]["ManifestSummary"] | null;
             /**
              * Name
              * @description File name, extension included; Rename changes only the part before it
@@ -1549,7 +1737,17 @@ export interface components {
              * @description The user starred the model
              */
             starred: boolean;
+            state: components["schemas"]["ModelState"];
         };
+        /**
+         * ModelState
+         * @description How far a model got: `needs_setup` (no manifest yet, so it cannot run), `ready` (its
+         *     manifest passed every check that reads the files, against this model too) or `verified`
+         *     (a trial run in the worker gave the output of the manifest's example; set by the worker,
+         *     not yet).
+         * @enum {string}
+         */
+        ModelState: "needs_setup" | "ready" | "verified";
         /**
          * ModelUpdate
          * @description What Rename and the star change; a field left out stays as it is.
@@ -1575,6 +1773,28 @@ export interface components {
              */
             models: components["schemas"]["ModelOut"][];
             usage: components["schemas"]["StorageUsage"];
+        };
+        /** Output */
+        Output: {
+            /**
+             * Dtype
+             * @constant
+             */
+            dtype: "float32";
+            /**
+             * Meaning
+             * @description `score`: the sign is the direction, the size is compared with the threshold
+             * @constant
+             */
+            meaning: "score";
+            /**
+             * Shape
+             * @example [
+             *       25,
+             *       5
+             *     ]
+             */
+            shape: number[];
         };
         /** ParamOut */
         ParamOut: {
@@ -1731,6 +1951,14 @@ export interface components {
             provider: components["schemas"]["Provider"];
         };
         /**
+         * Signature
+         * @description What goes into the model and what comes out; must equal what the model file says.
+         */
+        Signature: {
+            input: components["schemas"]["Tensor"];
+            output: components["schemas"]["Output"];
+        };
+        /**
          * SortOrder
          * @enum {string}
          */
@@ -1807,6 +2035,25 @@ export interface components {
             used_bytes: number;
         };
         /**
+         * Tensor
+         * @description The shape of one sample without the batch axis, and its type.
+         */
+        Tensor: {
+            /**
+             * Dtype
+             * @constant
+             */
+            dtype: "float32";
+            /**
+             * Shape
+             * @example [
+             *       25,
+             *       5
+             *     ]
+             */
+            shape: number[];
+        };
+        /**
          * Theme
          * @enum {string}
          */
@@ -1852,6 +2099,39 @@ export interface components {
              * @example blesk-novol-8.keras
              */
             name: string;
+        };
+        /** WarmUpOut */
+        WarmUpOut: {
+            /**
+             * Candles
+             * @description Candles a backtest loads before the first sample
+             * @example 24
+             */
+            candles: number;
+            /**
+             * Kind
+             * @description `exact` when every candle is a row; `estimate` with rows that span several candles (Renko), where the run loads more and reports what the warm-up used
+             * @enum {string}
+             */
+            kind: "exact" | "estimate";
+        };
+        /**
+         * Window
+         * @description How rows make one sample: the parameters of the catalog's ``window@1``.
+         */
+        Window: {
+            /**
+             * Last
+             * @description The last row of a sample: the last finished one (`closed`), or the row still forming (`current`, for representations with rows that span several candles)
+             * @default closed
+             * @enum {string}
+             */
+            last: "closed" | "current";
+            /**
+             * Length
+             * @description How many rows make one sample
+             */
+            length: number;
         };
     };
     responses: never;
@@ -2849,7 +3129,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Not a format the app takes yet, only Keras (`.keras`) for now (`unsupported-model-format`). */
+            /** @description Not a format the app takes: Keras (`.keras`) now, ONNX (`.onnx`) later, never pickle-based files (`unsupported-model-format`). */
             415: {
                 headers: {
                     [name: string]: unknown;
@@ -2988,6 +3268,129 @@ export interface operations {
                 };
             };
             /** @description Invalid request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_manifest_api_v1_models__model_id__manifest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Public ID of the model */
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Manifest"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no model with this ID (`not-found`), or the model has no manifest yet (`no-manifest`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    set_manifest_api_v1_models__model_id__manifest_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Public ID of the model */
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        /** @description The manifest (docs/preprocessing.md), as JSON */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Manifest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelOut"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no model with this ID (`not-found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The manifest is larger than 1 MB (`manifest-too-large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A check failed (`manifest-check-failed`): `problems` lists what is wrong, at most 10, each with its `check` (`schema`, `catalog`, `params`, `names`, `signature`, `example` or `model`) and a `detail` of one sentence; `more_problems` counts the rest and `unknown_blocks` names the blocks the catalog does not have. `detail` says the same in words. */
             422: {
                 headers: {
                     [name: string]: unknown;

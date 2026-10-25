@@ -3,6 +3,7 @@
 import unicodedata
 from datetime import datetime
 from enum import StrEnum
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -11,6 +12,9 @@ NAME_MAX = 60
 # Limits of the uploaded files (binary megabytes, as the app shows them).
 MB = 1024 * 1024
 FILE_MAX_BYTES = 50 * MB
+# A manifest is a few KB; its example makes it larger, and 1 MB still holds two samples of
+# 1000 rows by 23 columns.
+MANIFEST_MAX_BYTES = 1 * MB
 QUOTA_BYTES = 100 * MB
 # Models a user may keep.
 MODELS_MAX = 100
@@ -36,6 +40,53 @@ class ModelCheck(StrEnum):
 
     opens = "opens"
     weights = "weights"
+
+
+class ModelState(StrEnum):
+    """How far a model got: `needs_setup` (no manifest yet, so it cannot run), `ready` (its
+    manifest passed every check that reads the files, against this model too) or `verified`
+    (a trial run in the worker gave the output of the manifest's example; set by the worker,
+    not yet)."""
+
+    needs_setup = "needs_setup"
+    ready = "ready"
+    verified = "verified"
+
+
+class BlockUse(BaseModel):
+    id: str = Field(description="A block of the catalog and its version", examples=["candles@1"])
+    params: dict[str, Any] = Field(
+        description="Its parameters as the manifest gives them", examples=[{}]
+    )
+
+
+class WarmUpOut(BaseModel):
+    candles: int = Field(
+        description="Candles a backtest loads before the first sample", examples=[24]
+    )
+    kind: Literal["exact", "estimate"] = Field(
+        description=(
+            "`exact` when every candle is a row; `estimate` with rows that span several "
+            "candles (Renko), where the run loads more and reports what the warm-up used"
+        )
+    )
+
+
+class ManifestSummary(BaseModel):
+    """What the model's manifest says, in short; the whole manifest is
+    `GET /api/v1/models/{model_id}/manifest`."""
+
+    representation: BlockUse = Field(description="Which rows the model sees")
+    timeframe: str = Field(description="The timeframe of the candles it reads", examples=["30m"])
+    session: str = Field(
+        description="`regular` (US trading hours) or `24/7` (around the clock)",
+        examples=["regular"],
+    )
+    input_shape: list[int] = Field(
+        description="One sample: rows by columns (the features, in their order)",
+        examples=[[25, 5]],
+    )
+    warm_up: WarmUpOut
 
 
 class ModelOut(BaseModel):
@@ -68,6 +119,10 @@ class ModelOut(BaseModel):
         examples=[None],
     )
     created_at: datetime = Field(description="When the model was uploaded (UTC)")
+    state: ModelState
+    manifest_summary: ManifestSummary | None = Field(
+        description="What its manifest says, in short; null without one"
+    )
 
 
 class StorageUsage(BaseModel):

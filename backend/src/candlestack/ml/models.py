@@ -3,6 +3,7 @@
 
 import secrets
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -16,7 +17,7 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, query_expression
 
 from candlestack.core import Base
 
@@ -51,6 +52,18 @@ class Model(Base):
     keras_version: Mapped[str] = mapped_column(String(32))
     starred: Mapped[bool] = mapped_column(Boolean, server_default=false(), default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # How to build the model's input (docs/preprocessing.md), as the user's manifest gave it;
+    # null until one is added. Only a manifest that passed every check that reads the files is
+    # kept. It may be large with its example, so it is loaded only where it is asked for.
+    manifest: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, deferred=True, deferred_raiseload=True
+    )
+    # When the worker's trial run gave the output of the manifest's example (#268); null until
+    # then, and again when the manifest is replaced.
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The manifest without its example and notes, what the model's summary is made of: loaded
+    # by the queries of store.py that ask for it, None where they do not.
+    manifest_spec: Mapped[dict[str, Any] | None] = query_expression()
 
 
 # A user's names are unique in any case, as the numbering of uploads compares them so.

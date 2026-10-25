@@ -100,6 +100,8 @@ export const model = (fields: Partial<Model> = {}): Model => ({
   backtest_count: 0,
   best_sharpe: null,
   created_at: '2026-10-13T09:00:00Z',
+  state: 'needs_setup',
+  manifest_summary: null,
   ...fields,
 });
 
