@@ -1965,7 +1965,7 @@ export interface components {
             name: "kmeans";
             /**
              * Refit Every
-             * @description Rows a fit is used for
+             * @description Rows a fit is used for, at least `window / 20`
              */
             refit_every: number;
             /**
