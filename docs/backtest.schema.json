@@ -1,0 +1,1445 @@
+{
+  "$defs": {
+    "AlignOut": {
+      "properties": {
+        "candles_without_prediction": {
+          "title": "Candles Without Prediction",
+          "type": "integer"
+        },
+        "predictions_without_candle": {
+          "title": "Predictions Without Candle",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "predictions_without_candle",
+        "candles_without_prediction"
+      ],
+      "title": "AlignOut",
+      "type": "object"
+    },
+    "BacktestHeader": {
+      "properties": {
+        "created_at": {
+          "description": "When it started (UTC)",
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "duration_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Seconds it took",
+          "examples": [
+            162.0
+          ],
+          "title": "Duration S"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What went wrong and what to do, for a failed one",
+          "title": "Error"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When it finished or failed (UTC)",
+          "title": "Finished At"
+        },
+        "id": {
+          "examples": [
+            "bt_7f3k2m9qx4"
+          ],
+          "title": "Id",
+          "type": "string"
+        },
+        "number": {
+          "description": "The user's own number, shown as #N",
+          "examples": [
+            12
+          ],
+          "minimum": 1,
+          "title": "Number",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/BacktestStatus"
+        }
+      },
+      "required": [
+        "id",
+        "number",
+        "status",
+        "created_at",
+        "finished_at",
+        "duration_s",
+        "error"
+      ],
+      "title": "BacktestHeader",
+      "type": "object"
+    },
+    "BacktestModel": {
+      "properties": {
+        "framework": {
+          "examples": [
+            "keras"
+          ],
+          "title": "Framework",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null once the model is deleted",
+          "examples": [
+            "mdl_k2m9qx47f3"
+          ],
+          "title": "Id"
+        },
+        "manifest": {
+          "additionalProperties": true,
+          "description": "The manifest it ran with, as stored with the run",
+          "title": "Manifest",
+          "type": "object"
+        },
+        "name": {
+          "description": "The file name when it ran",
+          "examples": [
+            "raw-candles.keras"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "description": "Of the model file, hex",
+          "examples": [
+            "9b1e04c700000000000000000000000000000000000000000000000000000000"
+          ],
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "examples": [
+            48213
+          ],
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "framework",
+        "sha256",
+        "size_bytes",
+        "manifest"
+      ],
+      "title": "BacktestModel",
+      "type": "object"
+    },
+    "BacktestStatus": {
+      "description": "`finished` (it has results) or `failed` (it has an error); `running` comes with the\nbacktest builder.",
+      "enum": [
+        "running",
+        "finished",
+        "failed"
+      ],
+      "title": "BacktestStatus",
+      "type": "string"
+    },
+    "BenchmarkOut": {
+      "properties": {
+        "id": {
+          "examples": [
+            "bh"
+          ],
+          "title": "Id",
+          "type": "string"
+        },
+        "instrument": {
+          "examples": [
+            "stock:AAPL"
+          ],
+          "title": "Instrument",
+          "type": "string"
+        },
+        "kind": {
+          "description": "`buy_and_hold`; later more",
+          "examples": [
+            "buy_and_hold"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "instrument"
+      ],
+      "title": "BenchmarkOut",
+      "type": "object"
+    },
+    "BenchmarkResult": {
+      "properties": {
+        "total_return": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Total Return"
+        }
+      },
+      "required": [
+        "total_return"
+      ],
+      "title": "BenchmarkResult",
+      "type": "object"
+    },
+    "CalibrateStep": {
+      "additionalProperties": false,
+      "description": "`zscore` or `rank` over the `window` predictions ending at each one.",
+      "properties": {
+        "name": {
+          "enum": [
+            "zscore",
+            "rank"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "window": {
+          "maximum": 1000,
+          "minimum": 2,
+          "title": "Window",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "window"
+      ],
+      "title": "CalibrateStep",
+      "type": "object"
+    },
+    "CandlesStep": {
+      "additionalProperties": false,
+      "properties": {
+        "candles": {
+          "minimum": 1,
+          "title": "Candles",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "candles"
+      ],
+      "title": "CandlesStep",
+      "type": "object"
+    },
+    "DataOut": {
+      "description": "The data a run used. `loaded`, `changed`, `rows`, `predictions` and `align` are null\nuntil it finished.",
+      "properties": {
+        "align": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AlignOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "changed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The candles' fingerprint differs from the run's: the source changed them",
+          "title": "Changed"
+        },
+        "instrument": {
+          "$ref": "#/$defs/InstrumentOut"
+        },
+        "loaded": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Loaded"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "period": {
+          "$ref": "#/$defs/Period"
+        },
+        "predictions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PredictionsOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rows": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rows"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session": {
+          "examples": [
+            "regular"
+          ],
+          "title": "Session",
+          "type": "string"
+        },
+        "timeframe": {
+          "examples": [
+            "30m"
+          ],
+          "title": "Timeframe",
+          "type": "string"
+        },
+        "timeframe_seconds": {
+          "examples": [
+            1800
+          ],
+          "title": "Timeframe Seconds",
+          "type": "integer"
+        },
+        "warm_up": {
+          "$ref": "#/$defs/WarmUpReport"
+        }
+      },
+      "required": [
+        "instrument",
+        "timeframe",
+        "timeframe_seconds",
+        "session",
+        "period",
+        "loaded",
+        "changed",
+        "warm_up",
+        "rows",
+        "predictions",
+        "align"
+      ],
+      "title": "DataOut",
+      "type": "object"
+    },
+    "Decision": {
+      "additionalProperties": false,
+      "description": "How the predictions become a signal: each step of docs/engine.md (Signals) in the order\napplied, null when off; exactly what the command's `run.json` records.",
+      "properties": {
+        "calibrate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CalibrateStep"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "confirm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CandlesStep"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Count a value only once it held this many candles"
+        },
+        "ema": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmaStep"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "long_only": {
+          "default": false,
+          "description": "Flat instead of short",
+          "title": "Long Only",
+          "type": "boolean"
+        },
+        "min_hold": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CandlesStep"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Keep each new position for at least this many candles"
+        },
+        "rule": {
+          "default": {
+            "limit": 0.0,
+            "name": "threshold"
+          },
+          "discriminator": {
+            "mapping": {
+              "hysteresis": "#/$defs/HysteresisRule",
+              "kmeans": "#/$defs/KmeansRule",
+              "threshold": "#/$defs/ThresholdRule"
+            },
+            "propertyName": "name"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ThresholdRule"
+            },
+            {
+              "$ref": "#/$defs/HysteresisRule"
+            },
+            {
+              "$ref": "#/$defs/KmeansRule"
+            }
+          ],
+          "title": "Rule"
+        }
+      },
+      "title": "Decision",
+      "type": "object"
+    },
+    "EmaStep": {
+      "additionalProperties": false,
+      "properties": {
+        "span": {
+          "description": "The span of the exponential moving average",
+          "minimum": 1,
+          "title": "Span",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "span"
+      ],
+      "title": "EmaStep",
+      "type": "object"
+    },
+    "Execution": {
+      "additionalProperties": false,
+      "description": "How the engine fills orders and what they cost: the engine's `Settings`\n(docs/engine.md, Settings). Fractions: 0.05 is 5%; a basis point is 0.01%.",
+      "properties": {
+        "drawdown_stop": {
+          "anyOf": [
+            {
+              "exclusiveMaximum": 1,
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Drawdown Stop"
+        },
+        "fee_bps": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Fee Bps",
+          "type": "number"
+        },
+        "fill": {
+          "default": "next_open",
+          "enum": [
+            "next_open",
+            "signal_close"
+          ],
+          "title": "Fill",
+          "type": "string"
+        },
+        "slippage_bps": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Slippage Bps",
+          "type": "number"
+        },
+        "stop_loss": {
+          "anyOf": [
+            {
+              "exclusiveMaximum": 1,
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stop Loss"
+        }
+      },
+      "title": "Execution",
+      "type": "object"
+    },
+    "HysteresisRule": {
+      "additionalProperties": false,
+      "properties": {
+        "enter": {
+          "description": "The limit a position opens at",
+          "minimum": 0,
+          "title": "Enter",
+          "type": "number"
+        },
+        "exit": {
+          "description": "The limit it closes below, at most `enter`",
+          "minimum": 0,
+          "title": "Exit",
+          "type": "number"
+        },
+        "name": {
+          "const": "hysteresis",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "enter",
+        "exit"
+      ],
+      "title": "HysteresisRule",
+      "type": "object"
+    },
+    "InstrumentOut": {
+      "properties": {
+        "currency": {
+          "description": "What the prices are in",
+          "examples": [
+            "USD"
+          ],
+          "title": "Currency",
+          "type": "string"
+        },
+        "exchange": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "examples": [
+            "NASDAQ"
+          ],
+          "title": "Exchange"
+        },
+        "feed": {
+          "examples": [
+            "sip"
+          ],
+          "title": "Feed",
+          "type": "string"
+        },
+        "id": {
+          "examples": [
+            "stock:AAPL"
+          ],
+          "title": "Id",
+          "type": "string"
+        },
+        "market": {
+          "examples": [
+            "stock"
+          ],
+          "title": "Market",
+          "type": "string"
+        },
+        "name": {
+          "examples": [
+            "Apple Inc."
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "source": {
+          "examples": [
+            "alpaca"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "symbol": {
+          "examples": [
+            "AAPL"
+          ],
+          "title": "Symbol",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "market",
+        "symbol",
+        "name",
+        "exchange",
+        "source",
+        "feed",
+        "currency"
+      ],
+      "title": "InstrumentOut",
+      "type": "object"
+    },
+    "KmeansRule": {
+      "additionalProperties": false,
+      "properties": {
+        "k": {
+          "description": "Groups: long in the highest, short in the lowest",
+          "maximum": 5,
+          "minimum": 2,
+          "title": "K",
+          "type": "integer"
+        },
+        "name": {
+          "const": "kmeans",
+          "title": "Name",
+          "type": "string"
+        },
+        "refit_every": {
+          "description": "Rows a fit is used for, at least `window / 20`",
+          "minimum": 1,
+          "title": "Refit Every",
+          "type": "integer"
+        },
+        "window": {
+          "description": "Earlier predictions a fit uses, at least `2 * k`",
+          "maximum": 5000,
+          "title": "Window",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "k",
+        "window",
+        "refit_every"
+      ],
+      "title": "KmeansRule",
+      "type": "object"
+    },
+    "Loaded": {
+      "description": "The candles asked for, warm-up included, with their fingerprint (docs/data.md).",
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "fingerprint": {
+          "examples": [
+            "sha256:3b1f000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "gaps_total": {
+          "title": "Gaps Total",
+          "type": "integer"
+        },
+        "start": {
+          "title": "Start",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "count",
+        "fingerprint",
+        "gaps_total"
+      ],
+      "title": "Loaded",
+      "type": "object"
+    },
+    "MetricsArgs": {
+      "description": "The arguments the statistics were computed with.",
+      "properties": {
+        "periods_per_year": {
+          "description": "252 for stocks, 365 for crypto",
+          "examples": [
+            252
+          ],
+          "title": "Periods Per Year",
+          "type": "integer"
+        },
+        "risk_free_rate": {
+          "examples": [
+            0.0
+          ],
+          "title": "Risk Free Rate",
+          "type": "number"
+        }
+      },
+      "required": [
+        "periods_per_year",
+        "risk_free_rate"
+      ],
+      "title": "MetricsArgs",
+      "type": "object"
+    },
+    "Period": {
+      "additionalProperties": false,
+      "description": "The test period `[start, end)` in UTC epoch seconds of a candle's open.",
+      "properties": {
+        "end": {
+          "description": "End of the test, excluded",
+          "examples": [
+            1717459200
+          ],
+          "minimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "start": {
+          "description": "First second of the test",
+          "examples": [
+            1717372800
+          ],
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "title": "Period",
+      "type": "object"
+    },
+    "PredictionsOut": {
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "sha256": {
+          "description": "Of the stored predictions (Parquet), hex",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "count",
+        "sha256"
+      ],
+      "title": "PredictionsOut",
+      "type": "object"
+    },
+    "Results": {
+      "properties": {
+        "benchmarks": {
+          "additionalProperties": {
+            "$ref": "#/$defs/BenchmarkResult"
+          },
+          "title": "Benchmarks",
+          "type": "object"
+        },
+        "series": {
+          "$ref": "#/$defs/Series"
+        },
+        "stats": {
+          "$ref": "#/$defs/Stats"
+        },
+        "trades": {
+          "$ref": "#/$defs/Trades"
+        }
+      },
+      "required": [
+        "stats",
+        "benchmarks",
+        "series",
+        "trades"
+      ],
+      "title": "Results",
+      "type": "object"
+    },
+    "Rows": {
+      "description": "What the engine ran on.",
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "first_ts": {
+          "title": "First Ts",
+          "type": "integer"
+        },
+        "last_ts": {
+          "title": "Last Ts",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "first_ts",
+        "last_ts",
+        "count"
+      ],
+      "title": "Rows",
+      "type": "object"
+    },
+    "RunnerOut": {
+      "description": "What ran the model; null until the worker answered.",
+      "properties": {
+        "backend": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The backend and its release",
+          "examples": [
+            "jax 0.7.2"
+          ],
+          "title": "Backend"
+        },
+        "format": {
+          "examples": [
+            "keras"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "keras": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "examples": [
+            "3.15.1"
+          ],
+          "title": "Keras"
+        }
+      },
+      "required": [
+        "format",
+        "keras",
+        "backend"
+      ],
+      "title": "RunnerOut",
+      "type": "object"
+    },
+    "Series": {
+      "properties": {
+        "benchmarks": {
+          "additionalProperties": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "description": "Each benchmark's equity on the same rows, by its ID",
+          "title": "Benchmarks",
+          "type": "object"
+        },
+        "columns": {
+          "$ref": "#/$defs/SeriesColumns"
+        },
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "resolution": {
+          "description": "`candle`, or `day` when the light view made one point per UTC day of more than 10000 rows",
+          "examples": [
+            "candle"
+          ],
+          "title": "Resolution",
+          "type": "string"
+        }
+      },
+      "required": [
+        "resolution",
+        "count",
+        "columns",
+        "benchmarks"
+      ],
+      "title": "Series",
+      "type": "object"
+    },
+    "SeriesColumns": {
+      "description": "One value per row in each column. `prediction` and `signal` are left out of a series of\ndays.",
+      "properties": {
+        "close": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Close",
+          "type": "array"
+        },
+        "drawdown": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Drawdown",
+          "type": "array"
+        },
+        "equity": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Equity",
+          "type": "array"
+        },
+        "position": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Position",
+          "type": "array"
+        },
+        "prediction": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prediction"
+        },
+        "signal": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signal"
+        },
+        "ts": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Ts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ts",
+        "close",
+        "position",
+        "equity",
+        "drawdown"
+      ],
+      "title": "SeriesColumns",
+      "type": "object"
+    },
+    "Software": {
+      "properties": {
+        "app_version": {
+          "examples": [
+            "2026.10.24-3f2a1c9"
+          ],
+          "title": "App Version",
+          "type": "string"
+        },
+        "engine_version": {
+          "examples": [
+            "0.3.0"
+          ],
+          "title": "Engine Version",
+          "type": "string"
+        },
+        "runner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunnerOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "engine_version",
+        "app_version",
+        "runner"
+      ],
+      "title": "Software",
+      "type": "object"
+    },
+    "Stats": {
+      "description": "The 12 statistics of docs/engine.md (Metrics), in their order. Fractions; `max_drawdown`\nnegative; null when undefined.",
+      "properties": {
+        "avg_trade_return": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Avg Trade Return"
+        },
+        "best_trade_return": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Best Trade Return"
+        },
+        "buy_and_hold_return": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Buy And Hold Return"
+        },
+        "exposure": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Exposure"
+        },
+        "fees_paid": {
+          "title": "Fees Paid",
+          "type": "number"
+        },
+        "max_drawdown": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Max Drawdown"
+        },
+        "num_trades": {
+          "title": "Num Trades",
+          "type": "integer"
+        },
+        "sharpe": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sharpe"
+        },
+        "sortino": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sortino"
+        },
+        "total_return": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Total Return"
+        },
+        "win_rate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Win Rate"
+        },
+        "worst_trade_return": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Worst Trade Return"
+        }
+      },
+      "required": [
+        "total_return",
+        "max_drawdown",
+        "sharpe",
+        "sortino",
+        "num_trades",
+        "win_rate",
+        "avg_trade_return",
+        "best_trade_return",
+        "worst_trade_return",
+        "exposure",
+        "fees_paid",
+        "buy_and_hold_return"
+      ],
+      "title": "Stats",
+      "type": "object"
+    },
+    "ThresholdRule": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "description": "Long at a prediction of `limit` or more, short at `-limit` or less",
+          "minimum": 0,
+          "title": "Limit",
+          "type": "number"
+        },
+        "name": {
+          "const": "threshold",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "limit"
+      ],
+      "title": "ThresholdRule",
+      "type": "object"
+    },
+    "TradeColumns": {
+      "properties": {
+        "candles_held": {
+          "description": "Rows from the entry candle to the exit candle",
+          "items": {
+            "type": "integer"
+          },
+          "title": "Candles Held",
+          "type": "array"
+        },
+        "close_price": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Close Price",
+          "type": "array"
+        },
+        "close_ts": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Close Ts",
+          "type": "array"
+        },
+        "exit_reason": {
+          "description": "`signal`, `stop`, `gap`, `end`, `ruin`, `drawdown`",
+          "items": {
+            "type": "string"
+          },
+          "title": "Exit Reason",
+          "type": "array"
+        },
+        "fees": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Fees",
+          "type": "array"
+        },
+        "open_price": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Open Price",
+          "type": "array"
+        },
+        "open_ts": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Open Ts",
+          "type": "array"
+        },
+        "return": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Return",
+          "type": "array"
+        },
+        "side": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Side",
+          "type": "array"
+        },
+        "signal_ts": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Signal Ts",
+          "type": "array"
+        },
+        "slippage_cost": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Slippage Cost",
+          "type": "array"
+        },
+        "stop_price": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Stop Price",
+          "type": "array"
+        }
+      },
+      "required": [
+        "signal_ts",
+        "open_ts",
+        "close_ts",
+        "side",
+        "open_price",
+        "close_price",
+        "stop_price",
+        "exit_reason",
+        "return",
+        "fees",
+        "slippage_cost",
+        "candles_held"
+      ],
+      "title": "TradeColumns",
+      "type": "object"
+    },
+    "Trades": {
+      "properties": {
+        "columns": {
+          "$ref": "#/$defs/TradeColumns"
+        },
+        "complete": {
+          "description": "False when the light view kept the newest 10000",
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "count": {
+          "description": "The trades in the document",
+          "title": "Count",
+          "type": "integer"
+        },
+        "total": {
+          "description": "The trades the run had",
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "count",
+        "total",
+        "complete",
+        "columns"
+      ],
+      "title": "Trades",
+      "type": "object"
+    },
+    "WarmUpReport": {
+      "properties": {
+        "candles": {
+          "description": "Candles loaded before the period for the warm-up",
+          "title": "Candles",
+          "type": "integer"
+        },
+        "dropped": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The candles the model's input dropped at the start; null until it ran",
+          "title": "Dropped"
+        },
+        "kind": {
+          "enum": [
+            "exact",
+            "estimate"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candles",
+        "kind",
+        "dropped"
+      ],
+      "title": "WarmUpReport",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A backtest as the app shows it, the API returns it and a user downloads it\n(docs/engine.md, \"The result document\"). Market time is UTC epoch seconds of a candle's\nopen, ranges `[start, end)`; returns are fractions.",
+  "properties": {
+    "backtest": {
+      "$ref": "#/$defs/BacktestHeader"
+    },
+    "benchmarks": {
+      "items": {
+        "$ref": "#/$defs/BenchmarkOut"
+      },
+      "title": "Benchmarks",
+      "type": "array"
+    },
+    "data": {
+      "$ref": "#/$defs/DataOut"
+    },
+    "decision": {
+      "$ref": "#/$defs/Decision"
+    },
+    "execution": {
+      "$ref": "#/$defs/Execution"
+    },
+    "metrics": {
+      "$ref": "#/$defs/MetricsArgs"
+    },
+    "model": {
+      "$ref": "#/$defs/BacktestModel"
+    },
+    "results": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Results"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Null unless it finished"
+    },
+    "software": {
+      "$ref": "#/$defs/Software"
+    },
+    "version": {
+      "const": 1,
+      "description": "The format's version",
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "backtest",
+    "software",
+    "model",
+    "data",
+    "decision",
+    "execution",
+    "benchmarks",
+    "metrics",
+    "results"
+  ],
+  "title": "CandleStack backtest",
+  "type": "object"
+}

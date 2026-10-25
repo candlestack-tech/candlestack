@@ -366,31 +366,31 @@ layers = [
     "schemas",
 ]
 
-# Inside experiments, the same: routes and the seed command, the routes' dependencies, the
-# service, the queries, then the table and the errors, and the bodies at the bottom.
+# Inside experiments, the same: routes, the seed command and the result document's JSON
+# Schema, the routes' dependencies, the service, the queries and the assembly of a run (signals,
+# engine, metrics), then the table and the errors, the result document, and the bodies at the
+# bottom.
 [[tool.importlinter.contracts]]
 name = "Inside experiments: HTTP and seed -> dependencies -> service -> store -> models"
 type = "layers"
 containers = ["candlestack.experiments"]
 layers = [
-    "api | seed",
+    "api | seed | json_schema",
     "dependencies",
     "service",
-    "store",
+    "store | assembly",
     "models | errors",
+    "document",
     "schemas",
 ]
 
-# Experiments stores and lists backtests for now: it reads the users and their models, not
-# market data, and runs no backtest yet, so it imports neither data nor the backtest modules.
+# Experiments assembles a backtest from the backtest modules (assembly.py) but does not run
+# one yet: it reaches neither market data nor the worker.
 [[tool.importlinter.contracts]]
-name = "Experiments imports only ml, accounts and core for now"
+name = "Experiments does not run backtests yet"
 type = "forbidden"
 source_modules = ["candlestack.experiments"]
-forbidden_modules = [
-    "candlestack.data", "candlestack.engine", "candlestack.jobs", "candlestack.signals",
-    "candlestack.metrics",
-]
+forbidden_modules = ["candlestack.data", "candlestack.jobs"]
 
 # The API checks an uploaded model by reading its file, never by loading it: a load could run
 # code from the file, and the API image has no Keras or TensorFlow (the worker has).

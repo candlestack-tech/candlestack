@@ -25,8 +25,8 @@ flowchart LR
 - The three backtest modules are plain functions on Polars frames. They import no other module
   of the project, not each other and no server library; nothing imports `cli`.
   `uv run lint-imports` checks this (contracts in `backend/pyproject.toml`).
-- They meet only through the column contracts below. In the code, only the command calls them
-  one after the other; later `experiments` will too.
+- They meet only through the column contracts below. In the code, the command and
+  `experiments` (`assembly.py`) call them one after the other.
 
 What is outside the engine on purpose:
 
@@ -733,8 +733,9 @@ again, whatever `--jobs` is.
 ## The result document
 
 What a finished backtest is when the app shows it, the API returns it or a user downloads it as
-JSON. It is the design for the backtests API; nothing of it is built yet. One shape serves all
-three uses: the page and the API get a lighter view of the two long tables
+JSON. Its models are `experiments/document.py`, and `experiments/assembly.py` runs the steps and
+writes its results; the routes come with the backtests API. One shape serves all three uses: the
+page and the API get a lighter view of the two long tables
 ([The light view](#the-light-view)), the download gets everything.
 
 ### Stored, and built on request
@@ -829,7 +830,12 @@ The engine's worked example ([Worked example](#worked-example)) with `next_open`
 
 The groups follow the builder's steps (Model, Data, Decision, Execution): `model`, `data`,
 `decision`, `execution` and `benchmarks` together are what a new run needs, so running a
-backtest again sends them back.
+backtest again sends them back. As every view of a document runs the steps again, a new run's
+windows are bounded: a calibration window of at most 1,000, a k-means window of at most 5,000
+with `refit_every` at least `window / 20` (a `rank` window of 5,000 takes 8 s on 50,000 rows,
+k-means of 2,000 refitted on every row a minute and a half).
+`backend/tests/unit/experiments/test_document.py` builds this
+example as a document and compares it with what is printed here; change both together.
 
 | Group | Fields | From |
 | --- | --- | --- |
@@ -894,8 +900,9 @@ A 10-year run of 30-minute stock candles is about 4 MB as a download (1.4 MB com
   version. Readers ignore fields they do not know and accept new values in those lists.
 - Removing or renaming a field, or changing its type, unit or meaning, makes version 2.
 - A new `ENGINE_VERSION` does not change it: the engine's version is data in the document.
-- A JSON Schema generated from the API's models will live in `docs/backtest.schema.json`, kept
-  current by a test, as the manifest's is.
+- The JSON Schema generated from the models, [backtest.schema.json](backtest.schema.json), is
+  kept current by a test, as the manifest's is. From `backend/`:
+  `uv run python -m candlestack.experiments.json_schema > ../docs/backtest.schema.json`.
 
 Not in version 1: benchmarks other than buy and hold (SPY, QQQ, DIA), returns per month, the
 candles' OHLC (the fingerprint and `loaded` fetch them again), per-trade excursions, rolling
