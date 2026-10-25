@@ -236,8 +236,18 @@ def _problems() -> Iterator[None]:
             raise problem from error
 
 
-def _json(content: bytes, status: int = 200, headers: dict[str, str] | None = None) -> Response:
-    return Response(content, status, headers={**NO_STORE, **(headers or {})}, media_type=_JSON)
+def _json(
+    content: bytes,
+    response: Response,
+    status: int = 200,
+    headers: dict[str, str] | None = None,
+) -> Response:
+    """The JSON written already as the response, with the session's cookie ``current_user`` set
+    on ``response`` when the session slid on (FastAPI drops it from a returned response)."""
+    sent = Response(content, status, headers={**NO_STORE, **(headers or {})}, media_type=_JSON)
+    for cookie in response.headers.getlist("set-cookie"):
+        sent.headers.append("set-cookie", cookie)
+    return sent
 
 
 @router.post(
@@ -271,7 +281,9 @@ def _json(content: bytes, status: int = 200, headers: dict[str, str] | None = No
     },
     dependencies=[Depends(require_same_origin)],
 )
-async def start_backtest(body: BacktestIn, user: CurrentUserDep, runs: BacktestRunsDep) -> Response:
+async def start_backtest(
+    body: BacktestIn, user: CurrentUserDep, runs: BacktestRunsDep, response: Response
+) -> Response:
     """Starts a backtest of one of the user's models on one instrument and period and returns
     its document, `running`, with its number. Checked first: the model is the user's and has a
     manifest, the instrument fits the model, the period with the candles the model needs before
@@ -280,7 +292,7 @@ async def start_backtest(body: BacktestIn, user: CurrentUserDep, runs: BacktestR
     document (`GET /api/v1/backtests/{backtest_id}`) has the results once it finished."""
     with _problems():
         backtest, content = await runs.start(user.id, body)
-    return _json(content, 201, {"Location": f"/api/v1/backtests/{backtest.id}"})
+    return _json(content, response, 201, {"Location": f"/api/v1/backtests/{backtest.id}"})
 
 
 @router.get(
@@ -296,14 +308,14 @@ async def start_backtest(body: BacktestIn, user: CurrentUserDep, runs: BacktestR
     },
 )
 async def get_backtest(
-    backtest_id: BacktestId, user: CurrentUserDep, runs: BacktestRunsDep
+    backtest_id: BacktestId, user: CurrentUserDep, runs: BacktestRunsDep, response: Response
 ) -> Response:
     """The result document of the backtest, whatever its status (`results` is null until it
     finished), in the light view: a series of more than 10,000 rows has one point per UTC day,
     and only the newest 10,000 trades are in it (`trades.complete` false)."""
     with _problems():
         _, content = await runs.document(user.id, backtest_id, light=True)
-    return _json(content)
+    return _json(content, response)
 
 
 @router.get(
@@ -321,11 +333,11 @@ async def get_backtest(
     },
 )
 async def download_backtest(
-    backtest_id: BacktestId, user: CurrentUserDep, runs: BacktestRunsDep
+    backtest_id: BacktestId, user: CurrentUserDep, runs: BacktestRunsDep, response: Response
 ) -> Response:
     """The result document of a finished backtest with every row of its series and every
     trade, as a file to save."""
     with _problems():
         number, content = await runs.document(user.id, backtest_id, light=False)
     disposition = f'attachment; filename="candlestack-backtest-{number}.json"'
-    return _json(content, headers={"Content-Disposition": disposition})
+    return _json(content, response, headers={"Content-Disposition": disposition})
