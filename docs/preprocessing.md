@@ -9,10 +9,11 @@ turns candles into the model's input from it. It is the design agreed on 2026-10
 
 Built so far: the `preprocessing` module (the manifest and its checks, the catalog and the
 first blocks: `candles@1`, `open@1` to `volume@1`, `none@1`, `window@1`), the catalog endpoint
-`GET /api/v1/preprocessing/catalog`, and the manifest's JSON Schema,
-[manifest.schema.json](manifest.schema.json). Still to come: the manifest stored with each
-model, the worker that runs a model on its input, backtests that run with a model, and the
-app's upload and builder. Architecture and module rules: [architecture.md](architecture.md).
+`GET /api/v1/preprocessing/catalog`, the manifest's JSON Schema,
+[manifest.schema.json](manifest.schema.json), and the worker that runs a model on its input
+with checks 4 and 5 below ([architecture.md](architecture.md#worker)). Still to come: the
+manifest stored with each model, backtests that run with a model, and the app's upload and
+builder. Architecture and module rules: [architecture.md](architecture.md).
 The backtest that consumes the predictions: [engine.md](engine.md).
 
 ## Where it sits
@@ -249,9 +250,10 @@ test as soon as it is registered.
 ## Where it runs
 
 1. The backend loads the candles (it has the network and the cache) and writes them to a volume
-   shared with the worker.
+   shared with the worker, then hands it the job through the job queue (`jobs`).
 2. The worker, a container without network that sees the models read only, builds the input
-   from the manifest, loads the model and writes the predictions with their `ts`.
+   from the manifest, loads the model and writes the predictions with their `ts`
+   ([architecture.md](architecture.md#worker)).
 3. The backend aligns them with the candles and runs `signals`, `engine` and `metrics`.
 
 ## Model formats

@@ -99,6 +99,14 @@ class Settings(BaseSettings):
     # The files of the uploaded models; relative to the working directory.
     model_storage_dir: Path = Path("var/models")
 
+    # The jobs of the worker that runs the models (candlestack.jobs): a Redis of their own, so
+    # the worker reaches none of the cache's keys, and a directory the backend and the worker
+    # share for the candles and the predictions; relative to the working directory.
+    jobs_redis_url: str = "redis://127.0.0.1:6379/1"
+    job_files_dir: Path = Path("var/jobs")
+    # How long the worker lets one job run before it stops it, in seconds.
+    job_time_limit: float = Field(default=120, gt=0, le=3600)
+
     candles_max: int = Field(default=50_000, gt=0)
     client_rate_limit: int = Field(default=60, ge=0)
     alpaca_rate_limit: int = Field(

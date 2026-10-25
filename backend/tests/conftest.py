@@ -5,6 +5,7 @@
 ``settings``, ``fake_redis`` or ``fake_database`` to vary them.
 """
 
+import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -20,6 +21,10 @@ from candlestack.core import Settings
 from candlestack.core.db import get_database
 from candlestack.core.redis import get_redis
 from candlestack.main import create_app
+
+# The worker's tests load models with Keras on the backend the worker runs them on (its image
+# and its loop set the same), before any test imports Keras.
+os.environ.setdefault("KERAS_BACKEND", "jax")
 
 
 class FakeRedis:

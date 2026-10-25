@@ -31,6 +31,8 @@ compresses the responses (zstd or gzip) on the way to Cloudflare.
 | `migrate` | the backend image, `alembic upgrade head` | runs once per deploy, before the backend starts | `160m` |
 | `backup` | `prodrigestivill/postgres-backup-local:18-alpine`, pinned by digest | nothing reaches it | `32m` |
 | `models-backup` | `offen/docker-volume-backup`, pinned by digest | nothing reaches it, no network | `32m` |
+| `worker` | the stage `worker` of `backend/Dockerfile`; not deployed yet ([Worker](#worker)) | nothing reaches it; it reaches only `queue`, on the internal network `<env>_jobs` | `768m`, no swap, one CPU |
+| `queue` | `redis:8-alpine`, pinned by digest; not deployed yet | `queue:6379` on `<env>_jobs` only | `32m` |
 
 The frontend image holds the app, built with Node in the image's build stage and served by its
 Caddy (`frontend/Caddyfile`), the same in every environment. A path that is no file gets the
@@ -76,6 +78,8 @@ together they are above the memory, which is fine as long as what runs stays far
 | `postgres` | `128m` | about 30 MB with the backend's pool connected |
 | `backup`, `models-backup` | `32m` each | about 2 MB between their nightly runs; the models archive took under 32 MB for 300 MB of files |
 | `migrate` | `160m` | runs only during a deploy |
+| `worker` (not deployed yet) | `768m`, no swap | about 90 MB idle; a job adds a process with Keras and JAX, about 300 MB at its peak for 50000 candles of the raw-candles test model (locally) |
+| `queue` (not deployed yet) | `32m` (`maxmemory` 16 MB) | a few kilobytes per job |
 
 The limits of one environment add up to 896 MB without `migrate`, 1.79 GB for prod and stage,
 on top of the edge Caddy, cloudflared, the server agent (`2 x 64m`) and the system. Besides
@@ -143,6 +147,7 @@ The Docker networks:
 | --- | --- |
 | `edge` | the edge Caddy, the backend and frontend of prod and stage, the server agent (`vm-agent`) |
 | `<env>_default` | the backend, Redis, Postgres, `migrate` and `backup` of that environment (`models-backup` is on no network) |
+| `<env>_jobs` (internal) | the backend, and with the profile `worker` the worker and its queue: no way out |
 | `agent_docker` (internal) | the server agent and its Docker socket proxy |
 
 Every push to `main` builds the backend, frontend and agent images once, and a release builds
@@ -153,6 +158,26 @@ version changes.
 
 stage and https://ops.candlestack.tech (the team status page) are behind Cloudflare Access: members of the `candlestack-tech` GitHub organization sign in with GitHub. prod is
 public. Any new subdomain is team-only by default (Access application `*.candlestack.tech`).
+
+### Worker
+
+The worker runs the models users upload, one job at a time, for the backend
+([docs/architecture.md](../docs/architecture.md#worker)). `env/compose.yaml` defines it with
+its job queue (`worker`, `queue`) in the profile `worker`, which `vm/candlestack-deploy` does
+not start yet, and the backend already on the network `<env>_jobs` (internal: nothing on it
+reaches the internet) with the volume `<env>_jobs` for the jobs' files. The worker sees the
+models volume read-only, runs as `65534` with a read-only root filesystem (a tmpfs `/tmp` of
+256 MB for Keras and the copy of a model), no capabilities and `no-new-privileges`, and has
+768 MB without swap and one CPU. Its job process is the first the kernel stops at that limit,
+so a model that needs more fails its job and the worker goes on. The queue is a Redis of its
+own, so the worker reaches none of the cache's keys: `noeviction` and 16 MB, no persistence.
+
+To deploy it, what is still to do: build the image (`docker build --target worker backend`)
+in `stage.yml` next to the backend's, give `up` its digest (a third image, recorded in the
+stage record and promoted by a release like the other two) and run compose with
+`WORKER_IMAGE=<image@digest>` and `--profile worker`. Its 768 MB and the queue's 32 MB come on
+top of the 896 MB of limits per environment above: before both environments run it, the VM's
+2 GB need a look ([Memory](#memory)).
 
 ### Test backtests
 
@@ -292,7 +317,7 @@ The other commands are `edge` and `agent <image@digest>` (stage key); the header
 | `vm/deploy_authorized_keys` | Public deploy keys with their scopes |
 | `cloudflared/config.yml` | Tunnel ingress: SSH for deployments, everything else to the edge |
 | `edge/` | Caddy that routes each hostname to its environment |
-| `env/compose.yaml` | One environment (prod or stage): backend, frontend, Redis, Postgres with its migration and nightly backup, the nightly backup of the model files |
+| `env/compose.yaml` | One environment (prod or stage): backend, frontend, Redis, Postgres with its migration and nightly backup, the nightly backup of the model files; the worker and its queue in the profile `worker` |
 | `agent/` | Server agent for ops: host metrics and containers as JSON, read-only Docker proxy |
 | `github/` | Snapshot of the organization's GitHub settings: rulesets, environments, Actions policy, security, project |
 | `cloudflare/` | Snapshot of the Cloudflare settings: zone, DNS, Access, tunnel, Workers |
