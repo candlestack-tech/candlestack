@@ -15,9 +15,11 @@
 # backend keeps the uploaded model files in the volume <ENV_NAME>_models, which the
 # models-backup service archives every night into <ENV_NAME>_model_backups (infra/README.md,
 # "Backups").
-# The worker that runs the models and its job queue are in the profile "worker", which the
-# deploy does not start yet: with WORKER_IMAGE=<image@digest> and --profile worker they join the
-# backend on the internal network <ENV_NAME>_jobs (infra/README.md, "Worker").
+# The worker that runs the models and its job queue are in the profile "worker": stage only,
+# prod runs without them until the tech lead decides otherwise. The deploy does not start them
+# yet; once it does, it sets COMPOSE_PROFILES=worker and WORKER_IMAGE=<image@digest> for stage
+# only (as it sets Redis' memory per environment), and they join the backend on the internal
+# network <ENV_NAME>_jobs (infra/README.md, "Worker").
 services:
   backend:
     image: ${BACKEND_IMAGE:?}
@@ -220,6 +222,8 @@ services:
   # limit (docs/architecture.md, "Worker"). On the internal jobs network only: it reaches the
   # queue and nothing else, no internet. The model files read-only, the jobs' files shared with
   # the backend; the image's /data/jobs is owned by its user (65534), as the backend's is.
+  # No SENTRY_DSN: without network it could not reach Sentry. A bug of the worker reaches
+  # Sentry through the backend, which logs the job's `internal` result as an error.
   worker:
     image: ${WORKER_IMAGE:-}
     profiles: [worker]
@@ -227,19 +231,22 @@ services:
     environment:
       APP_ENV: ${ENV_NAME:?}
       APP_VERSION: ${APP_VERSION:?}
-      SENTRY_DSN: ${SENTRY_DSN:-}
       JOBS_REDIS_URL: redis://queue:6379/0
       MODEL_STORAGE_DIR: /data/models
       JOB_FILES_DIR: /data/jobs
     labels:
       candlestack.version: ${APP_VERSION:?}
-    # The loop (about 90 MB) and one job's process: Keras with JAX and the model, about 300 MB
-    # for 50000 candles of the raw-candles test model (infra/README.md, "Memory"). No swap: a
-    # model over the limit fails its job at once instead of slowing the VM down. One CPU, so a
-    # model cannot starve the backend.
-    mem_limit: 768m
-    memswap_limit: 768m
+    # The loop (about 85 MB) and one job's process: Keras with JAX and the model, about 300 MB
+    # for 50000 candles of the raw-candles test model, 490 MB for 40000 candles of a 25 x 28
+    # model (infra/README.md, "Memory"). No swap: a model over the limit fails its job at once
+    # instead of slowing the VM down. One of the two vCPUs, so a model cannot starve the
+    # backend. At most 512 processes and threads (a job's XLA thread pools grow with the CPUs:
+    # 183 at its peak on 20), and an init that reaps what a job's process left.
+    mem_limit: 512m
+    memswap_limit: 512m
     cpus: 1
+    pids_limit: 512
+    init: true
     read_only: true
     volumes:
       - models:/data/models:ro
@@ -311,7 +318,14 @@ volumes:
   models: {}
   model_backups: {}
   model_backups_work: {}
-  jobs: {}
+  # The jobs' files: in memory and at most 64 MB (a predict of 50000 candles has about 2 MB of
+  # candles and 0.5 MB of predictions), so nothing a job writes can fill the VM's disk, which
+  # prod shares. Owned by the backend's and the worker's user (65534).
+  jobs:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=64m,uid=65534,gid=65534,mode=0700
 
 networks:
   # The backend, the worker and its queue: internal, so the worker has no way out.

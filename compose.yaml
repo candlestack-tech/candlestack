@@ -73,10 +73,13 @@ services:
       - jobs:/data/jobs
     # The loop, and the process of one job with Keras and the model (docs/architecture.md,
     # "Worker"); the copy of the model it loads goes to /tmp. No swap: a model over the limit
-    # fails its job at once instead of slowing the machine down.
-    mem_limit: 768m
-    memswap_limit: 768m
+    # fails its job at once instead of slowing the machine down. As on the VM
+    # (infra/env/compose.yaml), so a model that runs here fits there.
+    mem_limit: 512m
+    memswap_limit: 512m
     cpus: 1
+    pids_limit: 512
+    init: true
     read_only: true
     tmpfs:
       - /tmp:size=256m
