@@ -168,6 +168,12 @@ def test_a_value_of_the_wrong_type_or_out_of_range(
     assert schema_problem(raw) == message
 
 
+def test_the_python_name_of_the_schema_field_is_not_a_field(raw: dict[str, Any]) -> None:
+    raw["schema_"] = raw.pop("schema")
+
+    assert schema_problem(raw) == "schema is missing. schema_ is not a field of the manifest."
+
+
 def test_params_of_any_block_parse_and_the_catalog_checks_them(raw: dict[str, Any]) -> None:
     raw["input"]["features"][0]["params"] = {"window": 20, "anything": [1, 2]}
 

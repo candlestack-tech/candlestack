@@ -129,7 +129,7 @@ class Example(_Strict):
 class Manifest(_Strict):
     """What a model takes and gives, stored with the model (docs/preprocessing.md)."""
 
-    model_config = ConfigDict(title="CandleStack model manifest", validate_by_name=True)
+    model_config = ConfigDict(title="CandleStack model manifest")
 
     schema_: Literal["candlestack.manifest/1"] = Field(alias="schema")
     input: Input
