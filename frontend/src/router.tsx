@@ -34,9 +34,11 @@ declare module '@tanstack/react-router' {
     router: typeof router;
   }
   // A link to an instrument from the home page sets from: 'home', so its back link returns there;
-  // a link to a backtest from the dashboard or a model's page sets 'dashboard' or 'model'.
+  // New backtest sets the part of the app it was opened in (dashboard, backtests, models), for
+  // the builder's back link; a link to a backtest from the dashboard or a model's page sets
+  // 'dashboard' or 'model'.
   interface HistoryState {
-    from?: 'home' | 'dashboard' | 'model';
+    from?: 'home' | 'dashboard' | 'backtests' | 'models' | 'model';
   }
   // A page of the signed-in app without the sidebar sets sidebar: false (the builder).
   interface StaticDataRouteOption {

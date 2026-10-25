@@ -19,7 +19,7 @@ export function formOf(defaults: BacktestDefaults): DefaultsForm {
 }
 
 // A day as YYYY-MM-DD that exists in the calendar (not 2024-02-30).
-function isDay(value: string): boolean {
+export function isDay(value: string): boolean {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (match === null) return false;
   const [year, month, day] = match.slice(1).map(Number) as [number, number, number];
@@ -28,7 +28,7 @@ function isDay(value: string): boolean {
 }
 
 // A percentage from 0 to 5; a comma works as the decimal point too.
-function percent(value: string): number | undefined {
+export function percent(value: string): number | undefined {
   const text = value.trim().replace(',', '.');
   if (!/^(\d+\.?\d*|\.\d+)$/.test(text)) return undefined;
   const number = Number(text);

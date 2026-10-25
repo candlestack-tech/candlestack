@@ -1,6 +1,6 @@
 import { keepPreviousData, queryOptions } from '@tanstack/react-query';
 
-import { apiUrl, get, patch } from './client';
+import { apiUrl, get, patch, postJson } from './client';
 import type { components } from './schema';
 
 // A backtest as the API sends it. Returns and rates are fractions (0.246 is 24.6 %); the results
@@ -15,6 +15,8 @@ export type Dashboard = components['schemas']['DashboardOut'];
 // One backtest as its page shows it: the result document (docs/engine.md) in the light view.
 export type BacktestDocument = components['schemas']['BacktestDocument'];
 export type BacktestStatus = components['schemas']['BacktestStatus'];
+// What a new backtest is made of: the setup groups of the result document.
+export type BacktestIn = components['schemas']['BacktestIn'];
 // The results Best backtests ranks by.
 export type BestMetric = keyof Dashboard['best'];
 
@@ -85,3 +87,6 @@ export function backtestQueryOptions(id: string) {
 export function backtestDownloadUrl(id: string): string {
   return apiUrl(`${backtestPath(id)}/download`);
 }
+
+// POST /api/v1/backtests: starts a backtest and answers with its document, `running`.
+export const startBacktest = (body: BacktestIn) => postJson<BacktestDocument>('/v1/backtests', body);

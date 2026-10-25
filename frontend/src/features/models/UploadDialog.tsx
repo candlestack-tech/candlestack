@@ -124,9 +124,10 @@ function UploadFlow({ existing, onAdded }: FlowProps) {
 }
 
 // Add a model (mockups/app, MODALS.upload): the model file, its manifest, then Add model, which
-// opens the model's page. The API keeps the model as soon as its file passed the checks, and the
-// manifest as soon as it passed its own, so closing the dialog early keeps what was uploaded.
-export function UploadDialog({ children }: { children: ReactNode }) {
+// opens the model's page, or with `onAdded` hands the model over (the builder chooses it). The API
+// keeps the model as soon as its file passed the checks, and the manifest as soon as it passed its
+// own, so closing the dialog early keeps what was uploaded.
+export function UploadDialog({ children, onAdded }: { children: ReactNode; onAdded?: (model: Model) => void }) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   return (
@@ -139,7 +140,8 @@ export function UploadDialog({ children }: { children: ReactNode }) {
         <UploadFlow
           onAdded={(model) => {
             setOpen(false);
-            void navigate({ to: '/models/$modelId', params: { modelId: model.id } });
+            if (onAdded) onAdded(model);
+            else void navigate({ to: '/models/$modelId', params: { modelId: model.id } });
           }}
         />
       </DialogContent>
@@ -147,11 +149,17 @@ export function UploadDialog({ children }: { children: ReactNode }) {
   );
 }
 
-type ManifestDialogProps = { model: Model | null; open: boolean; onOpenChange: (open: boolean) => void };
+type ManifestDialogProps = {
+  model: Model | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  // After Save, with the model (the builder chooses it).
+  onSaved?: (model: Model) => void;
+};
 
 // Add a manifest to {name} (mockups/app, MODALS.man): the same steps with the model done. The
 // model stays while the dialog fades out.
-export function ManifestDialog({ model, open, onOpenChange }: ManifestDialogProps) {
+export function ManifestDialog({ model, open, onOpenChange, onSaved }: ManifestDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent aria-describedby={undefined}>
@@ -160,7 +168,16 @@ export function ManifestDialog({ model, open, onOpenChange }: ManifestDialogProp
             {model ? `Add a manifest to ${model.name}` : 'Add a manifest'}
           </DialogTitle>
         </DialogHeader>
-        {model && <UploadFlow key={model.id} existing={model} onAdded={() => onOpenChange(false)} />}
+        {model && (
+          <UploadFlow
+            key={model.id}
+            existing={model}
+            onAdded={(saved) => {
+              onOpenChange(false);
+              onSaved?.(saved);
+            }}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

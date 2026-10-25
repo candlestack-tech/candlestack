@@ -188,8 +188,9 @@ that market data is delayed 15 min; up to 980 px above the page as a row that sc
 without a scrollbar, the foot left out) and the footer.
 The avatar is the user's initials (`initials.ts`), never a provider picture; its menu
 (`src/features/account/AccountMenu.tsx`) is a shadcn/ui DropdownMenu with Settings, Home page,
-API docs and, in red, Sign out. New backtest opens `ComingSoonDialog`: a shadcn/ui Dialog with
-the home page's Coming soon card over a sketch, for every part of the app that is not built yet.
+API docs and, in red, Sign out. New backtest is a link to the builder ([Backtest builder](#backtest-builder)).
+`ComingSoonDialog` is a shadcn/ui Dialog with the home page's Coming soon card over a sketch, for
+every part of the app that is not built yet.
 Icons are lucide's where lucide draws the design's icon; the others (Backtests, Models,
 Settings, Home page, the moon) are drawn from the mockup in `src/components/icons.tsx`. The
 mockups' button looks (`.btn`, `.btn.ghost`, `.btn.pri`) are class constants on shadcn's Button
@@ -300,7 +301,7 @@ delete modals):
   Rename and Delete), a strip of facts (what it reads and the warm-up, or the input shape without
   a manifest; the backtests and the best Sharpe), the input drawn as a matrix beside the checks,
   then the first 10 backtests of `GET /api/v1/backtests?model=<name>` with a link to all of them.
-  Backtest with it opens New backtest until the builder exists. Delete goes back to Models.
+  Backtest with it opens the builder with the model chosen. Delete goes back to Models.
 - The matrix (`InputMatrix.tsx`): the window's rows down (the oldest at the top, at most 32 drawn,
   spread over a longer window), the columns across under their catalog groups, then the one
   number it predicts. The cells are shaded by the first sample of the manifest's `example`,
@@ -309,6 +310,48 @@ delete modals):
   shows its catalog description, its parameters and its scaling ("as is", "BLESK scaling").
 - A model deleted meanwhile (404) closes its Rename or Delete dialog, and its page says it is not
   found.
+
+## Backtest builder
+
+`/backtests/new` (#270, `src/pages/NewBacktestPage.tsx`, the parts in
+`src/features/backtests/builder/`) follows `pageBuilder` of `mockups/app`: the page has no sidebar (the route's
+`staticData: { sidebar: false }`), a back link to where New backtest was clicked (Dashboard,
+Backtests or Models, the link's history state `from`), the title, the five steps in a row and one
+step at a time in a 760 px card. Steps reached so far can be opened again; Next stays off while
+the open step has something to fix, and Run backtest exists only on the last one. The header's
+New backtest, the dashboard's quick action and Get started link here; a model's Backtest with it
+adds `?model=<id>`.
+
+- The choices start from Settings, Backtest defaults (the route's loader reads them): the period,
+  the direction, the threshold, the stop loss, fees, slippage and the benchmark. The timeframe and
+  the whole input are the model's manifest's.
+- Model: every model of the user (`modelsQueryOptions()`), each with its preprocessing in one line
+  from `manifest_summary` ("Renko 0.6 × ATR · 30m · 23 features · window 25"). A model without a
+  manifest is dimmed and cannot be chosen, with Add manifest (`ManifestDialog`); Upload model is
+  `UploadDialog`, which comes back with the new model chosen. Without a choice, the first model
+  that can run is chosen.
+- Data: one instrument of the model's market (a `24/7` session is crypto, `regular` stocks) from
+  the instrument search, the most traded first until one is chosen; the timeframe from the model;
+  the period as in Settings with Last 12 months, the last whole year and All data. A period that
+  starts before the instrument's first candle and the model's warm-up after it (for stocks an
+  estimate with room for weekends and holidays), ends before it starts or after today is marked
+  with the reason.
+- Decision: the threshold, the direction cards and the stop loss of Settings; under Advanced the
+  calibration with its window, smoothing (EMA 5, 10, 20), the rule (threshold, hysteresis with
+  where it leaves, k-means with its groups, window and refit), confirm and minimum hold in candles
+  and the drawdown stop. The windows are checked against the API's limits as they are typed.
+- Execution: honest fill (the next candle's open, on by default, with what it means behind the
+  i), fees and slippage in percent, and the benchmark: buy and hold of the instrument, the index
+  funds of Settings shown as coming soon (`BacktestIn` takes buy and hold only).
+- Run: the four steps in a line each with Edit, a warning when filling at the signal's close, and
+  Run backtest, which sends the setup groups (`POST /api/v1/backtests`, `BacktestIn`: the days
+  as `[first day, the day after the last)` in UTC, ending now at the latest, percent as basis
+  points) and opens the new backtest's page. A refusal goes back to the step it is about and says
+  it in plain words from the problem's extensions (`problems.ts`): the model gone or without a
+  manifest on Model; the instrument, the period, the warm-up and too many candles on Data; a
+  backtest already running, backtests unavailable or the market data down on Run. Any change
+  clears it.
+- Below 640 px the labels go above their controls and only the open step keeps its name.
 
 ## Backtest page
 

@@ -116,8 +116,9 @@ export async function del(path: string): Promise<void> {
   await send(path, { method: 'DELETE', headers: { Accept: 'application/json' } });
 }
 
-// A change sent as JSON (PATCH a part, PUT the whole), answered with the changed resource.
-async function sendJson<T>(method: 'PATCH' | 'PUT', path: string, body: unknown): Promise<T> {
+// A change sent as JSON (PATCH a part, PUT the whole, POST a new one), answered with the
+// changed or new resource.
+async function sendJson<T>(method: 'PATCH' | 'PUT' | 'POST', path: string, body: unknown): Promise<T> {
   const res = await send(path, {
     method,
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -128,6 +129,7 @@ async function sendJson<T>(method: 'PATCH' | 'PUT', path: string, body: unknown)
 
 export const patch = <T>(path: string, body: unknown) => sendJson<T>('PATCH', path, body);
 export const put = <T>(path: string, body: unknown) => sendJson<T>('PUT', path, body);
+export const postJson = <T>(path: string, body: unknown) => sendJson<T>('POST', path, body);
 
 // Sends a file as the raw body, e.g. a model upload, and returns the JSON answer. Raw, not a
 // form: the API reads the body as the file and takes its name from the query.

@@ -12,8 +12,10 @@ const DIRECTIONS: readonly { value: Direction; title: string; about: string; sho
   { value: 'both', title: 'Long and short', about: 'Also sell short when it points down', short: true },
 ];
 
-// A slider with its value beside it (.st-sl, .st-val), at most 320 px wide.
+// A slider with its value beside it (.st-sl, .st-val), at most 320 px wide unless `className`
+// says otherwise (the builder's take the row).
 export function ValueSlider({
+  className,
   label,
   value,
   min,
@@ -22,6 +24,7 @@ export function ValueSlider({
   format,
   onChange,
 }: {
+  className?: string;
   label: string;
   value: number;
   min: number;
@@ -31,7 +34,7 @@ export function ValueSlider({
   onChange: (value: number) => void;
 }) {
   return (
-    <div className="flex max-w-[320px] items-center gap-3">
+    <div className={cn('flex max-w-[320px] items-center gap-3', className)}>
       <Slider
         className="flex-1"
         aria-label={label}
@@ -49,14 +52,17 @@ export function ValueSlider({
   );
 }
 
-// A number with its unit inside the field, on the surface at the right (.md-in.st-unit).
+// A number with its unit inside the field, on the surface at the right (.md-in.st-unit), at most
+// 260 px wide unless `className` says otherwise (the builder's are as wide as their numbers).
 export function UnitInput({
+  className,
   label,
   unit,
   value,
   invalid,
   onChange,
 }: {
+  className?: string;
   label: string;
   unit: string;
   value: string;
@@ -68,6 +74,7 @@ export function UnitInput({
       className={cn(
         'flex max-w-[260px] items-center rounded-md border bg-background focus-within:border-[color-mix(in_srgb,var(--accent)_55%,var(--rule))]',
         invalid && 'border-down focus-within:border-down',
+        className,
       )}
     >
       <Input
