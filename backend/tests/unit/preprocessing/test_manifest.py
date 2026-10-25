@@ -1,5 +1,4 @@
-"""The form of a manifest (the schema ``candlestack.manifest/1``): what parses, and the plain
-words of what does not."""
+"""The form of a manifest (version 1): what parses, and the plain words of what does not."""
 
 import json
 import re
@@ -72,7 +71,7 @@ def test_defaults_fill_what_the_manifest_leaves_out(raw: dict[str, Any]) -> None
 def test_the_manifest_dumps_back_with_its_field_names(raw: dict[str, Any]) -> None:
     dumped = parse_manifest(raw).model_dump(by_alias=True)
 
-    assert dumped["schema"] == "candlestack.manifest/1"
+    assert dumped["version"] == 1
     assert Manifest.model_validate(dumped) == parse_manifest(raw)
 
 
@@ -86,13 +85,13 @@ def test_a_document_that_is_no_object(document: str) -> None:
 
 
 def test_every_problem_of_the_form_is_one_sentence_of_one_message(raw: dict[str, Any]) -> None:
-    raw["schema"] = "candlestack.manifest/2"
+    raw["version"] = 2
     del raw["signature"]
     raw["input"]["features"][2]["name"] = ""
     raw["input"]["window"]["size"] = 25
 
     assert schema_problem(raw) == (
-        "schema: Input should be 'candlestack.manifest/1'. "
+        "This manifest has version 2. CandleStack reads version 1. "
         "input.features[2].name: String should have at least 1 character. "
         "input.window.size is not a field of the manifest. "
         "signature is missing."
@@ -178,10 +177,50 @@ def test_a_crypto_model_trades_around_the_clock(raw: dict[str, Any]) -> None:
     assert parse_manifest(raw).input.session == "24/7"
 
 
-def test_the_python_name_of_the_schema_field_is_not_a_field(raw: dict[str, Any]) -> None:
-    raw["schema_"] = raw.pop("schema")
+@pytest.mark.parametrize("version", [0, 2])
+def test_a_manifest_of_another_version_is_refused(raw: dict[str, Any], version: int) -> None:
+    raw["version"] = version
 
-    assert schema_problem(raw) == "schema is missing. schema_ is not a field of the manifest."
+    assert schema_problem(raw) == (
+        f"This manifest has version {version}. CandleStack reads version 1."
+    )
+
+
+@pytest.mark.parametrize("version", [True, 1.0, "1", None])
+def test_the_version_is_an_integer(raw: dict[str, Any], version: object) -> None:
+    raw["version"] = version
+
+    assert schema_problem(raw) == "version: Input should be a valid integer."
+    assert schema_problem(json.dumps(raw)) == "version: Input should be a valid integer."
+
+
+def test_a_manifest_with_the_old_version_field_says_how_to_update_it(
+    raw: dict[str, Any],
+) -> None:
+    del raw["version"]
+    raw["schema"] = "candlestack.manifest/1"
+
+    assert schema_problem(raw) == (
+        "The manifest names its version with the old field schema. "
+        'Replace "schema": "candlestack.manifest/1" with "version": 1.'
+    )
+
+
+def test_the_old_version_field_next_to_the_new_one_is_refused(raw: dict[str, Any]) -> None:
+    raw["schema"] = "candlestack.manifest/1"
+    raw["input"]["window"]["length"] = 0
+
+    assert schema_problem(raw) == (
+        "The manifest names its version with the old field schema. "
+        'Replace "schema": "candlestack.manifest/1" with "version": 1. '
+        "input.window.length: Input should be greater than or equal to 1."
+    )
+
+
+def test_a_manifest_without_a_version_is_refused(raw: dict[str, Any]) -> None:
+    del raw["version"]
+
+    assert schema_problem(raw) == "version is missing."
 
 
 def test_params_of_any_block_parse_and_the_catalog_checks_them(raw: dict[str, Any]) -> None:

@@ -45,7 +45,7 @@ copy of the manifest it ran with, next to the model's SHA-256, so a later change
 manifest never rewrites what an old backtest means.
 
 No existing standard describes Renko bricks, indicator windows and column order, so the schema
-is our own (`candlestack.manifest/1`). It borrows from:
+is our own, and each manifest carries its version (`"version": 1`). It borrows from:
 
 | Standard | What we take |
 | --- | --- |
@@ -58,7 +58,7 @@ is our own (`candlestack.manifest/1`). It borrows from:
 
 | Field | Meaning |
 | --- | --- |
-| `schema` | `candlestack.manifest/1` |
+| `version` | `1`, the only version so far: a manifest of another version is refused, and one that still has the old field `"schema": "candlestack.manifest/1"` is told to replace it with `"version": 1` |
 | `input.timeframe`, `input.session` | the candles the model expects: a timeframe of the market data (`30m`), and `regular` (US trading hours) or `24/7` (around the clock, as crypto trades) |
 | `input.representation` | which rows the model sees: a catalog block and its parameters (`candles@1`, `renko@1`, ...) |
 | `input.features` | the columns in their exact order: each a name (not `ts`, the time of a row), a catalog block (`rsi@1`), its parameters and its normalization (`none@1` when left out) |
@@ -97,7 +97,7 @@ features are the raw prices, nothing is normalized, a sample is the last 25 cand
 
 ```json
 {
-  "schema": "candlestack.manifest/1",
+  "version": 1,
   "input": {
     "timeframe": "30m",
     "session": "regular",
@@ -135,7 +135,7 @@ rel_low, rel_close, is_last_bar`.
 
 ```json
 {
-  "schema": "candlestack.manifest/1",
+  "version": 1,
   "input": {
     "timeframe": "30m",
     "session": "regular",

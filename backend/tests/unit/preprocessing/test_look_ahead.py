@@ -131,7 +131,7 @@ def manifest(
 ) -> Manifest:
     return parse_manifest(
         {
-            "schema": "candlestack.manifest/1",
+            "version": 1,
             "input": {
                 "timeframe": "30m",
                 "session": "regular",

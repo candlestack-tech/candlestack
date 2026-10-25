@@ -299,17 +299,18 @@
     "input": {
       "$ref": "#/$defs/Input"
     },
-    "schema": {
-      "const": "candlestack.manifest/1",
-      "title": "Schema",
-      "type": "string"
-    },
     "signature": {
       "$ref": "#/$defs/Signature"
+    },
+    "version": {
+      "const": 1,
+      "description": "The version of the manifest's form",
+      "title": "Version",
+      "type": "integer"
     }
   },
   "required": [
-    "schema",
+    "version",
     "input",
     "signature"
   ],

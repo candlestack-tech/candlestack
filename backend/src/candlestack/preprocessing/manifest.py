@@ -1,4 +1,4 @@
-"""The manifest (``candlestack.manifest/1``): what a model takes, as data.
+"""The manifest (version 1): what a model takes, as data.
 
 It names every step by a block of the catalog and that block's parameters, so the schema stays
 the same when blocks are added: it checks the form of the document only. Which blocks exist
@@ -13,9 +13,11 @@ would describe an input it does not build.
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic_core import PydanticCustomError
 
-SCHEMA = "candlestack.manifest/1"
+# The only version of the manifest so far: a manifest of any other is refused.
+VERSION = 1
 
 # The timeframes of the market data (docs/data.md#timeframes); data is not imported here.
 Timeframe = Literal["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
@@ -133,7 +135,7 @@ class Manifest(_Strict):
 
     model_config = ConfigDict(title="CandleStack model manifest")
 
-    schema_: Literal["candlestack.manifest/1"] = Field(alias="schema")
+    version: Literal[1] = Field(description="The version of the manifest's form")
     input: Input
     signature: Signature
     example: Example | None = None
@@ -141,3 +143,11 @@ class Manifest(_Strict):
         default_factory=dict,
         description="Free text for people: trained on which instruments, which period, notes",
     )
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def _version_is_an_integer(cls, value: object) -> object:
+        # Literal[1] alone takes true and 1.0 for 1, and the manifest is strict.
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise PydanticCustomError("int_type", "Input should be a valid integer")
+        return value
