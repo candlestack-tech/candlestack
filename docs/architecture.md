@@ -473,15 +473,16 @@ the ones whose folder exists while their code is being written.
 ## Import rules
 
 - Dependencies point one way: `experiments` -> `ml` -> `accounts` | `data` | `jobs` -> `core`.
-  `core` imports no other module, and `jobs` none at all. For now `experiments` imports only `ml`, `accounts` and `core`: not
-  `data` and not the backtest modules, as it runs no backtest yet.
+  `core` imports no other module, and `jobs` none at all. `experiments` imports `ml`, `accounts`
+  and `core`, and the backtest modules `signals`, `engine` and `metrics` to assemble a run
+  (`assembly.py`); not yet `data` and `jobs`, as it runs no backtest yet.
 - The backtest modules `signals`, `engine` and `metrics`, and `preprocessing`, stand alone:
   they import no other module of the project, not each other, and no server library
   (`fastapi`, `starlette`, `scalar_fastapi`, `granian`, `redis`, `httpx`, `sentry_sdk`,
   `pydantic_settings`, `sqlalchemy`, `asyncpg`, `alembic`, `authlib`). They are
   plain functions on Polars frames (Pydantic for their settings and the manifest, NumPy for
-  the model's input), put together only by the code that runs them: `cli` and the worker now,
-  `experiments` later. The worker runs `preprocessing` without network, so it must not need
+  the model's input), put together only by the code that runs them: `cli`, the worker and
+  `experiments`. The worker runs `preprocessing` without network, so it must not need
   the server's libraries.
 - `preprocessing` serves no HTTP itself: `ml` imports it and serves its catalog
   (`GET /api/v1/preprocessing/catalog`), as the manifest belongs to a model and `ml` will check
