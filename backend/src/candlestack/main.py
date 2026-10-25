@@ -33,7 +33,8 @@ from candlestack.core import (
     setup_sentry,
 )
 from candlestack.data import DataService, build_data_service, data_router
-from candlestack.experiments import backtests_router, model_usage
+from candlestack.experiments import BacktestRunner, backtests_router, model_usage
+from candlestack.jobs import JobClient, JobFiles, JobQueue
 from candlestack.ml import (
     LocalModelStorage,
     ModelsAccountDeletion,
@@ -85,12 +86,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     uses them: the client ``rate_limiter`` and the market ``data_service``. With
     ``STATS_REFRESH`` (prod and stage) the instrument stats are refreshed in a background task
     while the app runs. The model storage is made ready, and what crashed uploads left there
-    is removed now and every 10 minutes. On shutdown the data service's lookups in the
-    background stop before the clients close."""
+    is removed now and every 10 minutes. The ``backtest_runner`` runs the backtests users start;
+    those a stopped process left running fail now. On shutdown the runs stop (failed), then the
+    data service's lookups in the background, before the clients close."""
     settings: Settings = app.state.settings
     model_storage: ModelStorage = app.state.model_storage
     await model_storage.prepare()
     app.state.redis = create_redis(settings.redis_url)
+    # The queue of the worker that runs the models, for the backtests.
+    jobs_redis = create_redis(settings.jobs_redis_url)
     app.state.db = Database(settings.database_url.get_secret_value())
     app.state.rate_limiter = RateLimiter(app.state.redis)
     try:
@@ -98,6 +102,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.http = http
             data_service = build_data_service(settings, app.state.redis, http)
             app.state.data_service = data_service
+            runner = BacktestRunner(
+                app.state.db,
+                data_service,
+                JobClient(JobQueue(jobs_redis), JobFiles(settings.job_files_dir)),
+            )
+            app.state.backtest_runner = runner
+            await runner.recover()
             async with (
                 _background(data_service, stats=settings.stats_refresh),
                 _running(keep_incoming_swept(model_storage), "The sweep of incoming model files"),
@@ -105,10 +116,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 try:
                     yield
                 finally:
+                    # The runs first: they use the data service and Postgres to the end.
+                    await runner.close()
                     # Before the HTTP client closes under the lookups it may still run.
                     await data_service.close()
     finally:
         await app.state.db.dispose()
+        await jobs_redis.aclose()
         await app.state.redis.aclose()
 
 

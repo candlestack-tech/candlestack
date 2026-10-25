@@ -20,10 +20,12 @@ from candlestack.data import (
     DataService,
     InstrumentId,
     InstrumentNotFound,
+    InvalidRequest,
     PeriodOutOfRange,
     SourceUnavailable,
     Timeframe,
     TooManyCandles,
+    WarmUpOutOfRange,
     build_data_service,
     normalise,
 )
@@ -733,3 +735,41 @@ async def test_instrument_info(service: DataService, upstream, monkeypatch: pyte
         utc("2026-09-26T12:33"),
     )
     assert info.max_candles == 50000
+
+
+# --- The start of a load with a model's warm-up ---------------------------------------------
+
+
+async def test_the_warm_up_starts_its_candles_before_the_period(service: DataService, upstream):
+    upstream.exchange_info()
+    upstream.first_kline(LISTED_MS)
+    start = utc("2024-01-15T10:00")
+
+    with_warm_up = await service.warm_up_start(BTC, Timeframe.H1, start, start + 10 * HOUR, 24)
+    without = await service.warm_up_start(BTC, Timeframe.H1, start, start + 10 * HOUR, 0)
+
+    assert with_warm_up == start - 24 * HOUR
+    assert without == start
+
+
+async def test_the_warm_up_start_checks_the_period_and_the_warm_up(service: DataService, upstream):
+    upstream.exchange_info()
+    upstream.first_kline(LISTED_MS)
+    listed = utc("2017-08-17T04:00")
+    start = utc("2018-01-01")
+
+    with pytest.raises(WarmUpOutOfRange, match="Set start to 2017-08-18T04:00:00Z") as early:
+        await service.warm_up_start(BTC, Timeframe.H1, listed + 3 * HOUR, listed + 30 * HOUR, 24)
+    with pytest.raises(TooManyCandles) as many:
+        await service.warm_up_start(BTC, Timeframe.H1, start, start + 49_990 * HOUR, 24)
+    with pytest.raises(PeriodOutOfRange, match="from 2017-08-17T04:00:00Z"):
+        await service.warm_up_start(BTC, Timeframe.H1, listed - HOUR, listed + HOUR, 0)
+    with pytest.raises(PeriodOutOfRange, match="Set end to"):
+        await service.warm_up_start(BTC, Timeframe.H1, start, utc("2100-01-01"), 24)
+    with pytest.raises(InvalidRequest, match="must be before end"):
+        await service.warm_up_start(BTC, Timeframe.H1, start, start, 24)
+
+    assert early.value.earliest_start == listed + 24 * HOUR
+    assert (early.value.candles, early.value.timeframe) == (24, "1h")
+    # The warm-up counts against the maximum.
+    assert many.value.requested == 50_014

@@ -20,6 +20,7 @@ from candlestack.experiments.document import (
     LIGHT_ROWS,
     LIGHT_TRADES,
     VERSION,
+    AlignOut,
     BacktestHeader,
     BacktestModel,
     BenchmarkIn,
@@ -29,6 +30,7 @@ from candlestack.experiments.document import (
     Execution,
     MetricsArgs,
     Period,
+    Rows,
     Software,
 )
 from candlestack.metrics import drawdown, stats
@@ -92,6 +94,24 @@ def run(
     result = backtest(rows, execution)
     values = stats(result.trades, result.series, rows, periods_per_year)
     return Run(rows=rows, report=report, result=result, stats=values)
+
+
+def rows_of(done: Run) -> Rows:
+    """The rows the engine ran on, as the document's ``data.rows`` says them."""
+    ts = done.rows["ts"]
+    first, last = ts.first(), ts.last()
+    # A run has rows (``run`` raises NothingToTest without any).
+    assert isinstance(first, int)
+    assert isinstance(last, int)
+    return Rows(first_ts=first, last_ts=last, count=ts.len())
+
+
+def align_of(done: Run) -> AlignOut:
+    report = done.report
+    return AlignOut(
+        predictions_without_candle=report.predictions_without_candle,
+        candles_without_prediction=report.candles_without_prediction,
+    )
 
 
 def stats_out(values: dict[str, float | int | None]) -> dict[str, float | int | None]:

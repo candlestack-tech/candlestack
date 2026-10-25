@@ -6,10 +6,12 @@ when the backtest ran: ``MODEL_NAME``, over a left join of ``models``.
 """
 
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any, NamedTuple
 
 from sqlalchemy import (
     ColumnElement,
+    DateTime,
     Select,
     String,
     UnaryExpression,
@@ -21,10 +23,11 @@ from sqlalchemy import (
     literal,
     select,
     text,
+    update,
 )
 from sqlalchemy.dialects.postgresql import JSONB, aggregate_order_by, array_agg
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import InstrumentedAttribute
+from sqlalchemy.orm import InstrumentedAttribute, undefer
 from sqlalchemy.sql import visitors
 
 from candlestack.accounts import User
@@ -39,6 +42,7 @@ MODEL_NAME = func.coalesce(Model.name, Backtest.model_name)
 
 _FINISHED = Backtest.status == BacktestStatus.finished.value
 _FAILED = Backtest.status == BacktestStatus.failed.value
+_RUNNING = Backtest.status == BacktestStatus.running.value
 
 # The value each sort of the list orders by; `when` is the order they were made in, as `number`.
 _SORT_KEYS: dict[BacktestSort, SortKey] = {
@@ -254,6 +258,75 @@ class BacktestStore:
             )
         ).first()
         return Listed(*row) if row is not None else None
+
+    # --- What starting and running a backtest needs --------------------------------------------
+
+    def add(self, backtest: Backtest) -> None:
+        self._db.add(backtest)
+
+    async def running(self, user_id: str) -> bool:
+        """Whether a backtest of the user is running."""
+        found = await self._db.scalar(
+            select(Backtest.id).where(Backtest.user_id == user_id, _RUNNING).limit(1)
+        )
+        return found is not None
+
+    async def run_model(self, user_id: str, model_id: str) -> Model | None:
+        """The user's model with the ID and its manifest; None also when it is another user's."""
+        return await self._db.scalar(
+            select(Model)
+            .options(undefer(Model.manifest))
+            .where(Model.id == model_id, Model.user_id == user_id)
+        )
+
+    async def hold_model(self, user_id: str, model_id: str) -> bool:
+        """Whether the user still has the model; it cannot be deleted until the transaction
+        ends (a backtest stored with it would fail its foreign key)."""
+        found = await self._db.scalar(
+            select(Model.id)
+            .where(Model.id == model_id, Model.user_id == user_id)
+            .with_for_update(read=True, key_share=True)
+        )
+        return found is not None
+
+    async def model_of(self, backtest_id: str) -> str | None:
+        """The ID of the backtest's model; None once the model is deleted."""
+        return await self._db.scalar(select(Backtest.model_id).where(Backtest.id == backtest_id))
+
+    async def with_run(self, user_id: str, backtest_id: str) -> Backtest | None:
+        """The user's backtest with what its run stored, its predictions aside."""
+        return await self._db.scalar(
+            select(Backtest)
+            .options(undefer(Backtest.spec), undefer(Backtest.report), undefer(Backtest.stats))
+            .where(Backtest.id == backtest_id, Backtest.user_id == user_id)
+        )
+
+    async def run_of(self, backtest_id: str) -> Backtest | None:
+        """The backtest with its setup, whoever it is of: what the run reads when it starts."""
+        return await self._db.scalar(
+            select(Backtest).options(undefer(Backtest.spec)).where(Backtest.id == backtest_id)
+        )
+
+    async def predictions(self, backtest_id: str) -> bytes | None:
+        return await self._db.scalar(select(Backtest.predictions).where(Backtest.id == backtest_id))
+
+    async def fail(self, error: str, now: datetime, backtest_id: str | None = None) -> int:
+        """Marks the running backtest with the ID (every running one without an ID) failed
+        with ``error``; how many. One that has ended keeps what it has."""
+        query = update(Backtest).where(_RUNNING)
+        if backtest_id is not None:
+            query = query.where(Backtest.id == backtest_id)
+        failed = await self._db.scalars(
+            query.values(
+                status=BacktestStatus.failed.value,
+                error=error,
+                finished_at=now,
+                duration_s=func.extract(
+                    "epoch", literal(now, DateTime(timezone=True)) - Backtest.created_at
+                ),
+            ).returning(Backtest.id)
+        )
+        return len(failed.all())
 
     # --- What the seed command needs ----------------------------------------------------------
 

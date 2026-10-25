@@ -32,6 +32,11 @@ class JobClient:
         self._queue = queue
         self._files = files
 
+    async def ping(self) -> None:
+        """Raises ``redis.exceptions.RedisError`` when the queue cannot be reached, so a caller
+        can refuse work at once instead of waiting for a result that cannot come."""
+        await self._queue.ping()
+
     async def predict(
         self,
         *,

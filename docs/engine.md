@@ -733,10 +733,11 @@ again, whatever `--jobs` is.
 ## The result document
 
 What a finished backtest is when the app shows it, the API returns it or a user downloads it as
-JSON. Its models are `experiments/document.py`, and `experiments/assembly.py` runs the steps and
-writes its results; the routes come with the backtests API. One shape serves all three uses: the
-page and the API get a lighter view of the two long tables
-([The light view](#the-light-view)), the download gets everything.
+JSON. Its models are `experiments/document.py`, `experiments/assembly.py` runs the steps and
+writes its results, and the backtests API serves it
+([architecture.md](architecture.md#backtests)). One shape serves all three uses: the page and
+the API get a lighter view of the two long tables ([The light view](#the-light-view)), the
+download gets everything.
 
 ### Stored, and built on request
 
@@ -830,12 +831,13 @@ The engine's worked example ([Worked example](#worked-example)) with `next_open`
 
 The groups follow the builder's steps (Model, Data, Decision, Execution): `model`, `data`,
 `decision`, `execution` and `benchmarks` together are what a new run needs, so running a
-backtest again sends them back. As every view of a document runs the steps again, a new run's
-windows are bounded: a calibration window of at most 1,000, a k-means window of at most 5,000
-with `refit_every` at least `window / 20` (a `rank` window of 5,000 takes 8 s on 50,000 rows,
+backtest again sends them back: `POST /api/v1/backtests` takes them and ignores the
+groups' other fields. As every view of a document runs the steps again, a new run's windows
+are bounded: a calibration window of at most 1,000, a k-means window of at most 5,000 with
+`refit_every` at least `window / 20` (a `rank` window of 5,000 takes 8 s on 50,000 rows,
 k-means of 2,000 refitted on every row a minute and a half).
-`backend/tests/unit/experiments/test_document.py` builds this
-example as a document and compares it with what is printed here; change both together.
+`backend/tests/unit/experiments/test_document.py` builds this example as a document and
+compares it with what is printed here; change both together.
 
 | Group | Fields | From |
 | --- | --- | --- |
@@ -851,6 +853,13 @@ example as a document and compares it with what is printed here; change both tog
 | `results.benchmarks` | each benchmark's `total_return` | `buy_and_hold_return` for `bh` |
 | `results.series` | `ts`, `close`, `prediction`, `signal`, `position`, `equity`, `drawdown` per row; each benchmark's equity on the same rows | the engine's `series`, the candles, `drawdown` |
 | `results.trades` | the engine's trade columns, plus `candles_held`: the rows from the entry candle to the exit candle | the engine's `trades` |
+
+Until a backtest finished, its document has the setup only: `results` is null, and so are
+`software.runner`, `data.loaded`, `changed`, `rows`, `predictions`, `align` and
+`warm_up.dropped` (`warm_up.candles` and `kind` come from the manifest when it starts). As the
+results are built on request, `software.engine_version`, `data.rows` and `data.align` are those
+of the build; `data.loaded` and `data.predictions` are what the run stored, and the Backtests
+list keeps the statistics and the engine version of the run itself.
 
 ### Conventions
 

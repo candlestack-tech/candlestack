@@ -25,6 +25,10 @@ class FakeQueue:
         self.answer = answer
         self.submitted: list[Job] = []
         self.waits: list[float] = []
+        self.pinged = 0
+
+    async def ping(self) -> None:
+        self.pinged += 1
 
     async def submit(self, job: Job) -> None:
         self.submitted.append(job)
@@ -143,3 +147,11 @@ async def test_a_failure_of_the_model_is_no_error_here(
         await jobs.check(model="u/m.keras", sha256=SHA256, manifest=MANIFEST)
 
     assert caplog.records == []
+
+
+async def test_ping_asks_the_queue(tmp_path: Path) -> None:
+    jobs, queue, _ = client(tmp_path, "done")
+
+    await jobs.ping()
+
+    assert queue.pinged == 1

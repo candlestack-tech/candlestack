@@ -639,6 +639,7 @@ RFC 9457 `application/problem+json`, `type` `https://candlestack.tech/problems/<
 | 422 | `validation` | missing or malformed parameters | `errors`: one `{loc, msg, type}` per bad parameter |
 | 422 | `period-out-of-range` | `start` before `available_from`, or `end` in the future | `instrument`, `timeframe`, `available_from`, `available_to` |
 | 422 | `too-many-candles` | more than `CANDLES_MAX` expected candles | `requested`, `maximum`, `suggestion` (also in `detail`) |
+| 422 | `warm-up-out-of-range` | a backtest's period starts too early for the candles its model needs before it (`POST /api/v1/backtests`) | `instrument`, `timeframe`, `candles`, `earliest_start` (null when the first candle is not known) |
 | 429 | `rate-limited` | client over `CLIENT_RATE_LIMIT` | `limit`; header `Retry-After` |
 | 502 | `source-data-invalid` | source data failed validation | `source` |
 | 503 | `source-unavailable` | source down or timing out, or our budget for it is spent | `source`; header `Retry-After` when waiting helps (our budget is spent, or the source limits us) |

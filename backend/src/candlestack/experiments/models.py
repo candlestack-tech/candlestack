@@ -13,6 +13,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -76,6 +77,25 @@ class Backtest(Base):
     engine_version: Mapped[str | None] = mapped_column(String(16))
     # What the user sees of a failed backtest: what went wrong and what to do.
     error: Mapped[str | None] = mapped_column(Text)
+    # What a backtest made in the app ran with and found (docs/engine.md, "The result
+    # document"): its setup groups (the model with a copy of its manifest, the instrument and
+    # period, decision, execution, benchmarks), what the run reported (the candles loaded and
+    # their fingerprint, warm-up, rows, alignment, software, timings), the 12 statistics
+    # (max_drawdown negative) and the predictions as zstd Parquet (ts, prediction), from which
+    # the document is built again. Null for the seed command's backtests. Loaded only where
+    # the document is built: the predictions are about 140 KB for 10 years of stock candles.
+    spec: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, deferred=True, deferred_raiseload=True
+    )
+    report: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, deferred=True, deferred_raiseload=True
+    )
+    stats: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, deferred=True, deferred_raiseload=True
+    )
+    predictions: Mapped[bytes | None] = mapped_column(
+        LargeBinary, deferred=True, deferred_raiseload=True
+    )
     starred: Mapped[bool] = mapped_column(Boolean, server_default=false(), default=False)
     # Made by the seed command (test data on stage and local), which replaces only these.
     seeded: Mapped[bool] = mapped_column(Boolean, server_default=false(), default=False)

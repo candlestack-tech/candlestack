@@ -132,8 +132,12 @@ class BacktestsService:
     async def dashboard(self, user_id: str) -> DashboardOut:
         """What the Dashboard shows of the user's backtests."""
         counts = await self._counts(user_id)
+        # The newest that ended: a running one has nothing to show there yet.
         last = await self._store.backtests(
-            user_id, [], ordering(BacktestSort.default, SortOrder.desc), limit=DASHBOARD_LAST
+            user_id,
+            [Backtest.status != BacktestStatus.running.value],
+            ordering(BacktestSort.default, SortOrder.desc),
+            limit=DASHBOARD_LAST,
         )
         best = {
             name: [

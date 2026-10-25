@@ -36,6 +36,7 @@ from candlestack.data.candles import (
     find_gaps,
     fingerprint,
     first_of_last,
+    latest_end,
     resample_sessions,
     slice_range,
     suggest,
@@ -49,6 +50,7 @@ from candlestack.data.errors import (
     PeriodOutOfRange,
     SourceUnavailable,
     TooManyCandles,
+    WarmUpOutOfRange,
 )
 from candlestack.data.firsts import Firsts
 from candlestack.data.icons import FALLBACK_AFTER_FAILURE, Icon, Icons
@@ -286,6 +288,54 @@ class DataService:
             hint = suggest(start, end, timeframe, self._candles_max, lookup.sessions)
             raise TooManyCandles(requested, self._candles_max, hint)
         return await self._load(lookup, start, end)
+
+    async def warm_up_start(
+        self, instrument_id: InstrumentId, timeframe: Timeframe, start: int, end: int, candles: int
+    ) -> int:
+        """Where a load of ``[start, end)`` with ``candles`` candles before ``start`` (a model's
+        warm-up) begins: the open of the earliest of them, ``start`` without any. Checks the
+        period as ``candles`` does, with the warm-up counted against the maximum, so ``candles``
+        of ``[the returned start, end)`` then loads them.
+
+        Raises ``InvalidRequest``, ``InstrumentNotFound``, ``PeriodOutOfRange``,
+        ``WarmUpOutOfRange`` when the data has fewer candles before ``start``,
+        ``TooManyCandles`` and ``SourceUnavailable``.
+        """
+        if start >= end:
+            raise InvalidRequest(f"start ({start}) must be before end ({end}).")
+        lookup = await self._lookup(instrument_id, timeframe)
+        if end > lookup.now or (
+            lookup.available_from is not None and start < lookup.available_from
+        ):
+            raise lookup.out_of_range(start=start, end=end)
+        first = start
+        if candles > 0:
+            earliest = first_of_last(
+                start, lookup.now, timeframe, candles, lookup.sessions, lower=lookup.available_from
+            )
+            if (
+                earliest is None
+                or candle_count(earliest, start, timeframe, lookup.sessions) < candles
+            ):
+                raise WarmUpOutOfRange(
+                    instrument_id, timeframe, candles, self._after_warm_up(lookup, candles)
+                )
+            first = earliest
+        requested = candle_count(first, end, timeframe, lookup.sessions)
+        if requested > self._candles_max:
+            hint = suggest(first, end, timeframe, self._candles_max, lookup.sessions)
+            raise TooManyCandles(requested, self._candles_max, hint)
+        return first
+
+    @staticmethod
+    def _after_warm_up(lookup: _Lookup, candles: int) -> int | None:
+        """The first start with ``candles`` candles before it: the open of the candle after the
+        first ``candles`` ones; None when the first candle is not known."""
+        if lookup.available_from is None:
+            return None
+        return latest_end(
+            lookup.available_from, lookup.now, lookup.timeframe, candles, lookup.sessions
+        )
 
     async def last_candles(
         self, instrument_id: InstrumentId, timeframe: Timeframe, end: int, limit: int
