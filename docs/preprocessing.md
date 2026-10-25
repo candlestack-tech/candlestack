@@ -10,10 +10,10 @@ turns candles into the model's input from it. It is the design agreed on 2026-10
 Built so far: the `preprocessing` module (the manifest and its checks, the catalog and the
 first blocks: `candles@1`, `open@1` to `volume@1`, `none@1`, `window@1`), the catalog endpoint
 `GET /api/v1/preprocessing/catalog`, the manifest's JSON Schema,
-[manifest.schema.json](manifest.schema.json), and the worker that runs a model on its input
-with checks 4 and 5 below ([architecture.md](architecture.md#worker)). Still to come: the
-manifest stored with each model, backtests that run with a model, and the app's upload and
-builder. Architecture and module rules: [architecture.md](architecture.md).
+[manifest.schema.json](manifest.schema.json), the manifest stored with each model, and the
+worker that runs a model on its input with checks 4 and 5 below
+([architecture.md](architecture.md#worker)). Still to come: backtests that run with a model
+and the app's upload and builder. Architecture and module rules: [architecture.md](architecture.md).
 The backtest that consumes the predictions: [engine.md](engine.md).
 
 ## Where it sits
