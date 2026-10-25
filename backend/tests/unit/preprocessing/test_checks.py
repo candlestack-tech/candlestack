@@ -92,6 +92,19 @@ def test_a_block_in_the_wrong_step(raw: dict[str, Any]) -> None:
     }
 
 
+def test_the_last_candle_of_a_session_needs_the_regular_session(raw: dict[str, Any]) -> None:
+    raw["input"]["features"][4] = {"name": "last", "id": "session-last-candle@1"}
+
+    assert problems(raw) == {}
+
+    raw["input"]["session"] = "24/7"
+
+    assert problems(raw) == {
+        "catalog": "input.features[4] is session-last-candle@1, which marks the last candle of "
+        "each trading session, but 24/7 candles have no sessions. Use it with the regular session."
+    }
+
+
 def test_parameters_a_block_does_not_take(raw: dict[str, Any]) -> None:
     raw["input"]["representation"]["params"] = {"size": 3}
     raw["input"]["features"][0]["params"] = {"window": 14}

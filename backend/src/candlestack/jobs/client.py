@@ -47,9 +47,9 @@ class JobClient:
         wait: float = DEFAULT_WAIT,
     ) -> tuple[JobResult, pl.DataFrame | None]:
         """Runs the model (``<user_id>/<model_id>.keras`` in the model storage, with the
-        SHA-256 it was uploaded with) on ``candles`` (``ts``, open, high, low, close, volume),
-        its input built from ``manifest``. Returns the result and, when it is done, the
-        predictions: ``ts`` and ``prediction``, one row per sample."""
+        SHA-256 it was uploaded with) on ``candles`` (``ts``, open, high, low, close, volume,
+        and for stocks ``session_last``), its input built from ``manifest``. Returns the result
+        and, when it is done, the predictions: ``ts`` and ``prediction``, one row per sample."""
         job = _job("predict", model, sha256, manifest, wait)
         try:
             await anyio.to_thread.run_sync(self._files.write_candles, job.id, candles)

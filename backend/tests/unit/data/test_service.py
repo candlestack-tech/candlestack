@@ -11,6 +11,7 @@ from candlestack.data import (
     Session,
     Timeframe,
     resample_sessions,
+    session_last,
     slice_range,
 )
 from candlestack.data.cache import decode_chunk, encode_chunk
@@ -154,6 +155,14 @@ def test_assemble_resamples_stock_chunks_in_batches(
 
         assert len(periods) == 12
         assert result.frame.equals(resample_sessions(bars, timeframe, sessions))
+        assert result.session_last is not None
+        assert result.session_last.equals(session_last(result.frame, timeframe, sessions))
+        # One last candle a session, but the three early closes have no 1h candle 12:30-13:00
+        # here (their minutes end at 10:31); the frame carries the marks for the model.
+        assert result.session_last.sum() == len(sessions) - (3 if timeframe is Timeframe.H1 else 0)
+        marked = result.marked_frame()
+        assert marked.columns == [*CANDLE_SCHEMA, "session_last"]
+        assert marked.drop("session_last").equals(result.frame)
 
 
 def test_assemble_knows_candles_only_up_to_the_live_fetch() -> None:
@@ -176,3 +185,6 @@ def test_assemble_knows_candles_only_up_to_the_live_fetch() -> None:
 
     assert result.frame["ts"][-1] == utc("2026-09-26T11:59")
     assert (result.gaps, result.gaps_total) == ([], 0)
+    # Around the clock there is no session to be the last candle of.
+    assert result.session_last is None
+    assert result.marked_frame() is result.frame

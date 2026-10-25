@@ -160,6 +160,10 @@ CANDLE_SCHEMA = pl.Schema(
 )
 
 
+# The column of the mark of the last candle of each session, as preprocessing reads it.
+SESSION_LAST = "session_last"
+
+
 def empty_candles() -> pl.DataFrame:
     return pl.DataFrame(schema=CANDLE_SCHEMA)
 
@@ -170,7 +174,9 @@ class CandleSet:
 
     ``frame`` has ``CANDLE_SCHEMA`` and holds only closed candles, sorted by ``ts``. ``gaps``
     lists merged ``(start, end)`` ranges of missing candles, earliest first and capped (see
-    ``find_gaps``); ``gaps_total`` counts all missing candles.
+    ``find_gaps``); ``gaps_total`` counts all missing candles. ``session_last`` (stocks) says
+    for each row of ``frame`` whether it is the last candle of its session (see
+    ``candles.session_last``); it is None for markets without sessions.
     """
 
     instrument: InstrumentId
@@ -183,6 +189,14 @@ class CandleSet:
     gaps: list[tuple[int, int]]
     gaps_total: int
     fingerprint: str
+    session_last: pl.Series | None = None
+
+    def marked_frame(self) -> pl.DataFrame:
+        """``frame`` with the column ``session_last`` when the market has sessions: the
+        candles a model's input is built from (docs/data.md#last-candle-of-a-session)."""
+        if self.session_last is None:
+            return self.frame
+        return self.frame.with_columns(self.session_last.alias(SESSION_LAST))
 
 
 # The 24 h stats of the instruments of one market, as a source reports them: the last price

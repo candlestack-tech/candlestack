@@ -170,11 +170,19 @@ def _catalog(manifest: Manifest) -> list[str]:
     if unknown := unknown_blocks(manifest):
         kind = "block" if len(unknown) == 1 else "blocks"
         found.append(f"The catalog has no {kind} {_listed(unknown)} yet, so it cannot run.")
+    session = manifest.input.session
     for step in _steps(manifest):
         block = CATALOG.get(step.id)
-        if block is not None and block.step != step.step:
+        if block is None:
+            continue
+        if block.step != step.step:
             found.append(
                 f"{step.where} is {step.id}, a {block.step} block, where a {step.step} block goes."
+            )
+        if block.needs_session and session != "regular":
+            found.append(
+                f"{step.where} is {step.id}, which marks the last candle of each trading "
+                f"session, but {session} candles have no sessions. Use it with the regular session."
             )
     if manifest.input.window.last == "current":
         found.append(

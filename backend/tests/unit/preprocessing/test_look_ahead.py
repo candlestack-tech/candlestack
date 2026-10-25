@@ -41,7 +41,8 @@ Make = Callable[[random.Random], Any]
 
 
 def random_candles(rng: random.Random) -> pl.DataFrame:
-    """A random walk of 30-minute candles that gaps between them, with a random volume."""
+    """A random walk of 30-minute candles that gaps between them, with a random volume, some
+    marked the last of their session as stock candles are."""
     rows = []
     price = 100.0
     for row in range(ROWS):
@@ -49,11 +50,13 @@ def random_candles(rng: random.Random) -> pl.DataFrame:
         close = open_ * (1 + rng.gauss(0, 0.02))
         high = max(open_, close) * (1 + abs(rng.gauss(0, 0.01)))
         low = min(open_, close) * (1 - abs(rng.gauss(0, 0.01)))
-        rows.append((row * STEP, open_, high, low, close, rng.uniform(0, 1e6)))
+        last = rng.random() < 1 / 13
+        rows.append((row * STEP, open_, high, low, close, rng.uniform(0, 1e6), last))
         price = close
     schema = {
         "ts": pl.Int64,
         **dict.fromkeys(("open", "high", "low", "close", "volume"), pl.Float64),
+        "session_last": pl.Boolean,
     }
     return pl.DataFrame(rows, schema=schema, orient="row")
 
@@ -240,7 +243,7 @@ def next_close(frame: pl.DataFrame, _params: NoParams) -> pl.Series:
 
 def next_candle(frame: pl.DataFrame, _params: NoParams) -> pl.DataFrame:
     """Each row with the values of the next candle under its own ts."""
-    return frame.with_columns(pl.exclude("ts").shift(-1).fill_null(0.0))
+    return frame.with_columns(pl.exclude("ts", "session_last").shift(-1).fill_null(0.0))
 
 
 def centered(column: pl.Series, _params: NoParams) -> pl.Series:

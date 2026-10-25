@@ -24,6 +24,9 @@ from pydantic import BaseModel, ConfigDict
 from candlestack.preprocessing.manifest import Window
 
 CANDLE_COLUMNS = ("open", "high", "low", "close", "volume")
+# The mark of the last candle of each session, which the data module adds to stock candles from
+# the exchange calendar (docs/data.md#last-candle-of-a-session): true or false per candle.
+SESSION_LAST = "session_last"
 
 
 class NoParams(BaseModel):
@@ -60,6 +63,23 @@ def candle_column(name: str) -> Callable[[pl.DataFrame, NoParams], pl.Series]:
         return frame[name].cast(pl.Float64)
 
     return feature
+
+
+def session_last(frame: pl.DataFrame, _params: NoParams) -> pl.Series:
+    """``session-last-candle@1``: 1 on the last candle of its trading session, else 0.
+
+    The mark comes with the candles (``SESSION_LAST``), from the calendar, so it is known when
+    the candle closes, early closes included.
+
+    Raises:
+        ValueError: The candles have no marks: they are not candles of a session.
+    """
+    if SESSION_LAST not in frame.columns:
+        raise ValueError(
+            "The candles do not mark the last candle of each session, which "
+            "session-last-candle@1 reads; only stock candles of the regular session do"
+        )
+    return frame[SESSION_LAST].cast(pl.Float64)
 
 
 def none(column: pl.Series, _params: NoParams) -> pl.Series:

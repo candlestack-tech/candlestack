@@ -33,6 +33,29 @@ def test_one_candle_every_timeframe(manifest: dict[str, Any], timeframe: str, st
     assert candles["ts"].diff().drop_nulls().unique().to_list() == [step]
 
 
+@pytest.mark.parametrize(
+    ("timeframe", "per_session"), [("1m", 390), ("30m", 13), ("1h", 7), ("4h", 2), ("1d", 1)]
+)
+def test_the_regular_session_marks_the_last_candle_of_each(
+    manifest: dict[str, Any], timeframe: str, per_session: int
+) -> None:
+    manifest["input"]["timeframe"] = timeframe
+
+    candles = sample_candles(parse_manifest(manifest))
+
+    marked = candles.with_row_index().filter("session_last")["index"]
+    assert marked.len() == candles.height // per_session
+    assert (marked % per_session == per_session - 1).all()
+
+
+def test_candles_around_the_clock_have_no_sessions(manifest: dict[str, Any]) -> None:
+    manifest["input"]["session"] = "24/7"
+
+    candles = sample_candles(parse_manifest(manifest))
+
+    assert candles.columns == ["ts", "open", "high", "low", "close", "volume"]
+
+
 def test_an_estimated_warm_up_gets_twice_the_candles(
     manifest: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:

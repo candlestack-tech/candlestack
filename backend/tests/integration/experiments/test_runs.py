@@ -61,8 +61,7 @@ def manifest(**inputs: Any) -> dict[str, Any]:
 # --- A run to its results -------------------------------------------------------------------
 
 
-@pytest.mark.usefixtures("worker")
-def test_a_backtest_runs_and_its_document_has_the_results(ada, market) -> None:
+def test_a_backtest_runs_and_its_document_has_the_results(ada, market, worker) -> None:
     model_id = ada.runnable_model()
 
     started = ada.start(body(model_id))
@@ -127,6 +126,8 @@ def test_a_backtest_runs_and_its_document_has_the_results(ada, market) -> None:
     assert results["benchmarks"]["bh"]["total_return"] == results["stats"]["buy_and_hold_return"]
     assert (results["series"]["resolution"], results["series"]["count"]) == ("candle", 240)
     assert results["trades"]["complete"] is True
+    # The worker gets the stock candles with the mark of each session's last candle.
+    assert worker.columns == [["ts", "open", "high", "low", "close", "volume", "session_last"]]
 
 
 @pytest.mark.usefixtures("worker")
@@ -184,8 +185,7 @@ def test_the_download_has_every_row_and_names_the_file(ada) -> None:
     assert download.json() == document  # under 10,000 rows the light view is the whole
 
 
-@pytest.mark.usefixtures("worker")
-def test_a_crypto_backtest_annualizes_over_every_day(ada) -> None:
+def test_a_crypto_backtest_annualizes_over_every_day(ada, worker) -> None:
     model_id = ada.runnable_model(manifest(session="24/7"))
     bh = {**BH, "instrument": "crypto:BTCUSDT"}
 
@@ -195,6 +195,8 @@ def test_a_crypto_backtest_annualizes_over_every_day(ada) -> None:
     assert document["backtest"]["status"] == "finished"
     assert document["metrics"]["periods_per_year"] == 365
     assert document["data"]["instrument"]["currency"] == "USDT"
+    # Around the clock there are no sessions to mark.
+    assert worker.columns == [["ts", "open", "high", "low", "close", "volume"]]
 
 
 @pytest.mark.usefixtures("worker")

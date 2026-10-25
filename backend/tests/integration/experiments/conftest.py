@@ -172,6 +172,8 @@ class FakeMarket:
             gaps=[],
             gaps_total=0,
             fingerprint=fingerprint(source, feed, instrument_id, timeframe, start, end, frame),
+            # Stocks mark the last candle of each session; here every 13th, as 30m has it.
+            session_last=pl.Series("session_last", ts // step % 13 == 12) if stock else None,
         )
 
 
@@ -196,6 +198,8 @@ class FakeWorker:
         self._files = JobFiles(files)
         self.failure: tuple[Reason, str] | None = None
         self.jobs: list[Job] = []
+        # The columns of each job's candles, as the worker got them.
+        self.columns: list[list[str]] = []
         self.gate = threading.Event()
         self.gate.set()
         self._stop = threading.Event()
@@ -229,6 +233,7 @@ class FakeWorker:
         if self.failure is not None:
             return JobResult.failed(job.id, job.kind, *self.failure)
         candles = self._files.read_candles(job.id)
+        self.columns.append(candles.columns)
         dropped = job.manifest["input"]["window"]["length"] - 1
         close = candles["close"]
         predictions = pl.DataFrame(

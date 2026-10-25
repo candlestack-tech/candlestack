@@ -24,6 +24,7 @@ from candlestack.data import (
     normalise,
     resample_fixed,
     resample_sessions,
+    session_last,
     slice_range,
     suggest,
     validate,
@@ -301,6 +302,85 @@ def test_resample_sessions_empty(sessions: list[Session]) -> None:
     assert (
         resample_sessions(frame(minutes(utc("2024-01-01 12:00"), 5)), Timeframe.H1, []).height == 0
     )
+
+
+# session_last
+
+
+def last_marked(candles: pl.DataFrame, timeframe: Timeframe, sessions: list[Session]) -> list[int]:
+    """The open times of the candles marked the last of their session."""
+    marks = session_last(candles, timeframe, sessions)
+    assert marks.name == "session_last"
+    assert marks.dtype == pl.Boolean
+    assert marks.len() == candles.height
+    return candles.filter(marks)["ts"].to_list()
+
+
+def test_session_last_30m_normal_day(sessions: list[Session]) -> None:
+    session = by_date(sessions, "2024-06-03")  # 13:30-20:00 UTC
+    candles = resample_sessions(frame(minutes(session.open, 390)), Timeframe.M30, sessions)
+
+    assert candles.height == 13
+    assert last_marked(candles, Timeframe.M30, sessions) == [utc("2024-06-03 19:30")]  # 15:30
+
+
+def test_session_last_30m_early_close(sessions: list[Session]) -> None:
+    session = by_date(sessions, "2024-11-29")  # 14:30-18:00 UTC
+    candles = resample_sessions(frame(minutes(session.open, 210)), Timeframe.M30, sessions)
+
+    assert candles.height == 7
+    assert last_marked(candles, Timeframe.M30, sessions) == [utc("2024-11-29 17:30")]  # 12:30
+
+
+@pytest.mark.parametrize(
+    ("timeframe", "normal", "early"),
+    [
+        # New York opens of the last candle on 2024-06-03 (EDT) and 2024-11-29 (EST).
+        (Timeframe.M1, "2024-06-03 19:59", "2024-11-29 17:59"),
+        (Timeframe.M5, "2024-06-03 19:55", "2024-11-29 17:55"),
+        (Timeframe.M15, "2024-06-03 19:45", "2024-11-29 17:45"),
+        (Timeframe.H1, "2024-06-03 19:30", "2024-11-29 17:30"),  # 30 minutes long
+        (Timeframe.H4, "2024-06-03 17:30", "2024-11-29 14:30"),  # 13:30-16:00, 09:30-13:00
+        (Timeframe.D1, "2024-06-03 13:30", "2024-11-29 14:30"),
+    ],
+)
+def test_session_last_marks_one_candle_a_session(
+    sessions: list[Session], timeframe: Timeframe, normal: str, early: str
+) -> None:
+    normal_day, early_day = by_date(sessions, "2024-06-03"), by_date(sessions, "2024-11-29")
+    one_minute = frame([*minutes(normal_day.open, 390), *minutes(early_day.open, 210)])
+    candles = resample_sessions(one_minute, timeframe, sessions)
+
+    assert last_marked(candles, timeframe, sessions) == [utc(normal), utc(early)]
+
+
+def test_session_last_is_the_calendar_not_the_last_candle_there_is(
+    sessions: list[Session],
+) -> None:
+    # Without its 15:30 candle the day has no last candle: 15:00 does not end the session,
+    # and to call it the last would need the next candle, which comes later.
+    monday, tuesday = by_date(sessions, "2024-06-03"), by_date(sessions, "2024-06-04")
+    one_minute = frame([*minutes(monday.open, 360), *minutes(tuesday.open, 390)])
+    candles = resample_sessions(one_minute, Timeframe.M30, sessions)
+
+    assert candles["ts"][11] == utc("2024-06-03 19:00")  # Monday's last, 15:00-15:30
+    assert last_marked(candles, Timeframe.M30, sessions) == [utc("2024-06-04 19:30")]
+
+
+def test_session_last_outside_sessions_and_empty(sessions: list[Session]) -> None:
+    session = by_date(sessions, "2024-06-03")
+    outside = frame(
+        [
+            (utc("2023-12-29 20:00"), 1, 1, 1, 1, 1),  # before the calendar
+            (session.open - HOUR, 1, 1, 1, 1, 1),  # pre-market
+            (session.close, 1, 1, 1, 1, 1),  # after the close
+            (utc("2024-07-04 15:00"), 1, 1, 1, 1, 1),  # a holiday
+        ]
+    )
+
+    assert last_marked(outside, Timeframe.H1, sessions) == []
+    assert last_marked(frame([]), Timeframe.H1, sessions) == []
+    assert last_marked(frame(minutes(session.open, 3)), Timeframe.M1, []) == []
 
 
 # expected bins
