@@ -14,7 +14,6 @@ from candlestack.experiments.errors import (
     InstrumentNotForModel,
     InvalidBacktest,
     ModelNeedsSetup,
-    TimeframeNotSupported,
 )
 from candlestack.experiments.runs import (
     _check_benchmarks,
@@ -146,8 +145,8 @@ def test_a_model_runs_with_its_manifest_on_an_instrument_of_its_hours() -> None:
     assert _manifest(model(with_input(session="24/7")), crypto).input.session == "24/7"
     with pytest.raises(ModelNeedsSetup):
         _manifest(model(None), AAPL)
-    with pytest.raises(TimeframeNotSupported):
-        _manifest(model(with_input(timeframe="4h")), AAPL)
+    for timeframe in ("1m", "15m", "4h"):
+        assert _manifest(model(with_input(timeframe=timeframe)), AAPL).input.timeframe == timeframe
     with pytest.raises(InstrumentNotForModel):
         _manifest(model(MANIFEST), crypto)
     with pytest.raises(InstrumentNotForModel):

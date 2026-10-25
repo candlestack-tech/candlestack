@@ -116,8 +116,7 @@ flowchart LR
   (404: no model of the user with the ID, another user's included) and `not-signed-in` (401:
   also the account was deleted while its file uploaded). Each `type` URI opens a page on the
   website that says what the problem means and what the client should do. The experiments
-  module adds `model-needs-setup` (409: the model has no manifest), `timeframe-not-supported`
-  (422: the model's timeframe is not one of 5m, 30m, 1h and 1d, with `timeframe`),
+  module adds `model-needs-setup` (409: the model has no manifest),
   `instrument-not-for-model` (422: a model of US trading hours on a crypto pair or the other
   way round, with `session` and `market`), `backtest-running` (409: another backtest of the
   user runs), `backtests-unavailable` (503: the worker's queue cannot be reached),

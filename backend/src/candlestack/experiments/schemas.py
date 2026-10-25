@@ -42,11 +42,14 @@ class InstrumentMarket(StrEnum):
 
 
 class SetupTimeframe(StrEnum):
-    """Timeframes a backtest runs on (those of Settings, Backtest defaults)."""
+    """Timeframes a backtest runs on: those of the data."""
 
+    m1 = "1m"
     m5 = "5m"
+    m15 = "15m"
     m30 = "30m"
     h1 = "1h"
+    h4 = "4h"
     d1 = "1d"
 
 

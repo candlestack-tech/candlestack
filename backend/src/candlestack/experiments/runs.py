@@ -53,7 +53,6 @@ from candlestack.experiments.errors import (
     ModelNeedsSetup,
     ModelNotFound,
     NoDocument,
-    TimeframeNotSupported,
 )
 from candlestack.experiments.models import Backtest, new_backtest_id
 from candlestack.experiments.runner import BacktestRunner
@@ -92,9 +91,9 @@ class BacktestRuns:
         it with its document.
 
         Raises:
-            InvalidBacktest, ModelNotFound, ModelNeedsSetup, TimeframeNotSupported,
-            InstrumentNotForModel, BacktestRunning, BacktestsUnavailable, and the data module's
-            errors of the instrument and the period (``data.DataError``).
+            InvalidBacktest, ModelNotFound, ModelNeedsSetup, InstrumentNotForModel,
+            BacktestRunning, BacktestsUnavailable, and the data module's errors of the
+            instrument and the period (``data.DataError``).
         """
         instrument_id = InstrumentId.parse(body.data.instrument.id)
         _check_benchmarks(body.benchmarks, instrument_id)
@@ -314,15 +313,12 @@ def _manifest(model: Model, instrument_id: InstrumentId) -> Manifest:
     """The model's manifest, which the model runs with on the instrument.
 
     Raises:
-        ModelNeedsSetup, TimeframeNotSupported, InstrumentNotForModel.
+        ModelNeedsSetup, InstrumentNotForModel.
     """
     if model.manifest is None:
         raise ModelNeedsSetup
     # It passed every check when it was stored with the model.
     manifest = Manifest.model_validate(model.manifest)
-    timeframe = manifest.input.timeframe
-    if timeframe not in {item.value for item in SetupTimeframe}:
-        raise TimeframeNotSupported(timeframe)
     if _SESSIONS[instrument_id.market] != manifest.input.session:
         raise InstrumentNotForModel(manifest.input.session, instrument_id.market)
     return manifest

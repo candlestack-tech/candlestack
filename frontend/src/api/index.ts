@@ -77,4 +77,4 @@ export {
   type InstrumentSearchResult,
   type InstrumentSort,
 } from './search';
-export { instrumentTimeframe, parseTimeframe, type Timeframe } from './timeframes';
+export { TIMEFRAMES, instrumentTimeframe, parseTimeframe, type Timeframe } from './timeframes';

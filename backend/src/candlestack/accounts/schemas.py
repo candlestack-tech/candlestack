@@ -80,11 +80,14 @@ class MeUpdate(BaseModel):
 
 
 class BacktestTimeframe(StrEnum):
-    """Timeframes a new backtest can start with (Settings, Backtest defaults)."""
+    """Timeframes a new backtest can start with (Settings, Backtest defaults): those of the data."""
 
+    m1 = "1m"
     m5 = "5m"
+    m15 = "15m"
     m30 = "30m"
     h1 = "1h"
+    h4 = "4h"
     d1 = "1d"
 
 

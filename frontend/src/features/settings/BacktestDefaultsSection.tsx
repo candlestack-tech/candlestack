@@ -2,7 +2,7 @@ import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-q
 import { useState, type FormEvent } from 'react';
 
 import { DashboardCard } from '@/components/DashboardCard';
-import { errorMessage, preferencesQueryOptions, saveBacktestDefaults, type DefaultTimeframe } from '@/api';
+import { errorMessage, preferencesQueryOptions, saveBacktestDefaults, TIMEFRAMES, type DefaultTimeframe } from '@/api';
 import { ACCENT_BUTTON, BUTTON_SIZES } from '@/components/buttonStyles';
 import { Hint } from '@/components/Hint';
 import { SlidersIcon } from '@/components/icons';
@@ -14,8 +14,6 @@ import { Choice } from './controls';
 import { SettingsFooter, SettingsRow } from './rows';
 import { DirectionCards, PeriodInput, UnitInput, ValueSlider } from './defaultsControls';
 import { checkDefaults, formOf, sameDefaults, type DefaultsForm, type TypedField } from './defaultsForm';
-
-const TIMEFRAMES: readonly DefaultTimeframe[] = ['5m', '30m', '1h', '1d'];
 
 type Setter = <K extends keyof DefaultsForm>(key: K) => (value: DefaultsForm[K]) => void;
 type FieldsProps = { form: DefaultsForm; set: Setter; invalid: ReadonlySet<TypedField> };

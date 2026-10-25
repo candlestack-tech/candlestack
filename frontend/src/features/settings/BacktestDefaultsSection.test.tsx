@@ -33,9 +33,12 @@ describe('Backtest defaults', () => {
     expect(card().getByText('New backtests start here')).toBeDefined();
     const timeframes = within(card().getByRole('radiogroup', { name: 'Timeframe' })).getAllByRole('radio');
     expect(timeframes.map((radio) => [radio.textContent, radio.getAttribute('aria-checked')])).toEqual([
+      ['1m', 'false'],
       ['5m', 'false'],
+      ['15m', 'false'],
       ['30m', 'true'],
       ['1h', 'false'],
+      ['4h', 'false'],
       ['1d', 'false'],
     ]);
     expect([field('From').value, field('To').value]).toEqual(['2021-01-04', '2024-12-31']);
