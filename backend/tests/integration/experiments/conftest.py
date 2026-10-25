@@ -87,13 +87,21 @@ class FakeMarket:
     smooth walk of candles from ``FIRST`` on, each value a function of its ``ts`` (so every load
     of a period gives the same candles). ``scale`` changes the prices, as a source that adjusted
     them would; ``refuse`` makes the checks of a new backtest raise, ``refuse_candles`` the
-    loads."""
+    loads. ``slow`` seconds pass in each check of a new backtest, and ``held`` has how many
+    connections of the app's pool (``pool``) were in use at each check and load."""
 
     def __init__(self) -> None:
         self.scale = 1.0
         self.refuse: DataError | None = None
         self.refuse_candles: DataError | None = None
         self.loads: list[tuple[int, int]] = []
+        self.slow = 0.0
+        self.pool: Any = None
+        self.held: list[int] = []
+
+    def _hold(self) -> None:
+        if self.pool is not None:
+            self.held.append(self.pool.checkedout())
 
     async def instrument(self, instrument_id: InstrumentId) -> InstrumentInfo:
         if self.refuse is not None:
@@ -124,6 +132,8 @@ class FakeMarket:
         _end: int,
         candles: int,
     ) -> int:
+        self._hold()
+        await anyio.sleep(self.slow)
         if self.refuse is not None:
             raise self.refuse
         return start - candles * timeframe.seconds
@@ -131,6 +141,7 @@ class FakeMarket:
     async def candles(
         self, instrument_id: InstrumentId, timeframe: Timeframe, start: int, end: int
     ) -> CandleSet:
+        self._hold()
         if self.refuse_candles is not None:
             raise self.refuse_candles
         self.loads.append((start, end))
@@ -167,6 +178,7 @@ class FakeMarket:
 def market(app: FastAPI, client: Any) -> FakeMarket:
     """The fake market data, in the app and in its backtest runner."""
     fake = FakeMarket()
+    fake.pool = app.state.db.engine.pool
     app.state.data_service = fake
     app.state.backtest_runner._data = fake
     return fake
@@ -175,13 +187,16 @@ def market(app: FastAPI, client: Any) -> FakeMarket:
 class FakeWorker:
     """Answers the jobs of the queue as the worker would, without a model: one prediction per
     candle after the window's first rows (the warm-up), the candle's return over the one before
-    it in percent; or, with ``failure``, that failure (its reason and the user's sentences)."""
+    it in percent; or, with ``failure``, that failure (its reason and the user's sentences).
+    A job claimed waits to be answered while ``gate`` is clear."""
 
     def __init__(self, redis_url: str, files: Path) -> None:
         self._redis_url = redis_url
         self._files = JobFiles(files)
         self.failure: tuple[Reason, str] | None = None
         self.jobs: list[Job] = []
+        self.gate = threading.Event()
+        self.gate.set()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=anyio.run, args=(self._serve,), daemon=True)
 
@@ -191,6 +206,7 @@ class FakeWorker:
 
     def __exit__(self, *_exc: object) -> None:
         self._stop.set()
+        self.gate.set()
         self._thread.join(timeout=10)
 
     async def _serve(self) -> None:
@@ -203,6 +219,7 @@ class FakeWorker:
                     await anyio.sleep(0.02)
                     continue
                 self.jobs.append(claimed.job)
+                await anyio.to_thread.run_sync(self.gate.wait)
                 await queue.finish(self._answer(claimed.job))
         finally:
             await client.aclose()

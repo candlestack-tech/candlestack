@@ -4,6 +4,9 @@ what ``POST /api/v1/backtests`` checks and stores, the run to its results throug
 download, and what the list and the Dashboard show of a run."""
 
 import json
+import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -38,6 +41,14 @@ def body(model_id: str, **groups: Any) -> dict[str, Any]:
         "benchmarks": [BH],
         **groups,
     }
+
+
+def soon(condition: Callable[[], object], timeout: float = 10) -> None:
+    """Waits until ``condition`` holds."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        assert time.monotonic() < deadline, "it did not happen in time"
+        time.sleep(0.02)
 
 
 def manifest(**inputs: Any) -> dict[str, Any]:
@@ -276,6 +287,26 @@ def test_a_worker_out_of_reach_fails_the_backtest(ada, app, monkeypatch) -> None
     assert "cannot be reached" in document["backtest"]["error"]
 
 
+def test_a_model_deleted_while_it_runs_fails_the_backtest_with_why(ada, worker) -> None:
+    worker.gate.clear()
+    # The worker finds no file: the deletion took it along.
+    worker.failure = ("model-missing", "The model's file is gone. Upload the model again.")
+    model_id = ada.runnable_model()
+    backtest_id = ada.start(body(model_id)).json()["backtest"]["id"]
+    soon(lambda: worker.jobs)
+
+    deleted = ada.request("DELETE", f"/api/v1/models/{model_id}")
+    worker.gate.set()
+    document = ada.ended(backtest_id)
+
+    assert deleted.status_code == 204
+    assert document["backtest"]["status"] == "failed"
+    assert document["backtest"]["error"] == (
+        "The model was deleted before the backtest could run it."
+    )
+    assert document["model"]["id"] is None
+
+
 @pytest.mark.usefixtures("market")
 def test_a_run_the_server_stopped_fails_and_a_new_start_fails_those_left(
     ada, app, client, settings
@@ -310,6 +341,60 @@ def test_one_backtest_runs_at_a_time_per_user(ada, bob) -> None:
     assert second.status_code == 409
     assert second.json()["type"] == PROBLEMS + "backtest-running"
     assert other_user.status_code == 201
+
+
+@pytest.mark.usefixtures("market")
+def test_two_starts_at_once_run_one_backtest(ada, market) -> None:
+    # Both pass the first check before either has stored its backtest.
+    market.slow = 0.5
+    model_id = ada.runnable_model()
+
+    with ThreadPoolExecutor(2) as pool:
+        answers = list(pool.map(lambda _: ada.start(body(model_id)), range(2)))
+
+    assert sorted(answer.status_code for answer in answers) == [201, 409]
+    assert ada.sql("SELECT count(*) FROM backtests") == [(1,)]
+
+
+@pytest.mark.usefixtures("market")
+def test_a_model_deleted_while_the_start_checks_it_is_not_found(ada, market) -> None:
+    market.slow = 0.5
+    model_id = ada.runnable_model()
+
+    with ThreadPoolExecutor(1) as pool:
+        started = pool.submit(ada.start, body(model_id))
+        soon(lambda: market.held)  # the start is asking the data module
+        deleted = ada.request("DELETE", f"/api/v1/models/{model_id}")
+        answer = started.result()
+
+    assert deleted.status_code == 204
+    assert (answer.status_code, answer.json()["type"]) == (404, PROBLEMS + "not-found")
+    assert ada.sql("SELECT count(*) FROM backtests") == [(0,)]
+
+
+@pytest.mark.usefixtures("worker")
+def test_no_connection_waits_on_the_data_module(ada, market) -> None:
+    """The start and the document end their reads before they ask for market data."""
+    backtest_id = ada.start(body(ada.runnable_model())).json()["backtest"]["id"]
+    at_start = market.held[0]
+    ada.ended(backtest_id)
+    market.held.clear()
+
+    ada.document(backtest_id)
+
+    assert at_start == 0
+    assert market.held == [0]
+
+
+@pytest.mark.usefixtures("market")
+def test_the_backtest_routes_slide_the_session_on(ada) -> None:
+    ada.sql("UPDATE sessions SET last_seen_at = now() - interval '2 days'")
+    started = ada.start(body(ada.runnable_model()))
+    ada.sql("UPDATE sessions SET last_seen_at = now() - interval '2 days'")
+    document = ada.document(started.json()["backtest"]["id"])
+
+    assert "Max-Age=2592000" in started.headers["set-cookie"]
+    assert "Max-Age=2592000" in document.headers["set-cookie"]
 
 
 @pytest.mark.usefixtures("market")
