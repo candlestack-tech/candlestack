@@ -1016,10 +1016,10 @@ export interface components {
         BacktestStatus: "running" | "finished" | "failed";
         /**
          * BacktestTimeframe
-         * @description Timeframes a new backtest can start with (Settings, Backtest defaults).
+         * @description Timeframes a new backtest can start with (Settings, Backtest defaults): those of the data.
          * @enum {string}
          */
-        BacktestTimeframe: "5m" | "30m" | "1h" | "1d";
+        BacktestTimeframe: "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d";
         /** BacktestUpdate */
         BacktestUpdate: {
             /**
@@ -2524,10 +2524,10 @@ export interface components {
         SetupDirection: "long" | "both";
         /**
          * SetupTimeframe
-         * @description Timeframes a backtest runs on (those of Settings, Backtest defaults).
+         * @description Timeframes a backtest runs on: those of the data.
          * @enum {string}
          */
-        SetupTimeframe: "5m" | "30m" | "1h" | "1d";
+        SetupTimeframe: "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d";
         /**
          * SignInIntent
          * @enum {string}
@@ -3165,7 +3165,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description An invalid setup (`validation`), a model of a timeframe backtests do not run on (`timeframe-not-supported`) or of another market (`instrument-not-for-model`), a period outside the data (`period-out-of-range`), without the candles the model needs before it (`warm-up-out-of-range`), or with more candles than allowed (`too-many-candles`). */
+            /** @description An invalid setup (`validation`), a model of another market (`instrument-not-for-model`), a period outside the data (`period-out-of-range`), without the candles the model needs before it (`warm-up-out-of-range`), or with more candles than allowed (`too-many-candles`). */
             422: {
                 headers: {
                     [name: string]: unknown;

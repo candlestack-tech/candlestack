@@ -417,16 +417,12 @@ def test_the_model_must_be_the_users_and_have_a_manifest(ada, bob) -> None:
 
 
 @pytest.mark.usefixtures("market")
-def test_the_model_must_fit_the_instrument_and_a_timeframe_of_the_backtests(ada) -> None:
-    every_minute = ada.start(body(ada.runnable_model(manifest(timeframe="1m"))))
+def test_the_model_must_fit_the_instrument(ada) -> None:
     stock_model = ada.runnable_model(name="stock.keras")
     on_crypto = ada.start(
         body(stock_model, data=period(instrument="crypto:BTCUSDT"), benchmarks=[])
     )
 
-    assert every_minute.status_code == 422
-    assert every_minute.json()["type"] == PROBLEMS + "timeframe-not-supported"
-    assert every_minute.json()["timeframe"] == "1m"
     assert on_crypto.status_code == 422
     assert on_crypto.json()["type"] == PROBLEMS + "instrument-not-for-model"
     assert "stocks" in on_crypto.json()["detail"]

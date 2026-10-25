@@ -17,7 +17,7 @@ export type DateFormat = Schemas['DateFormat'];
 export type TimeFormat = Schemas['TimeFormat'];
 export type Benchmark = Schemas['Benchmark'];
 export type Direction = Schemas['Direction'];
-// The timeframes a new backtest can start with, a few of the chart's.
+// The timeframes a new backtest can start with: all of the chart's.
 export type DefaultTimeframe = BacktestDefaults['timeframe'];
 
 // GET /api/v1/me/preferences: the user's settings, the defaults for what they never saved. Under

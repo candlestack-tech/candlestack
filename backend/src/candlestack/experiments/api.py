@@ -24,7 +24,6 @@ from candlestack.experiments.errors import (
     ModelNeedsSetup,
     ModelNotFound,
     NoDocument,
-    TimeframeNotSupported,
 )
 from candlestack.experiments.schemas import (
     MODEL_NAME_MAX,
@@ -155,7 +154,7 @@ _SOURCE_ERRORS = {
 _NOT_FOUND = problem_doc(404, "The user has no backtest with this ID (`not-found`).")
 
 
-def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911, PLR0912 (one per error)
+def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911 (one per error)
     match error:
         case ModelNotFound() | BacktestNotFound():
             what = "model" if isinstance(error, ModelNotFound) else "backtest"
@@ -167,15 +166,6 @@ def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911, P
                 "Model needs a manifest",
                 "The model has no manifest yet, so CandleStack cannot build its input. Add one "
                 "on the Models page, then start the backtest.",
-            )
-        case TimeframeNotSupported():
-            return ProblemError(
-                422,
-                "timeframe-not-supported",
-                "Timeframe not supported",
-                f"The model reads {error.timeframe} candles, and backtests run on 5m, 30m, 1h "
-                "and 1d candles for now. Choose a model of one of them.",
-                extensions={"timeframe": error.timeframe},
             )
         case InstrumentNotForModel():
             market = "stocks" if error.session == "regular" else "crypto pairs"
@@ -271,11 +261,10 @@ def _json(
         ),
         **problem_doc(
             422,
-            "An invalid setup (`validation`), a model of a timeframe backtests do not run on "
-            "(`timeframe-not-supported`) or of another market (`instrument-not-for-model`), a "
-            "period outside the data (`period-out-of-range`), without the candles the model "
-            "needs before it (`warm-up-out-of-range`), or with more candles than allowed "
-            "(`too-many-candles`).",
+            "An invalid setup (`validation`), a model of another market "
+            "(`instrument-not-for-model`), a period outside the data (`period-out-of-range`), "
+            "without the candles the model needs before it (`warm-up-out-of-range`), or with "
+            "more candles than allowed (`too-many-candles`).",
         ),
         **_SOURCE_ERRORS,
     },

@@ -18,14 +18,6 @@ class ModelNeedsSetup(Exception):
     """The model has no manifest yet, so its input cannot be built."""
 
 
-class TimeframeNotSupported(Exception):
-    """The model reads candles of a timeframe the backtests do not run on yet."""
-
-    def __init__(self, timeframe: str) -> None:
-        super().__init__(timeframe)
-        self.timeframe = timeframe
-
-
 class InstrumentNotForModel(Exception):
     """The instrument trades in other hours than the candles the model reads (a stock model
     on a crypto pair, or the other way round)."""
