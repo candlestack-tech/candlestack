@@ -15,10 +15,11 @@ function Path({ framework }: { framework: Framework }) {
 }
 
 // The mark on a square tinted with its colour (fwIcon): 28 px in lists and the upload dialog,
-// 36 px on a model's tile.
+// 36 px on a model's tile, 40 px in the header of its page.
 const TILE_SIZES = {
   default: { tile: 'size-7 rounded-[7px]', mark: 'size-[15px]' },
   lg: { tile: 'size-9 rounded-[9px]', mark: 'size-[19px]' },
+  xl: { tile: 'size-10 rounded-[10px]', mark: 'size-5' },
 };
 
 type TileProps = { framework: Framework; size?: keyof typeof TILE_SIZES };

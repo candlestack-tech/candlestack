@@ -1,27 +1,25 @@
 import type { ComponentProps } from 'react';
 
 import { UploadIcon } from '@/components/icons';
-import { QuickAction, QuickActionTile } from '@/components/QuickAction';
+import { QuickAction } from '@/components/QuickAction';
 
 import { FrameworkMini } from './FrameworkMark';
-import { FRAMEWORKS } from './frameworks';
-
-// The upload icon on a 36 px tile (.qa-i), on the card and in the drop zone.
-export function UploadIconTile() {
-  return <QuickActionTile icon={UploadIcon} />;
-}
+import { UPLOAD_FRAMEWORKS } from './frameworks';
 
 // The quick action that opens the upload dialog (mockups/app, .qa-c): the icon, "Upload model"
-// and the marks of the five frameworks.
+// and the marks of the formats it takes.
 export function UploadCard(props: ComponentProps<'button'>) {
   return (
     <QuickAction
       icon={UploadIcon}
       title="Upload model"
       line={
-        <span className="flex flex-wrap items-center gap-[7px]">
-          {FRAMEWORKS.map((framework) => (
-            <FrameworkMini key={framework} framework={framework} />
+        <span className="flex flex-wrap items-center gap-3">
+          {UPLOAD_FRAMEWORKS.map((framework) => (
+            <span key={framework} className="inline-flex items-center gap-[5px] text-xs/[1.5] text-muted-foreground">
+              <FrameworkMini framework={framework} named={false} />
+              {framework}
+            </span>
           ))}
         </span>
       }

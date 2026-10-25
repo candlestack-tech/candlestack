@@ -1,7 +1,8 @@
-import { useNavigate, useRouterState } from '@tanstack/react-router';
-import { useRef, useState, type ReactNode } from 'react';
+import { useNavigate } from '@tanstack/react-router';
+import { useRef, useState, type ReactNode, type RefObject } from 'react';
 
-import { CancelButton, OutlineButton, PrimaryButton } from '@/components/DialogButtons';
+import type { Model } from '@/api';
+import { CancelButton, PrimaryButton } from '@/components/DialogButtons';
 import {
   Dialog,
   DialogBody,
@@ -10,166 +11,156 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-  DIALOG_HINT,
 } from '@/components/ui/dialog';
-import { cn } from '@/lib/utils';
 
-import { DropZone } from './DropZone';
-import { formatSize } from './format';
-import { FrameworkTile } from './FrameworkMark';
-import { ACCEPTED_EXTENSIONS, frameworkOfFile } from './frameworks';
-import { ComingSoonCheck, FailedChecks, PassedChecks, PendingChecks } from './UploadChecks';
-import { useUpload, type UploadState } from './useUpload';
+import { ACCEPTED_EXTENSIONS } from './frameworks';
+import { ManifestPart, ModelPart, SummaryPart } from './UploadParts';
+import { Steps } from './UploadSteps';
+import { useUpload, type ManifestStep, type ModelStep } from './useUpload';
 
-// The chosen file (.up-file): its framework's mark, its name, the framework and its size. A file
-// of no known framework shows its name only.
-function FileRow({ file }: { file: File }) {
-  const framework = frameworkOfFile(file.name);
+// A hidden file input that the drop zones and Choose another file open.
+function FileInput({
+  input,
+  label,
+  accept,
+  onFile,
+}: {
+  input: RefObject<HTMLInputElement | null>;
+  label: string;
+  accept: string;
+  onFile: (file: File) => void;
+}) {
   return (
-    <div className="flex items-center gap-2.5 rounded-lg border px-3 py-2.5">
-      {framework && <FrameworkTile framework={framework} />}
-      <span className="min-w-0">
-        <b className="font-bold break-words">{file.name}</b>
-        {framework && (
-          <span className={cn('block', DIALOG_HINT)}>
-            {framework} · {formatSize(file.size)}
-          </span>
-        )}
-      </span>
-    </div>
+    <input
+      ref={input}
+      type="file"
+      accept={accept}
+      hidden
+      aria-label={label}
+      onChange={(event) => {
+        const file = event.target.files?.[0];
+        // Cleared, so choosing the same file again is a change too.
+        event.target.value = '';
+        if (file) onFile(file);
+      }}
+    />
   );
 }
 
-function Result({ state }: { state: Exclude<UploadState, { step: 'pick' }> }) {
-  switch (state.step) {
-    case 'soon':
-      return <ComingSoonCheck />;
-    case 'checking':
-      return <PendingChecks />;
-    case 'ready':
-      return <PassedChecks model={state.model} />;
-    case 'failed':
-      return <FailedChecks failure={state.failure} />;
-  }
+// What screen readers hear as the steps go on; a failure is an alert of its own.
+function status(model: ModelStep, manifest: ManifestStep): string {
+  if (manifest.step === 'kept') return 'Manifest uploaded. It fits the model.';
+  if (manifest.step === 'checking') return 'Checking the manifest';
+  if (model.step === 'kept') return `${model.model.name} uploaded`;
+  if (model.step === 'checking') return 'Checking the model';
+  return '';
 }
 
-// The file and its checks, in a live region mounted in every step, so screen readers hear each
-// result, the ready model too. Empty, it has no height and its negative margin cancels the
-// body's gap (14 px), so it stays in the accessibility tree without moving the layout.
-function Results({ state }: { state: UploadState }) {
-  return (
-    <div aria-live="polite" className="flex flex-col gap-3.5 empty:-mt-3.5">
-      {state.step !== 'pick' && (
-        <>
-          <FileRow file={state.file} />
-          <Result state={state} />
-        </>
-      )}
-    </div>
+type FlowProps = {
+  // Adding a manifest to this model; without one, a new model.
+  existing?: Model;
+  onAdded: (model: Model) => void;
+};
+
+// The hidden file inputs and how the drop zones and Choose another file open them: the step
+// starts over, then the picker opens.
+function usePickers(flow: ReturnType<typeof useUpload>) {
+  const modelInput = useRef<HTMLInputElement>(null);
+  const manifestInput = useRef<HTMLInputElement>(null);
+  const chooseManifest = (file: File) => void flow.chooseManifest(file);
+  const inputs = (
+    <>
+      <FileInput input={modelInput} label="Model file" accept={ACCEPTED_EXTENSIONS} onFile={flow.chooseModel} />
+      <FileInput input={manifestInput} label="Manifest file" accept=".json,application/json" onFile={chooseManifest} />
+    </>
   );
+  const pickModel = () => {
+    flow.resetModel();
+    modelInput.current?.click();
+  };
+  const pickManifest = () => {
+    flow.resetManifest();
+    manifestInput.current?.click();
+  };
+  return { inputs, pickModel, pickManifest, chooseManifest };
 }
 
-type FooterProps = { state: UploadState; onAgain: () => void; onDone: () => void; onBacktest: () => void };
-
-// No buttons over the drop zone; Cancel while the checks run; Done or Backtest with it once the
-// model is kept; otherwise Cancel or Choose another file.
-function Footer({ state, onAgain, onDone, onBacktest }: FooterProps) {
-  if (state.step === 'pick') return null;
-  if (state.step === 'checking') {
-    return (
-      <DialogFooter>
-        <CancelButton />
-      </DialogFooter>
-    );
-  }
-  if (state.step === 'ready') {
-    return (
-      <DialogFooter>
-        <OutlineButton onClick={onDone}>Done</OutlineButton>
-        <PrimaryButton onClick={onBacktest}>Backtest with it</PrimaryButton>
-      </DialogFooter>
-    );
-  }
-  return (
-    <DialogFooter>
-      <CancelButton />
-      <PrimaryButton onClick={onAgain}>Choose another file</PrimaryButton>
-    </DialogFooter>
-  );
-}
-
-type FlowProps = { onDone: () => void; onBacktest: () => void };
-
-// The dialog's content: the drop zone, then the file and its checks. It mounts with the dialog
-// and unmounts with it; an upload still running goes on to its answer (useUpload).
-function UploadFlow({ onDone, onBacktest }: FlowProps) {
-  const { state, choose, reset } = useUpload();
-  const input = useRef<HTMLInputElement>(null);
-  const pick = () => input.current?.click();
-
+// The three steps, all in view, and Cancel and Add model (Save) under them. It mounts with the
+// dialog and unmounts with it; a file still being checked goes on to its answer (useUpload).
+function UploadFlow({ existing, onAdded }: FlowProps) {
+  const flow = useUpload(existing);
+  const pickers = usePickers(flow);
+  const adding = existing !== undefined;
+  const model = flow.model.step === 'kept' ? flow.model.model : null;
+  const ready = model !== null && (flow.manifest.step === 'kept' || flow.manifest.step === 'skipped');
   return (
     <>
       <DialogBody>
-        <input
-          ref={input}
-          type="file"
-          accept={ACCEPTED_EXTENSIONS}
-          hidden
-          aria-label="Model file"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            // Cleared, so choosing the same file again is a change too.
-            event.target.value = '';
-            if (file) choose(file);
-          }}
-        />
-        {state.step === 'pick' && <DropZone onPick={pick} onDrop={choose} />}
-        <Results state={state} />
+        {pickers.inputs}
+        <p aria-live="polite" className="sr-only">
+          {status(flow.model, flow.manifest)}
+        </p>
+        <Steps>
+          <ModelPart state={flow.model} adding={adding} onPick={pickers.pickModel} onDrop={flow.chooseModel} />
+          <ManifestPart
+            state={flow.manifest}
+            model={model}
+            adding={adding}
+            onPick={pickers.pickManifest}
+            onDrop={pickers.chooseManifest}
+            onSkip={flow.skipManifest}
+          />
+          <SummaryPart model={model} manifest={flow.manifest} adding={adding} />
+        </Steps>
       </DialogBody>
-      <Footer
-        state={state}
-        onAgain={() => {
-          reset();
-          pick();
-        }}
-        onDone={onDone}
-        onBacktest={onBacktest}
-      />
+      <DialogFooter>
+        <CancelButton />
+        <PrimaryButton disabled={!ready} onClick={() => model && onAdded(model)}>
+          {adding ? 'Save' : 'Add model'}
+        </PrimaryButton>
+      </DialogFooter>
     </>
   );
 }
 
-type Props = {
-  // The button that opens the dialog.
-  children: ReactNode;
-  // Backtest with it: what opens once the model is kept (the New backtest dialog for now).
-  onBacktest: () => void;
-};
-
-// Upload model (mockups/app, MODALS.upload): a Keras file goes to the API, which checks that it
-// opens as a safe Keras model and holds trained weights before it keeps it. Done closes it and
-// shows the Models page, where the new model has joined the tiles.
-export function UploadDialog({ children, onBacktest }: Props) {
+// Add a model (mockups/app, MODALS.upload): the model file, its manifest, then Add model, which
+// opens the model's page. The API keeps the model as soon as its file passed the checks, and the
+// manifest as soon as it passed its own, so closing the dialog early keeps what was uploaded.
+export function UploadDialog({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
-  const pathname = useRouterState({ select: (router) => router.location.pathname });
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent aria-describedby={undefined}>
         <DialogHeader>
-          <DialogTitle>Upload model</DialogTitle>
+          <DialogTitle>Add a model</DialogTitle>
         </DialogHeader>
         <UploadFlow
-          onDone={() => {
+          onAdded={(model) => {
             setOpen(false);
-            if (pathname !== '/models') void navigate({ to: '/models' });
-          }}
-          onBacktest={() => {
-            setOpen(false);
-            onBacktest();
+            void navigate({ to: '/models/$modelId', params: { modelId: model.id } });
           }}
         />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+type ManifestDialogProps = { model: Model | null; open: boolean; onOpenChange: (open: boolean) => void };
+
+// Add a manifest to {name} (mockups/app, MODALS.man): the same steps with the model done. The
+// model stays while the dialog fades out.
+export function ManifestDialog({ model, open, onOpenChange }: ManifestDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent aria-describedby={undefined}>
+        <DialogHeader>
+          <DialogTitle className="min-w-0 break-words">
+            {model ? `Add a manifest to ${model.name}` : 'Add a manifest'}
+          </DialogTitle>
+        </DialogHeader>
+        {model && <UploadFlow key={model.id} existing={model} onAdded={() => onOpenChange(false)} />}
       </DialogContent>
     </Dialog>
   );

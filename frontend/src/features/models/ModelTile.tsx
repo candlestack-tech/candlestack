@@ -1,7 +1,8 @@
+import { Link } from '@tanstack/react-router';
+
 import type { Model } from '@/api';
-import { BUTTON_SIZES, GHOST_BUTTON } from '@/components/buttonStyles';
+import { BUTTON_SIZES, OUTLINE_BUTTON } from '@/components/buttonStyles';
 import { HINT } from '@/components/Hint';
-import { PencilIcon, TrashIcon } from '@/components/icons';
 import { StarButton } from '@/components/StarButton';
 import { Button } from '@/components/ui/button';
 import { useDateStyle } from '@/features/preferences';
@@ -10,17 +11,16 @@ import { pluralNoun } from '@/lib/plural';
 import { formatSharpe } from '@/lib/results';
 import { cn } from '@/lib/utils';
 
-import { formatShape, formatSize } from './format';
+import { formatSize } from './format';
 import { FrameworkTile } from './FrameworkMark';
 import { API_FRAMEWORKS } from './frameworks';
-
-const ACTION = cn(BUTTON_SIZES.sm, GHOST_BUTTON, 'font-medium');
+import { readsOf } from './manifest';
+import { StatePill } from './StatePill';
 
 type Props = {
   model: Model;
   onStar: (model: Model) => void;
-  onRename: (model: Model) => void;
-  onDelete: (model: Model) => void;
+  onAddManifest: (model: Model) => void;
 };
 
 // The best Sharpe of its backtests and how many used it, side by side under a line.
@@ -39,64 +39,70 @@ function Stats({ model }: { model: Model }) {
   );
 }
 
-// Rename and Delete as small ghost buttons along the foot; Delete turns red on hover.
-function Actions({ model, onRename, onDelete }: Omit<Props, 'onStar'>) {
+// Add manifest while it has none, above the tile's link.
+function AddManifest({ model, onAddManifest }: Pick<Props, 'model' | 'onAddManifest'>) {
   return (
-    <div className="-mx-2 -mb-1.5 flex min-h-7 items-center gap-1">
+    <div className="mt-auto">
       <Button
         type="button"
-        variant="ghost"
-        className={ACTION}
-        aria-label={`Rename ${model.name}`}
-        onClick={() => onRename(model)}
+        variant="outline"
+        className={cn(BUTTON_SIZES.sm, OUTLINE_BUTTON, 'relative z-10')}
+        aria-label={`Add manifest to ${model.name}`}
+        onClick={() => onAddManifest(model)}
       >
-        <PencilIcon className="size-3.5" />
-        Rename
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        className={cn(ACTION, 'hover:text-down')}
-        aria-label={`Delete ${model.name}`}
-        onClick={() => onDelete(model)}
-      >
-        <TrashIcon className="size-3.5" />
-        Delete
+        Add manifest
       </Button>
     </div>
   );
 }
 
-// A model on the Models page (mockups/app, mdTile): a square card with the framework's mark and
-// the star, the name, what it is, the shape it reads, its results, then Rename and Delete.
-export function ModelTile({ model, onStar, onRename, onDelete }: Props) {
-  const framework = API_FRAMEWORKS[model.framework];
-  const shape = formatShape(model.input_shape, model.output_shape);
-  const dateStyle = useDateStyle();
+// The framework's mark at the left; the state and the star at the right, the star above the link.
+function TileTop({ model, onStar }: Pick<Props, 'model' | 'onStar'>) {
   return (
-    <article className="flex aspect-square min-w-0 flex-col gap-2.5 rounded-lg border bg-card p-4 transition-[border-color,box-shadow] duration-150 hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--rule))] hover:shadow-[0_4px_14px_var(--shadow)] motion-reduce:transition-none">
-      <div className="flex items-start justify-between">
-        <FrameworkTile framework={framework} size="lg" />
+    <div className="flex items-start justify-between gap-2">
+      <FrameworkTile framework={API_FRAMEWORKS[model.framework]} size="lg" />
+      <span className="flex items-center gap-1">
+        <StatePill state={model.state} />
         <StarButton
           starred={model.starred}
           label={`Star model ${model.name}`}
           onToggle={() => onStar(model)}
-          className="m-0 -mt-1 -mr-1.5 text-[21px]"
+          className="relative z-10 m-0 -mt-1 -mr-1.5 text-[21px]"
         />
-      </div>
+      </span>
+    </div>
+  );
+}
+
+// A model on the Models page (mockups/app, mdTileA): a square card with the framework's mark, its
+// state and the star, the name, what it is and what it reads, then its results, or Add manifest
+// while it has none. The whole tile opens the model's page: the name's link is stretched over it,
+// and the star and Add manifest sit above it.
+export function ModelTile({ model, onStar, onAddManifest }: Props) {
+  const dateStyle = useDateStyle();
+  return (
+    <article className="relative flex aspect-square min-w-0 flex-col gap-2.5 rounded-lg border bg-card p-4 transition-[border-color,box-shadow] duration-150 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring/60 hover:border-[color-mix(in_srgb,var(--accent)_40%,var(--rule))] hover:shadow-[0_4px_14px_var(--shadow)] motion-reduce:transition-none">
+      <TileTop model={model} onStar={onStar} />
       <div className="flex min-w-0 flex-col gap-0.5">
-        <b className="truncate font-semibold" title={model.name}>
+        <Link
+          to="/models/$modelId"
+          params={{ modelId: model.id }}
+          title={model.name}
+          className="truncate font-semibold outline-none after:absolute after:inset-0 after:rounded-lg"
+        >
           {model.name}
-        </b>
+        </Link>
         <span className={HINT}>
-          {framework} · {formatSize(model.size_bytes)} · added {formatRecentDay(new Date(model.created_at), dateStyle)}
+          {API_FRAMEWORKS[model.framework]} · {formatSize(model.size_bytes)} · added{' '}
+          {formatRecentDay(new Date(model.created_at), dateStyle)}
         </span>
       </div>
-      <div className="font-mono text-xs/[normal] text-muted-foreground">
-        {shape === null ? 'Shape not in the file' : `in ${shape}`}
-      </div>
-      <Stats model={model} />
-      <Actions model={model} onRename={onRename} onDelete={onDelete} />
+      <div className="font-mono text-xs/[17px] text-muted-foreground">{readsOf(model)}</div>
+      {model.state === 'needs_setup' ? (
+        <AddManifest model={model} onAddManifest={onAddManifest} />
+      ) : (
+        <Stats model={model} />
+      )}
     </article>
   );
 }

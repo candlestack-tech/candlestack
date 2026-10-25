@@ -52,11 +52,19 @@ export {
   type TimeZone,
 } from './preferences';
 export {
+  catalogQueryOptions,
   deleteModel,
+  manifestQueryOptions,
   modelsQueryOptions,
+  setManifest,
   updateModel,
   uploadModel,
+  type Catalog,
+  type CatalogBlock,
+  type Manifest,
+  type ManifestSummary,
   type Model,
+  type ModelState,
   type Models,
   type StorageUsage,
 } from './models';

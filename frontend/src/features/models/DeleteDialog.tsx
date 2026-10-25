@@ -25,9 +25,9 @@ function deleteText(model: Model): string {
   return `The file goes from your models and frees ${formatSize(model.size_bytes)}.${backtestsNote(model.backtest_count)} This cannot be undone.`;
 }
 
-type FormProps = { model: Model; onDone: () => void };
+type FormProps = { model: Model; onDone: () => void; onDeleted?: (() => void) | undefined };
 
-function DeleteForm({ model, onDone }: FormProps) {
+function DeleteForm({ model, onDone, onDeleted }: FormProps) {
   const remove = useDeleteModel();
   return (
     <>
@@ -43,7 +43,15 @@ function DeleteForm({ model, onDone }: FormProps) {
         <CancelButton />
         <DangerButton
           disabled={remove.isPending}
-          onClick={() => remove.mutate(model, { onSuccess: onDone, onError: (error) => isGone(error) && onDone() })}
+          onClick={() =>
+            remove.mutate(model, {
+              onSuccess: () => {
+                onDone();
+                onDeleted?.();
+              },
+              onError: (error) => isGone(error) && onDone(),
+            })
+          }
         >
           Delete
         </DangerButton>
@@ -52,17 +60,23 @@ function DeleteForm({ model, onDone }: FormProps) {
   );
 }
 
-type Props = { model: Model | null; open: boolean; onOpenChange: (open: boolean) => void };
+type Props = {
+  model: Model | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  // What follows once the model is gone: the model's page goes back to Models.
+  onDeleted?: () => void;
+};
 
 // Delete {name}? (mockups/app, MODALS.del). The model stays while the dialog fades out.
-export function DeleteDialog({ model, open, onOpenChange }: Props) {
+export function DeleteDialog({ model, open, onOpenChange, onDeleted }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="min-w-0 break-words">{model ? `Delete ${model.name}?` : 'Delete model?'}</DialogTitle>
         </DialogHeader>
-        {model && <DeleteForm key={model.id} model={model} onDone={() => onOpenChange(false)} />}
+        {model && <DeleteForm key={model.id} model={model} onDone={() => onOpenChange(false)} onDeleted={onDeleted} />}
       </DialogContent>
     </Dialog>
   );

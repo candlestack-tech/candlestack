@@ -98,7 +98,7 @@ describe('the dashboard of a new account', () => {
     expect(await screen.findByRole('dialog', { name: 'New backtest' })).toBeDefined();
     await userEvent.keyboard('{Escape}');
     await userEvent.click(screen.getByRole('button', { name: /^2Upload your own model/ }));
-    expect(await screen.findByRole('dialog', { name: 'Upload model' })).toBeDefined();
+    expect(await screen.findByRole('dialog', { name: 'Add a model' })).toBeDefined();
   });
 
   it('shows Starred models once a model is starred', async () => {
@@ -129,7 +129,7 @@ describe('the dashboard of an account with backtests', () => {
       ),
     ).toEqual([
       'New backtestPick the data, a model and a rule',
-      'Upload model',
+      'Upload modelKerasONNX',
       'Compare backtestsTwo side by side on one chart',
     ]);
     await vi.waitFor(() =>
@@ -242,7 +242,7 @@ describe('the dashboard of an account with backtests', () => {
     const openers = [
       [() => best.getByRole('button', { name: 'Backtest #10' }), 'Backtest #10'],
       [() => screen.getByRole('button', { name: /^New backtest\s*Pick/ }), 'New backtest'],
-      [() => screen.getByRole('button', { name: /^Upload model/ }), 'Upload model'],
+      [() => screen.getByRole('button', { name: /^Upload model/ }), 'Add a model'],
       [() => screen.getByRole('button', { name: /^Compare backtests/ }), 'Compare backtests'],
     ] as const;
     for (const [opener, dialog] of openers) {
