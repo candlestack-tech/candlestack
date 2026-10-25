@@ -17,7 +17,7 @@ from candlestack.jobs import EXAMPLE_TOLERANCE, Job, JobFiles
 from candlestack.worker import runner
 from candlestack.worker.model import load_keras
 from candlestack.worker.protocol import Outcome, Request
-from candlestack.worker.runner import FILE_MAX, INTERNAL, main, run
+from candlestack.worker.runner import FILE_MAX, INTERNAL, OUT_OF_MEMORY, main, run
 
 USER = "user-1"
 
@@ -288,6 +288,38 @@ def test_a_bug_of_ours_is_an_internal_failure_with_its_trace(
     assert (outcome.result.reason, outcome.result.error) == ("internal", INTERNAL)
     assert outcome.trace is not None
     assert "RuntimeError: a bug" in outcome.trace
+
+
+class TooLarge:
+    def predict(self, samples: np.ndarray, **_: object) -> np.ndarray:
+        raise MemoryError
+
+
+def raise_memory_error(*_: object) -> None:
+    raise MemoryError
+
+
+@pytest.mark.parametrize(
+    ("target", "replacement"),
+    [
+        ("load_keras", raise_memory_error),
+        ("load_keras", lambda *_: TooLarge()),
+        ("build_input", raise_memory_error),
+    ],
+)
+def test_a_model_that_needs_more_memory_than_there_is_is_no_bug(
+    make_job: Callable[..., Job],
+    run_job: Callable[[Job], Outcome],
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+    replacement: Callable[..., object],
+) -> None:
+    monkeypatch.setattr(runner, target, replacement)
+
+    outcome = run_job(make_job("check"))
+
+    assert (outcome.result.reason, outcome.result.error) == ("stopped", OUT_OF_MEMORY)
+    assert outcome.trace is None
 
 
 def test_main_reads_the_request_and_writes_the_outcome(

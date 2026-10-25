@@ -45,6 +45,9 @@ BATCH = 1024
 FILE_MAX = 512 * 1024 * 1024
 _SAVE_AGAIN = 'Save the model again with model.save("model.keras") and upload that file.'
 INTERNAL = "The worker failed on this job. This is a bug of CandleStack and it was reported."
+OUT_OF_MEMORY = (
+    "The model needs more memory than the worker has. Choose a shorter period or a smaller model."
+)
 
 
 class JobFailed(Exception):
@@ -69,6 +72,11 @@ def run(request: Request) -> Outcome:
         result = JobResult.failed(job.id, job.kind, failed.reason, failed.message).model_copy(
             update={"runner": _runner(), **failed.found}
         )
+    except MemoryError:
+        # An allocation larger than the memory can ever give (a long period of a large window)
+        # fails here; a smaller one past the container's limit gets this process killed, which
+        # the loop reports the same way.
+        result = JobResult.failed(job.id, job.kind, "stopped", OUT_OF_MEMORY)
     except Exception:  # noqa: BLE001 (a bug of ours: the loop logs it with its traceback)
         trace = traceback.format_exc()
         result = JobResult.failed(job.id, job.kind, "internal", INTERNAL)
@@ -166,6 +174,8 @@ def _model_file(models_dir: Path, name: str, sha256: str) -> Path:
 def _load(path: Path, scratch: Path) -> keras.Model:
     try:
         return load_keras(path, scratch)
+    except MemoryError:
+        raise
     except Exception as error:  # noqa: BLE001 (Keras raises any error on a file it cannot load)
         raise JobFailed(
             "load", f"Keras could not load the model ({type(error).__name__}). " + _SAVE_AGAIN
@@ -199,6 +209,8 @@ def _predict(model: keras.Model, samples: np.ndarray, manifest: Manifest) -> np.
     """The model's output for ``samples``, checked to be one finite score per sample."""
     try:
         output = np.asarray(model.predict(samples, batch_size=BATCH, verbose=0))
+    except MemoryError:
+        raise
     except Exception as error:  # noqa: BLE001 (any error of the model on its input)
         raise JobFailed(
             "predict",
