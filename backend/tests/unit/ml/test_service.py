@@ -14,8 +14,8 @@ from candlestack.ml.errors import ModelNameTaken
 from candlestack.ml.inspect import ModelFacts
 from candlestack.ml.models import Model
 from candlestack.ml.schemas import ModelState
-from candlestack.ml.service import ModelsService, _out
-from candlestack.preprocessing import Manifest, parse_manifest
+from candlestack.ml.service import ModelsService, _checked_alone, _out
+from candlestack.preprocessing import Manifest, ManifestProblem, parse_manifest
 
 if TYPE_CHECKING:
     from candlestack.ml.storage import ModelStorage
@@ -132,3 +132,25 @@ def test_the_summary_says_what_the_manifest_reads(raw: Manifest) -> None:
         "input_shape": [25, 5],
         "warm_up": {"candles": 24, "kind": "exact"},
     }
+
+
+def test_a_text_holding_nul_is_a_problem_of_the_form() -> None:
+    # JSON takes the character, but Postgres cannot keep it in a JSONB column.
+    document = json.loads((FIXTURES / "raw_candles.manifest.json").read_bytes())
+    document["input"]["features"][0]["name"] = "open\u0000"
+    document["about"] = {"note": "a\u0000b", "trained\u0000on": "AAPL"}
+
+    manifest, problems = _checked_alone(json.dumps(document).encode())
+
+    assert manifest is not None
+    cannot_keep = "holds the character NUL, which CandleStack cannot keep. Remove it."
+    assert problems == [
+        ManifestProblem(
+            "schema",
+            (
+                f"input.features[0].name {cannot_keep}",
+                f"A field name in about {cannot_keep}",
+                f"about.note {cannot_keep}",
+            ),
+        )
+    ]

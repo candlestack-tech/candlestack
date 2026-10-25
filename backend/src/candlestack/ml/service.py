@@ -76,6 +76,8 @@ from candlestack.preprocessing import (
 )
 
 logger = logging.getLogger(__name__)
+# The one character a JSON text may hold that Postgres cannot keep in JSONB.
+NUL = "\x00"
 
 KERAS_SUFFIX = ".keras"
 # The name a file without a usable one gets (".keras").
@@ -245,7 +247,37 @@ def _checked_alone(document: bytes) -> tuple[Manifest | None, list[ManifestProbl
         manifest = parse_manifest(document)
     except InvalidManifest as invalid:
         return None, [invalid.problem]
-    return manifest, check_manifest(manifest)
+    return manifest, check_manifest(manifest) + _with_nul(manifest)
+
+
+def _with_nul(manifest: Manifest) -> list[ManifestProblem]:
+    """A problem of the form for the texts of the manifest that hold the character NUL: JSON
+    takes it, but Postgres cannot keep it in a JSONB column. The example holds numbers only."""
+    texts = _texts_with_nul(manifest.model_dump(mode="json", exclude={"example"}), "")
+    sentences = tuple(
+        f"{where} holds the character NUL, which CandleStack cannot keep. Remove it."
+        for where in texts
+    )
+    return [ManifestProblem("schema", sentences)] if sentences else []
+
+
+def _texts_with_nul(value: object, where: str) -> list[str]:
+    """Where in `value` a text, or the name of a field, holds NUL."""
+    if isinstance(value, str):
+        return [where] if NUL in value else []
+    if isinstance(value, dict):
+        found = [f"A field name in {where}" for key in value if NUL in key]
+        return found + [
+            text
+            for key, item in value.items()
+            if NUL not in key
+            for text in _texts_with_nul(item, f"{where}.{key}" if where else key)
+        ]
+    if isinstance(value, list):
+        return [
+            text for i, item in enumerate(value) for text in _texts_with_nul(item, f"{where}[{i}]")
+        ]
+    return []
 
 
 class ModelsService:

@@ -246,7 +246,8 @@ flowchart LR
   stream passes it). The PUT runs the checks that read the files
   ([preprocessing.md](preprocessing.md#checking-a-model-with-its-manifest), 2 and 3) in the
   request: the form (`parse_manifest`), the catalog, the parameters, the names, the signature
-  and the example (`check_manifest`), then the signature against the input and output shapes
+  and the example (`check_manifest`), a text holding the character NUL (JSON takes it, a
+  JSONB column cannot keep it), then the signature against the input and output shapes
   the upload's check stored (`check_with_model`). Only a manifest that passed all of them is
   kept, in the JSONB column `models.manifest`, under the lock of the user's models; else the
   answer is `422 manifest-check-failed` with one sentence for each thing wrong in `problems`
