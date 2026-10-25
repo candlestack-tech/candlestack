@@ -225,14 +225,17 @@ def test_get_settings_is_read_once() -> None:
 
 def test_the_jobs_of_the_worker(monkeypatch: pytest.MonkeyPatch) -> None:
     defaults = Settings()
-    assert defaults.jobs_redis_url == "redis://127.0.0.1:6379/1"
+    assert defaults.jobs_redis_url.get_secret_value() == "redis://127.0.0.1:6379/1"
     assert defaults.job_files_dir == Path("var/jobs")
     assert defaults.job_time_limit == 120
 
-    monkeypatch.setenv("JOBS_REDIS_URL", "redis://queue:6379/0")
+    monkeypatch.setenv("JOBS_REDIS_URL", "redis://:queue-password@queue:6379/0")
     monkeypatch.setenv("JOB_TIME_LIMIT", "30")
 
-    assert (Settings().jobs_redis_url, Settings().job_time_limit) == ("redis://queue:6379/0", 30)
+    settings = Settings()
+    assert settings.jobs_redis_url.get_secret_value() == "redis://:queue-password@queue:6379/0"
+    assert settings.job_time_limit == 30
+    assert "queue-password" not in repr(settings)
 
 
 @pytest.mark.parametrize("limit", ["0", "3601"])

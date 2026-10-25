@@ -235,13 +235,34 @@ its job queue (`worker`, `queue`) in the profile `worker`, and the backend alrea
 network `<env>_jobs` (internal: nothing on it reaches the internet) with the volume
 `<env>_jobs` for the jobs' files. The worker sees the models volume read-only, runs as `65534`
 with a read-only root filesystem (a tmpfs `/tmp` of 256 MB for Keras and the copy of a model),
-no capabilities, `no-new-privileges`, an init, at most 512 processes and threads, 1 GB
-without swap and one CPU ([Memory](#memory), [CPU](#cpu)). Its job process is the first the
-kernel stops at that limit, so a model that needs more fails its job and the worker goes on.
+no capabilities (it starts as root to change to `65534`, see the queue's password below),
+`no-new-privileges`, an init, at most 512 processes and threads, 1 GB without swap and one CPU
+([Memory](#memory), [CPU](#cpu)). Its job process is the first the kernel stops at that limit, so a model that needs more fails its job and the worker goes on.
 The queue is a Redis of its own, so the worker reaches none of the cache's keys: `noeviction`
 and 16 MB, no persistence. The worker has no `SENTRY_DSN`, as it could not reach Sentry: the
 backend logs a job that failed with a bug of the worker (`internal`) as an error, and the
 worker's log (`sudo docker logs stage-worker-1`) has the traceback under the job's ID.
+
+**The queue's password.** The queue requires `QUEUE_PASSWORD` (`requirepass`; the secret of the
+environment `staging`, see the table in
+[How a deployment reaches the VM](#how-a-deployment-reaches-the-vm)), and the backend's and the
+worker's `JOBS_REDIS_URL` carry it (`redis://:<password>@queue:6379/0`); its health check
+authenticates with it and wants `PONG`. A model that broke out of Keras' safe mode shares the
+network and the user of the worker's loop, so the password must be out of its reach, not only
+out of its environment: a process reads the environment of every process of its user in
+`/proc/<pid>/environ`, and the container's init and the loop have the password there. So the
+worker starts as root (`user: "0:0"`) with no capability but `SETUID` and `SETGID`: the init
+stays root, and the loop, once it read its settings, becomes `65534` for good and makes itself
+not dumpable (`worker/service.py`, `drop_privileges`), so its `/proc` files belong to root
+whatever the host's `fs.suid_dumpable`. Every job's process runs as `65534` without
+capabilities, with an environment that has no Redis URL, and reads neither the init's nor the
+loop's environment or memory. Without `QUEUE_PASSWORD` (empty, as until the secret is set) the
+queue runs without a password, as before it had one, and every stage deploy says so in its log
+(`no QUEUE_PASSWORD: the job queue of stage runs without a password`); a deploy never fails on
+it. CI's `infra` job starts the queue of `env/compose.yaml` with and without one and checks what
+it answers. To change the password, set the secret and re-run the stage deploy: the queue, the
+backend and the worker start again with the new one, and the jobs queued then are lost (they
+end as timeouts at the backend).
 
 | Environment | Worker and queue |
 | --- | --- |
@@ -399,9 +420,9 @@ revision and fails the deploy.
 
 `up` reads its stdin: the first line is a GHCR token used once for the pull, then `KEY=VALUE`
 lines with the environment's secrets. Only `ALPACA_KEY_ID`, `ALPACA_SECRET_KEY`,
-`LOGO_DEV_KEY`, `SENTRY_DSN`, `POSTGRES_PASSWORD`, the four `OAUTH_` keys and `BETA_ALLOWLIST`
-are accepted (at most 256 printable characters, the beta list 4096, no spaces or quotes; the
-database password only the characters the table below names). The script hands them to
+`LOGO_DEV_KEY`, `SENTRY_DSN`, `POSTGRES_PASSWORD`, the four `OAUTH_` keys, `BETA_ALLOWLIST` and
+`QUEUE_PASSWORD` are accepted (at most 256 printable characters, the beta list 4096, no spaces
+or quotes; the database and the queue's passwords only the characters the table below names). The script hands them to
 `docker compose` in its environment only: it never writes them to a file or prints them (Docker
 itself keeps them in the container's configuration, as with any container environment variable).
 The workflows send them with the `env-secrets` input of `.github/actions/deploy`. After `up` the
@@ -420,6 +441,7 @@ The other commands are `edge` and `agent <image@digest>` (stage key); the header
 | `OAUTH_GITHUB_CLIENT_ID`, `OAUTH_GITHUB_CLIENT_SECRET` | environments `production`, `staging` | the environment's GitHub OAuth app, callback `https://<host>/api/v1/auth/github/callback` |
 | `OAUTH_GOOGLE_CLIENT_ID`, `OAUTH_GOOGLE_CLIENT_SECRET` | environments `production`, `staging` | the environment's Google OAuth client, callback `https://<host>/api/v1/auth/google/callback` |
 | `BETA_ALLOWLIST` | environments `production`, `staging` | comma-separated emails that may sign in with GitHub or Google; empty lets nobody in |
+| `QUEUE_PASSWORD` | environment `staging` | password of the worker's job queue ([Worker](#worker)), 16 to 256 letters, digits or `. _ ~ -` (it goes into the queue's URL as it is), e.g. `openssl rand -hex 32`; empty or unset, the queue runs without a password |
 | `SENTRY_AUTH_TOKEN` | environments `production`, `staging` | Sentry organization token (scope `org:ci`) that records each release |
 | `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | environments `production`, `staging` | Access service token `github-actions-deploy` |
 | `DEPLOY_KNOWN_HOSTS` | repository variable | SSH host key of the VM |

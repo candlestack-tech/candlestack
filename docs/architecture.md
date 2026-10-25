@@ -379,17 +379,33 @@ sequenceDiagram
   (`worker/service.py`) starts with the job on stdin and stops at `JOB_TIME_LIMIT` (120 s) or
   at the job's deadline, whichever comes first. The process runs in a session of its own, and
   its whole process group is killed after the job, so nothing it started outlives it. It is
-  the only one that imports Keras; it gets no keys, no Redis URL, no core dumps and no file
-  over 512 MB, and it is the first the kernel stops when the container runs out of memory. A
+  the only one that imports Keras; it gets no keys, no Redis URL (nor a way to read the
+  queue's password, see below), no core dumps and no file over 512 MB, and it is the first the kernel stops when the container runs out of memory. A
   model that crashes, hangs or exhausts the memory fails its job, and the loop takes the next
   one. Starting the process and importing Keras takes 2 to 4 s; loading the raw-candles test
   model about 0.5 s, its predictions for 50000 candles about 0.3 s, the container about 300 MB
   at its peak then. A 25 x 28 model runs on the 50000 candles a backtest may load within the
   container's 1 GB, about 600 MB at its peak ([infra/README.md](../infra/README.md#memory)).
+- **The queue's password**: the queue requires one (`requirepass`, `QUEUE_PASSWORD` of the
+  deploy), which the backend and the loop find in `JOBS_REDIS_URL`
+  (`redis://:<password>@queue:6379/0`; a `SecretStr`, never logged). The job's process must
+  not get it: it shares the loop's network and user, and a process reads the environment of
+  every process of its user in `/proc/<pid>/environ`, where the container's init and the loop
+  have the password. So the container starts the worker as root with only the capabilities
+  `SETUID` and `SETGID`; the init stays root, and the loop (`service.drop_privileges`), once it
+  read its settings, becomes 65534 for good (no supplementary groups, no capabilities left) and
+  makes itself not dumpable (`prctl(PR_SET_DUMPABLE, 0)`): its `/proc` files then belong to
+  root, and no process of its user may read its environment or memory or trace it. The job's
+  process runs as 65534 with an environment of its own (`service.child_environment`: where
+  Python, the app and Keras' settings are, nothing else) and holds no descriptor of the loop's
+  (Python closes them). Started as another user than root on Linux, the loop warns that the
+  job's process can read the password, when `JOBS_REDIS_URL` has one. Locally (`compose.yaml`)
+  the password is `candlestack`; on the VM, without `QUEUE_PASSWORD`, the queue has none
+  ([infra/README.md](../infra/README.md#worker)).
 - **What a model could still reach** if it broke out of Keras' safe mode: the container has no
-  way out, but the job's process shares the loop's network and user, so it could reach the
-  queue (`queue:6379`, without a password), the other jobs' files and every model file
-  (read-only). Each job running alone in a fresh process, killed with all it started, keeps
+  way out, and the queue refuses it without the password, but the job's process shares the
+  loop's user, so it could read the other jobs' files and every model file (read-only) and
+  signal the loop. Each job running alone in a fresh process, killed with all it started, keeps
   such a model to its own job's time.
 - **A worker that stops** while a job runs: on SIGTERM (a deploy, `docker stop`) it fails the
   job as `worker-stopped` and ends. Killed, it leaves a job without a lease, which the next
@@ -616,7 +632,7 @@ Environment variables, read by pydantic-settings without a prefix. All are docum
 | `REDIS_URL` | `redis://127.0.0.1:6379/0` | |
 | `DATABASE_URL` | `postgresql+asyncpg://candlestack:candlestack@127.0.0.1:5432/candlestack` | Postgres (whitespace stripped); the pool holds at most 10 connections |
 | `MODEL_STORAGE_DIR` | `var/models` | directory of the uploaded model files, relative to the working directory; `/data/models` (a volume) on the VM; created at startup; the worker reads it (read-only) |
-| `JOBS_REDIS_URL` | `redis://127.0.0.1:6379/1` | the job queue between the backend and the worker (`compose.yaml`: `redis://queue:6379/0`) |
+| `JOBS_REDIS_URL` | `redis://127.0.0.1:6379/1` | the job queue between the backend and the worker, with its password where it has one (`compose.yaml`: `redis://:candlestack@queue:6379/0`; the VM: `redis://:<QUEUE_PASSWORD>@queue:6379/0`); never logged |
 | `JOB_FILES_DIR` | `var/jobs` | the directory the backend and the worker share for the jobs' candles and predictions, relative to the working directory; `/data/jobs` (a volume) in the containers |
 | `JOB_TIME_LIMIT` | `120` | seconds the worker lets one job run before it stops it, at most 3600 |
 | `OAUTH_GITHUB_CLIENT_ID`, `OAUTH_GITHUB_CLIENT_SECRET` | empty | GitHub OAuth app; without both, GitHub sign-in is off |

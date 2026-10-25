@@ -2,8 +2,8 @@
 # infra/vm/candlestack-deploy on the VM, which also exports the backend's Alpaca keys
 # (ALPACA_KEY_ID, ALPACA_SECRET_KEY), the logo.dev key (LOGO_DEV_KEY), SENTRY_DSN, the Postgres
 # password (POSTGRES_PASSWORD), the OAuth apps (OAUTH_GITHUB_CLIENT_ID,
-# OAUTH_GITHUB_CLIENT_SECRET, OAUTH_GOOGLE_CLIENT_ID, OAUTH_GOOGLE_CLIENT_SECRET) and the beta
-# list (BETA_ALLOWLIST) for this command only:
+# OAUTH_GITHUB_CLIENT_SECRET, OAUTH_GOOGLE_CLIENT_ID, OAUTH_GOOGLE_CLIENT_SECRET), the beta
+# list (BETA_ALLOWLIST) and the job queue's password (QUEUE_PASSWORD) for this command only:
 #   ENV_NAME=stage APP_VERSION=<version> BACKEND_IMAGE=<image@digest> FRONTEND_IMAGE=<image@digest> \
 #   REDIS_MAXMEMORY=256mb REDIS_MEM_LIMIT=288m EDGE_NETWORK=edge POSTGRES_PASSWORD=<password> \
 #   docker compose -p stage -f infra/env/compose.yaml up -d
@@ -18,7 +18,9 @@
 # The worker that runs the models and its job queue are in the profile "worker": stage only,
 # prod runs without them until the tech lead decides otherwise. The deploy sets
 # COMPOSE_PROFILES=worker and WORKER_IMAGE=<image@digest> for stage only, and they join the
-# backend on the internal network <ENV_NAME>_jobs (infra/README.md, "Worker").
+# backend on the internal network <ENV_NAME>_jobs (infra/README.md, "Worker"). The queue
+# requires QUEUE_PASSWORD, which the backend's and the worker's JOBS_REDIS_URL carry; without
+# one (empty) it runs without a password.
 services:
   backend:
     image: ${BACKEND_IMAGE:?}
@@ -38,7 +40,7 @@ services:
       OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET:-}
       BETA_ALLOWLIST: ${BETA_ALLOWLIST:-}
       MODEL_STORAGE_DIR: /data/models
-      JOBS_REDIS_URL: redis://queue:6379/0
+      JOBS_REDIS_URL: redis://:${QUEUE_PASSWORD:-}@queue:6379/0
       JOB_FILES_DIR: /data/jobs
     # Read by the server agent: ops tells deploys (new version) from redeploys (same version).
     labels:
@@ -223,14 +225,19 @@ services:
   # the backend; the image's /data/jobs is owned by its user (65534), as the backend's is.
   # No SENTRY_DSN: without network it could not reach Sentry. A bug of the worker reaches
   # Sentry through the backend, which logs the job's `internal` result as an error.
+  # Started as root with only the capabilities to change its user (and the init, which stays
+  # root): the loop reads the queue's password, then becomes 65534 for good, so the job's
+  # process can read it neither in its environment nor in the loop's or the init's
+  # (docs/architecture.md, "Worker").
   worker:
     image: ${WORKER_IMAGE:-}
     profiles: [worker]
     restart: unless-stopped
+    user: "0:0"
     environment:
       APP_ENV: ${ENV_NAME:?}
       APP_VERSION: ${APP_VERSION:?}
-      JOBS_REDIS_URL: redis://queue:6379/0
+      JOBS_REDIS_URL: redis://:${QUEUE_PASSWORD:-}@queue:6379/0
       MODEL_STORAGE_DIR: /data/models
       JOB_FILES_DIR: /data/jobs
     labels:
@@ -255,6 +262,9 @@ services:
       - /tmp:size=256m
     cap_drop:
       - ALL
+    cap_add:
+      - SETUID
+      - SETGID
     security_opt:
       - no-new-privileges:true
     depends_on:
@@ -265,12 +275,15 @@ services:
 
   # The job queue between the backend and the worker: a Redis of its own, so the worker reaches
   # none of the cache's keys. It never evicts (a job must not vanish) and keeps nothing on disk:
-  # a job lost with it ends as a timeout at the backend.
+  # a job lost with it ends as a timeout at the backend. It refuses every command but AUTH
+  # without QUEUE_PASSWORD (an empty one is none); redis-cli of the health check sends it.
   queue:
     image: redis:8-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
     profiles: [worker]
     restart: unless-stopped
-    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "16mb", "--maxmemory-policy", "noeviction"]
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "16mb", "--maxmemory-policy", "noeviction", "--requirepass", "${QUEUE_PASSWORD:-}"]
+    environment:
+      REDISCLI_AUTH: ${QUEUE_PASSWORD:-}
     user: redis
     mem_limit: 32m
     read_only: true
@@ -281,7 +294,8 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # redis-cli exits 0 on a refusal too (NOAUTH): only PONG is healthy.
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning ping | grep -qx PONG"]
       interval: 5s
       timeout: 3s
       retries: 5

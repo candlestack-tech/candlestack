@@ -401,10 +401,45 @@ jobs:
           # The worker and its queue, as stage runs them.
           WORKER_IMAGE=worker ENV_NAME=stage APP_VERSION=check BACKEND_IMAGE=backend \
             FRONTEND_IMAGE=frontend REDIS_MAXMEMORY=256mb REDIS_MEM_LIMIT=288m EDGE_NETWORK=edge \
-            POSTGRES_PASSWORD=check \
+            POSTGRES_PASSWORD=check QUEUE_PASSWORD=check-queue-password \
             docker compose -f infra/env/compose.yaml --profile worker config --quiet
           docker compose -f infra/edge/compose.yaml config --quiet
           IMAGE=agent docker compose -f infra/agent/compose.yaml config --quiet
+
+      # The job queue of infra/env/compose.yaml as stage runs it: healthy, and it refuses a
+      # client without the password. Without one (QUEUE_PASSWORD empty) it answers anyone.
+      - name: Job queue password
+        env:
+          WORKER_IMAGE: worker
+          ENV_NAME: stage
+          APP_VERSION: check
+          BACKEND_IMAGE: backend
+          FRONTEND_IMAGE: frontend
+          REDIS_MAXMEMORY: 256mb
+          REDIS_MEM_LIMIT: 288m
+          EDGE_NETWORK: edge
+          POSTGRES_PASSWORD: check
+        run: |
+          docker network create edge >/dev/null
+          compose=(docker compose -p queue-check -f infra/env/compose.yaml --profile worker)
+          # ping <expected answer> [password]: what redis-cli in the queue's container gets.
+          ping() {
+            local answer
+            answer=$("${compose[@]}" exec -T queue env -u REDISCLI_AUTH \
+              redis-cli --no-auth-warning ${2:+-a "$2"} ping 2>&1)
+            if [[ $answer != *"$1"* ]]; then
+              echo "::error::expected '$1', got '$answer'"
+              return 1
+            fi
+            echo "ok    ${2:+with a password: }$answer"
+          }
+          QUEUE_PASSWORD=check-queue-password "${compose[@]}" up --detach --wait queue
+          ping NOAUTH
+          ping WRONGPASS wrong-password-0123
+          ping PONG check-queue-password
+          QUEUE_PASSWORD='' "${compose[@]}" up --detach --wait queue
+          ping PONG
+          "${compose[@]}" down
 
       # ruff at the backend's release (backend/uv.lock) with infra/agent/ruff.toml, then the
       # tests on the Python the agent image is built from.

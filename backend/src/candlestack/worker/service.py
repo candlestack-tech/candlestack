@@ -6,9 +6,11 @@ exhausts the container's memory fails its job and the loop goes on with the next
 job runs, the loop renews its lease; a job whose lease ran out (the worker stopped) is failed
 by the next sweep, never run again (``jobs.queue``). Redis out of reach is a warning and a
 retry, never the end of the loop. SIGTERM (a deploy, ``docker stop``) fails the running job as
-``worker-stopped`` and ends the loop.
+``worker-stopped`` and ends the loop. Before it serves, the loop keeps the queue's password
+from the job's process (``drop_privileges``).
 """
 
+import ctypes
 import logging
 import os
 import platform
@@ -20,6 +22,7 @@ from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import anyio
 from anyio import CancelScope
@@ -63,6 +66,10 @@ _ENVIRONMENT_KEPT = (
     "JAX_PLATFORMS",
 )
 _ENVIRONMENT_DEFAULTS = {"KERAS_BACKEND": "jax", "JAX_PLATFORMS": "cpu"}
+# The user the loop becomes when the container starts it as root (Linux), and so the job's
+# process too: nobody, who owns the jobs' files.
+WORKER_USER = 65534
+_PR_SET_DUMPABLE = 4
 
 TIME_LIMIT = (
     "The model took longer than {seconds:g} seconds and was stopped. Choose a shorter period "
@@ -298,9 +305,42 @@ def _log(result: JobResult) -> None:
     logger.info("Job %s %s", result.id, result.status, extra=extra)
 
 
+def drop_privileges(settings: Settings) -> None:
+    """Keeps the job queue's password (in ``JOBS_REDIS_URL``) out of the job's process' reach
+    (Linux), which gets an environment without it (``child_environment``).
+
+    The password is in the environment of the container's init and of the loop, which a
+    process of the same user reads in ``/proc/<pid>/environ``. So the container starts them as
+    root, with no capability but changing the user: the loop, once it read its settings,
+    becomes ``WORKER_USER`` for good (and every job's process with it), while the init stays
+    root. The loop then makes itself not dumpable: its ``/proc`` files belong to root and no
+    process of its user may trace it or read its memory, whatever the host's
+    ``fs.suid_dumpable``.
+    """
+    if sys.platform != "linux":
+        return
+    if os.getuid() == 0:
+        os.setgroups([])
+        os.setresgid(WORKER_USER, WORKER_USER, WORKER_USER)
+        os.setresuid(WORKER_USER, WORKER_USER, WORKER_USER)
+    elif urlsplit(settings.jobs_redis_url.get_secret_value()).password:
+        logger.warning(
+            "The worker was not started as root: the job's process can read the job queue's "
+            "password in the environment of the container's init"
+        )
+    _not_dumpable()
+
+
+def _not_dumpable() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(_PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+
+
 async def serve(settings: Settings) -> None:
     """Runs the worker until SIGTERM or SIGINT."""
-    redis = create_redis(settings.jobs_redis_url)
+    redis = create_redis(settings.jobs_redis_url.get_secret_value())
     worker = Worker(
         JobQueue(redis),
         JobFiles(settings.job_files_dir),
@@ -332,5 +372,6 @@ async def _stop_on_signal(scope: CancelScope) -> None:
 def main() -> None:
     settings = get_settings()
     setup_logging(settings.log_level)
+    drop_privileges(settings)
     setup_sentry(settings)
     anyio.run(serve, settings)
