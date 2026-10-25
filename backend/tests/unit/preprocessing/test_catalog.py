@@ -10,8 +10,28 @@ from candlestack.preprocessing import CATALOG, Block, ParamOut, describe_catalog
 from candlestack.preprocessing.catalog import _describe
 from candlestack.preprocessing.manifest import BLOCK_ID
 
+# The indicators of the BLESK models, in the order of their input, with their display group.
+INDICATORS = {
+    "bollinger-high@1": "Bands",
+    "bollinger-low@1": "Bands",
+    "keltner-high@1": "Bands",
+    "keltner-low@1": "Bands",
+    "squeeze@1": "Bands",
+    "rsi@1": "Momentum",
+    "roc@1": "Momentum",
+    "tsi@1": "Momentum",
+    "atr@1": "Bands",
+    "adx@1": "Trend",
+    "aroon-up@1": "Trend",
+    "aroon@1": "Trend",
+    "aroon-down@1": "Trend",
+    "sma@1": "Trend",
+    "ema@1": "Trend",
+    "macd-diff@1": "Trend",
+}
 
-def test_the_first_blocks_are_registered() -> None:
+
+def test_the_blocks_are_registered() -> None:
     assert {block: CATALOG[block].step for block in CATALOG} == {
         "candles@1": "representation",
         "open@1": "feature",
@@ -19,6 +39,7 @@ def test_the_first_blocks_are_registered() -> None:
         "low@1": "feature",
         "close@1": "feature",
         "volume@1": "feature",
+        **dict.fromkeys(INDICATORS, "feature"),
         "none@1": "normalization",
         "window@1": "window",
     }
@@ -51,6 +72,7 @@ def test_the_catalog_lists_the_blocks_by_step() -> None:
         "low@1",
         "close@1",
         "volume@1",
+        *INDICATORS,
         "none@1",
         "window@1",
     ]
@@ -69,10 +91,56 @@ def test_every_feature_has_a_display_group_and_no_other_block_has_one(block: Blo
     assert (block.group is not None) == (block.step == "feature")
 
 
-def test_the_candle_columns_are_in_the_candle_group() -> None:
+def test_the_features_are_in_their_display_groups() -> None:
     groups = {block.id: block.group for block in describe_catalog().blocks if block.group}
 
-    assert groups == dict.fromkeys(["open@1", "high@1", "low@1", "close@1", "volume@1"], "Candle")
+    assert groups == {
+        **dict.fromkeys(["open@1", "high@1", "low@1", "close@1", "volume@1"], "Candle"),
+        **INDICATORS,
+    }
+
+
+def test_the_catalog_describes_an_indicator_with_its_defaults_and_warm_up() -> None:
+    rsi = next(block for block in describe_catalog().blocks if block.id == "rsi@1")
+
+    assert (rsi.step, rsi.group, rsi.warm_up) == ("feature", "Momentum", "14 * window")
+    assert [param.model_dump() for param in rsi.params] == [
+        {
+            "name": "window",
+            "type": "integer",
+            "description": "Candles in the window",
+            "required": False,
+            "default": 20,
+            "minimum": 2,
+            "maximum": 1000,
+            "exclusive_minimum": None,
+            "exclusive_maximum": None,
+            "options": None,
+            "tunable": False,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("block", "rule"),
+    [
+        ("bollinger-high@1", "window - 1"),
+        ("squeeze@1", "max(bollinger_window - 1, keltner_window - 1, keltner_atr_window)"),
+        ("roc@1", "window"),
+        ("tsi@1", "7 * (slow + fast)"),
+        ("atr@1", "15 * window - 1"),
+        ("adx@1", "20 * window"),
+        ("ema@1", "7 * window"),
+        ("macd-diff@1", "7 * (max(fast, slow) + signal)"),
+    ],
+)
+def test_the_warm_up_rule_says_what_the_warm_up_counts(block: str, rule: str) -> None:
+    """The rule the app shows, evaluated on the block's defaults, is the warm-up it counts."""
+    params = CATALOG[block].params()
+    names = {"max": max, **params.model_dump()}
+
+    assert CATALOG[block].warm_up_rule == rule
+    assert eval(rule, {"__builtins__": {}}, names) == CATALOG[block].warm_up(params)
 
 
 def test_only_a_representation_may_span_several_candles_a_row() -> None:

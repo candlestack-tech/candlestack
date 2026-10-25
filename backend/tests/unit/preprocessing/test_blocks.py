@@ -146,6 +146,8 @@ def test_the_window_needs_length_minus_one_earlier_rows(length: int, rows_before
     assert CATALOG["window@1"].warm_up(Window(length=length)) == rows_before
 
 
-@pytest.mark.parametrize("block", [block for block in CATALOG if block != "window@1"])
-def test_the_other_blocks_need_no_earlier_candle(block: str) -> None:
+@pytest.mark.parametrize(
+    "block", ["candles@1", "open@1", "high@1", "low@1", "close@1", "volume@1", "none@1"]
+)
+def test_the_candle_blocks_need_no_earlier_candle(block: str) -> None:
     assert CATALOG[block].warm_up(NONE) == 0

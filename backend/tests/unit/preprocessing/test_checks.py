@@ -55,14 +55,14 @@ def test_the_manifest_without_preprocessing_can_run(raw: dict[str, Any]) -> None
 def test_blocks_still_to_come_parse_but_cannot_run() -> None:
     manifest = parse_manifest(BLESK_NO_VOL)
 
-    assert unknown_blocks(manifest) == ["renko-triples@1", "blesk-norm@1", "rsi@1"]
+    assert unknown_blocks(manifest) == ["renko-triples@1", "blesk-norm@1"]
     assert check_manifest(manifest) == [
         ManifestProblem(
             "catalog",
             (
                 (
-                    "The catalog has no blocks renko-triples@1, blesk-norm@1 and rsi@1 yet, so "
-                    "it cannot run."
+                    "The catalog has no blocks renko-triples@1 and blesk-norm@1 yet, so it "
+                    "cannot run."
                 ),
                 (
                     'The window option last "current" is not supported yet. It needs rows that '
@@ -178,7 +178,7 @@ def test_an_example_of_ragged_rows(raw: dict[str, Any]) -> None:
 
 
 def test_every_failed_check_is_one_problem(raw: dict[str, Any]) -> None:
-    raw["input"]["features"][0]["id"] = "rsi@1"
+    raw["input"]["features"][0]["id"] = "renko-direction@1"
     raw["input"]["features"][1]["params"] = {"window": 3}
     raw["input"]["features"][2]["name"] = "open"
     raw["signature"]["input"]["shape"] = [25, 23]
