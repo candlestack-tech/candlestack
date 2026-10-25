@@ -66,7 +66,7 @@ All four are required to merge:
 | `no-ai-signs / No AI signs` | commit messages, authors and the pull request text |
 | `linked-issue / Linked issue` | the pull request description closes an issue ("Closes #N"); the tech lead and Dependabot are exempt |
 | `pr-hygiene / Title and branch` | the title (starts with a capital letter and an imperative verb, no `type:` prefix, no trailing period, at most 72 characters) and the branch name (`<area>/<topic>`); Dependabot's titles are exempt. `pr-hygiene / Size` only warns, above 1000 changed lines (lockfiles, fixtures and generated snapshots not counted) |
-| `ci` | `Pre-commit` (the git hooks on every file, ruff aside), the backend jobs `lint` (ruff, ty, import-linter, the root `compose.yaml` validated and its dev image built), `unit` (no network: pytest-socket), `integration` (the unit and integration tests with Redis and Postgres, at least 95% branch coverage, and on a pull request at least 90% of the changed lines covered, diff-cover) and `e2e` (the built image, then scanned by Trivy); `frontend` (in `frontend/`: `npm run lint`, `npm test`, `npm run build`, and `src/api/schema.d.ts` regenerated from `docs/openapi.json` with `npm run api:types` must not change); `api` (breaking changes to the API, see below); `infra` (the deploy script's tests, the compose files of `infra/` validated, the server agent's ruff and tests, the edge Caddyfile and the tunnel ingress rules validated, the frontend and server agent images built and scanned by Trivy; see [infra/README.md](infra/README.md#tests)) |
+| `ci` | `Pre-commit` (the git hooks on every file, ruff aside), the backend jobs `lint` (ruff, ty, import-linter, the root `compose.yaml` validated and its dev image built), `unit` (no network: pytest-socket), `integration` (the unit and integration tests with Redis and Postgres, at least 95% branch coverage, and on a pull request at least 90% of the changed lines covered, diff-cover) and `e2e` (the built image, then scanned by Trivy, and the worker's image built and scanned); `frontend` (in `frontend/`: `npm run lint`, `npm test`, `npm run build`, and `src/api/schema.d.ts` regenerated from `docs/openapi.json` with `npm run api:types` must not change); `api` (breaking changes to the API, see below); `infra` (the deploy script's tests, the compose files of `infra/` validated, the server agent's ruff and tests, the edge Caddyfile and the tunnel ingress rules validated, the frontend and server agent images built and scanned by Trivy; see [infra/README.md](infra/README.md#tests)) |
 
 The backend jobs run only when `backend/`, `docs/openapi.json`, a `compose*.yaml` file in the
 repository root (`compose.yaml`) or `.github/workflows/ci.yml` changed, and `infra` only when
@@ -91,7 +91,7 @@ PowerShell 5.1, chain commands with `;` instead of `&&` and set a variable befor
 `$env:E2E_PORT='18001'; uv run pytest -m e2e` (it stays set in that window). From `backend/`:
 
 ```sh
-uv sync                                               # virtualenv with the dev tools
+uv sync                                               # virtualenv with the dev tools and the worker's Keras and JAX
 uv run ruff check . && uv run ruff format --check .   # lint and format
 uv run ty check                                       # types
 uv run lint-imports                                   # module boundaries

@@ -273,6 +273,25 @@ jobs:
           trivy image --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed
           --ignorefile .trivyignore.yaml --exit-code 1 candlestack-backend:e2e-${{ env.E2E_PORT }}
 
+      # The worker that runs the models: the stage `worker` of the same Dockerfile, built and
+      # scanned like the backend's image (its tests run in `unit` and `integration`).
+      - name: Build the worker image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: backend
+          target: worker
+          load: true
+          tags: candlestack-worker:e2e
+          build-args: APP_COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=worker-e2e
+          cache-to: type=gha,mode=max,scope=worker-e2e
+
+      - name: Scan the worker image
+        working-directory: .
+        run: >-
+          trivy image --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed
+          --ignorefile .trivyignore.yaml --exit-code 1 candlestack-worker:e2e
+
       - name: Start the stack
         run: docker compose -f tests/e2e/compose.yaml up -d --wait
 
@@ -379,6 +398,11 @@ jobs:
             REDIS_MAXMEMORY=256mb REDIS_MEM_LIMIT=288m EDGE_NETWORK=edge \
             POSTGRES_PASSWORD=check \
             docker compose -f infra/env/compose.yaml config --quiet
+          # The worker and its queue, which the deploy does not start yet.
+          WORKER_IMAGE=worker ENV_NAME=stage APP_VERSION=check BACKEND_IMAGE=backend \
+            FRONTEND_IMAGE=frontend REDIS_MAXMEMORY=256mb REDIS_MEM_LIMIT=288m EDGE_NETWORK=edge \
+            POSTGRES_PASSWORD=check \
+            docker compose -f infra/env/compose.yaml --profile worker config --quiet
           docker compose -f infra/edge/compose.yaml config --quiet
           IMAGE=agent docker compose -f infra/agent/compose.yaml config --quiet
 

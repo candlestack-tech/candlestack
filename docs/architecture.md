@@ -12,7 +12,9 @@ models; market data is not stored: the sources are the truth and Redis is a cach
 lost at any time. The backtest is being built next to them
 (`signals`, `engine`, `metrics` and the `candlestack-bt` command in `cli`, see
 [Modules](#modules) and the contract in [engine.md](engine.md)); it runs from the command line,
-not in the service.
+not in the service. A second process, the worker (`python -m candlestack.worker`), runs the
+models users upload in a container without network; the backend hands it jobs through a queue
+in Redis (`jobs`, see [Worker](#worker)).
 
 ## Runtime
 
@@ -33,6 +35,13 @@ flowchart LR
             backend --> postgres[("postgres<br/>users, sessions, settings, models, backtests")]
             backend --> models[("models volume<br/>uploaded model files")]
             modelsbackup["models-backup<br/>nightly archive"] -.->|"read-only"| models
+            subgraph jobsnet["jobs network (internal, no way out)"]
+                backend -->|"jobs, results"| queue[("queue<br/>Redis of the jobs")]
+                worker["worker<br/>runs the models, one job at a time"] -->|"takes jobs"| queue
+            end
+            worker -.->|"read-only"| models
+            backend <-->|"candles, predictions"| jobfiles[("jobs volume<br/>the jobs' files")]
+            worker <--> jobfiles
         end
     end
     backend -->|HTTPS| binance["Binance<br/>REST + data.binance.vision"]
@@ -48,6 +57,8 @@ flowchart LR
 | `redis` | `redis:8-alpine` | private network of the environment, no persistence, `allkeys-lru` |
 | `postgres` | `postgres:18-alpine` | private network of the environment, data in a volume; migrated by a one-shot `migrate` container (the backend image, `alembic upgrade head`) before the backend starts; prod and stage dump it every night (`backup`) |
 | `models-backup` | `offen/docker-volume-backup` | archives the `models` volume (read-only) every night at 00:30 UTC into the volume `model_backups`, keeps 7 days; no network |
+| `worker` | the stage `worker` of `backend/Dockerfile` | runs the uploaded models ([Worker](#worker)); only on the internal network `jobs`, the `models` volume read-only, the `jobs` volume shared with the backend, a read-only root filesystem, 512 MB without swap, one CPU; in `compose.yaml` now, on the VM on stage only, once the deploy starts the profile `worker` there ([infra/README.md](../infra/README.md#worker)) |
+| `queue` | `redis:8-alpine` | the job queue: only on the network `jobs`, no persistence, `noeviction`; with the worker |
 
 ## HTTP surface
 
@@ -227,16 +238,18 @@ flowchart LR
   state. The input shape (one input) and the output shape (`Dense`, `Flatten` and layers that
   keep their input's shape) are read from the config when it says them plainly, else null.
   `tests/fixtures/keras/make_allowlist.py` regenerates the allowlist from a Keras release.
-- **Loading an accepted file** (the worker, next milestone): the check is static, so the worker
-  is the second line. It loads with a pinned Keras release that has the fixes of the advisories
-  above (3.15.1 or later, the one the allowlist was generated from). It removes the model's
-  `compile_config` from `config.json` (a copy of the file) and loads it with
-  `keras.saving.load_model(path, compile=False, safe_mode=True)`, so nothing of the compile
-  settings, which the check does not look at, can ever be deserialized or run. It walks
-  `config.json` against the same allowlist again before loading, and
+- **Loading an accepted file** (the worker, `worker/model.py`): the check is static, so the
+  worker is the second line. It loads with the Keras release the allowlist was generated from,
+  pinned in the `worker` dependency group (3.15.1, which has the fixes of the advisories
+  above). It removes the model's `compile_config` from `config.json` (a copy of the file) and
+  loads it with `keras.saving.load_model(path, compile=False, safe_mode=True)`, so nothing of
+  the compile settings, which the check does not look at, can ever be deserialized or run, and
   passes `custom_objects` with a no-op stub for every user object under `*_regularizer` and
   `*_constraint` (a regularizer that adds no loss, a constraint that returns its input). It
-  runs without network access and with the same kind of limits as the check.
+  checks the file's SHA-256 against the one of the upload first, and runs without network
+  access, in a process of its own with a time limit, in a container with a memory limit
+  ([Worker](#worker)). It does not walk `config.json` against the allowlist a second time yet:
+  the allowlist is `ml`'s, which the worker does not import.
 - **Manifest** ([preprocessing.md](preprocessing.md#the-manifest)): a model is kept without
   one and gets it with its own request, `PUT /api/v1/models/{model_id}/manifest` with the
   manifest as the JSON body, which adds it or replaces the one the model had; `GET` on the same
@@ -285,6 +298,103 @@ flowchart LR
   (`async (db, user_id, model_ids) -> {model_id: (count, best Sharpe)}`) that
   `candlestack.main` puts on `app.state.model_usage`: `experiments.model_usage`, one grouped
   query for the whole list. Without one (`ml.no_usage`) no model was used.
+
+## Worker
+
+The worker runs the models users upload: a `predict` job gives the predictions of a model on
+candles (the backtests, #269), a `check` job is the trial run of a model with its manifest
+([preprocessing.md](preprocessing.md#checking-a-model-with-its-manifest), checks 4 and 5). The
+backend has the network and the candle cache, the worker has neither: they meet at a job queue
+in a Redis of their own (`queue`, `JOBS_REDIS_URL`) on the internal network `jobs`, and at a
+volume both mount (`jobs`, `JOB_FILES_DIR`) for the candles and the predictions. The backend
+calls `JobClient` of `jobs` and never imports the worker; the worker is
+`python -m candlestack.worker`.
+
+```mermaid
+sequenceDiagram
+    participant B as backend (JobClient)
+    participant V as jobs volume
+    participant Q as queue (Redis)
+    participant W as worker loop
+    participant P as job process (Keras)
+    B->>V: <job_id>/candles.parquet (predict)
+    B->>Q: SET jobs:job:<id>, RPUSH jobs:queue
+    W->>Q: claim: LMOVE to jobs:running + lease
+    W->>P: start, the job on stdin
+    P->>V: reads the candles, writes predictions.parquet
+    P->>W: the result on stdout
+    W->>Q: publish: RPUSH jobs:result:<id>
+    B->>Q: BLPOP jobs:result:<id> (until its wait runs out)
+    B->>V: reads the predictions, removes <job_id>/
+```
+
+- **Keys**, all under `jobs:`: `jobs:queue` (a list of job IDs, oldest first), `jobs:running`
+  (the IDs being run), `jobs:job:<id>` (the job as JSON, until its deadline and a minute more),
+  `jobs:lease:<id>` (the worker that runs it, 30 s, renewed every 10 s) and `jobs:result:<id>`
+  (a list of one result, which the backend pops; 10 minutes). Taking a job moves its ID to the
+  running list and gives it a lease in one Lua script, and publishing a result removes the job
+  from the running list in another, only while it is still there.
+- **A job** (`jobs.Job`): `version` (1), `id` (32 hex), `kind` (`predict` or `check`), `model`
+  (the file in the model storage, `<user_id>/<model_id>.keras`: no absolute path, no `..`),
+  `sha256` (of the upload), `manifest` (the model's manifest, as data), `enqueued_at` and
+  `deadline` (epoch seconds: when the backend stops waiting). The candles of a `predict` are
+  `<job_id>/candles.parquet` in the jobs' volume (`ts`, open, high, low, close, volume), and its
+  predictions `<job_id>/predictions.parquet` next to them (`ts` Int64, `prediction` Float64,
+  one row per sample, `ts` the candle at whose close the sample is known); each file is
+  written under another name and renamed, so the other side never reads half of one.
+- **A result** (`jobs.JobResult`): `id`, `kind`, `status` (`done` or `failed`), `reason` and
+  `error` of a failed one (a slug and plain sentences for the user), `samples` and `dropped`
+  (the predictions made, the warm-up's candles), `verified` and `example_difference` of a
+  `check` (the model gave the manifest's `example` within 1e-4, the largest difference), the
+  `runner` (the Keras release, its backend and the backend's release), the `timings` in
+  milliseconds (`queued`, `start` of the process, `load`, `input`, `predict`, `total`) and
+  `manifest_sha256`, the digest of the manifest the job ran with (`jobs.manifest_sha256`: the
+  SHA-256 of its JSON with sorted keys and no spaces), which `JobClient` sets on every result.
+- **The reasons**: `model-missing`, `model-changed` (SHA-256), `manifest`, `candles` (they
+  break their rules or make no sample), `load` (Keras refused the file), `predict` (the model
+  failed on its input), `output` (not one finite score per sample), `example`, `time-limit`,
+  `stopped` (the job's process was killed, mostly at the memory limit, or an allocation
+  larger than the memory failed), `worker-stopped`, `expired` (the backend no longer waits: a
+  job past its deadline does not run, a running one stops at it, a job without an answer
+  within the wait fails at the backend) and `internal` (a bug of ours).
+- **A `check`** builds the input from built-in candles (a seeded random walk, enough for the
+  manifest's warm-up and 64 samples), runs the model, wants one finite score per sample and,
+  with an `example`, its output within 1e-4. The code that sets `models.verified_at` from a
+  `check` (with the backtests, #269) sets it only when the result is `done` with `verified`
+  true and, under the lock of the user's models, the model's stored manifest still has the
+  result's `manifest_sha256`: a manifest replaced while the job ran keeps the model `ready`.
+- **One job at a time** per worker, each in a fresh process (`worker/runner.py`) that the loop
+  (`worker/service.py`) starts with the job on stdin and stops at `JOB_TIME_LIMIT` (120 s) or
+  at the job's deadline, whichever comes first. The process runs in a session of its own, and
+  its whole process group is killed after the job, so nothing it started outlives it. It is
+  the only one that imports Keras; it gets no keys, no Redis URL, no core dumps and no file
+  over 512 MB, and it is the first the kernel stops when the container runs out of memory. A
+  model that crashes, hangs or exhausts the memory fails its job, and the loop takes the next
+  one. Starting the process and importing Keras takes 2 to 4 s; loading the raw-candles test
+  model about 0.5 s, its predictions for 50000 candles about 0.3 s, the container about 300 MB
+  at its peak then. A 25 x 28 model runs on about 45000 candles within the container's 512 MB
+  ([infra/README.md](../infra/README.md#memory)).
+- **What a model could still reach** if it broke out of Keras' safe mode: the container has no
+  way out, but the job's process shares the loop's network and user, so it could reach the
+  queue (`queue:6379`, without a password), the other jobs' files and every model file
+  (read-only). Each job running alone in a fresh process, killed with all it started, keeps
+  such a model to its own job's time.
+- **A worker that stops** while a job runs: on SIGTERM (a deploy, `docker stop`) it fails the
+  job as `worker-stopped` and ends. Killed, it leaves a job without a lease, which the next
+  sweep (every 10 s by any worker, after the lease's 30 s) fails as `worker-stopped`. Such a job
+  is never run again: one that took its worker down would take the next one down too. Redis
+  out of reach is a warning, and the loop tries again 5 s later.
+- **Files**: the backend removes a job's directory once it has the result, whatever it is; the
+  worker removes the directories older than an hour (a backend that stopped waiting) at its
+  start and every 10 minutes. A job's directory is writable by both (the dev backend runs as
+  root, the worker as 65534). On the VM the volume is a tmpfs of 64 MB, so no job can fill
+  the disk through it.
+- **Logs**: a line per job (`job_id`, `kind`, `status`, `reason`, `duration_ms`), never the
+  model's path, its manifest or the candles. A bug of ours (`internal`) is an error in the
+  worker's log, with the job process' traceback. The worker cannot reach Sentry (it has no
+  network, and no `SENTRY_DSN` on the VM): `JobClient` logs an `internal` result as an error in
+  the backend, which makes it a Sentry issue naming the job's ID. What a model does wrong is
+  no error.
 
 ## Backtests
 
@@ -347,11 +457,13 @@ A module is a subpackage of `candlestack` under `backend/src/candlestack/`.
 | `data` | now | instrument catalog, candles, sessions, cache, source adapters, rate limits |
 | `accounts` | now | users, GitHub and Google sign-in, sessions, the beta list, Settings (name, sign-in methods, preferences, deleting the account); `CurrentUserDep` for the routes of the signed-in user, `AccountDeletionHook` for what other modules delete with an account |
 | `preprocessing` | started | the model's input from its manifest: the manifest's schema and checks, the catalog of blocks, and the input built from candles: representation (candles now; Renko, Kagi later), features, normalization, windows ([preprocessing.md](preprocessing.md)) |
-| `ml` | now | the models users upload: the upload and its static check, the file storage, the list, rename, star, delete; running models later, in a worker (below) |
+| `ml` | now | the models users upload: the upload and its static check, the file storage, the list, rename, star, delete; the worker runs them ([Worker](#worker)) |
 | `signals` | started | turn predictions into signals: align them with the candles, thresholds, long only; later smoothing, holding period, sizing, risk limits |
 | `engine` | started | the backtest loop: candles and signals in, trades and an equity series out; `ENGINE_VERSION` names its rules ([engine.md](engine.md)) |
 | `metrics` | started | unified metrics and charts of one run |
 | `cli` | started | the `candlestack-bt` command: backtests from files on the command line |
+| `jobs` | now | the job queue between the backend and the worker: the job and its result, the Redis keys, the jobs' files on the shared volume, `JobClient` for the backend ([Worker](#worker)) |
+| `worker` | now | the worker's process (`python -m candlestack.worker`): the loop, the job's process with Keras, the safe load of a model, the built-in candles of a check |
 | `experiments` | now | the stored backtests: the list of the Backtests page, stars, the Dashboard, the models' usage, the seed command; later assembling `preprocessing`, `ml`, `signals`, `engine` and `metrics` into runs |
 | `admin` | later | team-only administration (roles, audit) under `/admin` |
 
@@ -360,32 +472,37 @@ the ones whose folder exists while their code is being written.
 
 ## Import rules
 
-- Dependencies point one way: `experiments` -> `ml` -> `accounts` | `data` -> `core`. `core`
-  imports no other module. For now `experiments` imports only `ml`, `accounts` and `core`: not
+- Dependencies point one way: `experiments` -> `ml` -> `accounts` | `data` | `jobs` -> `core`.
+  `core` imports no other module, and `jobs` none at all. For now `experiments` imports only `ml`, `accounts` and `core`: not
   `data` and not the backtest modules, as it runs no backtest yet.
 - The backtest modules `signals`, `engine` and `metrics`, and `preprocessing`, stand alone:
   they import no other module of the project, not each other, and no server library
   (`fastapi`, `starlette`, `scalar_fastapi`, `granian`, `redis`, `httpx`, `sentry_sdk`,
   `pydantic_settings`, `sqlalchemy`, `asyncpg`, `alembic`, `authlib`). They are
   plain functions on Polars frames (Pydantic for their settings and the manifest, NumPy for
-  the model's input), put together only by the code that runs them: `cli` now, `experiments`
-  and the worker later. The worker runs `preprocessing` without network, so it must not need
+  the model's input), put together only by the code that runs them: `cli` and the worker now,
+  `experiments` later. The worker runs `preprocessing` without network, so it must not need
   the server's libraries.
 - `preprocessing` serves no HTTP itself: `ml` imports it and serves its catalog
   (`GET /api/v1/preprocessing/catalog`), as the manifest belongs to a model and `ml` will check
   it on upload. `experiments` will import it to build a backtest's input.
 - No module imports `cli`: it is the entry point of the `candlestack-bt` command
-  (`[project.scripts]` in `backend/pyproject.toml`).
+  (`[project.scripts]` in `backend/pyproject.toml`). No module imports `worker` either: it is
+  the worker's process, which the API reaches through the job queue of `jobs`. The worker puts
+  `core` (settings, logging, Sentry), `jobs` and `preprocessing` together, like `main` does for
+  the API.
 - The API part of `ml` reads the uploaded files (zip, JSON, the HDF5 metadata with h5py, in
   the check's child process) and never imports a deep learning framework, so the API process
   never loads one and never runs code from a file. An import-linter `forbidden` contract enforces it: sources `candlestack.ml`,
   `candlestack.main` and `candlestack.preprocessing` (which builds arrays for a model without
   knowing the framework that runs it), forbidden `keras`, `tensorflow`, `torch` and `jax`
-  (`include_external_packages = true`). Running models comes later, in a worker: only its
-  composition root (a future `candlestack/worker.py`) will import the framework, which goes
-  into a `worker` dependency group (or extra) that the API image does not install, and the
-  API will enqueue worker tasks by name instead of importing them. The name is `ml`, not
-  `models`, which `data/models.py` and the ORM models use.
+  (`include_external_packages = true`); `jobs` is among the sources too. Only the worker's
+  job process (`worker.runner`, `worker.model`) imports Keras and JAX, which are the
+  `worker` dependency group: `uv sync` installs it for development and the tests, the API
+  image does not (`--no-default-groups`), the worker image does. Another contract keeps the
+  worker's loop (`worker.service`) free of them, so the loop stays small and outlives a model
+  that brings its process down. The name is `ml`, not `models`, which `data/models.py` and
+  the ORM models use.
 - Another module is imported only through its package root:
   `from candlestack.data import DataService`, never `from candlestack.data.sources import ...`.
   The package root's `__init__.py` is the module's public API.
@@ -408,6 +525,8 @@ the ones whose folder exists while their code is being written.
 | Database | Postgres 18, SQLAlchemy 2 (asyncio) on asyncpg, Alembic migrations in `backend/migrations` | relational data with constraints; typed models; versioned schema changes that run before each deploy's backend starts |
 | Sign-in | Authlib (OAuth 2.0 messages, PKCE) over the app's httpx client | a maintained implementation of the protocol; the requests stay on the client the tests mock with respx |
 | Model files | h5py | reads the weights' metadata of an uploaded Keras file (the number of weights) without Keras, in the check's child process only |
+| Running models | Keras 3.15.1 on JAX (CPU), the `worker` dependency group | runs Keras files saved with any backend; JAX is the smallest backend on CPU, and the release is the one the upload's allowlist was generated from |
+| Job queue | a few Redis keys and Lua scripts of our own (`jobs`), a Redis of their own | one job at a time with leases needs no Celery or RQ and no new dependency; the worker sees none of the cache |
 | HTTP client | httpx (async), timeouts always set | async calls to the sources; mocked in tests with respx |
 | API docs | scalar-fastapi at `/api/v1/docs` | readable reference with request examples; Swagger and ReDoc disabled |
 | Time zones | stdlib `zoneinfo` + `tzdata` | DST-correct New York sessions even in slim images without system tz data |
@@ -431,7 +550,10 @@ Environment variables, read by pydantic-settings without a prefix. All are docum
 | `PUBLIC_URL` | prod `https://app.candlestack.tech`, stage `https://stage.candlestack.tech`, local `http://localhost:5173`, test `http://testserver` | where the app is reached: OAuth callbacks, cookies (`Secure` and `__Host-` over https), the same-origin check |
 | `REDIS_URL` | `redis://127.0.0.1:6379/0` | |
 | `DATABASE_URL` | `postgresql+asyncpg://candlestack:candlestack@127.0.0.1:5432/candlestack` | Postgres (whitespace stripped); the pool holds at most 10 connections |
-| `MODEL_STORAGE_DIR` | `var/models` | directory of the uploaded model files, relative to the working directory; `/data/models` (a volume) on the VM; created at startup |
+| `MODEL_STORAGE_DIR` | `var/models` | directory of the uploaded model files, relative to the working directory; `/data/models` (a volume) on the VM; created at startup; the worker reads it (read-only) |
+| `JOBS_REDIS_URL` | `redis://127.0.0.1:6379/1` | the job queue between the backend and the worker (`compose.yaml`: `redis://queue:6379/0`) |
+| `JOB_FILES_DIR` | `var/jobs` | the directory the backend and the worker share for the jobs' candles and predictions, relative to the working directory; `/data/jobs` (a volume) in the containers |
+| `JOB_TIME_LIMIT` | `120` | seconds the worker lets one job run before it stops it, at most 3600 |
 | `OAUTH_GITHUB_CLIENT_ID`, `OAUTH_GITHUB_CLIENT_SECRET` | empty | GitHub OAuth app; without both, GitHub sign-in is off |
 | `OAUTH_GOOGLE_CLIENT_ID`, `OAUTH_GOOGLE_CLIENT_SECRET` | empty | Google OAuth client; without both, Google sign-in is off |
 | `BETA_ALLOWLIST` | empty | comma-separated emails that may sign in with GitHub or Google, any case; empty lets nobody in |
@@ -483,6 +605,10 @@ What the backend sends to Sentry (only prod and stage have a DSN), set up in
   failed, never the account.
 - At most 100 error events an hour per process, so an error in a loop cannot use up the
   month's quota (50,000 errors, no pay-as-you-go).
+- The worker logs the same way (`setup_logging`): a line per job and an error for a bug of
+  ours, never a model's path, its manifest or the candles ([Worker](#worker)). Without network
+  it sends nothing to Sentry: the backend reports its bugs, as an error for each job whose
+  result is `internal`.
 
 Alerts are e-mails to the tech lead only: a new, regressed or reappearing issue on prod (at
 most every 30 minutes), 50 events of one issue in an hour on prod, and prod down. Stage sends
@@ -495,8 +621,8 @@ to check that an error reaches Sentry. The Sentry settings are recorded in
 
 ## Not in this milestone
 
-- Celery (job queue and worker)
-- TensorFlow / Keras
+- Celery (the job queue is our own, [Worker](#worker))
+- TensorFlow (Keras runs on JAX)
 - admin, roles, audit log
 - user data upload (no CSV import)
 - live data (streaming, websockets)
@@ -522,6 +648,9 @@ to check that an error reaches Sentry. The Sentry settings are recorded in
 | The Dashboard in one request | one round trip and one loading state for the page's six panels; each is a small query on the user's index |
 | `ml` gets the models' backtest counts through a `ModelUsage` that `main.py` wires | `ml` stays below `experiments` in the import graph, and the models list still costs one extra query, not one per model |
 | Test backtests only from a seed command, refused on prod, that replaces only its own rows | new accounts start empty and prod never gets test data, yet stage and local show the pages with data until the backtest builder exists |
+| The models run in a worker of their own: a container without network, the model files read-only, one job at a time, each in a fresh process with a time limit | a model is the user's file: whatever it does stays in a process that has no keys and no way out, a crash or a memory blow-up fails its job only, and the API image carries no deep learning framework |
+| Jobs through a queue in a Redis of its own, the candles and predictions through a shared volume | the worker reaches nothing but its jobs (none of the cache, the sessions' state or the rate limits); a queue that never evicts keeps every job, and a few kilobytes of JSON per job leave the arrays out of Redis |
+| A job whose worker stopped while it ran fails, and is never run again | a model that took its worker down (its memory) would take the next one down too; the backend can submit it again |
 | Model files on a local Docker volume behind a `ModelStorage` interface, served only through the API, archived every night for 7 days | no object storage to run or pay for while the files are few and small; Cloudflare R2 can replace the volume without touching the service |
 | Quotas: 50 MB per file, 100 MB and 100 models per user, one upload at a time (Redis), 2 minutes to send it; checked before the file is read (`Content-Length`) and again under a lock of the user | the VM's disk is small and shared by prod and stage; the lock in Redis keeps one user from filling the disk with uploads side by side, the second check stops two uploads from both passing |
 | A dev sign-in for `APP_ENV` `local` and `test` only, fixed in code, not a setting | signed-in pages can be built and tested without OAuth keys; no setting can turn it on in stage or prod |

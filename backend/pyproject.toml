@@ -48,10 +48,20 @@ dev = [
     "ruff>=0.16.9",
     "ty==0.0.84",
 ]
+# What only the worker runs models with (candlestack.worker): Keras on the JAX backend. Keras is
+# pinned to the release the upload's allowlist was generated from (ml/allowlist.py); a new one
+# comes with the allowlist regenerated. The API image installs neither (backend/Dockerfile).
+worker = [
+    "jax>=0.11.2",
+    "keras==3.15.1",
+]
 
 # The uv release line of the whole toolchain: local, CI (setup-uv reads this) and the image.
 [tool.uv]
 required-version = ">=0.12.19,<0.13"
+# `uv sync` installs the worker's group too, so its tests and types run everywhere; the images
+# choose their groups themselves.
+default-groups = ["dev", "worker"]
 
 # Migrations of the Postgres schema (backend/migrations), run by `alembic upgrade head`: by the
 # migrate service of compose before the backend starts, and here against DATABASE_URL. A new one:
@@ -174,12 +184,12 @@ root_package = "candlestack"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-name = "Modules depend downwards only: experiments -> ml -> accounts and data -> core"
+name = "Modules depend downwards only: experiments -> ml -> accounts, data and jobs -> core"
 type = "layers"
 layers = [
     "candlestack.experiments",
     "candlestack.ml",
-    "candlestack.accounts | candlestack.data",
+    "candlestack.accounts | candlestack.data | candlestack.jobs",
     "candlestack.core",
 ]
 
@@ -238,11 +248,18 @@ protected_modules = ["candlestack.preprocessing.*"]
 allowed_importers = ["candlestack.preprocessing"]
 
 [[tool.importlinter.contracts]]
+name = "Other modules import jobs only through its package root"
+type = "protected"
+protected_modules = ["candlestack.jobs.*"]
+allowed_importers = ["candlestack.jobs"]
+
+[[tool.importlinter.contracts]]
 name = "Only core uses the Sentry SDK"
 type = "forbidden"
 source_modules = [
     "candlestack.accounts", "candlestack.cli", "candlestack.data", "candlestack.experiments",
-    "candlestack.main", "candlestack.ml", "candlestack.openapi",
+    "candlestack.jobs", "candlestack.main", "candlestack.ml", "candlestack.openapi",
+    "candlestack.worker",
 ]
 forbidden_modules = ["sentry_sdk"]
 # They reach Sentry through core (logging, setup_sentry), never by importing it themselves.
@@ -261,8 +278,8 @@ source_modules = [
 ]
 forbidden_modules = [
     "candlestack.accounts", "candlestack.core", "candlestack.data", "candlestack.cli",
-    "candlestack.experiments", "candlestack.main", "candlestack.ml",
-    "candlestack.openapi", "fastapi", "starlette", "scalar_fastapi", "granian", "redis",
+    "candlestack.experiments", "candlestack.jobs", "candlestack.main", "candlestack.ml",
+    "candlestack.openapi", "candlestack.worker", "fastapi", "starlette", "scalar_fastapi", "granian", "redis",
     "httpx", "sentry_sdk", "pydantic_settings", "sqlalchemy", "asyncpg", "alembic", "authlib",
 ]
 
@@ -281,9 +298,24 @@ name = "Nothing imports the CLI"
 type = "forbidden"
 source_modules = [
     "candlestack.accounts", "candlestack.core", "candlestack.data", "candlestack.experiments",
-    "candlestack.main", "candlestack.ml", "candlestack.openapi", "candlestack.preprocessing",
+    "candlestack.jobs", "candlestack.main", "candlestack.ml", "candlestack.openapi",
+    "candlestack.preprocessing", "candlestack.worker",
 ]
 forbidden_modules = ["candlestack.cli"]
+
+# The worker is an entry point too (`python -m candlestack.worker`), a process of its own: the
+# API reaches it through the job queue of `jobs`, never by importing it. The modules are named
+# one by one: a new module of the project goes into source_modules.
+[[tool.importlinter.contracts]]
+name = "Nothing imports the worker"
+type = "forbidden"
+source_modules = [
+    "candlestack.accounts", "candlestack.cli", "candlestack.core", "candlestack.data",
+    "candlestack.engine", "candlestack.experiments", "candlestack.jobs", "candlestack.main",
+    "candlestack.metrics", "candlestack.ml", "candlestack.openapi", "candlestack.preprocessing",
+    "candlestack.signals",
+]
+forbidden_modules = ["candlestack.worker"]
 
 # Inside data, each layer imports only the ones below it. Modules of one layer joined by "|"
 # do not import each other; the ones joined by ":" may.
@@ -356,20 +388,34 @@ name = "Experiments imports only ml, accounts and core for now"
 type = "forbidden"
 source_modules = ["candlestack.experiments"]
 forbidden_modules = [
-    "candlestack.data", "candlestack.engine", "candlestack.signals", "candlestack.metrics",
+    "candlestack.data", "candlestack.engine", "candlestack.jobs", "candlestack.signals",
+    "candlestack.metrics",
 ]
 
 # The API checks an uploaded model by reading its file, never by loading it: a load could run
-# code from the file, and the API image has no Keras or TensorFlow (the worker will).
+# code from the file, and the API image has no Keras or TensorFlow (the worker has).
 # Preprocessing serves the catalog in the API and builds the input in the worker, so it builds
-# arrays for a model without knowing the framework that runs it.
+# arrays for a model without knowing the framework that runs it. The API hands models to the
+# worker through jobs, which knows no framework either.
 [[tool.importlinter.contracts]]
 name = "The API never imports a deep learning framework"
 type = "forbidden"
 source_modules = [
-    "candlestack.experiments", "candlestack.ml", "candlestack.main", "candlestack.preprocessing",
+    "candlestack.experiments", "candlestack.jobs", "candlestack.ml", "candlestack.main",
+    "candlestack.preprocessing",
 ]
 forbidden_modules = ["keras", "tensorflow", "torch", "jax"]
+
+# The worker's own process takes jobs from the queue and runs each in a child process
+# (worker.runner), the only one that imports Keras: the loop stays small and outlives a model
+# that crashes, hangs or exhausts its memory.
+[[tool.importlinter.contracts]]
+name = "The worker's loop never imports a deep learning framework"
+type = "forbidden"
+source_modules = ["candlestack.worker.service"]
+forbidden_modules = [
+    "keras", "tensorflow", "torch", "jax", "candlestack.worker.model", "candlestack.worker.runner",
+]
 
 # What the sources share lives in sources.base.
 [[tool.importlinter.contracts]]

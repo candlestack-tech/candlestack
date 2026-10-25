@@ -1,5 +1,6 @@
 # Local development: the backend with auto-reload on http://localhost:8000, its Redis and its
-# Postgres (migrated by the one-shot migrate service before the backend starts).
+# Postgres (migrated by the one-shot migrate service before the backend starts), and the worker
+# that runs the uploaded models with its job queue.
 #   cp .env.example .env    # optional; add Alpaca paper keys there
 #   docker compose up --build
 # API reference: http://localhost:8000/api/v1/docs
@@ -20,10 +21,18 @@ services:
       DATABASE_URL: *database-url
       # Bind mounts from Windows or macOS do not deliver file events; poll for changes.
       WATCHFILES_FORCE_POLLING: "true"
+      MODEL_STORAGE_DIR: /data/models
+      JOBS_REDIS_URL: &jobs-redis-url redis://queue:6379/0
+      JOB_FILES_DIR: /data/jobs
     ports:
       - 127.0.0.1:8000:8000
     volumes:
       - ./backend/src:/app/src
+      - models:/data/models
+      - jobs:/data/jobs
+    networks:
+      - default
+      - jobs
     depends_on:
       redis:
         condition: service_started
@@ -44,6 +53,54 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  # Runs the uploaded models, one job at a time (backend/src/candlestack/worker). On the jobs
+  # network only, which has no way out: it reaches the queue and nothing else. It sees the model
+  # files read-only and shares the jobs' files with the backend. A job's process starts from the
+  # mounted src/, so a change there applies from the next job; a change of the loop needs
+  # `docker compose restart worker`.
+  worker:
+    build:
+      context: backend
+      target: worker
+    environment:
+      JOBS_REDIS_URL: *jobs-redis-url
+      MODEL_STORAGE_DIR: /data/models
+      JOB_FILES_DIR: /data/jobs
+    volumes:
+      - ./backend/src:/app/src:ro
+      - models:/data/models:ro
+      - jobs:/data/jobs
+    # The loop, and the process of one job with Keras and the model (docs/architecture.md,
+    # "Worker"); the copy of the model it loads goes to /tmp. No swap: a model over the limit
+    # fails its job at once instead of slowing the machine down. As on the VM
+    # (infra/env/compose.yaml), so a model that runs here fits there.
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1
+    pids_limit: 512
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - jobs
+    depends_on:
+      queue:
+        condition: service_started
+
+  # The job queue between the backend and the worker: a Redis of its own, so the worker sees
+  # none of the cache. It never evicts (a job must not vanish) and keeps nothing on disk (a job
+  # lost with it ends as a timeout at the backend).
+  queue:
+    image: redis:8-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "16mb", "--maxmemory-policy", "noeviction"]
+    networks:
+      - jobs
 
   redis:
     image: redis:8-alpine
@@ -71,3 +128,10 @@ services:
 
 volumes:
   postgres: {}
+  models: {}
+  jobs: {}
+
+networks:
+  # The backend, the worker and the queue: internal, so the worker has no way to the internet.
+  jobs:
+    internal: true

@@ -15,6 +15,11 @@
 # backend keeps the uploaded model files in the volume <ENV_NAME>_models, which the
 # models-backup service archives every night into <ENV_NAME>_model_backups (infra/README.md,
 # "Backups").
+# The worker that runs the models and its job queue are in the profile "worker": stage only,
+# prod runs without them until the tech lead decides otherwise. The deploy does not start them
+# yet; once it does, it sets COMPOSE_PROFILES=worker and WORKER_IMAGE=<image@digest> for stage
+# only (as it sets Redis' memory per environment), and they join the backend on the internal
+# network <ENV_NAME>_jobs (infra/README.md, "Worker").
 services:
   backend:
     image: ${BACKEND_IMAGE:?}
@@ -34,16 +39,19 @@ services:
       OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET:-}
       BETA_ALLOWLIST: ${BETA_ALLOWLIST:-}
       MODEL_STORAGE_DIR: /data/models
+      JOBS_REDIS_URL: redis://queue:6379/0
+      JOB_FILES_DIR: /data/jobs
     # Read by the server agent: ops tells deploys (new version) from redeploys (same version).
     labels:
       candlestack.version: ${APP_VERSION:?}
     # The app, and the child process that checks an upload (infra/README.md, "Memory").
     mem_limit: 384m
     read_only: true
-    # The files of the uploaded models; the image's /data/models is owned by the app's user, so
-    # a new volume is too.
+    # The files of the uploaded models, and the jobs' files shared with the worker; the image's
+    # /data/models and /data/jobs are owned by the app's user, so a new volume is too.
     volumes:
       - models:/data/models
+      - jobs:/data/jobs
     tmpfs:
       - /tmp
     cap_drop:
@@ -64,6 +72,7 @@ services:
         condition: service_completed_successfully
     networks:
       default: {}
+      jobs: {}
       edge:
         aliases:
           - ${ENV_NAME}-backend
@@ -209,6 +218,77 @@ services:
     # It reaches nothing: the archives stay on the VM.
     network_mode: none
 
+  # Runs the models users upload, one job at a time, each in a process of its own with a time
+  # limit (docs/architecture.md, "Worker"). On the internal jobs network only: it reaches the
+  # queue and nothing else, no internet. The model files read-only, the jobs' files shared with
+  # the backend; the image's /data/jobs is owned by its user (65534), as the backend's is.
+  # No SENTRY_DSN: without network it could not reach Sentry. A bug of the worker reaches
+  # Sentry through the backend, which logs the job's `internal` result as an error.
+  worker:
+    image: ${WORKER_IMAGE:-}
+    profiles: [worker]
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${ENV_NAME:?}
+      APP_VERSION: ${APP_VERSION:?}
+      JOBS_REDIS_URL: redis://queue:6379/0
+      MODEL_STORAGE_DIR: /data/models
+      JOB_FILES_DIR: /data/jobs
+    labels:
+      candlestack.version: ${APP_VERSION:?}
+    # The loop (about 85 MB) and one job's process: Keras with JAX and the model, about 300 MB
+    # for 50000 candles of the raw-candles test model, 490 MB for 40000 candles of a 25 x 28
+    # model (infra/README.md, "Memory"). No swap: a model over the limit fails its job at once
+    # instead of slowing the VM down. One of the two vCPUs, so a model cannot starve the
+    # backend. At most 512 processes and threads (a job's XLA thread pools grow with the CPUs:
+    # 183 at its peak on 20), and an init that reaps what a job's process left.
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1
+    pids_limit: 512
+    init: true
+    read_only: true
+    volumes:
+      - models:/data/models:ro
+      - jobs:/data/jobs
+    # Keras' settings and the copy of the model it loads (a file of at most 50 MB).
+    tmpfs:
+      - /tmp:size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      queue:
+        condition: service_healthy
+    networks:
+      - jobs
+
+  # The job queue between the backend and the worker: a Redis of its own, so the worker reaches
+  # none of the cache's keys. It never evicts (a job must not vanish) and keeps nothing on disk:
+  # a job lost with it ends as a timeout at the backend.
+  queue:
+    image: redis:8-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+    profiles: [worker]
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "16mb", "--maxmemory-policy", "noeviction"]
+    user: redis
+    mem_limit: 32m
+    read_only: true
+    tmpfs:
+      - /data
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - jobs
+
   # Cache only: no persistence, least recently used keys go first when maxmemory is reached.
   redis:
     image: redis:8-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
@@ -238,8 +318,19 @@ volumes:
   models: {}
   model_backups: {}
   model_backups_work: {}
+  # The jobs' files: in memory and at most 64 MB (a predict of 50000 candles has about 2 MB of
+  # candles and 0.5 MB of predictions), so nothing a job writes can fill the VM's disk, which
+  # prod shares. Owned by the backend's and the worker's user (65534).
+  jobs:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=64m,uid=65534,gid=65534,mode=0700
 
 networks:
+  # The backend, the worker and its queue: internal, so the worker has no way out.
+  jobs:
+    internal: true
   # Without EDGE_NETWORK compose fails, rather than start the environment on a network the
   # deploy script did not choose.
   edge:

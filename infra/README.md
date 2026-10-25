@@ -31,6 +31,8 @@ compresses the responses (zstd or gzip) on the way to Cloudflare.
 | `migrate` | the backend image, `alembic upgrade head` | runs once per deploy, before the backend starts | `160m` |
 | `backup` | `prodrigestivill/postgres-backup-local:18-alpine`, pinned by digest | nothing reaches it | `32m` |
 | `models-backup` | `offen/docker-volume-backup`, pinned by digest | nothing reaches it, no network | `32m` |
+| `worker` | the stage `worker` of `backend/Dockerfile`; stage only, not deployed yet ([Worker](#worker)) | nothing reaches it; it reaches only `queue`, on the internal network `<env>_jobs` | `512m`, no swap, one CPU |
+| `queue` | `redis:8-alpine`, pinned by digest; stage only, not deployed yet | `queue:6379` on `<env>_jobs` only | `32m` |
 
 The frontend image holds the app, built with Node in the image's build stage and served by its
 Caddy (`frontend/Caddyfile`), the same in every environment. A path that is no file gets the
@@ -76,6 +78,8 @@ together they are above the memory, which is fine as long as what runs stays far
 | `postgres` | `128m` | about 30 MB with the backend's pool connected |
 | `backup`, `models-backup` | `32m` each | about 2 MB between their nightly runs; the models archive took under 32 MB for 300 MB of files |
 | `migrate` | `160m` | runs only during a deploy |
+| `worker` (stage only, not deployed yet) | `512m`, no swap | about 85 MB idle (the loop); a job adds a process with Keras and JAX (below) |
+| `queue` (stage only, not deployed yet) | `32m` (`maxmemory` 16 MB) | a few MB idle, a few kilobytes per job |
 
 The limits of one environment add up to 896 MB without `migrate`, 1.79 GB for prod and stage,
 on top of the edge Caddy, cloudflared, the server agent (`2 x 64m`) and the system. Besides
@@ -84,6 +88,70 @@ so the two environments stay within the memory with room for the system and a ch
 backend's 384 MB hold the app (about 150 MB at its peak so far) and the check's child, which
 limits itself to 192 MB of data (`RLIMIT_DATA`; a real model's check takes about 45 MB): about
 40 MB stay free even when both are at their limits.
+
+With the worker on stage, stage's limits add up to 1.44 GB (the 896 MB above, the worker's
+512 MB and the queue's 32 MB) and the VM's to 2.34 GB with prod's 896 MB, before the edge,
+cloudflared, the agent and the system. What runs is far less, except while a job runs:
+
+| | prod | stage with the worker |
+| --- | --- | --- |
+| idle, cache empty | about 200 MB | about 290 MB (the worker's loop 85 MB, the queue a few MB) |
+| idle, cache full | about 460 MB | about 550 MB |
+| a job running, cache full | about 460 MB | up to 980 MB (the worker at its 512 MB) |
+
+That is up to about 1.45 GB for both environments, which leaves about 500 MB of the 2 GB for
+the edge, cloudflared, the agent, the system and the page cache (those not measured here). The
+worker has no swap (`memswap_limit` equal to `mem_limit`): a model over its limit fails its job
+(`stopped`) instead of pushing the other containers into the 2 GB swap file. What goes to swap
+under pressure are the other containers' idle pages, the caches' first. If stage's jobs make
+prod slow, lower stage's Redis (`redis_memory` in `vm/candlestack-deploy`, 256 MB now) first.
+
+What a job takes, measured with the worker image locally (Docker on WSL2; the container's
+`memory.peak`, which counts the page cache of Keras' and JAX' libraries too):
+
+| Job | Peak of the worker | Under `512m` |
+| --- | --- | --- |
+| `check`, a 25 x 28 model of the research repository (a 5 MB file) | 276 MB | `done` |
+| `predict`, the raw-candles test model (25 x 5), 50000 candles | 303 MB | `done` |
+| `predict`, the 25 x 28 model, 20000 / 30000 / 40000 candles | 396 / 436 / 487 MB | `done` |
+| `predict`, the 25 x 28 model, 50000 candles | 602 MB (under `768m`) | `stopped`: the kernel killed the job's process, the loop went on |
+
+The same jobs with `env/compose.yaml` itself (stage, the profile `worker`) ended the same way.
+A peak at the limit without a kill is the page cache, which the kernel gives back first.
+
+The job's process imports Keras and JAX (about 245 MB), loads the model and builds its input,
+25 x 28 float32 per candle for that model (134 MB for 50000 candles, plus the frames it is
+built from). So at `512m` a model of that size runs on about 45000 candles at most, fewer than
+the 50000 a backtest may load (`CANDLES_MAX`); a model with a smaller input goes further.
+
+The jobs' files (the volume `<env>_jobs`) are a tmpfs of at most 64 MB: they take memory, not
+disk, about 2 MB of candles and 0.5 MB of predictions for a `predict` of 50000 candles. The
+backend removes a job's files once it has the result, the worker those older than an hour (a
+backend that stopped waiting), and they are gone when no container mounts the volume. A model
+cannot fill the VM's disk through them. The worker image takes 1.45 GB of the VM's disk, 987 MB
+of it the dependencies, pulled again only when `uv.lock` changes; `up` removes the old images
+after a deploy.
+
+#### CPU
+
+The VM is a t3.small: 2 vCPUs with burstable CPU credits, in the credit mode `standard`
+(`vm/aws-create.sh`). It earns 24 credits an hour (one credit is one vCPU at 100% for a
+minute; the baseline is 20% of each vCPU, 0.4 vCPU together) and keeps at most 576. Once the
+balance is spent, the whole VM, prod included, runs at that baseline until it earns credits
+again: slower, never an extra cost (the mode `unlimited` would bill the vCPU hours above the
+baseline instead).
+
+The worker runs one job at a time on at most one vCPU (`cpus: 1`): JAX' threads would take both,
+and the backend and Postgres keep the other. Measured locally, a job ran at that limit
+throughout: about 3 s of CPU for a `check` or a `predict` of 50000 candles of the raw-candles
+model, 4.2 s for 40000 candles of the 25 x 28 model, most of it the process' start and Keras'
+import; the idle loop takes 0.4% of a vCPU (it asks the queue twice a second). On the VM's
+slower vCPUs that is about 0.1 to 0.15 credits per job (an estimate), so a few dozen jobs an
+hour cost a few of the 24 credits earned. The most a job can take is its time limit, 120 s of
+one vCPU: 2 credits. Jobs back to back at that limit spend 60 credits an hour, so a full
+balance lasts about 16 hours of them, less what prod and stage spend anyway. One job at a time
+is the right cap on this VM: a second one would need another 512 MB and share the same vCPU.
+Once the worker runs, watch the balance (`CPUCreditBalance` in CloudWatch).
 
 ### Backups
 
@@ -143,6 +211,7 @@ The Docker networks:
 | --- | --- |
 | `edge` | the edge Caddy, the backend and frontend of prod and stage, the server agent (`vm-agent`) |
 | `<env>_default` | the backend, Redis, Postgres, `migrate` and `backup` of that environment (`models-backup` is on no network) |
+| `<env>_jobs` (internal) | the backend, and on stage the worker and its queue (the profile `worker`): no way out |
 | `agent_docker` (internal) | the server agent and its Docker socket proxy |
 
 Every push to `main` builds the backend, frontend and agent images once, and a release builds
@@ -153,6 +222,44 @@ version changes.
 
 stage and https://ops.candlestack.tech (the team status page) are behind Cloudflare Access: members of the `candlestack-tech` GitHub organization sign in with GitHub. prod is
 public. Any new subdomain is team-only by default (Access application `*.candlestack.tech`).
+
+### Worker
+
+The worker runs the models users upload, one job at a time, for the backend
+([docs/architecture.md](../docs/architecture.md#worker)). `env/compose.yaml` defines it with
+its job queue (`worker`, `queue`) in the profile `worker`, and the backend already on the
+network `<env>_jobs` (internal: nothing on it reaches the internet) with the volume
+`<env>_jobs` for the jobs' files. The worker sees the models volume read-only, runs as `65534`
+with a read-only root filesystem (a tmpfs `/tmp` of 256 MB for Keras and the copy of a model),
+no capabilities, `no-new-privileges`, an init, at most 512 processes and threads, 512 MB
+without swap and one CPU ([Memory](#memory), [CPU](#cpu)). Its job process is the first the
+kernel stops at that limit, so a model that needs more fails its job and the worker goes on.
+The queue is a Redis of its own, so the worker reaches none of the cache's keys: `noeviction`
+and 16 MB, no persistence. The worker has no `SENTRY_DSN`, as it could not reach Sentry: the
+backend logs a job that failed with a bug of the worker (`internal`) as an error, and the
+worker's log (`sudo docker logs stage-worker-1`) has the traceback under the job's ID.
+
+| Environment | Worker and queue |
+| --- | --- |
+| prod | off, until the tech lead decides otherwise |
+| stage | on, once the deploy starts them (below) |
+
+The deploy does not start them yet. What it still needs, for stage only:
+
+1. `build.yml` takes a build target (it builds the Dockerfile's last stage, `api`), and
+   `stage.yml` builds the stage `worker` of `backend/Dockerfile` with it next to the backend,
+   as `ghcr.io/candlestack-tech/candlestack/worker`.
+2. `up stage` takes a third image, `<worker@digest>`, checked and pulled like the other two and
+   written to the stage record as a fourth field (`stage.yml` passes it).
+3. `vm/candlestack-deploy` sets, next to `redis_memory`, `COMPOSE_PROFILES=worker` and
+   `WORKER_IMAGE=<worker@digest>` for stage only; prod sets neither, so its `up` starts neither
+   service. Once prod runs them too, `up prod` takes the worker's image from the stage record
+   like the other two, and `release.yml` tags it.
+4. `vm/test-candlestack-deploy.sh` covers the third image (malformed, missing, recorded) and
+   that `up prod` starts no worker.
+5. `security-scan.yml` scans the worker image stage runs, like the backend's.
+6. The status page shows the two new containers (`stage-worker-1`, `stage-queue-1`) from the
+   agent's snapshot.
 
 ### Test backtests
 
@@ -292,7 +399,7 @@ The other commands are `edge` and `agent <image@digest>` (stage key); the header
 | `vm/deploy_authorized_keys` | Public deploy keys with their scopes |
 | `cloudflared/config.yml` | Tunnel ingress: SSH for deployments, everything else to the edge |
 | `edge/` | Caddy that routes each hostname to its environment |
-| `env/compose.yaml` | One environment (prod or stage): backend, frontend, Redis, Postgres with its migration and nightly backup, the nightly backup of the model files |
+| `env/compose.yaml` | One environment (prod or stage): backend, frontend, Redis, Postgres with its migration and nightly backup, the nightly backup of the model files; the worker and its queue in the profile `worker` |
 | `agent/` | Server agent for ops: host metrics and containers as JSON, read-only Docker proxy |
 | `github/` | Snapshot of the organization's GitHub settings: rulesets, environments, Actions policy, security, project |
 | `cloudflare/` | Snapshot of the Cloudflare settings: zone, DNS, Access, tunnel, Workers |
