@@ -17,6 +17,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from candlestack.preprocessing import blocks
+from candlestack.preprocessing import indicators as ind
 from candlestack.preprocessing.manifest import Window
 
 Step = Literal["representation", "feature", "normalization", "window"]
@@ -55,6 +56,163 @@ class Block:
     tunable: frozenset[str] = field(default_factory=frozenset)
 
 
+def _window_warm_up(params: Any) -> int:
+    return params.window - 1
+
+
+def _feature(
+    block_id: str,
+    group: Group,
+    description: str,
+    run: Callable[..., Any],
+    params: type[BaseModel],
+    *,
+    warm_up: tuple[Callable[[Any], int], str] = (_window_warm_up, "window - 1"),
+) -> Block:
+    return Block(
+        id=block_id,
+        step="feature",
+        description=description,
+        run=run,
+        params=params,
+        warm_up=warm_up[0],
+        warm_up_rule=warm_up[1],
+        group=group,
+    )
+
+
+# The indicators of the BLESK models, in the order of their 25 x 23 input. A recursive one
+# (an EMA, Wilder's smoothing) waits until its first candles weigh under 1e-6 (indicators).
+_INDICATORS = (
+    _feature(
+        "bollinger-high@1",
+        "Bands",
+        "Upper Bollinger band: the mean close plus dev standard deviations",
+        ind.bollinger_high,
+        ind.Bollinger,
+    ),
+    _feature(
+        "bollinger-low@1",
+        "Bands",
+        "Lower Bollinger band: the mean close minus dev standard deviations",
+        ind.bollinger_low,
+        ind.Bollinger,
+    ),
+    _feature(
+        "keltner-high@1",
+        "Bands",
+        "Upper Keltner channel, original version: the mean of (4 high - 2 low + close) / 3",
+        ind.keltner_high,
+        ind.Keltner,
+    ),
+    _feature(
+        "keltner-low@1",
+        "Bands",
+        "Lower Keltner channel, original version: the mean of (4 low - 2 high + close) / 3",
+        ind.keltner_low,
+        ind.Keltner,
+    ),
+    _feature(
+        "squeeze@1",
+        "Bands",
+        "1 when the Bollinger bands lie inside a Keltner channel of mean true ranges, else 0",
+        ind.squeeze,
+        ind.Squeeze,
+        warm_up=(
+            ind.squeeze_warm_up,
+            "max(bollinger_window - 1, keltner_window - 1, keltner_atr_window)",
+        ),
+    ),
+    _feature(
+        "rsi@1",
+        "Momentum",
+        "Relative strength index with Wilder's smoothing",
+        ind.rsi,
+        ind.Rsi,
+        warm_up=(
+            ind.rsi_warm_up,
+            f"{ind.WILDER_WINDOWS} * window",
+        ),
+    ),
+    _feature(
+        "roc@1",
+        "Momentum",
+        "Rate of change: the close against the close window candles before, in percent",
+        ind.roc,
+        ind.Roc,
+        warm_up=(ind.roc_warm_up, "window"),
+    ),
+    _feature(
+        "tsi@1",
+        "Momentum",
+        "True strength index: the close's change smoothed by two EMAs, in percent",
+        ind.tsi,
+        ind.Tsi,
+        warm_up=(ind.tsi_warm_up, f"{ind.EMA_WINDOWS} * (slow + fast)"),
+    ),
+    _feature(
+        "atr@1",
+        "Bands",
+        "Average true range with Wilder's smoothing",
+        ind.atr,
+        ind.Atr,
+        warm_up=(ind.atr_warm_up, f"{ind.WILDER_WINDOWS + 1} * window - 1"),
+    ),
+    _feature(
+        "adx@1",
+        "Trend",
+        "Average directional index: how strong the trend is, with Wilder's smoothing",
+        ind.adx,
+        ind.Adx,
+        warm_up=(ind.adx_warm_up, f"{ind.ADX_WINDOWS} * window"),
+    ),
+    _feature(
+        "aroon-up@1",
+        "Trend",
+        "Aroon up on the close: 100 when the highest close of the window is the last",
+        ind.aroon_up,
+        ind.Aroon,
+    ),
+    _feature(
+        "aroon@1",
+        "Trend",
+        "Aroon on the close: Aroon up minus Aroon down",
+        ind.aroon,
+        ind.Aroon,
+    ),
+    _feature(
+        "aroon-down@1",
+        "Trend",
+        "Aroon down on the close: 100 when the lowest close of the window is the last",
+        ind.aroon_down,
+        ind.Aroon,
+    ),
+    _feature(
+        "sma@1",
+        "Trend",
+        "Simple moving average of the close",
+        ind.sma,
+        ind.Sma,
+    ),
+    _feature(
+        "ema@1",
+        "Trend",
+        "Exponential moving average of the close",
+        ind.ema,
+        ind.Ema,
+        warm_up=(ind.ema_warm_up, f"{ind.EMA_WINDOWS} * window"),
+    ),
+    _feature(
+        "macd-diff@1",
+        "Trend",
+        "MACD histogram: the fast EMA minus the slow EMA of the close, minus its signal EMA",
+        ind.macd_diff,
+        ind.Macd,
+        warm_up=(ind.macd_warm_up, f"{ind.EMA_WINDOWS} * (max(fast, slow) + signal)"),
+    ),
+)
+
+
 def _candle_column(name: str) -> Block:
     return Block(
         id=f"{name}@1",
@@ -76,6 +234,7 @@ CATALOG: Mapping[str, Block] = MappingProxyType(
                 run=blocks.candles,
             ),
             *(_candle_column(name) for name in blocks.CANDLE_COLUMNS),
+            *_INDICATORS,
             Block(
                 id="none@1",
                 step="normalization",

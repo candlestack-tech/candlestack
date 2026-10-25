@@ -8,7 +8,8 @@ prevents that: the **manifest** stored with every model, and the `preprocessing`
 turns candles into the model's input from it. It is the design agreed on 2026-10-18.
 
 Built so far: the `preprocessing` module (the manifest and its checks, the catalog and the
-first blocks: `candles@1`, `open@1` to `volume@1`, `none@1`, `window@1`), the catalog endpoint
+first blocks: `candles@1`, `open@1` to `volume@1`, the indicators of the BLESK models
+([below](#the-indicators-of-the-blesk-models)), `none@1`, `window@1`), the catalog endpoint
 `GET /api/v1/preprocessing/catalog`, the manifest's JSON Schema,
 [manifest.schema.json](manifest.schema.json), the manifest stored with each model, and the
 worker that runs a model on its input with checks 4 and 5 below
@@ -126,7 +127,8 @@ What the same schema says for the BLESK NO-VOL models, as far as research knows 
 ([research #117]): indicators on the 30-minute candles, Renko bricks of 0.6 x ATR(14) of the
 brick's first candle, rows of three bricks taken at the candle where the third one ends, a
 window of the last 24 finished rows and the current one. It cannot run yet: the catalog has
-none of its blocks but `none@1`, and the normalization formulas are not known.
+its indicators (`bollinger-high@1`, `rsi@1`, ...) but not `renko-triples@1`,
+`renko-direction@1` or `blesk-norm@1`, and the normalization formulas are not known.
 
 The features are shortened to three here, so as written this manifest fails the signature
 check (3 features give `[25, 3]`, not `[25, 23]`). The full manifest has all 23, in this order
@@ -228,7 +230,7 @@ warm-up as a short expression of its parameters (`"0"`, `"length - 1"`) and its 
 | Step | In, out | Blocks, in the order they come |
 | --- | --- | --- |
 | representation | candles, rows: each row with `ts`, the candle at whose close it is known (labelled by its open time, [data.md](data.md#time)), and the row's own columns | `candles@1` (every candle a row); then `renko-triples@1`, `kagi@1`; later Heikin-Ashi, range bars, volume bars |
-| features | rows, the same rows with one column per feature, computed on the candles (later optionally on the bricks) | `open@1` ... `volume@1`; then the indicators of the BLESK models |
+| features | rows, the same rows with one column per feature, computed on the candles (later optionally on the bricks) | `open@1` ... `volume@1`; the indicators of the BLESK models ([below](#the-indicators-of-the-blesk-models)); then `renko-direction@1` |
 | normalization | a column, the column scaled | `none@1`; then `blesk-norm@1`, a rolling z-score, price-relative; fitted numbers come only from the manifest, never from the backtest's own data |
 | window | rows, a `float32` array `(samples, length, features)` and the `ts` of each sample | `window@1`: the last `length` rows up to each row; `last: closed` (the default) ends a sample at the last finished row, `last: current` at the row still forming, which needs rows that span several candles, so it is refused until such a representation exists |
 
@@ -237,13 +239,50 @@ warm-up as a short expression of its parameters (`"0"`, `"length - 1"`) and its 
   this already ([engine.md](engine.md#signals)), so the signal holds and no order follows.
 - Warm-up: the run asks the data module for enough candles before the period's first day: the
   longest warm-up of the representation and of a feature with its normalization, plus the
-  window's `length - 1` rows. With `candles@1` the number is `exact`, and the build drops just
-  that many rows. With rows that span several candles (Renko, Kagi) it is an `estimate` from
+  window's `length - 1` rows. A feature over the last `window` candles needs the candles before
+  its first full window. A recursive one (an EMA, Wilder's smoothing) depends on every earlier
+  candle, so its warm-up lasts until the first candles weigh less than 1e-6 in a value: after
+  it, its values do not depend on where the candles start. With `candles@1` the number is
+  `exact`, and the build drops just that many rows. With rows that span several candles (Renko, Kagi) it is an `estimate` from
   the candles a row takes, so the run loads more and the report says how many the warm-up
   used.
 - A row with a missing, NaN or infinite feature at the start is warm-up: it is dropped and
   counted. One after a complete row is an error, so the model never gets a sample with a hole
   in it.
+
+### The indicators of the BLESK models
+
+The features of the BLESK NO-VOL models that are computed on the candles, in the order of their
+input. Each gives the numbers the models were trained on: those of the `ta` library 0.11, its
+quirks included, except Aroon, which is `ta` 0.10's ([research #118]). They are computed with
+Polars and NumPy, without `ta`. The defaults are the BLESK parameters; `ema20` and `ema50` are
+`ema@1` with `window` 20 and 50.
+
+| Input column | Block | Parameters (defaults) | Warm-up (candles) | Group |
+| --- | --- | --- | --- | --- |
+| `bb_bbh`, `bb_bbl` | `bollinger-high@1`, `bollinger-low@1`: the mean close plus and minus `dev` standard deviations of the population | `window` 20, `dev` 2 | `window - 1` | Bands |
+| `kch_high`, `kch_low` | `keltner-high@1`, `keltner-low@1`: `ta`'s original Keltner channel, the means of `(4 high - 2 low + close) / 3` and `(4 low - 2 high + close) / 3`, without an ATR or a multiplier | `window` 20 | `window - 1` | Bands |
+| `squeeze` | `squeeze@1`: 1 when both Bollinger bands lie inside the channel of the mean close plus and minus `keltner_multiplier` mean true ranges, else 0 | `bollinger_window` 20, `bollinger_dev` 2, `keltner_window` 20, `keltner_atr_window` 20, `keltner_multiplier` 1.5 | `max(bollinger_window - 1, keltner_window - 1, keltner_atr_window)` | Bands |
+| `rsi` | `rsi@1`: Wilder's smoothing of the rises and falls of the close | `window` 20 | `14 * window` | Momentum |
+| `roc` | `roc@1`: the change of the close from `window` candles before, in percent | `window` 20 | `window` | Momentum |
+| `tsi` | `tsi@1`: the close's change smoothed by an EMA of `slow`, then of `fast` candles, over its absolute value smoothed the same way, in percent | `slow` 25, `fast` 13 | `7 * (slow + fast)` | Momentum |
+| `atr` | `atr@1`: Wilder's smoothing of the true range, seeded with the mean of the first `window` | `window` 14 | `15 * window - 1` | Bands |
+| `adx` | `adx@1`: `ta`'s average directional index, the directional movements smoothed by Wilder and their index smoothed again | `window` 14 | `20 * window` | Trend |
+| `aroon_up`, `aroon`, `aroon_down` | `aroon-up@1`, `aroon@1` (up minus down), `aroon-down@1`: on the close, 100 x (the position of the highest or lowest close in the last `window`, the oldest at 1) / `window` | `window` 25 | `window - 1` | Trend |
+| `sma` | `sma@1`: the mean close | `window` 20 | `window - 1` | Trend |
+| `ema20`, `ema50` | `ema@1`: the EMA of the close from the first candle | `window` 20 | `7 * window` | Trend |
+| `macd_diff` | `macd-diff@1`: the MACD histogram, the fast EMA minus the slow EMA minus the signal EMA of that | `fast` 12, `slow` 26, `signal` 9 | `7 * (max(fast, slow) + signal)` | Trend |
+
+The recursive warm-ups come from the smoothing: after `7 * window` candles of an EMA, or
+`14 * window` of Wilder's smoothing, the first candles weigh less than e^-14, under 1e-6. The
+ADX smooths twice, and the TSI and the MACD chain two EMAs, so theirs are longer. With the
+defaults the longest is 280 candles (RSI and ADX), about 22 trading days of 30-minute candles.
+
+Not here: `direction` (`renko-direction@1`) comes with the Renko blocks. `rel_open`,
+`rel_high`, `rel_low` and `rel_close` exist only in the normalized data, and their formula is
+not known yet ([research #117]). `is_last_bar`, 1 on the last candle of a session, needs the
+trading calendar with its early closes, which the candles given to `preprocessing` do not
+carry.
 
 ## No look-ahead
 
@@ -311,7 +350,7 @@ Checks 1 to 3 read the files only and run on upload; 4 and 5 run the model in th
 - The look-ahead property test above.
 - Golden tests on the supervisor's data, one per step so a failure points at it, run only where
   `CANDLESTACK_SUPERVISOR_DATA` names a local copy (as `test_supervisor.py`): candles to his
-  `indicators`, to `all_renkos`, to `all_triples`, to `normalized`, to the model input
+  `indicators` (built: `tests/unit/preprocessing/test_supervisor.py`), to `all_renkos`, to `all_triples`, to `normalized`, to the model input
   `candles_x_values`, to his predictions. His data never goes into this repository.
 
 ## Open questions

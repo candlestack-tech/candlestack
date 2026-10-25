@@ -1,0 +1,291 @@
+"""The indicator blocks by hand: on a few candles for the ones over a window, against plain loops
+of the ``ta`` library's formulas for the recursive ones, and their warm-ups."""
+
+import itertools
+import math
+from typing import Any
+
+import numpy as np
+import polars as pl
+import pytest
+
+from candlestack.preprocessing import CATALOG
+
+# Five 30-minute candles.
+CANDLES = pl.DataFrame(
+    {
+        "ts": [0, 1800, 3600, 5400, 7200],
+        "open": [10.0, 10.0, 12.0, 11.0, 11.0],
+        "high": [11.0, 13.0, 12.0, 12.0, 15.0],
+        "low": [9.0, 10.0, 10.0, 10.0, 11.0],
+        "close": [10.0, 12.0, 11.0, 11.0, 14.0],
+        "volume": [100.0, 200.0, 300.0, 400.0, 500.0],
+    }
+)
+INDICATORS = [block for block in CATALOG.values() if block.group not in ("Candle", None)]
+
+
+def run(block: str, frame: pl.DataFrame = CANDLES, **params: Any) -> list[float | None]:
+    return CATALOG[block].run(frame, CATALOG[block].params.model_validate(params)).to_list()
+
+
+def wave(rows: int = 80) -> pl.DataFrame:
+    """Candles that rise and fall, with ranges and gaps that change from candle to candle."""
+    close = [100 + 5 * math.sin(row / 3) + 0.1 * row for row in range(rows)]
+    return pl.DataFrame(
+        {
+            "ts": [row * 1800 for row in range(rows)],
+            "open": [close[0], *close[:-1]],
+            "high": [value + 1 + (row % 3) * 0.5 for row, value in enumerate(close)],
+            "low": [value - 1 - (row % 2) * 0.5 for row, value in enumerate(close)],
+            "close": close,
+            "volume": [1.0] * rows,
+        }
+    )
+
+
+def random_walk(rows: int, seed: int) -> pl.DataFrame:
+    rng = np.random.default_rng(seed)
+    close = 100 * np.exp(np.cumsum(rng.normal(0, 0.01, rows)))
+    open_ = close * (1 + rng.normal(0, 0.003, rows))
+    return pl.DataFrame(
+        {
+            "ts": np.arange(rows) * 1800,
+            "open": open_,
+            "high": np.maximum(open_, close) * (1 + np.abs(rng.normal(0, 0.003, rows))),
+            "low": np.minimum(open_, close) * (1 - np.abs(rng.normal(0, 0.003, rows))),
+            "close": close,
+            "volume": np.ones(rows),
+        }
+    )
+
+
+def approx(values: list[float | None]) -> list[Any]:
+    return [None if value is None else pytest.approx(value, rel=1e-12) for value in values]
+
+
+def test_the_mean_close() -> None:
+    assert run("sma@1", window=2) == approx([None, 11.0, 11.5, 11.0, 12.5])
+
+
+def test_the_bollinger_bands_take_the_standard_deviation_of_the_population() -> None:
+    # Of two closes it is half their difference.
+    assert run("bollinger-high@1", window=2, dev=2) == approx([None, 13.0, 12.5, 11.0, 15.5])
+    assert run("bollinger-low@1", window=2, dev=2) == approx([None, 9.0, 10.5, 11.0, 9.5])
+
+
+def test_the_keltner_channel_is_the_original_version() -> None:
+    # The means of (4 high - 2 low + close) / 3: 12, 44/3, 13, 13, 52/3, and of
+    # (-2 high + 4 low + close) / 3: 8, 26/3, 9, 9, 28/3.
+    assert run("keltner-high@1", window=2) == approx([None, 40 / 3, 83 / 6, 13.0, 91 / 6])
+    assert run("keltner-low@1", window=2) == approx([None, 25 / 3, 53 / 6, 9.0, 55 / 6])
+
+
+def test_the_rate_of_change_is_in_percent() -> None:
+    assert run("roc@1", window=2) == approx([None, None, 10.0, -100 / 12, 300 / 11])
+
+
+def test_aroon_is_on_the_close_and_takes_the_first_of_equal_closes() -> None:
+    # The windows of three closes: 10, 12, 11; 12, 11, 11 (two lows); 11, 11, 14.
+    assert run("aroon-up@1", window=3) == approx([None, None, 200 / 3, 100 / 3, 100.0])
+    assert run("aroon-down@1", window=3) == approx([None, None, 100 / 3, 200 / 3, 100 / 3])
+    assert run("aroon@1", window=3) == approx([None, None, 100 / 3, -100 / 3, 200 / 3])
+
+
+def test_aroon_of_fewer_candles_than_its_window_is_warm_up() -> None:
+    assert run("aroon@1", CANDLES.head(2), window=3) == [None, None]
+
+
+def test_the_squeeze_is_1_while_the_bollinger_bands_are_inside_the_keltner_channel() -> None:
+    # True ranges 3, 2, 2, 4 from the second candle: means 2.5, 2, 3 from the third. The
+    # channel 11.5 +- 1.25, 11 +- 1, 12.5 +- 1.5 holds the bands 10.5..12.5 and 11..11, not
+    # 9.5..15.5. Its first value waits for two true ranges of candles with one before them.
+    params: dict[str, Any] = {
+        "bollinger_window": 2,
+        "bollinger_dev": 2,
+        "keltner_window": 2,
+        "keltner_atr_window": 2,
+        "keltner_multiplier": 0.5,
+    }
+
+    assert run("squeeze@1", **params) == [None, None, 1.0, 1.0, 0.0]
+
+
+NAN = math.nan
+
+
+def ewm(values: list[float], alpha: float) -> list[float]:
+    """An EMA as pandas' ``ewm(adjust=False)``: from the first value, past the leading NaNs."""
+    out: list[float] = []
+    last = NAN
+    for value in values:
+        if not math.isnan(value):
+            last = value if math.isnan(last) else (1 - alpha) * last + alpha * value
+        out.append(last)
+    return out
+
+
+def masked(values: list[float], count: int) -> list[float]:
+    """``values`` with NaN until ``count`` of them were seen (pandas' ``min_periods``)."""
+    seen = 0
+    out: list[float] = []
+    for value in values:
+        seen += not math.isnan(value)
+        out.append(value if seen >= count else NAN)
+    return out
+
+
+def ema(values: list[float], window: int) -> list[float]:
+    return masked(ewm(values, 2 / (window + 1)), window)
+
+
+def changes(frame: pl.DataFrame, first: float) -> list[float]:
+    close = frame["close"].to_list()
+    return [first] + [b - a for a, b in itertools.pairwise(close)]
+
+
+def wilder(values: list[float], window: int, seed_at: int) -> list[float]:
+    """``ta``'s Wilder smoothing: the mean of the ``window`` values up to ``seed_at``, then
+    ``(last * (window - 1) + value) / window``."""
+    out = [NAN] * seed_at + [sum(values[seed_at - window + 1 : seed_at + 1]) / window]
+    for value in values[seed_at + 1 :]:
+        out.append((out[-1] * (window - 1) + value) / window)
+    return out
+
+
+def rsi_by_hand(frame: pl.DataFrame, window: int) -> list[float]:
+    moves = changes(frame, 0.0)
+    up = ewm([max(move, 0.0) for move in moves], 1 / window)
+    down = ewm([max(-move, 0.0) for move in moves], 1 / window)
+    return [100.0 if d == 0 else 100 - 100 / (1 + u / d) for u, d in zip(up, down, strict=True)]
+
+
+def tsi_by_hand(frame: pl.DataFrame, slow: int, fast: int) -> list[float]:
+    moves = changes(frame, NAN)
+    smoothed = ema(ema(moves, slow), fast)
+    absolute = ema(ema([abs(move) for move in moves], slow), fast)
+    return [100 * s / a for s, a in zip(smoothed, absolute, strict=True)]
+
+
+def atr_by_hand(frame: pl.DataFrame, window: int) -> list[float]:
+    high, low, close = frame["high"].to_list(), frame["low"].to_list(), frame["close"].to_list()
+    ranges = [high[0] - low[0]] + [
+        max(high[i] - low[i], abs(high[i] - close[i - 1]), abs(low[i] - close[i - 1]))
+        for i in range(1, frame.height)
+    ]
+    return wilder(ranges, window, window - 1)
+
+
+def adx_by_hand(frame: pl.DataFrame, window: int) -> list[float]:
+    high, low, close = frame["high"].to_list(), frame["low"].to_list(), frame["close"].to_list()
+    rows = range(1, frame.height)
+    ranges = [NAN] + [max(high[i], close[i - 1]) - min(low[i], close[i - 1]) for i in rows]
+    rise = [NAN] + [high[i] - high[i - 1] for i in rows]
+    fall = [NAN] + [low[i - 1] - low[i] for i in rows]
+    plus = [r if r > f and r > 0 else 0.0 for r, f in zip(rise, fall, strict=True)]
+    minus = [f if f > r and f > 0 else 0.0 for r, f in zip(rise, fall, strict=True)]
+    smoothed = [wilder(values, window, window) for values in (ranges, plus, minus)]
+    index = [
+        100 * abs(p - m) / (p + m)
+        for p, m in ((100 * p / s, 100 * m / s) for s, p, m in zip(*smoothed, strict=True))
+    ]
+    return wilder(index, window, 2 * window - 1)
+
+
+def macd_by_hand(frame: pl.DataFrame, fast: int, slow: int, signal: int) -> list[float]:
+    close = frame["close"].to_list()
+    line = [f - s for f, s in zip(ema(close, fast), ema(close, slow), strict=True)]
+    return [value - sig for value, sig in zip(line, ema(line, signal), strict=True)]
+
+
+@pytest.mark.parametrize(
+    ("block", "params", "by_hand"),
+    [
+        ("rsi@1", {"window": 2}, lambda frame: rsi_by_hand(frame, 2)),
+        ("tsi@1", {"slow": 3, "fast": 2}, lambda frame: tsi_by_hand(frame, 3, 2)),
+        ("atr@1", {"window": 2}, lambda frame: atr_by_hand(frame, 2)),
+        ("adx@1", {"window": 2}, lambda frame: adx_by_hand(frame, 2)),
+        ("ema@1", {"window": 2}, lambda frame: ema(frame["close"].to_list(), 2)),
+        (
+            "macd-diff@1",
+            {"fast": 2, "slow": 3, "signal": 2},
+            lambda frame: macd_by_hand(frame, 2, 3, 2),
+        ),
+    ],
+)
+def test_a_recursive_block_follows_ta_s_formula_after_its_warm_up(
+    block: str, params: dict[str, int], by_hand: Any
+) -> None:
+    frame = wave()
+    count = CATALOG[block].warm_up(CATALOG[block].params.model_validate(params))
+    ours = run(block, frame, **params)
+
+    assert count < frame.height
+    assert ours[:count] == [None] * count
+    assert ours[count:] == [pytest.approx(value, rel=1e-9) for value in by_hand(frame)[count:]]
+
+
+def steady(rows: int, step: float) -> pl.DataFrame:
+    """Candles that move by ``step`` each, with a range of 2 around the close."""
+    close = [100.0 + step * row for row in range(rows)]
+    return pl.DataFrame(
+        {
+            "ts": [row * 1800 for row in range(rows)],
+            "open": close,
+            "high": [value + 1 for value in close],
+            "low": [value - 1 for value in close],
+            "close": close,
+            "volume": [1.0] * rows,
+        }
+    )
+
+
+def test_the_rsi_is_100_while_closes_rise_and_0_while_they_fall() -> None:
+    assert run("rsi@1", steady(40, 0.5), window=2)[-1] == 100.0
+    assert run("rsi@1", steady(40, -0.5), window=2)[-1] == pytest.approx(0.0)
+
+
+def test_the_tsi_is_100_while_closes_rise() -> None:
+    assert run("tsi@1", steady(60, 0.5), slow=3, fast=2)[-1] == pytest.approx(100.0)
+
+
+def test_the_atr_of_candles_of_one_range_is_that_range() -> None:
+    assert run("atr@1", steady(40, 0.5), window=2)[-1] == pytest.approx(2.0)
+
+
+def test_the_adx_is_100_in_a_steady_rise_and_0_without_any_move() -> None:
+    assert run("adx@1", steady(60, 0.5), window=2)[-1] == pytest.approx(100.0)
+    # No directional movement at all: ta counts the directional index as 0.
+    assert run("adx@1", steady(60, 0.0), window=2)[-1] == 0.0
+
+
+def test_the_macd_histogram_of_a_steady_rise_goes_to_0() -> None:
+    assert run("macd-diff@1", steady(80, 0.5), fast=2, slow=3, signal=2)[-1] == pytest.approx(
+        0.0, abs=1e-9
+    )
+
+
+@pytest.mark.parametrize("block", INDICATORS, ids=[block.id for block in INDICATORS])
+def test_the_warm_up_is_exactly_the_leading_nulls(block: Any) -> None:
+    params = block.params()
+    count = block.warm_up(params)
+    values = block.run(random_walk(count + 50, 0), params)
+
+    assert values.dtype == pl.Float64
+    assert values.head(count).null_count() == count
+    assert values.slice(count).null_count() == 0
+
+
+@pytest.mark.parametrize("block", INDICATORS, ids=[block.id for block in INDICATORS])
+def test_after_the_warm_up_where_the_candles_start_changes_nothing(block: Any) -> None:
+    """The values after the warm-up are those of a longer history, within the tolerance of the
+    golden tests: the first candles weigh less than 1e-6 in them."""
+    params = block.params()
+    count = block.warm_up(params)
+    candles = random_walk(count + 1000, 1)
+    later = 300
+
+    full = block.run(candles, params).slice(later + count).to_numpy()
+    started_later = block.run(candles.slice(later), params).slice(count).to_numpy()
+
+    np.testing.assert_allclose(started_later, full, rtol=1e-6, atol=1e-8)

@@ -23,7 +23,9 @@ from candlestack.preprocessing import (
 )
 from candlestack.preprocessing.blocks import NoParams
 
-ROWS = 60
+# Enough candles for the longest warm-up of the catalog's defaults (280, RSI and ADX) and a
+# window of 25 after it (test_the_candles_outlast_every_warm_up).
+ROWS = 400
 SEEDS = range(20)
 STEP = 1800
 # The parameters the blocks run with here. A block whose parameters have no defaults needs an
@@ -187,6 +189,16 @@ def changes_up_to_a_row(manifest: Manifest, rng: random.Random) -> bool:
         if up_to_samples(result, row) != up_to_samples(full, row):
             return True
     return False
+
+
+def test_the_candles_outlast_every_warm_up() -> None:
+    """A block still in its warm-up at the last candle gives nulls only, which look ahead at
+    nothing, so the tests above would pass without checking it."""
+    longest = max(
+        block.warm_up(params) for block in CATALOG.values() for params in params_of(block)
+    )
+
+    assert longest + max(params["length"] for params in PARAMS["window@1"]) < ROWS
 
 
 def test_the_manifests_cover_every_block() -> None:
