@@ -310,6 +310,22 @@ Both markets have the same list.
 | `4h` | 09:30-13:30, 13:30-16:00 | 2 | 09:30-13:00 | 1 |
 | `1d` | 09:30-16:00 | 1 | 09:30-13:00 | 1 |
 
+## Last candle of a session
+
+A model may read whether a candle is the last of its session (`session-last-candle@1`,
+[preprocessing.md](preprocessing.md#the-blocks)). The data module marks it from the calendar:
+a stock candle is the last of its session when its bin ends at the session close, so the
+15:30-16:00 candle for 30m on a normal day, the 12:30-13:00 one on an early close, the
+13:30-16:00 one for 4h, and every 1d candle. Crypto candles have no sessions and no mark.
+
+- The mark is known when the candle closes, from the calendar alone: a day without its last
+  candle (a gap in the source's data) has no candle marked, the one before is not taken for
+  the last.
+- It travels with the candles to the worker, not in the candles endpoint: a backtest's job
+  gets them with a Boolean column `session_last` next to `ts` and OHLCV
+  ([architecture.md](architecture.md#worker)). The fingerprint does not cover it; it follows
+  from the calendar and the timeframe.
+
 ## 4h and 1d
 
 | | Crypto | Stock |

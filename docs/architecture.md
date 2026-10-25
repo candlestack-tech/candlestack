@@ -353,7 +353,9 @@ sequenceDiagram
   (the file in the model storage, `<user_id>/<model_id>.keras`: no absolute path, no `..`),
   `sha256` (of the upload), `manifest` (the model's manifest, as data), `enqueued_at` and
   `deadline` (epoch seconds: when the backend stops waiting). The candles of a `predict` are
-  `<job_id>/candles.parquet` in the jobs' volume (`ts`, open, high, low, close, volume), and its
+  `<job_id>/candles.parquet` in the jobs' volume (`ts`, open, high, low, close, volume, and
+  for stocks `session_last`, the mark of each session's last candle from the calendar:
+  [data.md](data.md#last-candle-of-a-session)), and its
   predictions `<job_id>/predictions.parquet` next to them (`ts` Int64, `prediction` Float64,
   one row per sample, `ts` the candle at whose close the sample is known); each file is
   written under another name and renamed, so the other side never reads half of one.
@@ -373,11 +375,13 @@ sequenceDiagram
   job past its deadline does not run, a running one stops at it, a job without an answer
   within the wait fails at the backend) and `internal` (a bug of ours).
 - **A `check`** builds the input from built-in candles (a seeded random walk, enough for the
-  manifest's warm-up and 64 samples), runs the model, wants one finite score per sample and,
-  with an `example`, its output within 1e-4. `ml` sets `models.verified_at` from it only when
-  the result is `done` with `verified` true and, under the lock of the user's models, the
-  model's stored manifest still has the result's `manifest_sha256`: a manifest replaced while
-  the job ran keeps the model `ready` ([the check of a model](#the-check-of-a-model)).
+  manifest's warm-up and 64 samples; for the regular session the last candle of every
+  session's worth of them is marked, every 13th for 30m), runs the model, wants one finite
+  score per sample and, with an `example`, its output within 1e-4. `ml` sets
+  `models.verified_at` from it only when the result is `done` with `verified` true and, under
+  the lock of the user's models, the model's stored manifest still has the result's
+  `manifest_sha256`: a manifest replaced while the job ran keeps the model `ready`
+  ([the check of a model](#the-check-of-a-model)).
 - **One job at a time** per worker, each in a fresh process (`worker/runner.py`) that the loop
   (`worker/service.py`) starts with the job on stdin and stops at `JOB_TIME_LIMIT` (120 s) or
   at the job's deadline, whichever comes first. The process runs in a session of its own, and

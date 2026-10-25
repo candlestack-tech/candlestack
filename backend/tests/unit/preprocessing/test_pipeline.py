@@ -112,6 +112,44 @@ def test_candles_of_integers_and_more_columns(raw: dict[str, Any]) -> None:
     assert built.ts.dtype == pl.Int64
 
 
+def marked(count: int) -> pl.DataFrame:
+    """``candles(count)`` with every 13th marked the last of its session, as 30m stocks are."""
+    return candles(count).with_columns(
+        session_last=pl.Series([row % 13 == 12 for row in range(count)])
+    )
+
+
+def test_the_last_candle_of_each_session_is_one(raw: dict[str, Any]) -> None:
+    raw["input"]["features"] = [
+        {"name": "close", "id": "close@1"},
+        {"name": "is_last_bar", "id": "session-last-candle@1"},
+    ]
+    raw = with_window(raw, 1)
+
+    built = build_input(marked(27), parse_manifest(raw))
+
+    assert built.rows.columns == ["ts", "close", "is_last_bar"]
+    assert built.rows.schema["is_last_bar"] == pl.Float64
+    assert built.rows["is_last_bar"].to_list() == [0.0] * 12 + [1.0] + [0.0] * 12 + [1.0, 0.0]
+    assert built.dropped == 0
+
+
+def test_the_session_marks_are_read_only_by_the_block_that_needs_them(
+    raw: dict[str, Any],
+) -> None:
+    built = build_input(marked(25), parse_manifest(raw))
+
+    assert built.rows.columns == ["ts", *COLUMNS]
+    assert built.samples.tolist() == build_input(candles(25), parse_manifest(raw)).samples.tolist()
+
+
+def test_candles_without_session_marks_cannot_give_the_last_candle(raw: dict[str, Any]) -> None:
+    raw["input"]["features"][0] = {"name": "last", "id": "session-last-candle@1"}
+
+    with pytest.raises(ValueError, match="do not mark the last candle of each session"):
+        build_input(candles(25), parse_manifest(raw))
+
+
 def test_a_manifest_that_cannot_run_is_refused(raw: dict[str, Any]) -> None:
     raw["input"]["representation"]["id"] = "renko-triples@1"
 
@@ -154,8 +192,27 @@ def test_a_manifest_that_cannot_run_is_refused(raw: dict[str, Any]) -> None:
             candles(3).with_columns(ts=pl.Series([3600, 1800, 0])),
             "Each candle's ts must be after the one before it",
         ),
+        (
+            candles(3).with_columns(session_last=pl.Series([0, 0, 1])),
+            "The candles' session_last must be true or false",
+        ),
+        (
+            candles(3).with_columns(session_last=pl.Series([False, None, True])),
+            "A candle has a missing value",
+        ),
     ],
-    ids=["missing", "float-ts", "text", "null", "nan", "infinite", "repeated-ts", "unsorted"],
+    ids=[
+        "missing",
+        "float-ts",
+        "text",
+        "null",
+        "nan",
+        "infinite",
+        "repeated-ts",
+        "unsorted",
+        "numeric-marks",
+        "missing-mark",
+    ],
 )
 def test_candles_that_break_their_rules(
     raw: dict[str, Any], frame: pl.DataFrame, message: str

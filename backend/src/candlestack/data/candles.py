@@ -15,7 +15,7 @@ from typing import NamedTuple
 import polars as pl
 
 from candlestack.data.errors import DataIntegrityError, format_time
-from candlestack.data.models import CANDLE_SCHEMA, InstrumentId, Timeframe
+from candlestack.data.models import CANDLE_SCHEMA, SESSION_LAST, InstrumentId, Timeframe
 from candlestack.data.sessions import Session, session_bins, sessions_between
 
 MAX_GAP_RANGES = 100
@@ -131,6 +131,25 @@ def resample_sessions(
         .filter(pl.col("ts") < pl.col("session_close"))
         .with_columns(ts=pl.col("session_open") + offset // step * step)
         .select(_COLUMNS)
+    )
+
+
+def session_last(df: pl.DataFrame, timeframe: Timeframe, sessions: Sequence[Session]) -> pl.Series:
+    """For each candle of a frame sorted by ``ts``, in its order, whether it is the last of its
+    session: its bin ends at the session close (15:30-16:00 for 30m on a normal day, 12:30-13:00
+    on an early close; every 1d candle). It comes from the calendar alone, so it is known when
+    the candle closes; a session whose last candle is missing has no last candle. A candle
+    outside every session is not the last of one.
+    """
+    end = pl.col("ts") + timeframe.seconds
+    return (
+        _with_session(df.select("ts"), sessions)
+        .select(
+            ((pl.col("ts") < pl.col("session_close")) & (end >= pl.col("session_close")))
+            .fill_null(value=False)
+            .alias(SESSION_LAST)
+        )
+        .to_series()
     )
 
 

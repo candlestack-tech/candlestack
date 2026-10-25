@@ -37,6 +37,8 @@ class Block:
     - ``warm_up``: how many earlier candles it needs before its first complete value (rows,
       for the window), from its parameters; ``warm_up_rule`` says it in words for the app;
     - ``group``: a feature's display group; None for the other steps;
+    - ``needs_session``: it reads the mark of each session's last candle, which only candles of
+      the regular session have, so a manifest of 24/7 candles cannot use it;
     - ``candles_per_row``: for a representation whose rows span several candles (Renko, Kagi),
       an estimate of the candles a row takes, from its parameters; None when every candle is a
       row, which makes the warm-up of a manifest exact;
@@ -52,6 +54,7 @@ class Block:
     warm_up: Callable[[Any], int] = blocks.no_warm_up
     warm_up_rule: str = "0"
     group: Group | None = None
+    needs_session: bool = False
     candles_per_row: Callable[[Any], float] | None = None
     tunable: frozenset[str] = field(default_factory=frozenset)
 
@@ -234,6 +237,17 @@ CATALOG: Mapping[str, Block] = MappingProxyType(
                 run=blocks.candles,
             ),
             *(_candle_column(name) for name in blocks.CANDLE_COLUMNS),
+            Block(
+                id="session-last-candle@1",
+                step="feature",
+                description=(
+                    "1 on the last candle of its trading session, early closes included, else 0; "
+                    "stock candles only"
+                ),
+                run=blocks.session_last,
+                group="Candle",
+                needs_session=True,
+            ),
             *_INDICATORS,
             Block(
                 id="none@1",

@@ -39,6 +39,7 @@ def test_the_blocks_are_registered() -> None:
         "low@1": "feature",
         "close@1": "feature",
         "volume@1": "feature",
+        "session-last-candle@1": "feature",
         **dict.fromkeys(INDICATORS, "feature"),
         "none@1": "normalization",
         "window@1": "window",
@@ -72,6 +73,7 @@ def test_the_catalog_lists_the_blocks_by_step() -> None:
         "low@1",
         "close@1",
         "volume@1",
+        "session-last-candle@1",
         *INDICATORS,
         "none@1",
         "window@1",
@@ -95,7 +97,9 @@ def test_the_features_are_in_their_display_groups() -> None:
     groups = {block.id: block.group for block in describe_catalog().blocks if block.group}
 
     assert groups == {
-        **dict.fromkeys(["open@1", "high@1", "low@1", "close@1", "volume@1"], "Candle"),
+        **dict.fromkeys(
+            ["open@1", "high@1", "low@1", "close@1", "volume@1", "session-last-candle@1"], "Candle"
+        ),
         **INDICATORS,
     }
 
@@ -220,3 +224,11 @@ def test_a_block_with_parameters_describes_types_ranges_defaults_and_tunable() -
     assert (params["close_only"].type, params["close_only"].default) == ("boolean", False)
     assert params["atr_at"].options == ["brick_start", "brick_end"]
     assert not params["atr_window"].tunable
+
+
+def test_only_the_last_candle_of_a_session_needs_sessions() -> None:
+    assert [block.id for block in CATALOG.values() if block.needs_session] == [
+        "session-last-candle@1"
+    ]
+    last = next(block for block in describe_catalog().blocks if block.id == "session-last-candle@1")
+    assert (last.step, last.group, last.warm_up, last.params) == ("feature", "Candle", "0", [])

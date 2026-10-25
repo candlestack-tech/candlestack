@@ -146,7 +146,7 @@ class BacktestRunner:
         timings["candles"] = _ms(clock)
         # The file as the model storage keeps it (ml.LocalModelStorage).
         model = f"{backtest.user_id}/{backtest.model_id}.keras"
-        result, predictions = await self._predict(backtest_id, model, spec, candles.frame)
+        result, predictions = await self._predict(backtest_id, model, spec, candles.marked_frame())
         timings.update({f"job_{name}": value for name, value in result.timings})
         clock = time.monotonic()
         period = spec.data.period

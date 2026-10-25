@@ -38,6 +38,7 @@ from candlestack.data.candles import (
     first_of_last,
     latest_end,
     resample_sessions,
+    session_last,
     slice_range,
     suggest,
 )
@@ -597,4 +598,5 @@ def assemble(
         fingerprint=fingerprint(
             source.name, source.feed, request.instrument, timeframe, start, end, frame
         ),
+        session_last=None if sessions is None else session_last(frame, timeframe, sessions),
     )

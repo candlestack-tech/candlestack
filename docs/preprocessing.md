@@ -8,9 +8,9 @@ prevents that: the **manifest** stored with every model, and the `preprocessing`
 turns candles into the model's input from it. It is the design agreed on 2026-10-18.
 
 Built so far: the `preprocessing` module (the manifest and its checks, the catalog and the
-first blocks: `candles@1`, `open@1` to `volume@1`, the indicators of the BLESK models
-([below](#the-indicators-of-the-blesk-models)), `none@1`, `window@1`), the catalog endpoint
-`GET /api/v1/preprocessing/catalog`, the manifest's JSON Schema,
+first blocks: `candles@1`, `open@1` to `volume@1`, `session-last-candle@1`, the indicators of
+the BLESK models ([below](#the-indicators-of-the-blesk-models)), `none@1`, `window@1`), the
+catalog endpoint `GET /api/v1/preprocessing/catalog`, the manifest's JSON Schema,
 [manifest.schema.json](manifest.schema.json), the manifest stored with each model, and the
 worker that runs a model on its input with checks 4 and 5 below
 ([architecture.md](architecture.md#worker)), and the backtests that run a model on its input
@@ -131,8 +131,8 @@ window of the last 24 finished rows and the current one. It cannot run yet: the 
 its indicators (`bollinger-high@1`, `rsi@1`, ...) but not `renko-triples@1`,
 `renko-direction@1` or `blesk-norm@1`, and the normalization formulas are not known.
 
-The features are shortened to three here, so as written this manifest fails the signature
-check (3 features give `[25, 3]`, not `[25, 23]`). The full manifest has all 23, in this order
+The features are shortened to four here, so as written this manifest fails the signature
+check (4 features give `[25, 4]`, not `[25, 23]`). The full manifest has all 23, in this order
 ([research #117]): `bb_bbh, bb_bbl, kch_high, kch_low, squeeze, rsi, roc, tsi, atr, adx,
 aroon_up, aroon, aroon_down, sma, ema20, ema50, macd_diff, direction, rel_open, rel_high,
 rel_low, rel_close, is_last_bar`.
@@ -150,7 +150,8 @@ rel_low, rel_close, is_last_bar`.
     "features": [
       {"name": "bb_bbh", "id": "bollinger-high@1", "params": {"window": 20, "dev": 2}, "norm": {"id": "blesk-norm@1"}},
       {"name": "rsi", "id": "rsi@1", "params": {"window": 20}, "norm": {"id": "blesk-norm@1"}},
-      {"name": "direction", "id": "renko-direction@1"}
+      {"name": "direction", "id": "renko-direction@1"},
+      {"name": "is_last_bar", "id": "session-last-candle@1"}
     ],
     "window": {"length": 25, "last": "current"}
   },
@@ -221,7 +222,7 @@ other module of the project and no server library. It is registered in the catal
 versioned name, with its step, a Pydantic model of its parameters, its warm-up (how many
 earlier candles it needs; rows, for the window) and a short description. A feature also has a
 display group (`Candle`, `Bands`, `Momentum`, `Trend`, `Volume`, `Brick`; `open@1` to
-`volume@1` are `Candle`), and each block names its `tunable` parameters (none yet).
+`volume@1` and `session-last-candle@1` are `Candle`), and each block names its `tunable` parameters (none yet).
 `GET /api/v1/preprocessing/catalog` serves the catalog, so the app builds its forms from it
 and a new block needs no frontend change: each block with its id, step, description, `group`
 (null except for features; a string, not an enum, so a new group breaks no client), its
@@ -231,7 +232,7 @@ warm-up as a short expression of its parameters (`"0"`, `"length - 1"`) and its 
 | Step | In, out | Blocks, in the order they come |
 | --- | --- | --- |
 | representation | candles, rows: each row with `ts`, the candle at whose close it is known (labelled by its open time, [data.md](data.md#time)), and the row's own columns | `candles@1` (every candle a row); then `renko-triples@1`, `kagi@1`; later Heikin-Ashi, range bars, volume bars |
-| features | rows, the same rows with one column per feature, computed on the candles (later optionally on the bricks) | `open@1` ... `volume@1`; the indicators of the BLESK models ([below](#the-indicators-of-the-blesk-models)); then `renko-direction@1` |
+| features | rows, the same rows with one column per feature, computed on the candles (later optionally on the bricks) | `open@1` ... `volume@1`; `session-last-candle@1` (1 on the last candle of its session, [below](#the-last-candle-of-a-session)); the indicators of the BLESK models ([below](#the-indicators-of-the-blesk-models)); then `renko-direction@1` |
 | normalization | a column, the column scaled | `none@1`; then `blesk-norm@1`, a rolling z-score, price-relative; fitted numbers come only from the manifest, never from the backtest's own data |
 | window | rows, a `float32` array `(samples, length, features)` and the `ts` of each sample | `window@1`: the last `length` rows up to each row; `last: closed` (the default) ends a sample at the last finished row, `last: current` at the row still forming, which needs rows that span several candles, so it is refused until such a representation exists |
 
@@ -281,9 +282,25 @@ defaults the longest is 280 candles (RSI and ADX), about 22 trading days of 30-m
 
 Not here: `direction` (`renko-direction@1`) comes with the Renko blocks. `rel_open`,
 `rel_high`, `rel_low` and `rel_close` exist only in the normalized data, and their formula is
-not known yet ([research #117]). `is_last_bar`, 1 on the last candle of a session, needs the
-trading calendar with its early closes, which the candles given to `preprocessing` do not
-carry.
+not known yet ([research #117]). `is_last_bar` is `session-last-candle@1`,
+[below](#the-last-candle-of-a-session).
+
+### The last candle of a session
+
+`session-last-candle@1` gives 1 on the last candle of its trading session and 0 on the others,
+with no parameters and no warm-up (group `Candle`); it is the `is_last_bar` of the BLESK models,
+which equals the `end_bar` of their candles ([research #118]). Which candle is the last needs
+the exchange calendar with its early closes, and `preprocessing` has no network, so the block
+does not work it out: the data module marks the candle whose bin ends at the session close
+([data.md](data.md#last-candle-of-a-session)) and the mark comes with the candles, the Boolean
+column `session_last` next to OHLCV, through the job's candles file to the worker
+([architecture.md](architecture.md#worker)). The mark is known when the candle closes, so the
+block does not look ahead; a day whose last candle is missing has none marked.
+
+Crypto candles have no sessions, so the block needs `"session": "regular"`: a manifest of
+`24/7` candles that names it fails the `catalog` check ("candles have no sessions"), and
+candles without the marks make the build fail rather than give a column of zeros, which a
+model trained on stock sessions would read as "never the last candle".
 
 ## No look-ahead
 
@@ -331,7 +348,8 @@ Checks 1 to 3 read the files only and run on upload; 4 and 5 run the model in th
    (the run loads the window's warm-up before its first day; 1000 rows of 30-minute candles
    are about 77 trading days) and what a manifest lists, far above any real model's: 256
    features, 32 parameters of a block, 8 axes of a shape, block ids of 64 characters; every
-   block and version in the catalog and in its own step,
+   block and version in the catalog and in its own step (and `session-last-candle@1` only with
+   the `regular` session),
    each parameter of the right type and in its range; the feature names unique and none
    named `ts`; `signature.input` equal to `[window.length, number of features]` and
    `signature.output` equal to `[1]`; the shapes of the `example`.
@@ -351,7 +369,8 @@ Checks 1 to 3 read the files only and run on upload; 4 and 5 run the model in th
 - The look-ahead property test above.
 - Golden tests on the supervisor's data, one per step so a failure points at it, run only where
   `CANDLESTACK_SUPERVISOR_DATA` names a local copy (as `test_supervisor.py`): candles to his
-  `indicators` (built: `tests/unit/preprocessing/test_supervisor.py`), to `all_renkos`, to `all_triples`, to `normalized`, to the model input
+  `indicators` and the session marks to his `end_bar` (built:
+  `tests/unit/preprocessing/test_supervisor.py`), to `all_renkos`, to `all_triples`, to `normalized`, to the model input
   `candles_x_values`, to his predictions. His data never goes into this repository.
 
 ## Open questions

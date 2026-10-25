@@ -8,7 +8,7 @@ from typing import Literal
 import numpy as np
 import polars as pl
 
-from candlestack.preprocessing.blocks import CANDLE_COLUMNS
+from candlestack.preprocessing.blocks import CANDLE_COLUMNS, SESSION_LAST
 from candlestack.preprocessing.catalog import CATALOG, WINDOW
 from candlestack.preprocessing.checks import check_manifest
 from candlestack.preprocessing.manifest import Manifest
@@ -73,7 +73,7 @@ def warm_up(manifest: Manifest) -> WarmUp:
 
 def build_input(candles: pl.DataFrame, manifest: Manifest) -> ModelInput:
     """The model's input from ``candles`` (``ts`` and the columns open, high, low, close and
-    volume, as the data module gives them) and ``manifest``.
+    volume, as the data module gives them, and for stocks ``session_last``) and ``manifest``.
 
     Raises:
         ValueError: The manifest cannot run (``check_manifest`` finds a problem), the candles
@@ -113,11 +113,12 @@ def _warm_up(block_id: str, params: dict[str, object]) -> int:
 
 
 def _checked(candles: pl.DataFrame) -> pl.DataFrame:
-    """The candles cast to Int64 ``ts`` and Float64 values.
+    """The candles cast to Int64 ``ts`` and Float64 values, with ``session_last`` when they
+    have it; other columns are left out.
 
     Raises:
-        ValueError: A column is missing or not numeric, a value is missing or not finite, or a
-            ``ts`` is not after the one before it.
+        ValueError: A column is missing or not numeric, ``session_last`` is not Boolean, a value
+            is missing or not finite, or a ``ts`` is not after the one before it.
     """
     missing = [name for name in ("ts", *CANDLE_COLUMNS) if name not in candles.columns]
     if missing:
@@ -127,8 +128,13 @@ def _checked(candles: pl.DataFrame) -> pl.DataFrame:
     wrong = [name for name in CANDLE_COLUMNS if not candles[name].dtype.is_numeric()]
     if wrong:
         raise ValueError(f"The candles' {', '.join(wrong)} must be numbers")
+    marks = [SESSION_LAST] if SESSION_LAST in candles.columns else []
+    if marks and candles[SESSION_LAST].dtype != pl.Boolean:
+        raise ValueError(f"The candles' {SESSION_LAST} must be true or false")
     frame = candles.select(
-        pl.col("ts").cast(pl.Int64), *(pl.col(name).cast(pl.Float64) for name in CANDLE_COLUMNS)
+        pl.col("ts").cast(pl.Int64),
+        *(pl.col(name).cast(pl.Float64) for name in CANDLE_COLUMNS),
+        *marks,
     )
     if frame.null_count().sum_horizontal().item():
         raise ValueError("A candle has a missing value")

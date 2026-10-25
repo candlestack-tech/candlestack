@@ -6,6 +6,8 @@ manifest builds an input the model answers with finite numbers of the right shap
 whether the answers are good. The worker has no network, so it could not fetch real ones.
 """
 
+import math
+
 import numpy as np
 import polars as pl
 
@@ -27,11 +29,15 @@ _TIMEFRAME_SECONDS = {
     "4h": 14_400,
     "1d": 86_400,
 }
+# A regular session (09:30-16:00) in seconds: from it, how many candles make one.
+_SESSION_SECONDS = 23_400
 
 
 def sample_candles(manifest: Manifest) -> pl.DataFrame:
     """Candles in the form the data module gives them (``ts``, open, high, low, close,
-    volume), one every timeframe of the manifest."""
+    volume), one every timeframe of the manifest. For the regular session they mark the last
+    candle of each session (``session_last``), as stock candles do: every 13th for 30m, every
+    candle for 1d."""
     need = warm_up(manifest)
     count = need.candles * (_ESTIMATE_MARGIN if need.kind == "estimate" else 1) + SAMPLES
     rng = np.random.default_rng(_SEED)
@@ -39,7 +45,7 @@ def sample_candles(manifest: Manifest) -> pl.DataFrame:
     open_ = np.concatenate(([100.0], close[:-1]))
     spread = np.abs(rng.normal(0, 0.003, count))
     step = _TIMEFRAME_SECONDS[manifest.input.timeframe]
-    return pl.DataFrame(
+    frame = pl.DataFrame(
         {
             "ts": _START + np.arange(count, dtype=np.int64) * step,
             "open": open_,
@@ -48,4 +54,10 @@ def sample_candles(manifest: Manifest) -> pl.DataFrame:
             "close": close,
             "volume": rng.uniform(1_000, 100_000, count),
         }
+    )
+    if manifest.input.session != "regular":
+        return frame
+    per_session = math.ceil(_SESSION_SECONDS / step)
+    return frame.with_columns(
+        session_last=pl.Series(np.arange(count) % per_session == per_session - 1)
     )

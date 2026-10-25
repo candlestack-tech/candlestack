@@ -15,7 +15,8 @@ Every stock folder with both files is checked, each of his columns a test of its
 are labelled by the candle's close in ``unix`` seconds, and his volume is ``volume_base``. A
 column is compared on every row after the block's warm-up (his first rows differ for the
 recursive indicators, research #118) with the tolerance of the research: ``rtol`` 1e-6 and
-``atol`` 1e-8, and the 0/1 ``squeeze`` exactly. Two exceptions, both float noise:
+``atol`` 1e-8, and the 0/1 ``squeeze`` and ``is_last_bar`` exactly. Two exceptions, both float
+noise:
 
 - A recursive indicator weighs its first candles under 1e-6 once its warm-up ends, and his
   started elsewhere (on a longer history, or another first candle), so on the first
@@ -23,10 +24,16 @@ recursive indicators, research #118) with the tolerance of the research: ``rtol`
   ``atol`` 1e-6 there (seen: up to 2e-5 of the value, within the first 40 rows).
 - ``squeeze`` compares a Bollinger band with the channel's edge; where they are equal but for
   the last bits of a float (within ``TIE`` of the close), his 0 or 1 may be the other one.
+
+His ``is_last_bar`` and the ``end_bar`` of his candles mark the last candle of each session.
+The data module marks it from Alpaca's calendar, which a test cannot ask, so here the calendar
+is made from the days of his candles, 09:30-16:00 New York, with the early closes below at
+13:00.
 """
 
 import functools
 import os
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +41,7 @@ import numpy as np
 import polars as pl
 import pytest
 
+from candlestack.data import Timeframe, parse_calendar, session_last
 from candlestack.preprocessing import CATALOG
 
 DATA = os.environ.get("CANDLESTACK_SUPERVISOR_DATA", "")
@@ -60,12 +68,41 @@ COLUMNS: dict[str, tuple[str, dict[str, Any]]] = {
     "ema20": ("ema@1", {"window": 20}),
     "ema50": ("ema@1", {"window": 50}),
     "macd_diff": ("macd-diff@1", {}),
+    "is_last_bar": ("session-last-candle@1", {}),
 }
-EXACT = {"squeeze"}
+EXACT = {"squeeze", "is_last_bar"}
 RECURSIVE = {"rsi", "tsi", "atr", "adx", "ema20", "ema50", "macd_diff"}
 EARLY_ROWS = 64
 TIE = 1e-12
 HIGH, LOW, CLOSE = pl.col("high"), pl.col("low"), pl.col("close")
+# The NYSE early closes (13:00 New York) of his years, 2016 to August 2026, public exchange
+# facts; 2026 has none before November.
+EARLY_CLOSES = frozenset(
+    date.fromisoformat(day)
+    for day in (
+        "2016-11-25",
+        "2017-07-03",
+        "2017-11-24",
+        "2018-07-03",
+        "2018-11-23",
+        "2018-12-24",
+        "2019-07-03",
+        "2019-11-29",
+        "2019-12-24",
+        "2020-11-27",
+        "2020-12-24",
+        "2021-11-26",
+        "2022-11-25",
+        "2023-07-03",
+        "2023-11-24",
+        "2024-07-03",
+        "2024-11-29",
+        "2024-12-24",
+        "2025-07-03",
+        "2025-11-28",
+        "2025-12-24",
+    )
+)
 
 pytestmark = pytest.mark.skipif(
     not DATA, reason="CANDLESTACK_SUPERVISOR_DATA does not name the supervisor's data"
@@ -89,16 +126,28 @@ STOCKS = stock_folders()
 
 @functools.lru_cache(maxsize=1)
 def candles(stock: str) -> pl.DataFrame:
+    """His candles as the data module gives them, with the mark of each session's last one."""
     frame = pl.read_parquet(ROOT / stock / "candles.parquet")
-    return frame.select(
+    frame = frame.select(
         "unix",
+        "end_bar",
         ts=pl.col("unix").cast(pl.Int64) - HALF_HOUR,
         open="open",
         high="high",
         low="low",
         close="close",
         volume=pl.col("volume_base").cast(pl.Float64),
+        day=pl.col("date").dt.date(),
     ).sort("ts")
+    sessions = parse_calendar(
+        {"date": day.isoformat(), "open": "09:30", "close": _close(day)}
+        for day in frame["day"].unique()
+    )
+    return frame.with_columns(session_last(frame, Timeframe.M30, sessions))
+
+
+def _close(day: date) -> str:
+    return "13:00" if day in EARLY_CLOSES else "16:00"
 
 
 def squeeze_tie() -> pl.Expr:
@@ -135,8 +184,10 @@ def test_the_block_gives_his_column(stock: str, column: str) -> None:
     assert rows.height > 0, f"{stock} has no row of {column} after the warm-up"
     a, b = rows["ours"].to_numpy(), rows["his"].to_numpy()
 
-    if column in EXACT:
+    if column == "squeeze":
         within = (a == b) | rows["tie"].to_numpy()
+    elif column in EXACT:
+        within = a == b
     else:
         within = np.isclose(a, b, rtol=1e-6, atol=1e-8)
     if column in RECURSIVE:
@@ -147,3 +198,17 @@ def test_the_block_gives_his_column(stock: str, column: str) -> None:
         f"{stock} {column}: {int((~within).sum())} of {rows.height} rows differ, "
         f"max |diff| {float(np.nanmax(np.abs(a - b))):.3g}"
     )
+
+
+@pytest.mark.parametrize("stock", STOCKS)
+def test_the_last_candle_of_each_session_is_his_end_bar(stock: str) -> None:
+    frame = candles(stock)
+    block = CATALOG["session-last-candle@1"]
+
+    ours = block.run(frame, block.params())
+    his = frame["end_bar"].cast(pl.Float64)
+
+    # Aggregates only, never his values.
+    differ = int((ours != his).sum())
+    assert differ == 0, f"{stock}: {differ} of {frame.height} candles differ in end_bar"
+    assert ours.sum() == frame["day"].n_unique(), f"{stock}: not one last candle a day"
