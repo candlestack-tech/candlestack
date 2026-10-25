@@ -526,8 +526,9 @@ export interface paths {
          *     kept only when every check passes: its form, the catalog (every block exists, in its
          *     step), the blocks' parameters, the names of the columns, the signature against the window
          *     and the columns, the shapes of the example, and the signature against the input and
-         *     output the upload read from the model file. The model is then `ready`; a trial run
-         *     makes it `verified` (not yet).
+         *     output the upload read from the model file. The model is then `ready`. A trial run in the
+         *     worker follows after the answer: the model becomes `verified` when it gives the output of
+         *     the manifest's example, and a failed run leaves it `ready` with its `check_error`.
          */
         put: operations["set_manifest_api_v1_models__model_id__manifest_put"];
         post?: never;
@@ -2160,6 +2161,12 @@ export interface components {
              */
             best_sharpe: number | null;
             /**
+             * Check Error
+             * @description Why the trial run of its manifest in the worker failed, in plain sentences; null when it passed or has not run (the model stays `ready`)
+             * @example null
+             */
+            check_error: string | null;
+            /**
              * Created At
              * Format: date-time
              * @description When the model was uploaded (UTC)
@@ -2233,8 +2240,7 @@ export interface components {
          * ModelState
          * @description How far a model got: `needs_setup` (no manifest yet, so it cannot run), `ready` (its
          *     manifest passed every check that reads the files, against this model too) or `verified`
-         *     (a trial run in the worker gave the output of the manifest's example; set by the worker,
-         *     not yet).
+         *     (a trial run in the worker gave the output of the manifest's example).
          * @enum {string}
          */
         ModelState: "needs_setup" | "ready" | "verified";

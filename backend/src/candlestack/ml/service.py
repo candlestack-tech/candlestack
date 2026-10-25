@@ -182,6 +182,7 @@ def _out(
         created_at=model.created_at,
         state=_state(model, manifest),
         manifest_summary=None if manifest is None else _summary(manifest),
+        check_error=model.check_error,
     )
 
 
@@ -449,8 +450,9 @@ class ModelsService:
         chunks: AsyncIterable[bytes],
     ) -> ModelOut:
         """Checks the manifest the client sends against the user's model and keeps it in place
-        of the one the model had, if any: the model is ``ready``, until a trial run verifies
-        it again. `declared_size` is the size the client announced (Content-Length), if any.
+        of the one the model had, if any: the model is ``ready``, unchecked, until a trial run
+        verifies it again (``checks.ModelChecks``, which the route starts). `declared_size` is
+        the size the client announced (Content-Length), if any.
 
         Raises:
             ManifestTooLarge: The manifest is larger than a manifest may be.
@@ -472,6 +474,8 @@ class ModelsService:
         # What the user wrote, without the defaults filled in, so it reads back as it was given.
         model.manifest = manifest.model_dump(mode="json", exclude_unset=True)
         model.verified_at = None
+        model.checked_at = None
+        model.check_error = None
         usage = await self._store.backtest_usage(user_id, [model.id])
         await self._store.commit()
         logger.info("User %s set the manifest of model %s", user_id, model.id)

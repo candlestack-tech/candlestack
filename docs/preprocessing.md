@@ -199,7 +199,9 @@ it (`PUT /api/v1/models/{model_id}/manifest`, [architecture.md](architecture.md#
    window). Its checks run at once (checks 2 and 3 below), and the two are compared side by
    side: "the manifest gives [25, 23], the model takes [25, 23]". The manifest is kept only
    when every check passed, and the model is then `ready`. An `example` in it is optional:
-   the trial run compares it, and the model is `verified` when it matches.
+   the trial run in the worker (checks 4 and 5 below), which starts once the manifest is kept,
+   compares it, and the model is `verified` when it matches; a trial run that fails leaves
+   the model `ready` with its error.
 3. Add model. Step 2 can be skipped: the model is kept as `needs_setup`, and its manifest is
    added later from the Models page ("Add manifest"). A manifest added again replaces the one
    the model had, and the model is `ready` until a trial run verifies it again.

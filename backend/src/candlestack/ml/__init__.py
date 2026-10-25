@@ -8,11 +8,13 @@ file (its ``config.json`` and weights), not by loading it.
 startup, sweeps it while the app runs (``keep_incoming_swept``) and registers
 ``ModelsAccountDeletion`` among the account deletion hooks. It also puts a ``ModelUsage`` on
 ``app.state.model_usage``: what counts the backtests of each model, which ``ml`` cannot import
-(``no_usage`` counts none).
+(``no_usage`` counts none), and the ``ModelChecks`` on ``app.state.model_checks``: the trial
+runs of the models in the worker, recovered at startup and closed on shutdown.
 """
 
 from candlestack.ml.api import preprocessing_router
 from candlestack.ml.api import router as models_router
+from candlestack.ml.checks import ModelChecks
 from candlestack.ml.models import Model
 from candlestack.ml.schemas import ModelOut, ModelsOut
 from candlestack.ml.service import ModelsAccountDeletion
@@ -22,6 +24,7 @@ from candlestack.ml.usage import ModelUsage, ModelUsageStats, no_usage
 __all__ = [
     "LocalModelStorage",
     "Model",
+    "ModelChecks",
     "ModelOut",
     "ModelStorage",
     "ModelUsage",

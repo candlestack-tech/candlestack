@@ -3044,6 +3044,21 @@
             ],
             "title": "Best Sharpe"
           },
+          "check_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the trial run of its manifest in the worker failed, in plain sentences; null when it passed or has not run (the model stays `ready`)",
+            "examples": [
+              null
+            ],
+            "title": "Check Error"
+          },
           "created_at": {
             "description": "When the model was uploaded (UTC)",
             "format": "date-time",
@@ -3159,7 +3174,8 @@
           "best_sharpe",
           "created_at",
           "state",
-          "manifest_summary"
+          "manifest_summary",
+          "check_error"
         ],
         "title": "ModelOut",
         "type": "object"
@@ -3183,7 +3199,7 @@
         "type": "object"
       },
       "ModelState": {
-        "description": "How far a model got: `needs_setup` (no manifest yet, so it cannot run), `ready` (its\nmanifest passed every check that reads the files, against this model too) or `verified`\n(a trial run in the worker gave the output of the manifest's example; set by the worker,\nnot yet).",
+        "description": "How far a model got: `needs_setup` (no manifest yet, so it cannot run), `ready` (its\nmanifest passed every check that reads the files, against this model too) or `verified`\n(a trial run in the worker gave the output of the manifest's example).",
         "enum": [
           "needs_setup",
           "ready",
@@ -6615,7 +6631,7 @@
         ]
       },
       "put": {
-        "description": "Adds the model's manifest, or replaces the one it has; the body is the manifest. It is\nkept only when every check passes: its form, the catalog (every block exists, in its\nstep), the blocks' parameters, the names of the columns, the signature against the window\nand the columns, the shapes of the example, and the signature against the input and\noutput the upload read from the model file. The model is then `ready`; a trial run\nmakes it `verified` (not yet).",
+        "description": "Adds the model's manifest, or replaces the one it has; the body is the manifest. It is\nkept only when every check passes: its form, the catalog (every block exists, in its\nstep), the blocks' parameters, the names of the columns, the signature against the window\nand the columns, the shapes of the example, and the signature against the input and\noutput the upload read from the model file. The model is then `ready`. A trial run in the\nworker follows after the answer: the model becomes `verified` when it gives the output of\nthe manifest's example, and a failed run leaves it `ready` with its `check_error`.",
         "operationId": "set_manifest_api_v1_models__model_id__manifest_put",
         "parameters": [
           {

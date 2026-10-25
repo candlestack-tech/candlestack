@@ -284,8 +284,11 @@ flowchart LR
   error), and more than 100 errors of the form are counted, not read.
 - **States**: each model says its `state`: `needs_setup` without a manifest, `ready` with one
   (it passed every check above), `verified` once `models.verified_at` is set. The worker's
-  trial run (#268) will set it when the model gives the output of the manifest's `example`,
-  and only while the manifest is still the one it ran with; replacing the manifest clears it.
+  trial run sets it when the model gives the output of the manifest's `example`, and only
+  while the manifest is still the one it ran with; replacing the manifest clears it
+  ([the check of a model](#the-check-of-a-model)). A trial run that failed on the model
+  leaves it `ready` with `check_error`, the worker's sentences for the Models page (null when
+  it passed or has not run).
   Each model also carries `manifest_summary` (the representation, timeframe, session, input
   shape and warm-up), so the Models tiles and the model's page need no second request. The
   column `manifest` is deferred: the queries of the list and of a change read
@@ -371,10 +374,10 @@ sequenceDiagram
   within the wait fails at the backend) and `internal` (a bug of ours).
 - **A `check`** builds the input from built-in candles (a seeded random walk, enough for the
   manifest's warm-up and 64 samples), runs the model, wants one finite score per sample and,
-  with an `example`, its output within 1e-4. The code that sets `models.verified_at` from a
-  `check` (still to come) sets it only when the result is `done` with `verified`
-  true and, under the lock of the user's models, the model's stored manifest still has the
-  result's `manifest_sha256`: a manifest replaced while the job ran keeps the model `ready`.
+  with an `example`, its output within 1e-4. `ml` sets `models.verified_at` from it only when
+  the result is `done` with `verified` true and, under the lock of the user's models, the
+  model's stored manifest still has the result's `manifest_sha256`: a manifest replaced while
+  the job ran keeps the model `ready` ([the check of a model](#the-check-of-a-model)).
 - **One job at a time** per worker, each in a fresh process (`worker/runner.py`) that the loop
   (`worker/service.py`) starts with the job on stdin and stops at `JOB_TIME_LIMIT` (120 s) or
   at the job's deadline, whichever comes first. The process runs in a session of its own, and
@@ -423,6 +426,36 @@ sequenceDiagram
   network, and no `SENTRY_DSN` on the VM): `JobClient` logs an `internal` result as an error in
   the backend, which makes it a Sentry issue naming the job's ID. What a model does wrong is
   no error.
+
+### The check of a model
+
+`PUT /api/v1/models/{model_id}/manifest` answers once the manifest is kept, and then starts
+the model's check (`ml.ModelChecks`, `ml/checks.py`): a task of the API process, like the runs
+of the backtests, so the request never waits for the worker. It reads the model's SHA-256 and
+manifest, lets the session go, submits the `check` job through `JobClient` and waits for its
+result (`DEFAULT_WAIT`, 180 s), then keeps what it came to in another transaction, under the
+lock of the user's models and only while the stored manifest has the result's
+`manifest_sha256`:
+
+| Result | `verified_at` | `checked_at` | `check_error` | State |
+| --- | --- | --- | --- | --- |
+| `done`, `verified` true | now | now | null | `verified` |
+| `done`, `verified` false (no `example`) | null | now | null | `ready` |
+| `failed` on the model (`manifest`, `candles`, `load`, `predict`, `output`, `example`, `time-limit`, `stopped`, `model-changed`) | null | now | the result's `error` | `ready` |
+| `failed` on the worker (`expired`, `worker-stopped`, `internal`, `model-missing`), or the queue out of reach | unchanged (null) | unchanged (null) | unchanged (null) | `ready` |
+
+Replacing the manifest clears all three. A user's checks run one after the other, as their
+backtests do: a manifest set while one of the user's checks runs waits for it (a model set
+again before its turn is checked once, with the manifest it has then), so a user who keeps
+replacing manifests holds at most one job in the worker's queue. A worker that cannot be reached or does not answer
+says nothing about the model, so it stays `ready` and unchecked: prod has no queue yet (its
+`queue` host is not there, the job fails at once with a warning), and on stage a stopped
+worker costs one wait of 180 s per check. `checked_at` null with a manifest marks a model whose
+check never came to an end, as when the process stopped while it waited (the API runs in one
+process, which keeps no checks across a restart): at startup the API checks those one after the
+other, oldest first, and stops at the first that finds no worker (unreachable or `expired`),
+so they wait for the next start. On shutdown the checks in progress stop; their models are
+checked at the next start.
 
 ## Backtests
 
@@ -537,7 +570,7 @@ A module is a subpackage of `candlestack` under `backend/src/candlestack/`.
 | `data` | now | instrument catalog, candles, sessions, cache, source adapters, rate limits |
 | `accounts` | now | users, GitHub and Google sign-in, sessions, the beta list, Settings (name, sign-in methods, preferences, deleting the account); `CurrentUserDep` for the routes of the signed-in user, `AccountDeletionHook` for what other modules delete with an account |
 | `preprocessing` | started | the model's input from its manifest: the manifest's schema and checks, the catalog of blocks, and the input built from candles: representation (candles now; Renko, Kagi later), features, normalization, windows ([preprocessing.md](preprocessing.md)) |
-| `ml` | now | the models users upload: the upload and its static check, the file storage, the list, rename, star, delete; the worker runs them ([Worker](#worker)) |
+| `ml` | now | the models users upload: the upload and its static check, the file storage, the list, rename, star, delete, the manifest; the worker runs them and checks them with their manifests ([Worker](#worker)) |
 | `signals` | started | turn predictions into signals: align them with the candles, thresholds, long only; later smoothing, holding period, sizing, risk limits |
 | `engine` | started | the backtest loop: candles and signals in, trades and an equity series out; `ENGINE_VERSION` names its rules ([engine.md](engine.md)) |
 | `metrics` | started | unified metrics and charts of one run |

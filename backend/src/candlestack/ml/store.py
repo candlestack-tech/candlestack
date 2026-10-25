@@ -2,9 +2,10 @@
 Nothing here commits; the service does, once a change is complete."""
 
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, func, literal_column, select, text
+from sqlalchemy import delete, func, literal_column, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import with_expression
@@ -69,6 +70,43 @@ class ModelStore:
             )
         ).one_or_none()
         return None if row is None else (row[0],)
+
+    async def check_input(self, user_id: str, model_id: str) -> tuple[bytes, dict[str, Any]] | None:
+        """The SHA-256 of the user's model file and its manifest, what a check runs with; None
+        when the user has no model with the ID or it has no manifest."""
+        row = (
+            await self._db.execute(
+                select(Model.sha256, Model.manifest).where(
+                    Model.id == model_id, Model.user_id == user_id
+                )
+            )
+        ).one_or_none()
+        return None if row is None or row[1] is None else (row[0], row[1])
+
+    async def unchecked(self) -> list[tuple[str, str]]:
+        """The user and model IDs of the models of every user whose manifest no check came to
+        an end for, oldest first."""
+        rows = await self._db.execute(
+            select(Model.user_id, Model.id)
+            .where(Model.manifest.is_not(None), Model.checked_at.is_(None))
+            .order_by(Model.created_at, Model.id)
+        )
+        return [(row[0], row[1]) for row in rows]
+
+    async def record_check(
+        self, model_id: str, *, checked_at: datetime, verified: bool, error: str | None
+    ) -> None:
+        """Keeps what the check of the model's manifest came to: verified now, or not, with
+        the error of a failed one."""
+        await self._db.execute(
+            update(Model)
+            .where(Model.id == model_id)
+            .values(
+                checked_at=checked_at,
+                verified_at=checked_at if verified else None,
+                check_error=error,
+            )
+        )
 
     async def backtest_usage(
         self, user_id: str, model_ids: Sequence[str]
