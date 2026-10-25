@@ -18,7 +18,7 @@ from candlestack.preprocessing import (
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "keras"
 BLESK_NO_VOL = {
-    "schema": "candlestack.manifest/1",
+    "version": 1,
     "input": {
         "timeframe": "30m",
         "session": "regular",

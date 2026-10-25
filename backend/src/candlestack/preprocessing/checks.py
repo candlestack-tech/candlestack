@@ -16,12 +16,15 @@ from pydantic import ValidationError
 from pydantic_core import ErrorDetails
 
 from candlestack.preprocessing.catalog import CATALOG, Step
-from candlestack.preprocessing.manifest import RESERVED_NAMES, Manifest
+from candlestack.preprocessing.manifest import RESERVED_NAMES, VERSION, Manifest
 
 Check = Literal["schema", "catalog", "params", "names", "signature", "example", "model"]
 
 # The output CandleStack takes: one score per sample.
 SCORE_SHAPE = [1]
+
+# Manifests written before the plain version number named it in this field.
+OLD_VERSION_FIELD = "schema"
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,15 +55,33 @@ def parse_manifest(document: str | bytes | Mapping[str, Any]) -> Manifest:
     """The manifest in ``document``: JSON text, or the JSON object already read.
 
     Raises:
-        InvalidManifest: It is not valid JSON or not of the schema ``candlestack.manifest/1``.
+        InvalidManifest: It is not valid JSON or not of the form of a manifest of version 1.
     """
     try:
         if isinstance(document, str | bytes):
             return Manifest.model_validate_json(document)
         return Manifest.model_validate(document)
     except ValidationError as error:
-        sentences = [_sentence(detail) for detail in error.errors(include_url=False)]
+        details = error.errors(include_url=False)
+        sentences = []
+        if any(_is_old_version_field(detail) for detail in details):
+            # One sentence says how to update the manifest instead of two about its fields.
+            sentences.append(
+                f"The manifest names its version with the old field {OLD_VERSION_FIELD}. Replace "
+                f'"{OLD_VERSION_FIELD}": "candlestack.manifest/1" with "version": {VERSION}.'
+            )
+            details = [
+                detail
+                for detail in details
+                if not _is_old_version_field(detail)
+                and (detail["loc"], detail["type"]) != (("version",), "missing")
+            ]
+        sentences += [_sentence(detail) for detail in details]
         raise InvalidManifest(ManifestProblem("schema", " ".join(sentences))) from None
+
+
+def _is_old_version_field(detail: ErrorDetails) -> bool:
+    return (detail["loc"], detail["type"]) == ((OLD_VERSION_FIELD,), "extra_forbidden")
 
 
 def check_manifest(manifest: Manifest) -> list[ManifestProblem]:
@@ -235,6 +256,8 @@ def _sentence(detail: ErrorDetails, *, where: str = "", block: str | None = None
         return "The manifest must be a JSON object."
     if kind == "missing":
         return f"{path} is missing." if block is None else f"{path} is missing ({block} needs it)."
+    if path == "version" and kind == "literal_error":
+        return f"This manifest has version {detail['input']}. CandleStack reads version {VERSION}."
     if kind == "extra_forbidden":
         return (
             f"{path} is not a field of the manifest."
