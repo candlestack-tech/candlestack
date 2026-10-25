@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 
 import type { Dashboard } from '@/api';
-import { useBacktestDialog, useStarBacktest } from '@/features/backtests';
+import { useStarBacktest } from '@/features/backtests';
 import { useModels, useStarModel } from '@/features/models';
 import { NewBacktestDialog } from '@/features/workspace';
 import { cn } from '@/lib/utils';
@@ -44,16 +44,15 @@ export function DashboardWidgets({ dashboard }: Props) {
   const [newBacktest, setNewBacktest] = useState(false);
   const star = useStarBacktest();
   const starModel = useStarModel();
-  const { dialog, openBacktest } = useBacktestDialog();
   const full = dashboard.counts.all > 0;
   const onStar = star.mutate;
   const openNew = () => setNewBacktest(true);
   const left = [
-    full && <LastBacktests key="last" backtests={dashboard.last} onOpen={openBacktest} onStar={onStar} />,
-    dashboard.best.sharpe.length > 0 && <BestBacktests key="best" best={dashboard.best} onOpen={openBacktest} />,
+    full && <LastBacktests key="last" backtests={dashboard.last} onStar={onStar} />,
+    dashboard.best.sharpe.length > 0 && <BestBacktests key="best" best={dashboard.best} />,
   ].filter(Boolean);
   const right = [
-    full && <StarredBacktests key="runs" starred={dashboard.starred} onOpen={openBacktest} onStar={onStar} />,
+    full && <StarredBacktests key="runs" starred={dashboard.starred} onStar={onStar} />,
     showsStarredModels(models, error !== null, full) && (
       <StarredModels key="models" models={models} error={error} onStar={starModel.mutate} />
     ),
@@ -63,7 +62,6 @@ export function DashboardWidgets({ dashboard }: Props) {
       {full ? <QuickActions onNewBacktest={openNew} /> : <GetStarted onNewBacktest={openNew} />}
       <Columns left={left} right={right} />
       <NewBacktestDialog open={newBacktest} onOpenChange={setNewBacktest} />
-      {dialog}
     </div>
   );
 }

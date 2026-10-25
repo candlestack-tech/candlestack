@@ -186,7 +186,7 @@ describe("a model's page", () => {
       ...backtestsAnswer({ backtests: [one, two], total: 14, pages: 2 }, BACKTESTS),
     });
     const runs = box('Backtests');
-    expect(await runs.findByRole('button', { name: 'Backtest #12' })).toBeDefined();
+    expect((await runs.findByRole('link', { name: 'Backtest #12' })).getAttribute('href')).toBe('/backtests/bt_1');
     expect(runs.getByRole('heading', { level: 2 }).textContent).toBe('Backtests 14');
     expect(runs.getByRole('link', { name: 'All 14' }).getAttribute('href')).toBe('/backtests?model=my-tsmixer.keras');
     expect(runs.getByText('+24.6 %')).toBeDefined();

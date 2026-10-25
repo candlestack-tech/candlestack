@@ -8,7 +8,6 @@ import { cn } from '@/lib/utils';
 import { hasResults } from './format';
 import { BacktestReturn, BacktestWhen, InstrumentChips, Missing } from './parts';
 import { BacktestCell, CELL, HEAD, NUMBER, ROW, TABLE } from './table';
-import { useBacktestDialog } from './useBacktestDialog';
 import { useBacktestsPage, useStarBacktest } from './useBacktests';
 
 // The columns, and from which width down each one hides so the table never scrolls sideways.
@@ -23,14 +22,14 @@ const COLUMNS: readonly { label: string; number?: boolean; hide?: string }[] = [
 
 const hideOf = (label: string) => COLUMNS.find((column) => column.label === label)?.hide;
 
-type RowProps = { backtest: Backtest; onOpen: (backtest: Backtest) => void; onStar: (backtest: Backtest) => void };
+type RowProps = { backtest: Backtest; onStar: (backtest: Backtest) => void };
 
-function Row({ backtest, onOpen, onStar }: RowProps) {
+function Row({ backtest, onStar }: RowProps) {
   const done = hasResults(backtest);
   return (
     <tr className={ROW}>
       <td className={CELL}>
-        <BacktestCell backtest={backtest} onOpen={onOpen} onStar={onStar} />
+        <BacktestCell backtest={backtest} onStar={onStar} />
       </td>
       <td className={cn(CELL, hideOf('Instruments'))}>
         <InstrumentChips backtest={backtest} max={2} />
@@ -51,7 +50,7 @@ function Row({ backtest, onOpen, onStar }: RowProps) {
 
 type TableProps = Omit<RowProps, 'backtest'> & { backtests: Backtest[] };
 
-function Table({ backtests, onOpen, onStar }: TableProps) {
+function Table({ backtests, onStar }: TableProps) {
   return (
     <div className="border-t">
       <table className={TABLE}>
@@ -66,7 +65,7 @@ function Table({ backtests, onOpen, onStar }: TableProps) {
         </thead>
         <tbody>
           {backtests.map((backtest) => (
-            <Row key={backtest.id} backtest={backtest} onOpen={onOpen} onStar={onStar} />
+            <Row key={backtest.id} backtest={backtest} onStar={onStar} />
           ))}
         </tbody>
       </table>
@@ -80,7 +79,6 @@ function Table({ backtests, onOpen, onStar }: TableProps) {
 export function ModelBacktests({ name }: { name: string }) {
   const { data, error } = useBacktestsPage({ model: name });
   const star = useStarBacktest();
-  const { dialog, openBacktest } = useBacktestDialog();
   const backtests = data?.backtests ?? [];
   const more = data !== undefined && data.total > backtests.length;
   return (
@@ -101,10 +99,7 @@ export function ModelBacktests({ name }: { name: string }) {
       </div>
       {error && <p className={cn(HINT, 'px-4 pb-4')}>{errorMessage(error, 'Could not load the backtests.')}</p>}
       {data && backtests.length === 0 && <p className="px-4 pb-4 text-muted-foreground">None yet</p>}
-      {backtests.length > 0 && (
-        <Table backtests={backtests} onOpen={openBacktest} onStar={(item) => star.mutate(item)} />
-      )}
-      {dialog}
+      {backtests.length > 0 && <Table backtests={backtests} onStar={(item) => star.mutate(item)} />}
     </section>
   );
 }

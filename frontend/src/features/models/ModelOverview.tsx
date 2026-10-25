@@ -2,6 +2,7 @@ import { Check, Minus } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import type { Manifest, Model } from '@/api';
+import { FactsStrip } from '@/components/FactsStrip';
 import { HINT } from '@/components/Hint';
 import { useDateStyle } from '@/features/preferences';
 import { formatRecentDay } from '@/lib/dates';
@@ -57,16 +58,7 @@ export function ModelFacts({ model }: { model: Model }) {
       ]
     : [['Input', model.input_shape ? formatDims(model.input_shape) : '–']];
   facts.push(['Backtests', String(model.backtest_count)], ['Best Sharpe', formatSharpe(model.best_sharpe)]);
-  return (
-    <dl className="mb-4 flex flex-wrap gap-px overflow-hidden rounded-[10px] border bg-border">
-      {facts.map(([term, value]) => (
-        <div key={term} className="min-w-0 flex-[1_1_110px] bg-background px-3.5 py-2.5">
-          <dt className="text-xs text-muted-foreground">{term}</dt>
-          <dd className="mt-0.5 font-mono text-[15px] font-medium whitespace-nowrap tabular-nums">{value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
+  return <FactsStrip facts={facts.map(([term, value]) => ({ term, value }))} />;
 }
 
 // The input as a matrix with its shape in the heading.

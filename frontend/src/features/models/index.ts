@@ -9,5 +9,6 @@ export { ModelsGrid } from './ModelsGrid';
 export { SidebarStorage } from './SidebarStorage';
 export { StorageMeter } from './StorageMeter';
 export { UploadCard } from './UploadCard';
+export { formatGrid, representationName as manifestRepresentation } from './manifest';
 export { ManifestDialog, UploadDialog } from './UploadDialog';
 export { useManifest, useModels, useStarModel } from './useModels';

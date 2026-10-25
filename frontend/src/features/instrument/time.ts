@@ -29,3 +29,8 @@ export function crosshairFormatter(style: DateStyle) {
     return `${formatDate(date, style)}, ${formatTime(date, style)}`;
   };
 }
+
+// The label under the crosshair of a chart of days: the date alone.
+export function dayFormatter(style: DateStyle) {
+  return (seconds: number): string => formatDate(new Date(seconds * 1000), style);
+}

@@ -1,9 +1,24 @@
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { backtest, backtestsAnswer, dashboardAnswer, problem, stubApi } from '@/test/api';
+import {
+  backtest,
+  backtestDocument,
+  backtestsAnswer,
+  dashboardAnswer,
+  problem,
+  runningDocument,
+  stubApi,
+} from '@/test/api';
 
-import { backtestsQueryOptions, dashboardQueryOptions, updateBacktest } from './backtests';
+import {
+  backtestDownloadUrl,
+  backtestQueryOptions,
+  backtestsQueryOptions,
+  dashboardQueryOptions,
+  updateBacktest,
+  type BacktestDocument,
+} from './backtests';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -63,5 +78,28 @@ describe('updateBacktest', () => {
   it('passes a backtest that is gone on as not-found', async () => {
     stubApi({ 'PATCH /api/v1/backtests/bt_7f3k2m9qx4': problem(404, 'not-found', 'No such backtest.') });
     await expect(updateBacktest('bt_7f3k2m9qx4', { starred: true })).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe('backtestQueryOptions', () => {
+  it("reads a backtest's document under the account", async () => {
+    stubApi({ 'GET /api/v1/backtests/bt_7f3k2m9qx4': { status: 200, body: backtestDocument() } });
+    const options = backtestQueryOptions('bt_7f3k2m9qx4');
+    expect(options.queryKey).toEqual(['account', 'backtest', 'bt_7f3k2m9qx4']);
+    await expect(new QueryClient().fetchQuery(options)).resolves.toEqual(backtestDocument());
+  });
+
+  it('asks again every 2 s while it runs and never once it ended', () => {
+    const { refetchInterval, staleTime } = backtestQueryOptions('bt_7f3k2m9qx4');
+    const query = (data: BacktestDocument | undefined) => ({ state: { data } }) as never;
+    if (typeof refetchInterval !== 'function' || typeof staleTime !== 'function') throw new Error('Not functions');
+    expect(refetchInterval(query(runningDocument()))).toBe(2000);
+    expect(refetchInterval(query(backtestDocument()))).toBe(false);
+    expect(staleTime(query(runningDocument()))).toBe(0);
+    expect(staleTime(query(backtestDocument()))).toBe(Infinity);
+  });
+
+  it('downloads the whole document from its own path', () => {
+    expect(backtestDownloadUrl('bt_7f3k2m9qx4')).toBe('/api/v1/backtests/bt_7f3k2m9qx4/download');
   });
 });

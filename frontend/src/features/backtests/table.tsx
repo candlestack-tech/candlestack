@@ -1,3 +1,4 @@
+import { Link, useRouterState } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 
 import type { Backtest } from '@/api';
@@ -53,13 +54,31 @@ export function SortButton({
 export const ROW_OPENER =
   'cursor-pointer outline-none after:absolute after:inset-0 focus-visible:text-primary focus-visible:after:rounded-md focus-visible:after:ring-2 focus-visible:after:ring-ring/60 focus-visible:after:ring-inset';
 
-// The button that opens a row's backtest, stretched over the whole row so the row is one click
-// target and the keyboard reaches it; what else the row holds (the star) sits above it.
-export function RowOpener({ label, onOpen, children }: { label: string; onOpen: () => void; children: ReactNode }) {
+// Where a backtest's page goes back to: the dashboard or the model's page it was opened from,
+// else the Backtests page.
+function useOpenedFrom(): 'dashboard' | 'model' | undefined {
+  return useRouterState({
+    select: ({ location }) => {
+      if (location.pathname.startsWith('/dashboard')) return 'dashboard';
+      return location.pathname.startsWith('/models/') ? 'model' : undefined;
+    },
+  });
+}
+
+// The link to a row's backtest page, stretched over the whole row so the row is one click target
+// and the keyboard reaches it; what else the row holds (the star) sits above it.
+export function RowOpener({ backtest, children }: { backtest: Backtest; children: ReactNode }) {
+  const from = useOpenedFrom();
   return (
-    <button type="button" aria-label={label} onClick={onOpen} className={ROW_OPENER}>
+    <Link
+      to="/backtests/$backtestId"
+      params={{ backtestId: backtest.id }}
+      state={from && { from }}
+      aria-label={`Backtest #${backtest.number}`}
+      className={ROW_OPENER}
+    >
       {children}
-    </button>
+    </Link>
   );
 }
 
@@ -70,15 +89,7 @@ export function RowStar({ starred, label, onToggle }: { starred: boolean; label:
 }
 
 // The star and the number of a backtest, the number opening it (the Backtest column).
-export function BacktestCell({
-  backtest,
-  onOpen,
-  onStar,
-}: {
-  backtest: Backtest;
-  onOpen: (backtest: Backtest) => void;
-  onStar: (backtest: Backtest) => void;
-}) {
+export function BacktestCell({ backtest, onStar }: { backtest: Backtest; onStar: (backtest: Backtest) => void }) {
   return (
     <span className="inline-flex items-center gap-1.5">
       <RowStar
@@ -86,7 +97,7 @@ export function BacktestCell({
         label={`Star backtest ${backtest.number}`}
         onToggle={() => onStar(backtest)}
       />
-      <RowOpener label={`Backtest #${backtest.number}`} onOpen={() => onOpen(backtest)}>
+      <RowOpener backtest={backtest}>
         <BacktestNumber backtest={backtest} />
       </RowOpener>
     </span>

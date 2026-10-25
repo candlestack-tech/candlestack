@@ -275,19 +275,19 @@ describe('the Backtests page', () => {
     expect(mono).toEqual(['Return', 'Sharpe', 'Max drawdown', 'Trades']);
   });
 
-  it('opens a row from the keyboard, ringing the row while its opener has the focus', async () => {
+  it('opens a row from the keyboard, ringing the row while its link has the focus', async () => {
     stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
-    await renderApp('/backtests');
+    const { router } = await renderApp('/backtests');
     const star = await screen.findByRole('button', { name: 'Star backtest 12' });
     star.focus();
     await userEvent.tab();
-    const opener = screen.getByRole('button', { name: 'Backtest #12' });
+    const opener = screen.getByRole('link', { name: 'Backtest #12' });
     expect(document.activeElement).toBe(opener);
     expect(opener.className.split(' ')).toEqual(
       expect.arrayContaining(['after:absolute', 'after:inset-0', 'focus-visible:after:ring-2']),
     );
     await userEvent.keyboard('{Enter}');
-    expect(await screen.findByRole('dialog', { name: 'Backtest #12' })).toBeDefined();
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe('/backtests/bt_7f3k2m9qx4'));
   });
   it('stars a backtest at once and takes the star back when the API refuses', async () => {
     stubApi({
@@ -316,44 +316,20 @@ describe('the Backtests page', () => {
     expect(subtitle()).toBe('0 of 3');
   });
 
-  it('opens a backtest as Coming soon, but not from its star', async () => {
+  it("opens a backtest's page, but not from its star", async () => {
     stubApi({
       ...sessionWithPreferences(ARSEN),
       ...backtestsAnswer(PAGE),
       'PATCH /api/v1/backtests/bt_q7r8s9t2u3': { status: 200, body: { ...TEN, starred: false } },
     });
-    await renderApp('/backtests');
+    const { router } = await renderApp('/backtests');
     await userEvent.click(await screen.findByRole('button', { name: 'Star backtest 10' }));
-    expect(screen.queryByRole('dialog')).toBeNull();
-    await userEvent.click(screen.getByRole('button', { name: 'Backtest #10' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Backtest #10' });
-    expect(
-      within(dialog).getByText('BTCUSDT, ETHUSDT and SOLUSDT · Time windows · blesk-novol-8.keras · 12 Oct 19:44'),
-    ).toBeDefined();
-    expect(within(dialog).getByText('Coming soon')).toBeDefined();
-  });
-
-  it.each([
-    ['Escape', (user: ReturnType<typeof userEvent.setup>) => user.keyboard('{Escape}')],
-    [
-      'its close button',
-      (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByRole('button', { name: 'Close' })),
-    ],
-    [
-      'a click beside it',
-      (user: ReturnType<typeof userEvent.setup>) =>
-        user.click(document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]')!),
-    ],
-  ])('gives the focus back to the row that opened a backtest, closed with %s', async (_, close) => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
-    await renderApp('/backtests');
-    const user = userEvent.setup();
-    const opener = await screen.findByRole('button', { name: 'Backtest #10' });
-    await user.click(opener);
-    await screen.findByRole('dialog', { name: 'Backtest #10' });
-    await close(user);
-    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Backtest #10' }));
+    expect(router.state.location.pathname).toBe('/backtests');
+    const opener = screen.getByRole('link', { name: 'Backtest #10' });
+    expect(opener.getAttribute('href')).toBe('/backtests/bt_q7r8s9t2u3');
+    await userEvent.click(opener);
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe('/backtests/bt_q7r8s9t2u3'));
+    expect(router.state.location.state.from).toBeUndefined();
   });
 
   it('pages through the backtests', async () => {

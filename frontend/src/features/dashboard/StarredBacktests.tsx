@@ -15,12 +15,12 @@ import { cn } from '@/lib/utils';
 
 import { MoreRow, STARRED_ROW, Sparkline, Widget } from './widgets';
 
-type RowProps = { backtest: Backtest; onOpen: (backtest: Backtest) => void; onStar: (backtest: Backtest) => void };
+type RowProps = { backtest: Backtest; onStar: (backtest: Backtest) => void };
 
 // Two lines (.dd-sb): the star beside both; the number with up to two instruments, the small
 // equity line and the return; under them the representation and the model, and the Sharpe ratio.
 // A failed backtest has the Failed badge instead, without a line.
-function Row({ backtest, onOpen, onStar }: RowProps) {
+function Row({ backtest, onStar }: RowProps) {
   const done = hasResults(backtest);
   return (
     <div className={cn(STARRED_ROW, 'grid-cols-[auto_minmax(0,1fr)_auto_auto] gap-y-px')}>
@@ -28,7 +28,7 @@ function Row({ backtest, onOpen, onStar }: RowProps) {
         <RowStar starred label={`Unstar backtest ${backtest.number}`} onToggle={() => onStar(backtest)} />
       </span>
       <span className="flex items-center gap-1.5 overflow-hidden text-[13px] text-ellipsis whitespace-nowrap">
-        <RowOpener label={`Backtest #${backtest.number}`} onOpen={() => onOpen(backtest)}>
+        <RowOpener backtest={backtest}>
           <BacktestNumber backtest={backtest} />
         </RowOpener>
         <InstrumentChips backtest={backtest} max={2} tight />
@@ -49,12 +49,11 @@ function Row({ backtest, onOpen, onStar }: RowProps) {
 
 type Props = {
   starred: Dashboard['starred'];
-  onOpen: (backtest: Backtest) => void;
   onStar: (backtest: Backtest) => void;
 };
 
 // The four starred backtests with the best Sharpe ratio (mockups/app, ddStarred), then More.
-export function StarredBacktests({ starred, onOpen, onStar }: Props) {
+export function StarredBacktests({ starred, onStar }: Props) {
   return (
     <Widget icon={BacktestsIcon} title="Starred backtests" aside={<Hint>by Sharpe</Hint>}>
       {starred.backtests.length === 0 ? (
@@ -63,7 +62,7 @@ export function StarredBacktests({ starred, onOpen, onStar }: Props) {
         <>
           <div className="flex flex-col">
             {starred.backtests.map((backtest) => (
-              <Row key={backtest.id} backtest={backtest} onOpen={onOpen} onStar={onStar} />
+              <Row key={backtest.id} backtest={backtest} onStar={onStar} />
             ))}
           </div>
           <MoreRow total={starred.total} to="/backtests" />

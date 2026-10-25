@@ -2,6 +2,7 @@ import { vi } from 'vitest';
 
 import type {
   Backtest,
+  BacktestDocument,
   BacktestsPage,
   Catalog,
   CatalogBlock,
@@ -273,3 +274,133 @@ export const CATALOG: Catalog = {
 };
 
 export const catalogAnswer = { 'GET /api/v1/preprocessing/catalog': { status: 200, body: CATALOG } };
+
+// The data of the worked example of docs/engine.md: AAPL, 30-minute candles.
+const EXAMPLE_DATA: BacktestDocument['data'] = {
+  instrument: {
+    id: 'stock:AAPL',
+    market: 'stock',
+    symbol: 'AAPL',
+    name: 'Apple Inc.',
+    exchange: 'NASDAQ',
+    source: 'alpaca',
+    feed: 'sip',
+    currency: 'USD',
+  },
+  timeframe: '30m',
+  timeframe_seconds: 1800,
+  session: 'regular',
+  period: { start: 1717372800, end: 1717459200 },
+  loaded: { start: 1717081200, end: 1717430400, count: 29, fingerprint: 'sha256:3b1f', gaps_total: 0 },
+  changed: false,
+  warm_up: { candles: 24, kind: 'exact', dropped: 24 },
+  rows: { first_ts: 1717421400, last_ts: 1717428600, count: 5 },
+  predictions: { count: 5, sha256: 'e1aa90d2' },
+  align: { predictions_without_candle: 0, candles_without_prediction: 0 },
+};
+
+// The results of the worked example of docs/engine.md.
+const EXAMPLE_RESULTS: NonNullable<BacktestDocument['results']> = {
+  stats: {
+    total_return: -0.05195,
+    max_drawdown: -0.060224,
+    sharpe: null,
+    sortino: null,
+    num_trades: 1,
+    win_rate: 0,
+    avg_trade_return: -0.05195,
+    best_trade_return: -0.05195,
+    worst_trade_return: -0.05195,
+    exposure: 0.2,
+    fees_paid: 0.00195,
+    buy_and_hold_return: -0.02,
+  },
+  benchmarks: { bh: { total_return: -0.02 } },
+  series: {
+    resolution: 'candle',
+    count: 5,
+    columns: {
+      ts: [1717421400, 1717423200, 1717425000, 1717426800, 1717428600],
+      close: [100, 101, 103, 97, 98],
+      prediction: [0.01, 0.3, 0.2, 0.1, 0.4],
+      signal: [0, 1, 1, 1, 1],
+      position: [0, 0, 1, 0, 0],
+      equity: [1, 1, 1.008804, 0.94805, 0.94805],
+      drawdown: [0, 0, 0, -0.060224, -0.060224],
+    },
+    benchmarks: { bh: [1, 1.01, 1.03, 0.97, 0.98] },
+  },
+  trades: {
+    count: 1,
+    total: 1,
+    complete: true,
+    columns: {
+      signal_ts: [1717423200],
+      open_ts: [1717425000],
+      close_ts: [1717426800],
+      side: [1],
+      open_price: [102],
+      close_price: [96.9],
+      stop_price: [96.9],
+      exit_reason: ['stop'],
+      return: [-0.05195],
+      fees: [0.00195],
+      slippage_cost: [0],
+      candles_held: [1],
+    },
+  },
+};
+
+// The worked example of docs/engine.md as the result document of #12: AAPL, 30-minute candles,
+// one long trade stopped out, 5 % stop and 10 bps fees, against buy and hold.
+export const backtestDocument = (fields: Partial<BacktestDocument> = {}): BacktestDocument => ({
+  version: 1,
+  backtest: {
+    id: 'bt_7f3k2m9qx4',
+    number: 12,
+    status: 'finished',
+    created_at: '2026-10-17T14:05:00Z',
+    finished_at: '2026-10-17T14:07:42Z',
+    duration_s: 162,
+    error: null,
+  },
+  software: {
+    engine_version: '0.3.0',
+    app_version: 'dev',
+    runner: { format: 'keras', keras: '3.15.1', backend: 'jax 0.7.2' },
+  },
+  model: {
+    id: 'mdl_7f3k2m9qx4',
+    name: 'raw-candles.keras',
+    framework: 'keras',
+    sha256: '9b1e04c7',
+    size_bytes: 48213,
+    manifest: manifest(),
+  },
+  data: EXAMPLE_DATA,
+  decision: {
+    calibrate: null,
+    ema: null,
+    rule: { name: 'threshold', limit: 0.05 },
+    long_only: false,
+    confirm: null,
+    min_hold: null,
+  },
+  execution: { fill: 'next_open', stop_loss: 0.05, drawdown_stop: null, fee_bps: 10, slippage_bps: 0 },
+  benchmarks: [{ id: 'bh', kind: 'buy_and_hold', instrument: 'stock:AAPL' }],
+  metrics: { periods_per_year: 252, risk_free_rate: 0 },
+  results: EXAMPLE_RESULTS,
+  ...fields,
+});
+
+// The same document while it runs: the setup only.
+export const runningDocument = (): BacktestDocument => {
+  const doc = backtestDocument();
+  return {
+    ...doc,
+    backtest: { ...doc.backtest, status: 'running', finished_at: null, duration_s: null },
+    software: { ...doc.software, runner: null },
+    data: { ...doc.data, loaded: null, changed: null, rows: null, predictions: null, align: null },
+    results: null,
+  };
+};

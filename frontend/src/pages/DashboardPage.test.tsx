@@ -225,22 +225,20 @@ describe('the dashboard of an account with backtests', () => {
     expect(widget('Last backtests').getByRole('button', { name: 'Star backtest 12' }).textContent).toBe('☆');
   });
 
-  it('opens a backtest of a widget as Coming soon', async () => {
+  it("opens a backtest's page from a widget, with its way back to the dashboard", async () => {
     await open({ ...dashboardAnswer(FULL), ...modelsAnswer([]) });
     const best = within(await screen.findByRole('region', { name: 'Best backtests' }));
-    await userEvent.click(best.getByRole('button', { name: 'Backtest #10' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Backtest #10' });
-    expect(
-      within(dialog).getByText('AAPL, MSFT, NVDA and SPY · Renko · blesk-novol-8.keras · 12 Oct 19:44'),
-    ).toBeDefined();
+    const opener = best.getByRole('link', { name: 'Backtest #10' });
+    await userEvent.click(opener);
+    expect(await screen.findByRole('link', { name: '← Dashboard' })).toBeDefined();
+    expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe('Not found');
   });
 
   it('gives the focus back to what opened a dialog when it closes', async () => {
     await open({ ...dashboardAnswer(FULL), ...modelsAnswer([]) });
     const user = userEvent.setup();
-    const best = within(await screen.findByRole('region', { name: 'Best backtests' }));
+    await screen.findByRole('region', { name: 'Best backtests' });
     const openers = [
-      [() => best.getByRole('button', { name: 'Backtest #10' }), 'Backtest #10'],
       [() => screen.getByRole('button', { name: /^New backtest\s*Pick/ }), 'New backtest'],
       [() => screen.getByRole('button', { name: /^Upload model/ }), 'Add a model'],
       [() => screen.getByRole('button', { name: /^Compare backtests/ }), 'Compare backtests'],

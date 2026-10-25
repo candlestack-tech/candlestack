@@ -1,6 +1,6 @@
 import { keepPreviousData, queryOptions } from '@tanstack/react-query';
 
-import { get, patch } from './client';
+import { apiUrl, get, patch } from './client';
 import type { components } from './schema';
 
 // A backtest as the API sends it. Returns and rates are fractions (0.246 is 24.6 %); the results
@@ -12,6 +12,9 @@ export type BacktestSort = components['schemas']['BacktestSort'];
 export type SortOrder = components['schemas']['SortOrder'];
 export type Representation = components['schemas']['Representation'];
 export type Dashboard = components['schemas']['DashboardOut'];
+// One backtest as its page shows it: the result document (docs/engine.md) in the light view.
+export type BacktestDocument = components['schemas']['BacktestDocument'];
+export type BacktestStatus = components['schemas']['BacktestStatus'];
 // The results Best backtests ranks by.
 export type BestMetric = keyof Dashboard['best'];
 
@@ -25,6 +28,8 @@ export type BacktestsParams = {
   order?: SortOrder | undefined;
   page?: number | undefined;
 };
+
+const backtestPath = (id: string) => `/v1/backtests/${encodeURIComponent(id)}`;
 
 // GET /api/v1/backtests: a page of 10, with the counts and the models the filters offer.
 function listBacktests(params: BacktestsParams, signal?: AbortSignal): Promise<BacktestsPage> {
@@ -57,5 +62,26 @@ export function dashboardQueryOptions() {
 
 // PATCH /api/v1/backtests/{id}: stars or unstars the backtest.
 export function updateBacktest(id: string, update: components['schemas']['BacktestUpdate']): Promise<Backtest> {
-  return patch<Backtest>(`/v1/backtests/${encodeURIComponent(id)}`, update);
+  return patch<Backtest>(backtestPath(id), update);
+}
+
+// While a backtest runs, its page asks again this often until it finished or failed.
+export const POLL_MS = 2000;
+
+// GET /api/v1/backtests/{id}: the result document in the light view, whatever its status. A
+// running one is asked for again every POLL_MS; a finished or failed one never changes, so it is
+// not asked for again while it is in the cache.
+export function backtestQueryOptions(id: string) {
+  return queryOptions({
+    queryKey: ['account', 'backtest', id],
+    queryFn: ({ signal }) => get<BacktestDocument>(backtestPath(id), signal),
+    staleTime: ({ state }) => (state.data?.backtest.status === 'running' ? 0 : Infinity),
+    refetchInterval: ({ state }) => (state.data?.backtest.status === 'running' ? POLL_MS : false),
+  });
+}
+
+// GET /api/v1/backtests/{id}/download: the whole document, every row and trade, which the browser
+// saves as candlestack-backtest-<number>.json (the API's Content-Disposition).
+export function backtestDownloadUrl(id: string): string {
+  return apiUrl(`${backtestPath(id)}/download`);
 }
