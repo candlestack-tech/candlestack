@@ -153,7 +153,16 @@ export interface paths {
          */
         get: operations["list_backtests_api_v1_backtests_get"];
         put?: never;
-        post?: never;
+        /**
+         * Start Backtest
+         * @description Starts a backtest of one of the user's models on one instrument and period and returns
+         *     its document, `running`, with its number. Checked first: the model is the user's and has a
+         *     manifest, the instrument fits the model, the period with the candles the model needs before
+         *     it fits the data and the candle limit, the user has no other backtest running, and the
+         *     worker that runs the models can be reached. The run goes on after the response; the
+         *     document (`GET /api/v1/backtests/{backtest_id}`) has the results once it finished.
+         */
+        post: operations["start_backtest_api_v1_backtests_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -167,7 +176,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Get Backtest
+         * @description The result document of the backtest, whatever its status (`results` is null until it
+         *     finished), in the light view: a series of more than 10,000 rows has one point per UTC day,
+         *     and only the newest 10,000 trades are in it (`trades.complete` false).
+         */
+        get: operations["get_backtest_api_v1_backtests__backtest_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -178,6 +193,27 @@ export interface paths {
          * @description Stars or unstars the backtest.
          */
         patch: operations["update_backtest_api_v1_backtests__backtest_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/backtests/{backtest_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Backtest
+         * @description The result document of a finished backtest with every row of its series and every
+         *     trade, as a file to save.
+         */
+        get: operations["download_backtest_api_v1_backtests__backtest_id__download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/dashboard": {
@@ -528,6 +564,13 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AlignOut */
+        AlignOut: {
+            /** Candles Without Prediction */
+            candles_without_prediction: number;
+            /** Predictions Without Candle */
+            predictions_without_candle: number;
+        };
         /**
          * Appearance
          * @description How the app looks for this user (Settings, Appearance).
@@ -674,6 +717,100 @@ export interface components {
             threshold: number;
             timeframe: components["schemas"]["BacktestTimeframe"];
         };
+        /**
+         * CandleStack backtest
+         * @description A backtest as the app shows it, the API returns it and a user downloads it
+         *     (docs/engine.md, "The result document"). Market time is UTC epoch seconds of a candle's
+         *     open, ranges `[start, end)`; returns are fractions.
+         */
+        BacktestDocument: {
+            backtest: components["schemas"]["BacktestHeader"];
+            /** Benchmarks */
+            benchmarks: components["schemas"]["BenchmarkOut"][];
+            data: components["schemas"]["DataOut"];
+            decision: components["schemas"]["Decision"];
+            execution: components["schemas"]["Execution"];
+            metrics: components["schemas"]["MetricsArgs"];
+            model: components["schemas"]["BacktestModel"];
+            /** @description Null unless it finished */
+            results: components["schemas"]["Results"] | null;
+            software: components["schemas"]["Software"];
+            /**
+             * Version
+             * @description The format's version
+             * @constant
+             */
+            version: 1;
+        };
+        /** BacktestHeader */
+        BacktestHeader: {
+            /**
+             * Created At
+             * Format: date-time
+             * @description When it started (UTC)
+             */
+            created_at: string;
+            /**
+             * Duration S
+             * @description Seconds it took
+             * @example 162
+             */
+            duration_s: number | null;
+            /**
+             * Error
+             * @description What went wrong and what to do, for a failed one
+             */
+            error: string | null;
+            /**
+             * Finished At
+             * @description When it finished or failed (UTC)
+             */
+            finished_at: string | null;
+            /**
+             * Id
+             * @example bt_7f3k2m9qx4
+             */
+            id: string;
+            /**
+             * Number
+             * @description The user's own number, shown as #N
+             * @example 12
+             */
+            number: number;
+            status: components["schemas"]["BacktestStatus"];
+        };
+        /**
+         * BacktestIn
+         * @description A new backtest: the setup groups of the result document. The document of a backtest can
+         *     be sent back as it is to run it again; its other groups are ignored.
+         */
+        BacktestIn: {
+            /**
+             * Benchmarks
+             * @description Buy and hold of the instrument, or nothing
+             */
+            benchmarks?: components["schemas"]["BenchmarkIn"][];
+            data: components["schemas"]["DataIn"];
+            /**
+             * @default {
+             *       "long_only": false,
+             *       "rule": {
+             *         "limit": 0,
+             *         "name": "threshold"
+             *       }
+             *     }
+             */
+            decision: components["schemas"]["Decision"];
+            /**
+             * @default {
+             *       "fee_bps": 0,
+             *       "fill": "next_open",
+             *       "slippage_bps": 0
+             *     }
+             */
+            execution: components["schemas"]["Execution"];
+            model: components["schemas"]["ModelRef"];
+        };
         /** BacktestInstrument */
         BacktestInstrument: {
             market: components["schemas"]["InstrumentMarket"];
@@ -683,6 +820,44 @@ export interface components {
              * @example AAPL
              */
             symbol: string;
+        };
+        /** BacktestModel */
+        BacktestModel: {
+            /**
+             * Framework
+             * @example keras
+             */
+            framework: string;
+            /**
+             * Id
+             * @description Null once the model is deleted
+             * @example mdl_k2m9qx47f3
+             */
+            id: string | null;
+            /**
+             * Manifest
+             * @description The manifest it ran with, as stored with the run
+             */
+            manifest: {
+                [key: string]: unknown;
+            };
+            /**
+             * Name
+             * @description The file name when it ran
+             * @example raw-candles.keras
+             */
+            name: string;
+            /**
+             * Sha256
+             * @description Of the model file, hex
+             * @example 9b1e04c700000000000000000000000000000000000000000000000000000000
+             */
+            sha256: string;
+            /**
+             * Size Bytes
+             * @example 48213
+             */
+            size_bytes: number;
         };
         /**
          * BacktestOut
@@ -893,6 +1068,52 @@ export interface components {
          */
         Benchmark: "bh" | "SPY" | "QQQ" | "DIA";
         /**
+         * BenchmarkIn
+         * @description What the run is compared with. Version 1 has buy and hold of the run's instrument only.
+         */
+        BenchmarkIn: {
+            /**
+             * Id
+             * @example bh
+             */
+            id: string;
+            /**
+             * Instrument
+             * @description The run's instrument
+             * @example stock:AAPL
+             */
+            instrument: string;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "buy_and_hold";
+        };
+        /** BenchmarkOut */
+        BenchmarkOut: {
+            /**
+             * Id
+             * @example bh
+             */
+            id: string;
+            /**
+             * Instrument
+             * @example stock:AAPL
+             */
+            instrument: string;
+            /**
+             * Kind
+             * @description `buy_and_hold`; later more
+             * @example buy_and_hold
+             */
+            kind: string;
+        };
+        /** BenchmarkResult */
+        BenchmarkResult: {
+            /** Total Return */
+            total_return: number | null;
+        };
+        /**
          * BestBacktests
          * @description The 5 best finished backtests by each result, the best first (for `max_drawdown` the
          *     smallest fall).
@@ -980,6 +1201,19 @@ export interface components {
             params: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * CalibrateStep
+         * @description `zscore` or `rank` over the `window` predictions ending at each one.
+         */
+        CalibrateStep: {
+            /**
+             * Name
+             * @enum {string}
+             */
+            name: "zscore" | "rank";
+            /** Window */
+            window: number;
         };
         /** CandlesMeta */
         CandlesMeta: {
@@ -1115,6 +1349,11 @@ export interface components {
              */
             v: number[];
         };
+        /** CandlesStep */
+        CandlesStep: {
+            /** Candles */
+            candles: number;
+        };
         /** CatalogOut */
         CatalogOut: {
             /**
@@ -1132,10 +1371,53 @@ export interface components {
             counts: components["schemas"]["BacktestCounts"];
             /**
              * Last
-             * @description The 6 newest backtests, failed ones included
+             * @description The 6 newest backtests that ended, failed ones included (not running ones)
              */
             last: components["schemas"]["BacktestOut"][];
             starred: components["schemas"]["StarredBacktests"];
+        };
+        /**
+         * DataIn
+         * @description One instrument and the period; the timeframe and session are the model's. The document's
+         *     other fields of the group are ignored.
+         */
+        DataIn: {
+            instrument: components["schemas"]["InstrumentRef"];
+            period: components["schemas"]["Period"];
+        };
+        /**
+         * DataOut
+         * @description The data a run used. `loaded`, `changed`, `rows`, `predictions` and `align` are null
+         *     until it finished.
+         */
+        DataOut: {
+            align: components["schemas"]["AlignOut"] | null;
+            /**
+             * Changed
+             * @description The candles' fingerprint differs from the run's: the source changed them
+             */
+            changed: boolean | null;
+            instrument: components["schemas"]["InstrumentOut"];
+            loaded: components["schemas"]["Loaded"] | null;
+            period: components["schemas"]["Period"];
+            predictions: components["schemas"]["PredictionsOut"] | null;
+            rows: components["schemas"]["Rows"] | null;
+            /**
+             * Session
+             * @example regular
+             */
+            session: string;
+            /**
+             * Timeframe
+             * @example 30m
+             */
+            timeframe: string;
+            /**
+             * Timeframe Seconds
+             * @example 1800
+             */
+            timeframe_seconds: number;
+            warm_up: components["schemas"]["WarmUpReport"];
         };
         /**
          * DateFormat
@@ -1143,6 +1425,33 @@ export interface components {
          * @enum {string}
          */
         DateFormat: "dmy" | "iso" | "dot";
+        /**
+         * Decision
+         * @description How the predictions become a signal: each step of docs/engine.md (Signals) in the order
+         *     applied, null when off; exactly what the command's `run.json` records.
+         */
+        Decision: {
+            calibrate?: components["schemas"]["CalibrateStep"] | null;
+            /** @description Count a value only once it held this many candles */
+            confirm?: components["schemas"]["CandlesStep"] | null;
+            ema?: components["schemas"]["EmaStep"] | null;
+            /**
+             * Long Only
+             * @description Flat instead of short
+             * @default false
+             */
+            long_only: boolean;
+            /** @description Keep each new position for at least this many candles */
+            min_hold?: components["schemas"]["CandlesStep"] | null;
+            /**
+             * Rule
+             * @default {
+             *       "limit": 0,
+             *       "name": "threshold"
+             *     }
+             */
+            rule: components["schemas"]["ThresholdRule"] | components["schemas"]["HysteresisRule"] | components["schemas"]["KmeansRule"];
+        };
         /**
          * DeniedSignInOut
          * @description The last sign-in of this browser that the beta list turned away.
@@ -1161,6 +1470,14 @@ export interface components {
          * @enum {string}
          */
         Direction: "long" | "both";
+        /** EmaStep */
+        EmaStep: {
+            /**
+             * Span
+             * @description The span of the exponential moving average
+             */
+            span: number;
+        };
         /**
          * EquitySeries
          * @description The equity of the strategy and of buy and hold over the test period, for a small chart:
@@ -1216,6 +1533,33 @@ export interface components {
          */
         Exchange: "AMEX" | "ARCA" | "BATS" | "BINANCE" | "NASDAQ" | "NYSE";
         /**
+         * Execution
+         * @description How the engine fills orders and what they cost: the engine's `Settings`
+         *     (docs/engine.md, Settings). Fractions: 0.05 is 5%; a basis point is 0.01%.
+         */
+        Execution: {
+            /** Drawdown Stop */
+            drawdown_stop?: number | null;
+            /**
+             * Fee Bps
+             * @default 0
+             */
+            fee_bps: number;
+            /**
+             * Fill
+             * @default next_open
+             * @enum {string}
+             */
+            fill: "next_open" | "signal_close";
+            /**
+             * Slippage Bps
+             * @default 0
+             */
+            slippage_bps: number;
+            /** Stop Loss */
+            stop_loss?: number | null;
+        };
+        /**
          * Feature
          * @description One column of the input: its name, the block that computes it and its normalization.
          */
@@ -1270,6 +1614,24 @@ export interface components {
             status: "ok" | "error";
             /** Version */
             version: string;
+        };
+        /** HysteresisRule */
+        HysteresisRule: {
+            /**
+             * Enter
+             * @description The limit a position opens at
+             */
+            enter: number;
+            /**
+             * Exit
+             * @description The limit it closes below, at most `enter`
+             */
+            exit: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            name: "hysteresis";
         };
         /**
          * Input
@@ -1494,6 +1856,62 @@ export interface components {
          * @enum {string}
          */
         InstrumentMarket: "crypto" | "stock";
+        /** InstrumentOut */
+        InstrumentOut: {
+            /**
+             * Currency
+             * @description What the prices are in
+             * @example USD
+             */
+            currency: string;
+            /**
+             * Exchange
+             * @example NASDAQ
+             */
+            exchange: string | null;
+            /**
+             * Feed
+             * @example sip
+             */
+            feed: string;
+            /**
+             * Id
+             * @example stock:AAPL
+             */
+            id: string;
+            /**
+             * Market
+             * @example stock
+             */
+            market: string;
+            /**
+             * Name
+             * @example Apple Inc.
+             */
+            name: string;
+            /**
+             * Source
+             * @example alpaca
+             */
+            source: string;
+            /**
+             * Symbol
+             * @example AAPL
+             */
+            symbol: string;
+        };
+        /**
+         * InstrumentRef
+         * @description The instrument to run on; the document's other fields of it are ignored.
+         */
+        InstrumentRef: {
+            /**
+             * Id
+             * @description `<market>:<symbol>`
+             * @example stock:AAPL
+             */
+            id: string;
+        };
         /** InstrumentSearchOut */
         InstrumentSearchOut: {
             /**
@@ -1533,6 +1951,48 @@ export interface components {
          * @enum {string}
          */
         InstrumentSort: "volume" | "change" | "-change" | "symbol";
+        /** KmeansRule */
+        KmeansRule: {
+            /**
+             * K
+             * @description Groups: long in the highest, short in the lowest
+             */
+            k: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            name: "kmeans";
+            /**
+             * Refit Every
+             * @description Rows a fit is used for
+             */
+            refit_every: number;
+            /**
+             * Window
+             * @description Earlier predictions a fit uses, at least `2 * k`
+             */
+            window: number;
+        };
+        /**
+         * Loaded
+         * @description The candles asked for, warm-up included, with their fingerprint (docs/data.md).
+         */
+        Loaded: {
+            /** Count */
+            count: number;
+            /** End */
+            end: number;
+            /**
+             * Fingerprint
+             * @example sha256:3b1f000000000000000000000000000000000000000000000000000000000000
+             */
+            fingerprint: string;
+            /** Gaps Total */
+            gaps_total: number;
+            /** Start */
+            start: number;
+        };
         /**
          * CandleStack model manifest
          * @description What a model takes and gives, stored with the model (docs/preprocessing.md).
@@ -1647,6 +2107,23 @@ export interface components {
             display_name: string;
         };
         /**
+         * MetricsArgs
+         * @description The arguments the statistics were computed with.
+         */
+        MetricsArgs: {
+            /**
+             * Periods Per Year
+             * @description 252 for stocks, 365 for crypto
+             * @example 252
+             */
+            periods_per_year: number;
+            /**
+             * Risk Free Rate
+             * @example 0
+             */
+            risk_free_rate: number;
+        };
+        /**
          * ModelCount
          * @description A model the user's backtests used, by the name they show for it.
          */
@@ -1738,6 +2215,19 @@ export interface components {
              */
             starred: boolean;
             state: components["schemas"]["ModelState"];
+        };
+        /**
+         * ModelRef
+         * @description The model to run; the other fields of the document's `model` group are ignored, so the
+         *     group can be sent back as it is.
+         */
+        ModelRef: {
+            /**
+             * Id
+             * @description Public ID of one of the user's models
+             * @example mdl_k2m9qx47f3
+             */
+            id: string;
         };
         /**
          * ModelState
@@ -1862,6 +2352,34 @@ export interface components {
             type: "integer" | "number" | "string" | "boolean";
         };
         /**
+         * Period
+         * @description The test period `[start, end)` in UTC epoch seconds of a candle's open.
+         */
+        Period: {
+            /**
+             * End
+             * @description End of the test, excluded
+             * @example 1717459200
+             */
+            end: number;
+            /**
+             * Start
+             * @description First second of the test
+             * @example 1717372800
+             */
+            start: number;
+        };
+        /** PredictionsOut */
+        PredictionsOut: {
+            /** Count */
+            count: number;
+            /**
+             * Sha256
+             * @description Of the stored predictions (Parquet), hex
+             */
+            sha256: string;
+        };
+        /**
          * PreferencesOut
          * @description The user's settings; a user who never saved any gets the defaults.
          */
@@ -1909,6 +2427,90 @@ export interface components {
          * @enum {string}
          */
         Representation: "renko" | "kagi" | "windows";
+        /** Results */
+        Results: {
+            /** Benchmarks */
+            benchmarks: {
+                [key: string]: components["schemas"]["BenchmarkResult"];
+            };
+            series: components["schemas"]["Series"];
+            stats: components["schemas"]["Stats"];
+            trades: components["schemas"]["Trades"];
+        };
+        /**
+         * Rows
+         * @description What the engine ran on.
+         */
+        Rows: {
+            /** Count */
+            count: number;
+            /** First Ts */
+            first_ts: number;
+            /** Last Ts */
+            last_ts: number;
+        };
+        /**
+         * RunnerOut
+         * @description What ran the model; null until the worker answered.
+         */
+        RunnerOut: {
+            /**
+             * Backend
+             * @description The backend and its release
+             * @example jax 0.7.2
+             */
+            backend: string | null;
+            /**
+             * Format
+             * @example keras
+             */
+            format: string;
+            /**
+             * Keras
+             * @example 3.15.1
+             */
+            keras: string | null;
+        };
+        /** Series */
+        Series: {
+            /**
+             * Benchmarks
+             * @description Each benchmark's equity on the same rows, by its ID
+             */
+            benchmarks: {
+                [key: string]: number[];
+            };
+            columns: components["schemas"]["SeriesColumns"];
+            /** Count */
+            count: number;
+            /**
+             * Resolution
+             * @description `candle`, or `day` when the light view made one point per UTC day of more than 10000 rows
+             * @example candle
+             */
+            resolution: string;
+        };
+        /**
+         * SeriesColumns
+         * @description One value per row in each column. `prediction` and `signal` are left out of a series of
+         *     days.
+         */
+        SeriesColumns: {
+            /** Close */
+            close: number[];
+            /** Drawdown */
+            drawdown: number[];
+            /** Equity */
+            equity: number[];
+            /** Position */
+            position: number[];
+            /** Prediction */
+            prediction?: number[] | null;
+            /** Signal */
+            signal?: number[] | null;
+            /** Ts */
+            ts: number[];
+        };
         /**
          * SetupBenchmark
          * @description What a backtest is measured against: buy and hold of its own instruments, or an ETF.
@@ -1957,6 +2559,20 @@ export interface components {
         Signature: {
             input: components["schemas"]["Tensor"];
             output: components["schemas"]["Output"];
+        };
+        /** Software */
+        Software: {
+            /**
+             * App Version
+             * @example 2026.10.24-3f2a1c9
+             */
+            app_version: string;
+            /**
+             * Engine Version
+             * @example 0.3.0
+             */
+            engine_version: string;
+            runner: components["schemas"]["RunnerOut"] | null;
         };
         /**
          * SortOrder
@@ -2013,6 +2629,37 @@ export interface components {
              */
             total: number;
         };
+        /**
+         * Stats
+         * @description The 12 statistics of docs/engine.md (Metrics), in their order. Fractions; `max_drawdown`
+         *     negative; null when undefined.
+         */
+        Stats: {
+            /** Avg Trade Return */
+            avg_trade_return: number | null;
+            /** Best Trade Return */
+            best_trade_return: number | null;
+            /** Buy And Hold Return */
+            buy_and_hold_return: number | null;
+            /** Exposure */
+            exposure: number | null;
+            /** Fees Paid */
+            fees_paid: number;
+            /** Max Drawdown */
+            max_drawdown: number | null;
+            /** Num Trades */
+            num_trades: number;
+            /** Sharpe */
+            sharpe: number | null;
+            /** Sortino */
+            sortino: number | null;
+            /** Total Return */
+            total_return: number | null;
+            /** Win Rate */
+            win_rate: number | null;
+            /** Worst Trade Return */
+            worst_trade_return: number | null;
+        };
         /** StorageUsage */
         StorageUsage: {
             /**
@@ -2058,6 +2705,19 @@ export interface components {
          * @enum {string}
          */
         Theme: "light" | "dark";
+        /** ThresholdRule */
+        ThresholdRule: {
+            /**
+             * Limit
+             * @description Long at a prediction of `limit` or more, short at `-limit` or less
+             */
+            limit: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            name: "threshold";
+        };
         /**
          * TimeFormat
          * @description `24` 16:05, `12` 4:05 PM.
@@ -2076,6 +2736,58 @@ export interface components {
          * @enum {string}
          */
         Timeframe: "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d";
+        /** TradeColumns */
+        TradeColumns: {
+            /**
+             * Candles Held
+             * @description Rows from the entry candle to the exit candle
+             */
+            candles_held: number[];
+            /** Close Price */
+            close_price: number[];
+            /** Close Ts */
+            close_ts: number[];
+            /**
+             * Exit Reason
+             * @description `signal`, `stop`, `gap`, `end`, `ruin`, `drawdown`
+             */
+            exit_reason: string[];
+            /** Fees */
+            fees: number[];
+            /** Open Price */
+            open_price: number[];
+            /** Open Ts */
+            open_ts: number[];
+            /** Return */
+            return: number[];
+            /** Side */
+            side: number[];
+            /** Signal Ts */
+            signal_ts: number[];
+            /** Slippage Cost */
+            slippage_cost: number[];
+            /** Stop Price */
+            stop_price: (number | null)[];
+        };
+        /** Trades */
+        Trades: {
+            columns: components["schemas"]["TradeColumns"];
+            /**
+             * Complete
+             * @description False when the light view kept the newest 10000
+             */
+            complete: boolean;
+            /**
+             * Count
+             * @description The trades in the document
+             */
+            count: number;
+            /**
+             * Total
+             * @description The trades the run had
+             */
+            total: number;
+        };
         /**
          * UsedModel
          * @description The model a backtest used.
@@ -2111,6 +2823,24 @@ export interface components {
             /**
              * Kind
              * @description `exact` when every candle is a row; `estimate` with rows that span several candles (Renko), where the run loads more and reports what the warm-up used
+             * @enum {string}
+             */
+            kind: "exact" | "estimate";
+        };
+        /** WarmUpReport */
+        WarmUpReport: {
+            /**
+             * Candles
+             * @description Candles loaded before the period for the warm-up
+             */
+            candles: number;
+            /**
+             * Dropped
+             * @description The candles the model's input dropped at the start; null until it ran
+             */
+            dropped: number | null;
+            /**
+             * Kind
              * @enum {string}
              */
             kind: "exact" | "estimate";
@@ -2377,6 +3107,170 @@ export interface operations {
             };
         };
     };
+    start_backtest_api_v1_backtests_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestDocument"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no model with this ID (`not-found`), or the instrument is not in the catalog (`instrument-not-found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The model has no manifest (`model-needs-setup`), or another backtest of the user is running (`backtest-running`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description An invalid setup (`validation`), a model of a timeframe backtests do not run on (`timeframe-not-supported`) or of another market (`instrument-not-for-model`), a period outside the data (`period-out-of-range`), without the candles the model needs before it (`warm-up-out-of-range`), or with more candles than allowed (`too-many-candles`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A data source sent candles that failed validation (`source-data-invalid`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_backtest_api_v1_backtests__backtest_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Public ID of the backtest */
+                backtest_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestDocument"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no backtest with this ID (`not-found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The backtest is test data that has no result document (`no-document`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A data source sent candles that failed validation (`source-data-invalid`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     update_backtest_api_v1_backtests__backtest_id__patch: {
         parameters: {
             query?: never;
@@ -2431,6 +3325,83 @@ export interface operations {
             };
             /** @description Invalid request */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    download_backtest_api_v1_backtests__backtest_id__download_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Public ID of the backtest */
+                backtest_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestDocument"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no backtest with this ID (`not-found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The backtest is running or failed (`backtest-not-finished`), or is test data without a result document (`no-document`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A data source sent candles that failed validation (`source-data-invalid`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`). */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

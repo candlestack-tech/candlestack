@@ -508,3 +508,13 @@ async def test_without_keys_stocks_are_unavailable(redis, http: httpx.AsyncClien
         await service.instrument(AAPL)
 
     assert not upstream.router.calls
+
+
+@pytest.mark.usefixtures("stocks")
+async def test_the_warm_up_counts_session_candles_only(service: DataService):
+    monday = utc("2024-12-02T14:30")
+
+    first = await service.warm_up_start(AAPL, Timeframe.D1, monday, utc("2024-12-04"), 2)
+
+    # Friday, then Wednesday: Thanksgiving and the weekend have no session.
+    assert first == utc("2024-11-27T14:30")

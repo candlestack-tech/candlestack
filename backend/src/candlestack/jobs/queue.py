@@ -100,6 +100,10 @@ class JobQueue:
         self._finish = redis.register_script(_FINISH)
         self._sweep = redis.register_script(_SWEEP)
 
+    async def ping(self) -> None:
+        """Raises ``redis.exceptions.RedisError`` when the queue cannot be reached."""
+        await self._redis.ping()
+
     async def submit(self, job: Job) -> None:
         ttl = max(math.ceil(job.deadline - time.time()), 1) + _JOB_TTL_MARGIN
         async with self._redis.pipeline(transaction=True) as pipe:

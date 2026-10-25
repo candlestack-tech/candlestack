@@ -1,6 +1,24 @@
 {
   "components": {
     "schemas": {
+      "AlignOut": {
+        "properties": {
+          "candles_without_prediction": {
+            "title": "Candles Without Prediction",
+            "type": "integer"
+          },
+          "predictions_without_candle": {
+            "title": "Predictions Without Candle",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "predictions_without_candle",
+          "candles_without_prediction"
+        ],
+        "title": "AlignOut",
+        "type": "object"
+      },
       "Appearance": {
         "description": "How the app looks for this user (Settings, Appearance).",
         "properties": {
@@ -257,6 +275,194 @@
         "title": "BacktestDefaultsIn",
         "type": "object"
       },
+      "BacktestDocument": {
+        "description": "A backtest as the app shows it, the API returns it and a user downloads it\n(docs/engine.md, \"The result document\"). Market time is UTC epoch seconds of a candle's\nopen, ranges `[start, end)`; returns are fractions.",
+        "properties": {
+          "backtest": {
+            "$ref": "#/components/schemas/BacktestHeader"
+          },
+          "benchmarks": {
+            "items": {
+              "$ref": "#/components/schemas/BenchmarkOut"
+            },
+            "title": "Benchmarks",
+            "type": "array"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DataOut"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/Decision"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/Execution"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/MetricsArgs"
+          },
+          "model": {
+            "$ref": "#/components/schemas/BacktestModel"
+          },
+          "results": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Results"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null unless it finished"
+          },
+          "software": {
+            "$ref": "#/components/schemas/Software"
+          },
+          "version": {
+            "const": 1,
+            "description": "The format's version",
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "backtest",
+          "software",
+          "model",
+          "data",
+          "decision",
+          "execution",
+          "benchmarks",
+          "metrics",
+          "results"
+        ],
+        "title": "CandleStack backtest",
+        "type": "object"
+      },
+      "BacktestHeader": {
+        "properties": {
+          "created_at": {
+            "description": "When it started (UTC)",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "duration_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seconds it took",
+            "examples": [
+              162.0
+            ],
+            "title": "Duration S"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What went wrong and what to do, for a failed one",
+            "title": "Error"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it finished or failed (UTC)",
+            "title": "Finished At"
+          },
+          "id": {
+            "examples": [
+              "bt_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "number": {
+            "description": "The user's own number, shown as #N",
+            "examples": [
+              12
+            ],
+            "minimum": 1.0,
+            "title": "Number",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BacktestStatus"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "status",
+          "created_at",
+          "finished_at",
+          "duration_s",
+          "error"
+        ],
+        "title": "BacktestHeader",
+        "type": "object"
+      },
+      "BacktestIn": {
+        "description": "A new backtest: the setup groups of the result document. The document of a backtest can\nbe sent back as it is to run it again; its other groups are ignored.",
+        "properties": {
+          "benchmarks": {
+            "description": "Buy and hold of the instrument, or nothing",
+            "items": {
+              "$ref": "#/components/schemas/BenchmarkIn"
+            },
+            "maxItems": 1,
+            "title": "Benchmarks",
+            "type": "array"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DataIn"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/Decision",
+            "default": {
+              "long_only": false,
+              "rule": {
+                "limit": 0.0,
+                "name": "threshold"
+              }
+            }
+          },
+          "execution": {
+            "$ref": "#/components/schemas/Execution",
+            "default": {
+              "fee_bps": 0.0,
+              "fill": "next_open",
+              "slippage_bps": 0.0
+            }
+          },
+          "model": {
+            "$ref": "#/components/schemas/ModelRef"
+          }
+        },
+        "required": [
+          "model",
+          "data"
+        ],
+        "title": "BacktestIn",
+        "type": "object"
+      },
       "BacktestInstrument": {
         "properties": {
           "market": {
@@ -276,6 +482,71 @@
           "symbol"
         ],
         "title": "BacktestInstrument",
+        "type": "object"
+      },
+      "BacktestModel": {
+        "properties": {
+          "framework": {
+            "examples": [
+              "keras"
+            ],
+            "title": "Framework",
+            "type": "string"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null once the model is deleted",
+            "examples": [
+              "mdl_k2m9qx47f3"
+            ],
+            "title": "Id"
+          },
+          "manifest": {
+            "additionalProperties": true,
+            "description": "The manifest it ran with, as stored with the run",
+            "title": "Manifest",
+            "type": "object"
+          },
+          "name": {
+            "description": "The file name when it ran",
+            "examples": [
+              "raw-candles.keras"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "Of the model file, hex",
+            "examples": [
+              "9b1e04c700000000000000000000000000000000000000000000000000000000"
+            ],
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "examples": [
+              48213
+            ],
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "framework",
+          "sha256",
+          "size_bytes",
+          "manifest"
+        ],
+        "title": "BacktestModel",
         "type": "object"
       },
       "BacktestOut": {
@@ -684,6 +955,93 @@
         "title": "Benchmark",
         "type": "string"
       },
+      "BenchmarkIn": {
+        "additionalProperties": false,
+        "description": "What the run is compared with. Version 1 has buy and hold of the run's instrument only.",
+        "properties": {
+          "id": {
+            "examples": [
+              "bh"
+            ],
+            "pattern": "^[a-z0-9_-]{1,16}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "instrument": {
+            "description": "The run's instrument",
+            "examples": [
+              "stock:AAPL"
+            ],
+            "title": "Instrument",
+            "type": "string"
+          },
+          "kind": {
+            "const": "buy_and_hold",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "instrument"
+        ],
+        "title": "BenchmarkIn",
+        "type": "object"
+      },
+      "BenchmarkOut": {
+        "properties": {
+          "id": {
+            "examples": [
+              "bh"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "instrument": {
+            "examples": [
+              "stock:AAPL"
+            ],
+            "title": "Instrument",
+            "type": "string"
+          },
+          "kind": {
+            "description": "`buy_and_hold`; later more",
+            "examples": [
+              "buy_and_hold"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "instrument"
+        ],
+        "title": "BenchmarkOut",
+        "type": "object"
+      },
+      "BenchmarkResult": {
+        "properties": {
+          "total_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Return"
+          }
+        },
+        "required": [
+          "total_return"
+        ],
+        "title": "BenchmarkResult",
+        "type": "object"
+      },
       "BestBacktests": {
         "description": "The 5 best finished backtests by each result, the best first (for `max_drawdown` the\nsmallest fall).",
         "properties": {
@@ -850,6 +1208,31 @@
           "params"
         ],
         "title": "BlockUse",
+        "type": "object"
+      },
+      "CalibrateStep": {
+        "additionalProperties": false,
+        "description": "`zscore` or `rank` over the `window` predictions ending at each one.",
+        "properties": {
+          "name": {
+            "enum": [
+              "zscore",
+              "rank"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "window": {
+            "minimum": 2.0,
+            "title": "Window",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "window"
+        ],
+        "title": "CalibrateStep",
         "type": "object"
       },
       "CandlesMeta": {
@@ -1081,6 +1464,21 @@
         "title": "CandlesOut",
         "type": "object"
       },
+      "CandlesStep": {
+        "additionalProperties": false,
+        "properties": {
+          "candles": {
+            "minimum": 1.0,
+            "title": "Candles",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "candles"
+        ],
+        "title": "CandlesStep",
+        "type": "object"
+      },
       "CatalogOut": {
         "properties": {
           "blocks": {
@@ -1108,7 +1506,7 @@
             "$ref": "#/components/schemas/BacktestCounts"
           },
           "last": {
-            "description": "The 6 newest backtests, failed ones included",
+            "description": "The 6 newest backtests that ended, failed ones included (not running ones)",
             "items": {
               "$ref": "#/components/schemas/BacktestOut"
             },
@@ -1128,6 +1526,125 @@
         "title": "DashboardOut",
         "type": "object"
       },
+      "DataIn": {
+        "description": "One instrument and the period; the timeframe and session are the model's. The document's\nother fields of the group are ignored.",
+        "properties": {
+          "instrument": {
+            "$ref": "#/components/schemas/InstrumentRef"
+          },
+          "period": {
+            "$ref": "#/components/schemas/Period"
+          }
+        },
+        "required": [
+          "instrument",
+          "period"
+        ],
+        "title": "DataIn",
+        "type": "object"
+      },
+      "DataOut": {
+        "description": "The data a run used. `loaded`, `changed`, `rows`, `predictions` and `align` are null\nuntil it finished.",
+        "properties": {
+          "align": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AlignOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "changed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The candles' fingerprint differs from the run's: the source changed them",
+            "title": "Changed"
+          },
+          "instrument": {
+            "$ref": "#/components/schemas/InstrumentOut"
+          },
+          "loaded": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Loaded"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "period": {
+            "$ref": "#/components/schemas/Period"
+          },
+          "predictions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PredictionsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rows": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rows"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "session": {
+            "examples": [
+              "regular"
+            ],
+            "title": "Session",
+            "type": "string"
+          },
+          "timeframe": {
+            "examples": [
+              "30m"
+            ],
+            "title": "Timeframe",
+            "type": "string"
+          },
+          "timeframe_seconds": {
+            "examples": [
+              1800
+            ],
+            "title": "Timeframe Seconds",
+            "type": "integer"
+          },
+          "warm_up": {
+            "$ref": "#/components/schemas/WarmUpReport"
+          }
+        },
+        "required": [
+          "instrument",
+          "timeframe",
+          "timeframe_seconds",
+          "session",
+          "period",
+          "loaded",
+          "changed",
+          "warm_up",
+          "rows",
+          "predictions",
+          "align"
+        ],
+        "title": "DataOut",
+        "type": "object"
+      },
       "DateFormat": {
         "description": "`dmy` 12 Oct 2024, `iso` 2024-10-12, `dot` 12.10.2024.",
         "enum": [
@@ -1137,6 +1654,88 @@
         ],
         "title": "DateFormat",
         "type": "string"
+      },
+      "Decision": {
+        "additionalProperties": false,
+        "description": "How the predictions become a signal: each step of docs/engine.md (Signals) in the order\napplied, null when off; exactly what the command's `run.json` records.",
+        "properties": {
+          "calibrate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CalibrateStep"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confirm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandlesStep"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Count a value only once it held this many candles"
+          },
+          "ema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmaStep"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "long_only": {
+            "default": false,
+            "description": "Flat instead of short",
+            "title": "Long Only",
+            "type": "boolean"
+          },
+          "min_hold": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandlesStep"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Keep each new position for at least this many candles"
+          },
+          "rule": {
+            "default": {
+              "limit": 0.0,
+              "name": "threshold"
+            },
+            "discriminator": {
+              "mapping": {
+                "hysteresis": "#/components/schemas/HysteresisRule",
+                "kmeans": "#/components/schemas/KmeansRule",
+                "threshold": "#/components/schemas/ThresholdRule"
+              },
+              "propertyName": "name"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ThresholdRule"
+              },
+              {
+                "$ref": "#/components/schemas/HysteresisRule"
+              },
+              {
+                "$ref": "#/components/schemas/KmeansRule"
+              }
+            ],
+            "title": "Rule"
+          }
+        },
+        "title": "Decision",
+        "type": "object"
       },
       "DeniedSignInOut": {
         "description": "The last sign-in of this browser that the beta list turned away.",
@@ -1167,6 +1766,22 @@
         ],
         "title": "Direction",
         "type": "string"
+      },
+      "EmaStep": {
+        "additionalProperties": false,
+        "properties": {
+          "span": {
+            "description": "The span of the exponential moving average",
+            "minimum": 1.0,
+            "title": "Span",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "span"
+        ],
+        "title": "EmaStep",
+        "type": "object"
       },
       "EquitySeries": {
         "description": "The equity of the strategy and of buy and hold over the test period, for a small chart:\ncumulative returns as fractions (0 at the start; 0.246 is 24.6 %), sampled at evenly spaced\ntimes from the first day to the last, the same times in both.",
@@ -1262,6 +1877,61 @@
         ],
         "title": "Exchange",
         "type": "string"
+      },
+      "Execution": {
+        "additionalProperties": false,
+        "description": "How the engine fills orders and what they cost: the engine's `Settings`\n(docs/engine.md, Settings). Fractions: 0.05 is 5%; a basis point is 0.01%.",
+        "properties": {
+          "drawdown_stop": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 1.0,
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Drawdown Stop"
+          },
+          "fee_bps": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Fee Bps",
+            "type": "number"
+          },
+          "fill": {
+            "default": "next_open",
+            "enum": [
+              "next_open",
+              "signal_close"
+            ],
+            "title": "Fill",
+            "type": "string"
+          },
+          "slippage_bps": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Slippage Bps",
+            "type": "number"
+          },
+          "stop_loss": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 1.0,
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Loss"
+          }
+        },
+        "title": "Execution",
+        "type": "object"
       },
       "Feature": {
         "additionalProperties": false,
@@ -1359,6 +2029,35 @@
           "postgres"
         ],
         "title": "Health",
+        "type": "object"
+      },
+      "HysteresisRule": {
+        "additionalProperties": false,
+        "properties": {
+          "enter": {
+            "description": "The limit a position opens at",
+            "minimum": 0.0,
+            "title": "Enter",
+            "type": "number"
+          },
+          "exit": {
+            "description": "The limit it closes below, at most `enter`",
+            "minimum": 0.0,
+            "title": "Exit",
+            "type": "number"
+          },
+          "name": {
+            "const": "hysteresis",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "enter",
+          "exit"
+        ],
+        "title": "HysteresisRule",
         "type": "object"
       },
       "Input": {
@@ -1827,6 +2526,104 @@
         "title": "InstrumentMarket",
         "type": "string"
       },
+      "InstrumentOut": {
+        "properties": {
+          "currency": {
+            "description": "What the prices are in",
+            "examples": [
+              "USD"
+            ],
+            "title": "Currency",
+            "type": "string"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "NASDAQ"
+            ],
+            "title": "Exchange"
+          },
+          "feed": {
+            "examples": [
+              "sip"
+            ],
+            "title": "Feed",
+            "type": "string"
+          },
+          "id": {
+            "examples": [
+              "stock:AAPL"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "market": {
+            "examples": [
+              "stock"
+            ],
+            "title": "Market",
+            "type": "string"
+          },
+          "name": {
+            "examples": [
+              "Apple Inc."
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "source": {
+            "examples": [
+              "alpaca"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "symbol": {
+            "examples": [
+              "AAPL"
+            ],
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "market",
+          "symbol",
+          "name",
+          "exchange",
+          "source",
+          "feed",
+          "currency"
+        ],
+        "title": "InstrumentOut",
+        "type": "object"
+      },
+      "InstrumentRef": {
+        "description": "The instrument to run on; the document's other fields of it are ignored.",
+        "properties": {
+          "id": {
+            "description": "`<market>:<symbol>`",
+            "examples": [
+              "stock:AAPL"
+            ],
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "InstrumentRef",
+        "type": "object"
+      },
       "InstrumentSearchOut": {
         "properties": {
           "count": {
@@ -1893,6 +2690,79 @@
         ],
         "title": "InstrumentSort",
         "type": "string"
+      },
+      "KmeansRule": {
+        "additionalProperties": false,
+        "properties": {
+          "k": {
+            "description": "Groups: long in the highest, short in the lowest",
+            "maximum": 5.0,
+            "minimum": 2.0,
+            "title": "K",
+            "type": "integer"
+          },
+          "name": {
+            "const": "kmeans",
+            "title": "Name",
+            "type": "string"
+          },
+          "refit_every": {
+            "description": "Rows a fit is used for",
+            "minimum": 1.0,
+            "title": "Refit Every",
+            "type": "integer"
+          },
+          "window": {
+            "description": "Earlier predictions a fit uses, at least `2 * k`",
+            "title": "Window",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "k",
+          "window",
+          "refit_every"
+        ],
+        "title": "KmeansRule",
+        "type": "object"
+      },
+      "Loaded": {
+        "description": "The candles asked for, warm-up included, with their fingerprint (docs/data.md).",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "end": {
+            "title": "End",
+            "type": "integer"
+          },
+          "fingerprint": {
+            "examples": [
+              "sha256:3b1f000000000000000000000000000000000000000000000000000000000000"
+            ],
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "gaps_total": {
+            "title": "Gaps Total",
+            "type": "integer"
+          },
+          "start": {
+            "title": "Start",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "count",
+          "fingerprint",
+          "gaps_total"
+        ],
+        "title": "Loaded",
+        "type": "object"
       },
       "Manifest": {
         "additionalProperties": false,
@@ -2084,6 +2954,32 @@
         "title": "MeUpdate",
         "type": "object"
       },
+      "MetricsArgs": {
+        "description": "The arguments the statistics were computed with.",
+        "properties": {
+          "periods_per_year": {
+            "description": "252 for stocks, 365 for crypto",
+            "examples": [
+              252
+            ],
+            "title": "Periods Per Year",
+            "type": "integer"
+          },
+          "risk_free_rate": {
+            "examples": [
+              0.0
+            ],
+            "title": "Risk Free Rate",
+            "type": "number"
+          }
+        },
+        "required": [
+          "periods_per_year",
+          "risk_free_rate"
+        ],
+        "title": "MetricsArgs",
+        "type": "object"
+      },
       "ModelCount": {
         "description": "A model the user's backtests used, by the name they show for it.",
         "properties": {
@@ -2261,6 +3157,24 @@
           "manifest_summary"
         ],
         "title": "ModelOut",
+        "type": "object"
+      },
+      "ModelRef": {
+        "description": "The model to run; the other fields of the document's `model` group are ignored, so the\ngroup can be sent back as it is.",
+        "properties": {
+          "id": {
+            "description": "Public ID of one of the user's models",
+            "examples": [
+              "mdl_k2m9qx47f3"
+            ],
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ModelRef",
         "type": "object"
       },
       "ModelState": {
@@ -2540,6 +3454,55 @@
         "title": "ParamOut",
         "type": "object"
       },
+      "Period": {
+        "additionalProperties": false,
+        "description": "The test period `[start, end)` in UTC epoch seconds of a candle's open.",
+        "properties": {
+          "end": {
+            "description": "End of the test, excluded",
+            "examples": [
+              1717459200
+            ],
+            "minimum": 0.0,
+            "title": "End",
+            "type": "integer"
+          },
+          "start": {
+            "description": "First second of the test",
+            "examples": [
+              1717372800
+            ],
+            "minimum": 0.0,
+            "title": "Start",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "Period",
+        "type": "object"
+      },
+      "PredictionsOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "sha256": {
+            "description": "Of the stored predictions (Parquet), hex",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "count",
+          "sha256"
+        ],
+        "title": "PredictionsOut",
+        "type": "object"
+      },
       "PreferencesOut": {
         "description": "The user's settings; a user who never saved any gets the defaults.",
         "properties": {
@@ -2617,6 +3580,221 @@
         ],
         "title": "Representation",
         "type": "string"
+      },
+      "Results": {
+        "properties": {
+          "benchmarks": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BenchmarkResult"
+            },
+            "title": "Benchmarks",
+            "type": "object"
+          },
+          "series": {
+            "$ref": "#/components/schemas/Series"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/Stats"
+          },
+          "trades": {
+            "$ref": "#/components/schemas/Trades"
+          }
+        },
+        "required": [
+          "stats",
+          "benchmarks",
+          "series",
+          "trades"
+        ],
+        "title": "Results",
+        "type": "object"
+      },
+      "Rows": {
+        "description": "What the engine ran on.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "first_ts": {
+            "title": "First Ts",
+            "type": "integer"
+          },
+          "last_ts": {
+            "title": "Last Ts",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "first_ts",
+          "last_ts",
+          "count"
+        ],
+        "title": "Rows",
+        "type": "object"
+      },
+      "RunnerOut": {
+        "description": "What ran the model; null until the worker answered.",
+        "properties": {
+          "backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The backend and its release",
+            "examples": [
+              "jax 0.7.2"
+            ],
+            "title": "Backend"
+          },
+          "format": {
+            "examples": [
+              "keras"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "keras": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "3.15.1"
+            ],
+            "title": "Keras"
+          }
+        },
+        "required": [
+          "format",
+          "keras",
+          "backend"
+        ],
+        "title": "RunnerOut",
+        "type": "object"
+      },
+      "Series": {
+        "properties": {
+          "benchmarks": {
+            "additionalProperties": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "description": "Each benchmark's equity on the same rows, by its ID",
+            "title": "Benchmarks",
+            "type": "object"
+          },
+          "columns": {
+            "$ref": "#/components/schemas/SeriesColumns"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "resolution": {
+            "description": "`candle`, or `day` when the light view made one point per UTC day of more than 10000 rows",
+            "examples": [
+              "candle"
+            ],
+            "title": "Resolution",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resolution",
+          "count",
+          "columns",
+          "benchmarks"
+        ],
+        "title": "Series",
+        "type": "object"
+      },
+      "SeriesColumns": {
+        "description": "One value per row in each column. `prediction` and `signal` are left out of a series of\ndays.",
+        "properties": {
+          "close": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Close",
+            "type": "array"
+          },
+          "drawdown": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Drawdown",
+            "type": "array"
+          },
+          "equity": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Equity",
+            "type": "array"
+          },
+          "position": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Position",
+            "type": "array"
+          },
+          "prediction": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prediction"
+          },
+          "signal": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal"
+          },
+          "ts": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Ts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ts",
+          "close",
+          "position",
+          "equity",
+          "drawdown"
+        ],
+        "title": "SeriesColumns",
+        "type": "object"
       },
       "SetupBenchmark": {
         "description": "What a backtest is measured against: buy and hold of its own instruments, or an ETF.",
@@ -2710,6 +3888,41 @@
           "output"
         ],
         "title": "Signature",
+        "type": "object"
+      },
+      "Software": {
+        "properties": {
+          "app_version": {
+            "examples": [
+              "2026.10.24-3f2a1c9"
+            ],
+            "title": "App Version",
+            "type": "string"
+          },
+          "engine_version": {
+            "examples": [
+              "0.3.0"
+            ],
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "runner": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunnerOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "engine_version",
+          "app_version",
+          "runner"
+        ],
+        "title": "Software",
         "type": "object"
       },
       "SortOrder": {
@@ -2828,6 +4041,145 @@
         "title": "StarredBacktests",
         "type": "object"
       },
+      "Stats": {
+        "description": "The 12 statistics of docs/engine.md (Metrics), in their order. Fractions; `max_drawdown`\nnegative; null when undefined.",
+        "properties": {
+          "avg_trade_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Trade Return"
+          },
+          "best_trade_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Trade Return"
+          },
+          "buy_and_hold_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buy And Hold Return"
+          },
+          "exposure": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exposure"
+          },
+          "fees_paid": {
+            "title": "Fees Paid",
+            "type": "number"
+          },
+          "max_drawdown": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown"
+          },
+          "num_trades": {
+            "title": "Num Trades",
+            "type": "integer"
+          },
+          "sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe"
+          },
+          "sortino": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sortino"
+          },
+          "total_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Return"
+          },
+          "win_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Win Rate"
+          },
+          "worst_trade_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Trade Return"
+          }
+        },
+        "required": [
+          "total_return",
+          "max_drawdown",
+          "sharpe",
+          "sortino",
+          "num_trades",
+          "win_rate",
+          "avg_trade_return",
+          "best_trade_return",
+          "worst_trade_return",
+          "exposure",
+          "fees_paid",
+          "buy_and_hold_return"
+        ],
+        "title": "Stats",
+        "type": "object"
+      },
       "StorageUsage": {
         "properties": {
           "file_max_bytes": {
@@ -2904,6 +4256,28 @@
         "title": "Theme",
         "type": "string"
       },
+      "ThresholdRule": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "description": "Long at a prediction of `limit` or more, short at `-limit` or less",
+            "minimum": 0.0,
+            "title": "Limit",
+            "type": "number"
+          },
+          "name": {
+            "const": "threshold",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "limit"
+        ],
+        "title": "ThresholdRule",
+        "type": "object"
+      },
       "TimeFormat": {
         "description": "`24` 16:05, `12` 4:05 PM.",
         "enum": [
@@ -2935,6 +4309,149 @@
         ],
         "title": "Timeframe",
         "type": "string"
+      },
+      "TradeColumns": {
+        "properties": {
+          "candles_held": {
+            "description": "Rows from the entry candle to the exit candle",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Candles Held",
+            "type": "array"
+          },
+          "close_price": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Close Price",
+            "type": "array"
+          },
+          "close_ts": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Close Ts",
+            "type": "array"
+          },
+          "exit_reason": {
+            "description": "`signal`, `stop`, `gap`, `end`, `ruin`, `drawdown`",
+            "items": {
+              "type": "string"
+            },
+            "title": "Exit Reason",
+            "type": "array"
+          },
+          "fees": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Fees",
+            "type": "array"
+          },
+          "open_price": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Open Price",
+            "type": "array"
+          },
+          "open_ts": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Open Ts",
+            "type": "array"
+          },
+          "return": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Return",
+            "type": "array"
+          },
+          "side": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Side",
+            "type": "array"
+          },
+          "signal_ts": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Signal Ts",
+            "type": "array"
+          },
+          "slippage_cost": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Slippage Cost",
+            "type": "array"
+          },
+          "stop_price": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Stop Price",
+            "type": "array"
+          }
+        },
+        "required": [
+          "signal_ts",
+          "open_ts",
+          "close_ts",
+          "side",
+          "open_price",
+          "close_price",
+          "stop_price",
+          "exit_reason",
+          "return",
+          "fees",
+          "slippage_cost",
+          "candles_held"
+        ],
+        "title": "TradeColumns",
+        "type": "object"
+      },
+      "Trades": {
+        "properties": {
+          "columns": {
+            "$ref": "#/components/schemas/TradeColumns"
+          },
+          "complete": {
+            "description": "False when the light view kept the newest 10000",
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "count": {
+            "description": "The trades in the document",
+            "title": "Count",
+            "type": "integer"
+          },
+          "total": {
+            "description": "The trades the run had",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "total",
+          "complete",
+          "columns"
+        ],
+        "title": "Trades",
+        "type": "object"
       },
       "UsedModel": {
         "description": "The model a backtest used.",
@@ -3004,6 +4521,42 @@
           "kind"
         ],
         "title": "WarmUpOut",
+        "type": "object"
+      },
+      "WarmUpReport": {
+        "properties": {
+          "candles": {
+            "description": "Candles loaded before the period for the warm-up",
+            "title": "Candles",
+            "type": "integer"
+          },
+          "dropped": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The candles the model's input dropped at the start; null until it ran",
+            "title": "Dropped"
+          },
+          "kind": {
+            "enum": [
+              "exact",
+              "estimate"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "candles",
+          "kind",
+          "dropped"
+        ],
+        "title": "WarmUpReport",
         "type": "object"
       },
       "Window": {
@@ -3393,9 +4946,205 @@
         "tags": [
           "backtests"
         ]
+      },
+      "post": {
+        "description": "Starts a backtest of one of the user's models on one instrument and period and returns\nits document, `running`, with its number. Checked first: the model is the user's and has a\nmanifest, the instrument fits the model, the period with the candles the model needs before\nit fits the data and the candle limit, the user has no other backtest running, and the\nworker that runs the models can be reached. The run goes on after the response; the\ndocument (`GET /api/v1/backtests/{backtest_id}`) has the results once it finished.",
+        "operationId": "start_backtest_api_v1_backtests_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not come from the app's own pages (`cross-origin-request`)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The user has no model with this ID (`not-found`), or the instrument is not in the catalog (`instrument-not-found`)."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The model has no manifest (`model-needs-setup`), or another backtest of the user is running (`backtest-running`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "An invalid setup (`validation`), a model of a timeframe backtests do not run on (`timeframe-not-supported`) or of another market (`instrument-not-for-model`), a period outside the data (`period-out-of-range`), without the candles the model needs before it (`warm-up-out-of-range`), or with more candles than allowed (`too-many-candles`)."
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A data source sent candles that failed validation (`source-data-invalid`)."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`)."
+          }
+        },
+        "summary": "Start Backtest",
+        "tags": [
+          "backtests"
+        ]
       }
     },
     "/api/v1/backtests/{backtest_id}": {
+      "get": {
+        "description": "The result document of the backtest, whatever its status (`results` is null until it\nfinished), in the light view: a series of more than 10,000 rows has one point per UTC day,\nand only the newest 10,000 trades are in it (`trades.complete` false).",
+        "operationId": "get_backtest_api_v1_backtests__backtest_id__get",
+        "parameters": [
+          {
+            "description": "Public ID of the backtest",
+            "in": "path",
+            "name": "backtest_id",
+            "required": true,
+            "schema": {
+              "description": "Public ID of the backtest",
+              "examples": [
+                "bt_7f3k2m9qx4"
+              ],
+              "title": "Backtest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The user has no backtest with this ID (`not-found`)."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The backtest is test data that has no result document (`no-document`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A data source sent candles that failed validation (`source-data-invalid`)."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`)."
+          }
+        },
+        "summary": "Get Backtest",
+        "tags": [
+          "backtests"
+        ]
+      },
       "patch": {
         "description": "Stars or unstars the backtest.",
         "operationId": "update_backtest_api_v1_backtests__backtest_id__patch",
@@ -3478,6 +5227,104 @@
           }
         },
         "summary": "Update Backtest",
+        "tags": [
+          "backtests"
+        ]
+      }
+    },
+    "/api/v1/backtests/{backtest_id}/download": {
+      "get": {
+        "description": "The result document of a finished backtest with every row of its series and every\ntrade, as a file to save.",
+        "operationId": "download_backtest_api_v1_backtests__backtest_id__download_get",
+        "parameters": [
+          {
+            "description": "Public ID of the backtest",
+            "in": "path",
+            "name": "backtest_id",
+            "required": true,
+            "schema": {
+              "description": "Public ID of the backtest",
+              "examples": [
+                "bt_7f3k2m9qx4"
+              ],
+              "title": "Backtest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The user has no backtest with this ID (`not-found`)."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The backtest is running or failed (`backtest-not-finished`), or is test data without a result document (`no-document`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A data source sent candles that failed validation (`source-data-invalid`)."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`)."
+          }
+        },
+        "summary": "Download Backtest",
         "tags": [
           "backtests"
         ]

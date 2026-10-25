@@ -27,6 +27,7 @@ from candlestack.data.errors import (
     PeriodOutOfRange,
     SourceUnavailable,
     TooManyCandles,
+    WarmUpOutOfRange,
 )
 from candlestack.data.models import Exchange, InstrumentId, InstrumentSort, Market, Timeframe
 from candlestack.data.schemas import (
@@ -105,8 +106,9 @@ TimeParam = Annotated[int, BeforeValidator(_epoch_seconds), WithJsonSchema(TIME_
 
 
 @contextmanager
-def _problems() -> Iterator[None]:
-    """Raises the data module's errors inside the block as problem details."""
+def problems() -> Iterator[None]:
+    """Raises the data module's errors inside the block as problem details; other modules
+    whose routes ask for market data use it too (``data_problems``)."""
     try:
         yield
     except DataError as error:
@@ -116,7 +118,7 @@ def _problems() -> Iterator[None]:
         raise problem from error
 
 
-def _problem(error: DataError) -> ProblemError | None:  # noqa: PLR0911 (a case per error)
+def _problem(error: DataError) -> ProblemError | None:  # noqa: C901, PLR0911 (a case per error)
     detail = error.detail
     match error:
         case InstrumentNotFound():
@@ -150,6 +152,19 @@ def _problem(error: DataError) -> ProblemError | None:  # noqa: PLR0911 (a case 
                     "requested": error.requested,
                     "maximum": error.maximum,
                     "suggestion": error.suggestion,
+                },
+            )
+        case WarmUpOutOfRange():
+            return ProblemError(
+                422,
+                "warm-up-out-of-range",
+                "Not enough candles before the period",
+                detail,
+                extensions={
+                    "instrument": error.instrument,
+                    "timeframe": error.timeframe,
+                    "candles": error.candles,
+                    "earliest_start": error.earliest_start,
                 },
             )
         case InvalidRequest():
@@ -282,7 +297,7 @@ async def search_instruments(  # noqa: PLR0913 (a query parameter each, and the 
     When the instrument list of one market cannot be loaded, the other market is still
     searched and `unavailable` names the missing one; 503 when no market can be searched.
     """
-    with _problems():
+    with problems():
         found = await service.search(q, market, limit, offset, exchange=exchange, sort=sort)
     return InstrumentSearchOut(
         items=[
@@ -321,7 +336,7 @@ async def instrument_detail(
     """An instrument with its timeframes, available period and the candle limit: what a valid
     candle request can ask for. Counts against the per-minute limit of requests per client
     address, like candle requests."""
-    with _problems():
+    with problems():
         info = await service.instrument(InstrumentId.parse(instrument_id))
     return InstrumentDetailOut.of_info(info)
 
@@ -416,7 +431,7 @@ async def candles(  # noqa: PLR0913 (a query parameter each, and the settings)
                 }
             ]
         )
-    with _problems():
+    with problems():
         if start is None:
             found = await service.last_candles(
                 InstrumentId.parse(instrument_id),
@@ -469,7 +484,7 @@ async def instrument_icon(
     as it answers again). Not counted against the per-minute limit of candle and instrument
     requests: a page of the list asks for one icon per row.
     """
-    with _problems():
+    with problems():
         icon = await service.icon(InstrumentId.parse(instrument_id))
     return Response(
         icon.content,

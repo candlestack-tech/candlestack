@@ -4,6 +4,7 @@ Other modules import only from here (``from candlestack.data import InstrumentId
 the submodules. The contract is docs/data.md.
 """
 
+from candlestack.data.api import problems as data_problems
 from candlestack.data.api import router as data_router
 from candlestack.data.candles import (
     MAX_GAP_RANGES,
@@ -31,6 +32,7 @@ from candlestack.data.errors import (
     PeriodOutOfRange,
     SourceUnavailable,
     TooManyCandles,
+    WarmUpOutOfRange,
 )
 from candlestack.data.models import (
     CANDLE_SCHEMA,
@@ -79,9 +81,11 @@ __all__ = [
     "SourceUnavailable",
     "Timeframe",
     "TooManyCandles",
+    "WarmUpOutOfRange",
     "build_data_service",
     "candle_count",
     "closed_only",
+    "data_problems",
     "data_router",
     "empty_candles",
     "expected_bins_fixed",

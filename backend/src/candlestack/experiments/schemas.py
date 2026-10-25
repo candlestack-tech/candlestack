@@ -87,7 +87,8 @@ class BacktestSetup(BaseModel):
 
 class BacktestSetupIn(BacktestSetup):
     """The setup of a new backtest, checked against the limits of Settings, Backtest defaults:
-    what writes a backtest stores it through this model."""
+    the seed command stores it through this model. A backtest run in the app stores the summary
+    of its own setup (runs.py), which may lie outside these limits."""
 
     threshold: float = Field(ge=0, le=0.5, description="Signal strength to trade")
     stop_loss_pct: int = Field(ge=1, le=20, description="Exit when a trade loses this many percent")
@@ -283,6 +284,8 @@ class DashboardOut(BaseModel):
     """Everything the Dashboard shows, in one response."""
 
     counts: BacktestCounts
-    last: list[BacktestOut] = Field(description="The 6 newest backtests, failed ones included")
+    last: list[BacktestOut] = Field(
+        description="The 6 newest backtests that ended, failed ones included (not running ones)"
+    )
     best: BestBacktests
     starred: StarredBacktests

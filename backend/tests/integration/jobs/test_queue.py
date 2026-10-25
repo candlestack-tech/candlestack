@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 
 from candlestack.core import create_redis
 from candlestack.jobs import WORKER_STOPPED, Job, JobQueue, JobResult
@@ -168,3 +169,14 @@ async def test_the_kind_of_an_unreadable_job_defaults_to_predict(
 
     assert claimed is not None
     assert (claimed.job, claimed.kind) == (None, "predict")
+
+
+async def test_ping_answers_when_the_queue_is_up_and_raises_when_it_is_not(
+    queue: JobQueue,
+) -> None:
+    down = create_redis("redis://127.0.0.1:1/0")
+
+    await queue.ping()
+    with pytest.raises(RedisError):
+        await JobQueue(down).ping()
+    await down.aclose()

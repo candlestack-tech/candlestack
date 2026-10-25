@@ -11,6 +11,7 @@ from redis.asyncio import Redis
 from candlestack.core import Database, RateLimiter, Settings
 from candlestack.core.redis import get_redis
 from candlestack.data import DataService
+from candlestack.experiments import BacktestRunner
 from candlestack.main import _report_death, create_app
 from candlestack.main import app as module_app
 
@@ -22,6 +23,7 @@ def test_lifespan_opens_and_closes_the_shared_clients(app: FastAPI) -> None:
         assert isinstance(app.state.http, httpx.AsyncClient)
         assert isinstance(app.state.rate_limiter, RateLimiter)
         assert isinstance(app.state.data_service, DataService)
+        assert isinstance(app.state.backtest_runner, BacktestRunner)
         assert app.state.http.headers["User-Agent"] == "candlestack/1.2.3"
 
     assert app.state.http.is_closed

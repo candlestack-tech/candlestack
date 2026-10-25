@@ -12,8 +12,8 @@ first blocks: `candles@1`, `open@1` to `volume@1`, `none@1`, `window@1`), the ca
 `GET /api/v1/preprocessing/catalog`, the manifest's JSON Schema,
 [manifest.schema.json](manifest.schema.json), the manifest stored with each model, and the
 worker that runs a model on its input with checks 4 and 5 below
-([architecture.md](architecture.md#worker)). Still to come: backtests that run with a model
-and the app's upload and builder. Architecture and module rules: [architecture.md](architecture.md).
+([architecture.md](architecture.md#worker)), and the backtests that run a model on its input
+([architecture.md](architecture.md#backtests)). Still to come: the app's upload and builder. Architecture and module rules: [architecture.md](architecture.md).
 The backtest that consumes the predictions: [engine.md](engine.md).
 
 ## Where it sits

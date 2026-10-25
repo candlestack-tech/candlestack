@@ -324,7 +324,7 @@ def first_of_last(
     return earliest
 
 
-def _latest_end(
+def latest_end(
     start: int, end: int, timeframe: Timeframe, maximum: int, sessions: Sequence[Session] | None
 ) -> int:
     """The latest end, up to ``end``, for which ``[start, end)`` has at most ``maximum`` bins:
@@ -357,7 +357,7 @@ def suggest(
     """
     if candle_count(start, end, timeframe, sessions) <= maximum:
         raise ValueError(f"{maximum} candles are enough: the period fits")
-    latest = format_time(_latest_end(start, end, timeframe, maximum, sessions))
+    latest = format_time(latest_end(start, end, timeframe, maximum, sessions))
     fitting = next(
         (
             longer

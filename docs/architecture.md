@@ -5,16 +5,16 @@ under `/api`. In this milestone it has five modules: `core` (configuration, logg
 Redis, Postgres and HTTP clients, CSRF protection, health, Sentry), `data` (market data:
 instrument catalog and candles from Binance and Alpaca, see [data.md](data.md)), `accounts`
 (users, GitHub and Google sign-in, sessions, the beta list, Settings), `ml` (the models
-users upload: the upload and its checks, the files, the list) and `experiments` (the stored
-backtests: the Backtests page and the Dashboard). Postgres stores what users create,
-accounts, sessions, settings, the models and the backtests so far, and a volume the files of the
-models; market data is not stored: the sources are the truth and Redis is a cache that can be
-lost at any time. The backtest is being built next to them
-(`signals`, `engine`, `metrics` and the `candlestack-bt` command in `cli`, see
-[Modules](#modules) and the contract in [engine.md](engine.md)); it runs from the command line,
-not in the service. A second process, the worker (`python -m candlestack.worker`), runs the
-models users upload in a container without network; the backend hands it jobs through a queue
-in Redis (`jobs`, see [Worker](#worker)).
+users upload: the upload and its checks, the files, the list) and `experiments` (the
+backtests: running them, their result documents, the Backtests page and the Dashboard).
+Postgres stores what users create, accounts, sessions, settings, the models and the backtests,
+and a volume the files of the models; market data is not stored: the sources are the truth and
+Redis is a cache that can be lost at any time. The backtest itself is `signals`, `engine` and
+`metrics` (see [Modules](#modules) and the contract in [engine.md](engine.md)), which
+`experiments` runs for the API and the `candlestack-bt` command of `cli` from files. A second
+process, the worker (`python -m candlestack.worker`), runs the models users upload in a
+container without network; the backend hands it jobs through a queue in Redis (`jobs`, see
+[Worker](#worker)).
 
 ## Runtime
 
@@ -85,6 +85,9 @@ flowchart LR
 | `PATCH /api/v1/models/{model_id}` | renames a model (the extension stays; `409 model-name-taken`) or stars and unstars it |
 | `DELETE /api/v1/models/{model_id}` | deletes a model and its file |
 | `GET /api/v1/preprocessing/catalog` | the blocks a model's manifest can name, by step: id, description, the display group of a feature (`Candle`, `Bands`, `Momentum`, `Trend`, `Volume`, `Brick`), warm-up and parameters (type, range, default, `tunable`); public, served by `ml` ([preprocessing.md](preprocessing.md#the-blocks)) |
+| `POST /api/v1/backtests` | starts a backtest of one of the user's models: the body is the setup groups of the result document (`model`, `data`, `decision`, `execution`, `benchmarks`); checked first, then stored `running` and run after the response; 201 with its result document ([Backtests](#backtests)) |
+| `GET /api/v1/backtests/{backtest_id}` | the backtest's result document in the light view, whatever its status ([engine.md](engine.md#the-result-document)) |
+| `GET /api/v1/backtests/{backtest_id}/download` | the result document of a finished backtest with every row and trade, as an attachment |
 | `GET /api/v1/backtests` | a page of 10 of the user's backtests: search `q` (number, symbol or model name), `show` (`all`, `starred`, `failed`), `model` (a model's name), `sort` and `order`, `page`; with the total, the pages and what the filter panel shows (the counts of all, starred and failed backtests, the models used) ([Backtests](#backtests)) |
 | `PATCH /api/v1/backtests/{backtest_id}` | stars or unstars a backtest |
 | `GET /api/v1/dashboard` | everything the Dashboard shows in one response: the counts, the 6 newest backtests, the 5 best finished ones by Sharpe ratio, return, drawdown and win rate, the 4 best starred ones |
@@ -113,7 +116,17 @@ flowchart LR
   (404: no model of the user with the ID, another user's included) and `not-signed-in` (401:
   also the account was deleted while its file uploaded). Each `type` URI opens a page on the
   website that says what the problem means and what the client should do. The experiments
-  module adds none: it uses `not-found` (404: no backtest of the user with the ID).
+  module adds `model-needs-setup` (409: the model has no manifest), `timeframe-not-supported`
+  (422: the model's timeframe is not one of 5m, 30m, 1h and 1d, with `timeframe`),
+  `instrument-not-for-model` (422: a model of US trading hours on a crypto pair or the other
+  way round, with `session` and `market`), `backtest-running` (409: another backtest of the
+  user runs), `backtests-unavailable` (503: the worker's queue cannot be reached),
+  `backtest-not-finished` (409: a download of a running or failed backtest) and `no-document`
+  (409: a test backtest of the seed command has no result document); it uses `not-found`
+  (404: no backtest or model of the user with the ID), `validation` (422, also a benchmark of
+  another instrument), and the data module's `warm-up-out-of-range`, `period-out-of-range`,
+  `too-many-candles`, `instrument-not-found`, `source-unavailable` and `source-data-invalid`
+  for the instrument and the period.
 - Every response carries `X-Request-ID` and `Server-Timing: app;dur=<ms>` (the app's time
   until the response started), so response times can be measured from outside.
 - Logs: one JSON object per line on stdout (`ts`, `level`, `logger`, `msg`); the access line
@@ -302,7 +315,7 @@ flowchart LR
 ## Worker
 
 The worker runs the models users upload: a `predict` job gives the predictions of a model on
-candles (the backtests, #269), a `check` job is the trial run of a model with its manifest
+candles (the backtests), a `check` job is the trial run of a model with its manifest
 ([preprocessing.md](preprocessing.md#checking-a-model-with-its-manifest), checks 4 and 5). The
 backend has the network and the candle cache, the worker has neither: they meet at a job queue
 in a Redis of their own (`queue`, `JOBS_REDIS_URL`) on the internal network `jobs`, and at a
@@ -360,7 +373,7 @@ sequenceDiagram
 - **A `check`** builds the input from built-in candles (a seeded random walk, enough for the
   manifest's warm-up and 64 samples), runs the model, wants one finite score per sample and,
   with an `example`, its output within 1e-4. The code that sets `models.verified_at` from a
-  `check` (with the backtests, #269) sets it only when the result is `done` with `verified`
+  `check` (still to come) sets it only when the result is `done` with `verified`
   true and, under the lock of the user's models, the model's stored manifest still has the
   result's `manifest_sha256`: a manifest replaced while the job ran keeps the model `ready`.
 - **One job at a time** per worker, each in a fresh process (`worker/runner.py`) that the loop
@@ -400,13 +413,25 @@ sequenceDiagram
 
 - **Table** `backtests`, one row per run of a user: the user's own number (`#N`: 1, 2, 3 per
   user, unique with the user, given under an advisory lock of the user), the status
-  (`finished` or `failed`; `running` comes with the backtest builder, the check constraint
-  allows it already), the instruments in the order chosen (JSONB: market as the market data
+  (`running`, `finished` or `failed`), the instruments in the order chosen (JSONB: market as the market data
   API names it, `stock` or `crypto`, and symbol), the representation (`renko`, `kagi`,
   `windows`), the model, the setup (JSONB, the fields of Settings > Backtest defaults), the
   results (total and buy-and-hold return, Sharpe ratio, max drawdown, win rate, trades, how
   long the run took, the engine version), a short equity series, the error of a failed one,
-  the star, and when it started and finished. Results are null for a failed backtest.
+  the star, and when it started and finished. Results are null for a failed backtest. A
+  backtest run in the app also stores (deferred columns, which the list and the Dashboard
+  never read) what the result document is built from (docs/engine.md, "Stored, and built on
+  request"): `spec` (JSONB: the model's name, framework, SHA-256, size and a copy of its
+  manifest, the instrument as the catalog had it, the model's timeframe and session, the
+  period, where the load with the warm-up starts, the decision, the execution, the benchmarks,
+  the arguments of the statistics and the app's version), `report` (JSONB: the candles loaded
+  with their range, count, gaps and fingerprint, the warm-up the model's input dropped, the
+  rows the engine ran on, the predictions' count and SHA-256, the `AlignReport`, the model
+  runner's versions and the timings of the steps in milliseconds), `stats` (JSONB: the 12
+  statistics, `max_drawdown` negative) and `predictions` (bytea: `ts` and `prediction` as zstd
+  Parquet, about 140 KB for 10 years of 30-minute stock candles; in Postgres, so they are in its
+  backups and go with the account's cascade, and no other volume is needed). The seed
+  command's backtests have none of them, and no result document.
 - **The equity series** (`equity`: `{strategy, benchmark}`, JSONB) draws the small lines of the
   Dashboard's starred backtests: the cumulative return of the strategy and of buy and hold as
   fractions (0 at the start), at most 60 points each, at the same evenly spaced times over the
@@ -434,16 +459,53 @@ sequenceDiagram
   name), so each count is what its filter returns.
 - A stored setup and equity series are read without the limits of a new backtest
   (`BacktestSetupIn`, `EquitySeriesIn`, which check them on the way in), so a limit made
-  tighter later never fails the list.
+  tighter later never fails the list. A backtest run in the app stores in `setup` a summary of
+  its setup in those fields (the model's timeframe, the period's first and last UTC day, long
+  only or both, the rule's limit or 0 for k-means, the stop loss in whole percent or 0 without
+  one, fees and slippage in percent, buy and hold); its result document has the setup as it
+  is.
 - **The Dashboard** (`GET /api/v1/dashboard`) is one response: the counts, the 6 newest
   backtests (failed ones too), the 5 best finished ones by Sharpe ratio, return, drawdown
   (the smallest fall first) and win rate, and the 4 starred ones with the best Sharpe ratio
-  (those without one last) with the total starred. When `running` comes with the builder, the
-  newest backtests must leave out the running ones.
-- Users cannot make backtests yet: the builder comes later and will fill the same table. Until
-  then, `python -m candlestack.experiments.seed --email <email>` gives one account the 15
-  backtests of the mockup on stage or local ([infra/README.md](../infra/README.md#test-backtests));
-  it refuses `APP_ENV` `prod`, marks its rows (`seeded`) and replaces only those when run again.
+  (those without one last) with the total starred. The newest leave out the running ones,
+  which have nothing to show yet.
+- **Starting one** (`POST /api/v1/backtests`): the body is the setup groups of the result
+  document, so a document sent back runs the backtest again (the groups' other fields are
+  ignored): `model` (`id`), `data` (`instrument.id` and `period`, `[start, end)` in epoch
+  seconds; the timeframe and session are the model's), `decision` (the post-processing steps
+  as `run.json` records them, threshold 0 by default), `execution` (the engine's `Settings`)
+  and `benchmarks` (none, or buy and hold of the instrument). Checked before anything is
+  stored, each a problem ([HTTP surface](#http-surface)): the model is the user's and has a
+  manifest (`ready` or `verified`), its timeframe is one the list can show (5m, 30m, 1h, 1d),
+  its session fits the instrument's market (`regular` for stocks, `24/7` for crypto), the user
+  has no backtest running (checked again under the lock that gives the number), the worker's
+  queue answers a ping (prod has no worker yet: `503 backtests-unavailable` at once, never a
+  wait), and the period with the manifest's warm-up before it fits the data
+  (`DataService.warm_up_start`: the period as the candles endpoint checks it, the warm-up's
+  candles before `start`, and all of them against `CANDLES_MAX`). The answer is the result
+  document of the new backtest, `running`, with `Location`.
+- **The run** (`experiments/runner.py`, `BacktestRunner` on `app.state.backtest_runner`) is a
+  task of the API process, so it outlives the request: the candles with the warm-up from the
+  data module, a `predict` job through `JobClient` (the model's file, its SHA-256 and the copy
+  of its manifest; the candles go through the jobs' volume), the predictions of the period
+  stored, `align` (not strict: a candle without a new prediction repeats the last one, as rows
+  of Renko or Kagi need), the decision's steps, `engine.backtest`, `metrics.stats` with 252
+  periods a year for stocks and 365 for crypto, and the result stored with its summary
+  columns and the short equity series. It holds no database connection while the worker runs.
+  A failure anywhere fails the backtest with a plain sentence for the user: the data module's
+  detail, the job's `error`, a worker out of reach or not answering, no prediction in the
+  period; a bug of ours is logged as an error (a Sentry issue) and the user reads that it was
+  reported. The API runs in one process, so on its start the backtests still `running` were
+  left by a process that stopped and fail ("The server restarted..."), and on shutdown the
+  runs it stops fail the same way.
+- **The result document** (`GET /api/v1/backtests/{backtest_id}`, and `/download`) is built
+  on request ([engine.md](engine.md#the-result-document)): the stored predictions, the
+  candles of the stored range from the cache and the engine, in a thread; `data.changed` is
+  true when their fingerprint differs from the run's. Written with orjson from the Polars
+  columns; `docs/backtest.schema.json` is its JSON Schema.
+- `python -m candlestack.experiments.seed --email <email>` gives one account the 15 backtests
+  of the mockup on stage or local ([infra/README.md](../infra/README.md#test-backtests)); it
+  refuses `APP_ENV` `prod`, marks its rows (`seeded`) and replaces only those when run again.
 - A user's backtests go with the account by the foreign key's cascade (no deletion hook: no
   files). Another user's backtest is a 404.
 
@@ -464,7 +526,7 @@ A module is a subpackage of `candlestack` under `backend/src/candlestack/`.
 | `cli` | started | the `candlestack-bt` command: backtests from files on the command line |
 | `jobs` | now | the job queue between the backend and the worker: the job and its result, the Redis keys, the jobs' files on the shared volume, `JobClient` for the backend ([Worker](#worker)) |
 | `worker` | now | the worker's process (`python -m candlestack.worker`): the loop, the job's process with Keras, the safe load of a model, the built-in candles of a check |
-| `experiments` | now | the stored backtests: the list of the Backtests page, stars, the Dashboard, the models' usage, the seed command; later assembling `preprocessing`, `ml`, `signals`, `engine` and `metrics` into runs |
+| `experiments` | now | the backtests: starting and running them (`data`, the worker through `jobs`, `signals`, `engine`, `metrics`), their result documents, the list of the Backtests page, stars, the Dashboard, the models' usage, the seed command |
 | `admin` | later | team-only administration (roles, audit) under `/admin` |
 
 Folders for later modules are created when their work starts, not before; `started` marks
@@ -473,9 +535,9 @@ the ones whose folder exists while their code is being written.
 ## Import rules
 
 - Dependencies point one way: `experiments` -> `ml` -> `accounts` | `data` | `jobs` -> `core`.
-  `core` imports no other module, and `jobs` none at all. `experiments` imports `ml`, `accounts`
-  and `core`, and the backtest modules `signals`, `engine` and `metrics` to assemble a run
-  (`assembly.py`); not yet `data` and `jobs`, as it runs no backtest yet.
+  `core` imports no other module, and `jobs` none at all. `experiments` runs the backtests:
+  it imports `data`, `jobs`, `preprocessing` (a manifest's warm-up) and the backtest modules
+  `signals`, `engine` and `metrics` as well.
 - The backtest modules `signals`, `engine` and `metrics`, and `preprocessing`, stand alone:
   they import no other module of the project, not each other, and no server library
   (`fastapi`, `starlette`, `scalar_fastapi`, `granian`, `redis`, `httpx`, `sentry_sdk`,

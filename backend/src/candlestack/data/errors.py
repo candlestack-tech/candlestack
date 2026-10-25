@@ -84,6 +84,31 @@ class PeriodOutOfRange(DataError):
         super().__init__(" ".join(sentences))
 
 
+class WarmUpOutOfRange(DataError):
+    """The period starts too early for the candles a model needs before it (its warm-up): the
+    data has fewer of them before ``start``. ``earliest_start`` is the first start that has
+    them, None when the first candle is not known."""
+
+    def __init__(
+        self,
+        instrument: "InstrumentId | str",
+        timeframe: "Timeframe | str",
+        candles: int,
+        earliest_start: int | None,
+    ) -> None:
+        self.instrument = str(instrument)
+        self.timeframe = str(timeframe)
+        self.candles = candles
+        self.earliest_start = earliest_start
+        detail = (
+            f"The model needs {candles} {timeframe} candles of {instrument} before the start of "
+            "the period, and the data has fewer."
+        )
+        if earliest_start is not None:
+            detail += f" Set start to {format_time(earliest_start)} or later."
+        super().__init__(detail)
+
+
 class TooManyCandles(DataError):
     """More expected candles than allowed; ``suggestion`` comes from ``suggest()``."""
 
