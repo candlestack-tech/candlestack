@@ -177,10 +177,21 @@ def _trades(done: Run, *, light: bool) -> dict[str, Any]:
     if light and total > LIGHT_TRADES:
         trades = trades.tail(LIGHT_TRADES)
     index = done.result.series.select("ts").with_row_index("row")
+    # Polars keeps no row order in a join unless asked: the trades stay in theirs.
     held = (
         trades.select("open_ts", "close_ts")
-        .join(index.rename({"ts": "open_ts", "row": "opened"}), on="open_ts", how="left")
-        .join(index.rename({"ts": "close_ts", "row": "closed"}), on="close_ts", how="left")
+        .join(
+            index.rename({"ts": "open_ts", "row": "opened"}),
+            on="open_ts",
+            how="left",
+            maintain_order="left",
+        )
+        .join(
+            index.rename({"ts": "close_ts", "row": "closed"}),
+            on="close_ts",
+            how="left",
+            maintain_order="left",
+        )
         .select(pl.col("closed").cast(pl.Int64) - pl.col("opened").cast(pl.Int64))
         .to_series()
     )
