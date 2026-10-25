@@ -729,6 +729,177 @@ option or a wrong mix of options (as in `run`), a missing data folder, a data fo
 stock folder or an `--out` it cannot write to. The same files and options write the same bytes
 again, whatever `--jobs` is.
 
+## The result document
+
+What a finished backtest is when the app shows it, the API returns it or a user downloads it as
+JSON. It is the design for the backtests API; nothing of it is built yet. One shape serves all
+three uses: the page and the API get a lighter view of the two long tables
+([The light view](#the-light-view)), the download gets everything.
+
+### Stored, and built on request
+
+The engine is deterministic: the same candles, predictions and settings give the same bytes. A
+backtest stores only what cannot be recomputed quickly:
+
+| Stored | Size | Why |
+| --- | --- | --- |
+| the setup: the model (ID, name, SHA-256, a copy of its manifest), the instrument and period, the decision and the execution settings | a few KB | the run cannot be repeated without it |
+| the predictions: `ts` and `prediction` per row, Parquet | about 140 KB for 10 years of 30-minute stock candles, 700 KB for crypto | running the model is the slow part |
+| `stats`, the 12 metrics | 1 KB | the Backtests list and the Dashboard sort by them |
+| the fingerprint and range of the loaded candles | under 1 KB | tells whether the candles changed since |
+
+The series, the trades and the document itself are built when they are asked for: the candles
+from the cache, the stored predictions, then `signals`, `backtest` and `metrics`, well under a
+second. A source can re-adjust old prices (after a split or a dividend); then the candles'
+fingerprint differs, the document says so (`data.changed` is true) and is built from the
+candles as they are now, so its `results.stats` can differ from the stored ones.
+
+### The shape
+
+The engine's worked example ([Worked example](#worked-example)) with `next_open`, a 5% stop and
+10 bps fees, as a document. `//` comments are notes here, not part of the format.
+
+```jsonc
+{
+  "version": 1,
+  "backtest": {
+    "id": "bt_7f3k2m9qx4", "number": 12, "status": "finished",   // running, finished or failed
+    "created_at": "2026-10-25T14:02:11Z", "finished_at": "2026-10-25T14:04:53Z",
+    "duration_s": 162.0, "error": null
+  },
+  "software": {
+    "engine_version": "0.3.0", "app_version": "2026.10.24-3f2a1c9",
+    "runner": {"format": "keras", "keras": "3.15.1", "backend": "jax 0.7.2"}
+  },
+  "model": {
+    "id": "mdl_k2m9qx47f3", "name": "raw-candles.keras", "framework": "keras",
+    "sha256": "9b1e04c7…", "size_bytes": 48213,
+    "manifest": {"version": 1, "input": {"…": "…"}, "signature": {"…": "…"}}   // as stored with the run
+  },
+  "data": {
+    "instrument": {"id": "stock:AAPL", "market": "stock", "symbol": "AAPL", "name": "Apple Inc.",
+                   "exchange": "NASDAQ", "source": "alpaca", "feed": "sip", "currency": "USD"},
+    "timeframe": "30m", "timeframe_seconds": 1800, "session": "regular",
+    "period": {"start": 1717372800, "end": 1717459200},
+    "loaded": {"start": 1717081200, "end": 1717430400, "count": 29, "fingerprint": "sha256:3b1f…", "gaps_total": 0},
+    "changed": false,
+    "warm_up": {"candles": 24, "kind": "exact", "dropped": 24},
+    "rows": {"first_ts": 1717421400, "last_ts": 1717428600, "count": 5},
+    "predictions": {"count": 5, "sha256": "e1aa90d2…"},
+    "align": {"predictions_without_candle": 0, "candles_without_prediction": 0}
+  },
+  "decision": {"calibrate": null, "ema": null, "rule": {"name": "threshold", "limit": 0.05},
+               "long_only": false, "confirm": null, "min_hold": null},
+  "execution": {"fill": "next_open", "stop_loss": 0.05, "drawdown_stop": null,
+                "fee_bps": 10.0, "slippage_bps": 0.0},
+  "benchmarks": [{"id": "bh", "kind": "buy_and_hold", "instrument": "stock:AAPL"}],
+  "metrics": {"periods_per_year": 252, "risk_free_rate": 0.0},
+  "results": {                                                    // null unless finished
+    "stats": {"total_return": -0.05195, "max_drawdown": -0.060224, "sharpe": null, "sortino": null,
+              "num_trades": 1, "win_rate": 0.0, "avg_trade_return": -0.05195,
+              "best_trade_return": -0.05195, "worst_trade_return": -0.05195,
+              "exposure": 0.2, "fees_paid": 0.00195, "buy_and_hold_return": -0.02},
+    "benchmarks": {"bh": {"total_return": -0.02}},
+    "series": {
+      "resolution": "candle", "count": 5,
+      "columns": {
+        "ts":         [1717421400, 1717423200, 1717425000, 1717426800, 1717428600],
+        "close":      [100.0, 101.0, 103.0, 97.0, 98.0],
+        "prediction": [0.01, 0.3, 0.2, 0.1, 0.4],
+        "signal":     [0.0, 1.0, 1.0, 1.0, 1.0],
+        "position":   [0.0, 0.0, 1.0, 0.0, 0.0],
+        "equity":     [1.0, 1.0, 1.008804, 0.94805, 0.94805],
+        "drawdown":   [0.0, 0.0, 0.0, -0.060224, -0.060224]
+      },
+      "benchmarks": {"bh": [1.0, 1.01, 1.03, 0.97, 0.98]}
+    },
+    "trades": {
+      "count": 1, "total": 1, "complete": true,
+      "columns": {
+        "signal_ts": [1717423200], "open_ts": [1717425000], "close_ts": [1717426800],
+        "side": [1], "open_price": [102.0], "close_price": [96.9], "stop_price": [96.9],
+        "exit_reason": ["stop"], "return": [-0.05195], "fees": [0.00195],
+        "slippage_cost": [0.0], "candles_held": [1]
+      }
+    }
+  }
+}
+```
+
+The groups follow the builder's steps (Model, Data, Decision, Execution): `model`, `data`,
+`decision`, `execution` and `benchmarks` together are what a new run needs, so running a
+backtest again sends them back.
+
+| Group | Fields | From |
+| --- | --- | --- |
+| `backtest` | ID, the user's number, status, when it was created and finished (ISO 8601 UTC), seconds it took, the error of a failed run | the stored backtest |
+| `software` | `ENGINE_VERSION`, the app's version, the versions of the model runner | the engine, the app, the worker |
+| `model` | ID (null once the model is deleted), file name, framework, SHA-256, size, the manifest copy | the model at run time |
+| `data` | the instrument, timeframe and session; `period`: the user's dates; `loaded`: the candles asked for, warm-up included, with their fingerprint; `changed`; `warm_up` as the preprocessing reports it; `rows`: what the engine ran on; the predictions' count and SHA-256; the `AlignReport` | the data module, the preprocessing, `align` |
+| `decision` | each post-processing step in the order applied, null when off: exactly what `run.json` records | the steps ([Signals](#signals)) |
+| `execution` | the engine's `Settings` | [Settings](#settings) |
+| `benchmarks` | what the run is compared with: an ID, a kind and an instrument. Version 1 has buy and hold only | the builder |
+| `metrics` | the arguments `stats` was called with | [Metrics](#metrics) |
+| `results.stats` | the 12 metrics of [Metrics](#metrics), in their order | `stats`, with `max_drawdown` negative |
+| `results.benchmarks` | each benchmark's `total_return` | `buy_and_hold_return` for `bh` |
+| `results.series` | `ts`, `close`, `prediction`, `signal`, `position`, `equity`, `drawdown` per row; each benchmark's equity on the same rows | the engine's `series`, the candles, `drawdown` |
+| `results.trades` | the engine's trade columns, plus `candles_held`: the rows from the entry candle to the exit candle | the engine's `trades` |
+
+### Conventions
+
+- **Tables are columns:** `{"ts": [...], "equity": [...]}`, index `i` of every array is one
+  row, as the candles endpoint does. Column names are the engine's, so a download maps one to
+  one onto `trades.parquet` and `series.parquet`.
+- **Market time** (every `ts`, `*_ts`, `start` and `end`) is integer UTC epoch seconds of a
+  candle's open, ranges `[start, end)`. **Wall-clock time** (`created_at`, `finished_at`) is ISO
+  8601 UTC.
+- **Returns, fees, drawdown and exposure are fractions** (0.05 is 5%). `equity` is a multiple
+  of the starting capital, 1.0 at the start. Prices are in `data.instrument.currency`.
+- **`max_drawdown` is negative** (-0.06 is 6% below the peak), as the app shows it; `stats.json`
+  of the command keeps the engine's positive value.
+- **Sharpe and Sortino** are yearly with `metrics.periods_per_year`: 252 for stocks, 365 for
+  crypto, which trades every day. (The command always uses 252.)
+- **Numbers are not rounded.** A value that is not finite is `null`, never NaN, so the document
+  is always valid JSON.
+- No field or value names a person, and the document holds no user ID, email or key.
+
+### The light view
+
+The page and the API get the same document with two tables made lighter. The download gets every
+row and every trade.
+
+- **Series** of more than 10,000 rows become one point per UTC day: the day's last `close`,
+  `position`, `equity` and benchmark equity, and its lowest `drawdown`, at the `ts` of the day's
+  last candle. These are the days Sharpe and Sortino are computed from, so the chart and the
+  metrics agree, and the lowest point is `max_drawdown`. `prediction` and `signal` are left out.
+  `series.resolution` is then `day` instead of `candle`.
+- **Trades** above 10,000 keep the newest 10,000; `count` is how many are in the document,
+  `total` how many the run had, and `complete` is false.
+
+| Use | Route | Series | Trades |
+| --- | --- | --- | --- |
+| the page, the API | `GET /api/v1/backtests/{id}`, any status (`results` null until it finishes) | light | light |
+| the download | `GET /api/v1/backtests/{id}/download`, an attachment; `409 backtest-not-finished` before it finishes | every row | every trade |
+
+A 10-year run of 30-minute stock candles is about 4 MB as a download (1.4 MB compressed); a
+10-year crypto run about 21 MB (7.6 MB compressed). The light view stays under 2 MB.
+
+### The version
+
+`version` is the format's version, now 1.
+
+- A version only grows: a new field, a new column or a new value in an open list
+  (`exit_reason`, `benchmarks[].kind`, the `decision` steps, `series.resolution`) keeps the
+  version. Readers ignore fields they do not know and accept new values in those lists.
+- Removing or renaming a field, or changing its type, unit or meaning, makes version 2.
+- A new `ENGINE_VERSION` does not change it: the engine's version is data in the document.
+- A JSON Schema generated from the API's models will live in `docs/backtest.schema.json`, kept
+  current by a test, as the manifest's is.
+
+Not in version 1: benchmarks other than buy and hold (SPY, QQQ, DIA), returns per month, the
+candles' OHLC (the fingerprint and `loaded` fetch them again), per-trade excursions, rolling
+statistics, partial results of a failed run.
+
 ## Checking against the supervisor's backtest
 
 `backend/tests/unit/engine/test_supervisor.py` runs the engine on the supervisor's candles and
