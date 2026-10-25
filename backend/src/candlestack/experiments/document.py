@@ -21,6 +21,15 @@ VERSION = 1
 # and only the newest trades up to this stay.
 LIGHT_ROWS = 10_000
 LIGHT_TRADES = 10_000
+# The largest windows a run takes. Each build of a document runs the steps again, in the API
+# process: ``rank`` compares a prediction with every other one of its window, and ``kmeans``
+# fits on its window at every refit, which keeps the GIL. These keep a run of CANDLES_MAX rows
+# to a second or two (a ``rank`` window of 5,000 takes 8 s, k-means with a window of 2,000
+# refitted on every row a minute and a half).
+CALIBRATION_WINDOW_MAX = 1_000
+KMEANS_WINDOW_MAX = 5_000
+# A k-means fit is used for at least ``window / 20`` rows.
+KMEANS_WINDOW_PER_REFIT = 20
 
 Number = Annotated[float, Field(allow_inf_nan=False)]
 
@@ -72,7 +81,7 @@ class CalibrateStep(_Strict):
     """`zscore` or `rank` over the `window` predictions ending at each one."""
 
     name: Literal["zscore", "rank"]
-    window: int = Field(ge=2)
+    window: int = Field(ge=2, le=CALIBRATION_WINDOW_MAX)
 
 
 class EmaStep(_Strict):
@@ -101,13 +110,20 @@ class HysteresisRule(_Strict):
 class KmeansRule(_Strict):
     name: Literal["kmeans"]
     k: int = Field(ge=2, le=5, description="Groups: long in the highest, short in the lowest")
-    window: int = Field(description="Earlier predictions a fit uses, at least `2 * k`")
-    refit_every: int = Field(ge=1, description="Rows a fit is used for")
+    window: int = Field(
+        le=KMEANS_WINDOW_MAX, description="Earlier predictions a fit uses, at least `2 * k`"
+    )
+    refit_every: int = Field(
+        ge=1,
+        description=f"Rows a fit is used for, at least `window / {KMEANS_WINDOW_PER_REFIT}`",
+    )
 
     @model_validator(mode="after")
     def _window_fits_the_groups(self) -> Self:
         if self.window < 2 * self.k:
             raise ValueError("window must be at least 2 * k")
+        if self.window > KMEANS_WINDOW_PER_REFIT * self.refit_every:
+            raise ValueError(f"refit_every must be at least window / {KMEANS_WINDOW_PER_REFIT}")
         return self
 
 

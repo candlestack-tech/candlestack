@@ -183,6 +183,10 @@ def test_the_decision_is_what_run_json_records(decision: dict[str, Any]) -> None
         {"rule": {"name": "kmeans", "k": 6, "window": 50, "refit_every": 10}},
         {"rule": {"name": "magic"}},
         {"calibrate": {"name": "zscore", "window": 1}},
+        # Windows that would keep the API busy for seconds at each build of the document.
+        {"calibrate": {"name": "rank", "window": 1001}},
+        {"rule": {"name": "kmeans", "k": 3, "window": 5001, "refit_every": 1000}},
+        {"rule": {"name": "kmeans", "k": 3, "window": 2000, "refit_every": 99}},
         {"ema": {"span": 0}},
         {"confirm": {"candles": 0}},
         {"min_hold": {"candles": 1.5}},

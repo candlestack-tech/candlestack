@@ -239,6 +239,7 @@
           "type": "string"
         },
         "window": {
+          "maximum": 1000,
           "minimum": 2,
           "title": "Window",
           "type": "integer"
@@ -652,13 +653,14 @@
           "type": "string"
         },
         "refit_every": {
-          "description": "Rows a fit is used for",
+          "description": "Rows a fit is used for, at least `window / 20`",
           "minimum": 1,
           "title": "Refit Every",
           "type": "integer"
         },
         "window": {
           "description": "Earlier predictions a fit uses, at least `2 * k`",
+          "maximum": 5000,
           "title": "Window",
           "type": "integer"
         }

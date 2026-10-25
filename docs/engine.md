@@ -830,7 +830,11 @@ The engine's worked example ([Worked example](#worked-example)) with `next_open`
 
 The groups follow the builder's steps (Model, Data, Decision, Execution): `model`, `data`,
 `decision`, `execution` and `benchmarks` together are what a new run needs, so running a
-backtest again sends them back. `backend/tests/unit/experiments/test_document.py` builds this
+backtest again sends them back. As every view of a document runs the steps again, a new run's
+windows are bounded: a calibration window of at most 1,000, a k-means window of at most 5,000
+with `refit_every` at least `window / 20` (a `rank` window of 5,000 takes 8 s on 50,000 rows,
+k-means of 2,000 refitted on every row a minute and a half).
+`backend/tests/unit/experiments/test_document.py` builds this
 example as a document and compares it with what is printed here; change both together.
 
 | Group | Fields | From |
