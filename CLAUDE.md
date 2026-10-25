@@ -17,8 +17,8 @@ contract.
 - Do only what the task asks. No drive-by refactors, renames or new dependencies.
 - Modules import each other only through their package root
   (`from candlestack.core import ProblemError`), and `candlestack.core` imports no other module.
-  The backtest modules `engine`, `signals` and `metrics` import no other module, not each
-  other and no server library; no module imports `cli`. A new module gets its entry in the
+  The backtest modules `engine`, `signals` and `metrics`, and `preprocessing`, import no other
+  module, not each other and no server library; no module imports `cli`. A new module gets its entry in the
   import-linter contracts in `backend/pyproject.toml`.
 - The API is a contract: a change to it updates `docs/openapi.json`
   (`uv run python -m candlestack.openapi > ../docs/openapi.json`) and `docs/data.md` or
