@@ -120,6 +120,13 @@ const modelsRoute = createRoute({
   component: lazyRouteComponent(() => import('@/pages/ModelsPage'), 'ModelsPage'),
 });
 
+// /models/mdl_7f3k2m9qx4: one model's page. An ID the user has no model with says so on the page.
+const modelRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/models/$modelId',
+  component: lazyRouteComponent(() => import('@/pages/ModelPage'), 'ModelPage'),
+});
+
 const openSettingsSection = (section: string) =>
   redirect({ to: '/settings/$section', params: { section }, replace: true });
 
@@ -151,5 +158,5 @@ const settingsSectionRoute = createRoute({
 
 export const routeTree = rootRoute.addChildren([
   publicRoute.addChildren([homeRoute, instrumentsRoute, instrumentRoute, signInRoute]),
-  appRoute.addChildren([dashboardRoute, backtestsRoute, modelsRoute, settingsRoute, settingsSectionRoute]),
+  appRoute.addChildren([dashboardRoute, backtestsRoute, modelsRoute, modelRoute, settingsRoute, settingsSectionRoute]),
 ]);

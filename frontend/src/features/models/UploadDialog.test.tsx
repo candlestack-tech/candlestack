@@ -12,8 +12,8 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ARSEN, MB, model, modelsAnswer, problem, session, stubApi } from '@/test/api';
-import { renderApp } from '@/test/app';
+import { MB, model, modelsAnswer, problem, stubApi } from '@/test/api';
+import { addButton, file, LSTM, openUpload, steps, UPLOAD, type Answers } from '@/test/upload';
 
 import { UploadDialog } from './UploadDialog';
 
@@ -22,24 +22,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const UPLOAD = 'POST /api/v1/models?name=lstm-signals.keras';
-const LSTM = model({ id: 'mdl_a2b3c4d5e6', name: 'lstm-signals.keras', size_bytes: Math.round(12.4 * MB) });
-
-// A file of `mb` megabytes; only its size and name matter.
-function file(name: string, mb = 12.4) {
-  const item = new File(['x'], name);
-  Object.defineProperty(item, 'size', { value: Math.round(mb * MB) });
-  return item;
-}
-
-type Answers = Parameters<typeof stubApi>[0];
-
-// The dialog on another page than Models, as the dashboard will have it.
+// The dialog on another page than Models, as the dashboard has it.
 function renderElsewhere() {
   const root = createRootRoute({
     component: () => (
       <>
-        <UploadDialog onBacktest={() => undefined}>
+        <UploadDialog>
           <button type="button">Upload</button>
         </UploadDialog>
         <Outlet />
@@ -48,7 +36,7 @@ function renderElsewhere() {
   });
   const page = (path: string) => createRoute({ getParentRoute: () => root, path });
   const router = createRouter({
-    routeTree: root.addChildren([page('/dashboard'), page('/models')]),
+    routeTree: root.addChildren([page('/dashboard'), page('/models/$modelId')]),
     history: createMemoryHistory({ initialEntries: ['/dashboard'] }),
   });
   render(
@@ -59,164 +47,93 @@ function renderElsewhere() {
   return router;
 }
 
-async function openUpload(answers: Answers = {}, url = '/models') {
-  const fetch = stubApi({ ...session(ARSEN), ...modelsAnswer([]), ...answers });
-  const app = await renderApp(url);
-  const user = userEvent.setup();
-  await user.click(await screen.findByRole('button', { name: /^Upload model/ }));
-  const dialog = within(screen.getByRole('dialog', { name: 'Upload model' }));
-  const choose = (item: File) => fireEvent.change(dialog.getByLabelText('Model file'), { target: { files: [item] } });
-  return { ...app, fetch, user, dialog, choose };
-}
-
-// The checks as screen readers hear them: their state, title and hint.
-const checks = (dialog: { getAllByRole: (role: 'listitem') => HTMLElement[] }) =>
-  dialog.getAllByRole('listitem').map((item) => item.textContent);
-
-describe('the upload dialog', () => {
-  it('opens on the drop zone, a file picker that offers every format', async () => {
+describe('the upload, step 1: the model', () => {
+  it('opens on the model with the later steps waiting and Add model off', async () => {
     const { dialog } = await openUpload();
-    const zone = dialog.getByRole('button', { name: /Drop a trained model here/ });
-    expect([...zone.children].map((child) => child.textContent)).toEqual([
-      '',
-      'Drop a trained model here',
-      'or click to choose a file. Up to 50 MB.',
-      ['Keras', 'TensorFlow', 'PyTorch', 'ONNX', 'scikit-learn'].join(''),
-    ]);
+    expect(steps(dialog)).toEqual(['Upload the model', 'Upload the manifest', 'Add the model']);
+    expect(dialog.getByText('A trained model in Keras (.keras) or ONNX (.onnx), up to 50 MB.')).toBeDefined();
+    const zone = dialog.getByRole('button', { name: /Drop the model here/ });
+    expect(zone.textContent).toBe('Drop the model hereor click to choose a fileKerasONNX');
+    expect(dialog.getByRole('link', { name: 'How to export' }).getAttribute('href')).toBe(
+      'https://onnx.ai/onnx/intro/converters.html',
+    );
+    expect(dialog.getByText(/^PyTorch, TensorFlow or scikit-learn\? Export the model to ONNX first\./)).toBeDefined();
     const input = dialog.getByLabelText<HTMLInputElement>('Model file');
-    expect([input.type, input.accept]).toEqual(['file', '.keras,.h5,.pb,.zip,.pt,.pth,.onnx,.joblib,.pkl,.skops']);
-    expect(dialog.queryByRole('button', { name: 'Cancel' })).toBeNull();
-  });
-
-  it('keeps an empty live region in the accessibility tree for the first announcement', async () => {
-    const { dialog } = await openUpload();
-    const region = dialog.getByRole('button', { name: /Drop a trained model here/ }).nextElementSibling;
-    expect(region?.getAttribute('aria-live')).toBe('polite');
-    expect(region?.childElementCount).toBe(0);
+    expect([input.type, input.accept]).toEqual(['file', '.keras,.onnx']);
+    expect(addButton(dialog).disabled).toBe(true);
   });
 
   it('opens the file picker on a click of the drop zone', async () => {
     const { user, dialog } = await openUpload();
-    const input = dialog.getByLabelText<HTMLInputElement>('Model file');
-    const click = vi.spyOn(input, 'click');
-    await user.click(dialog.getByRole('button', { name: /Drop a trained model here/ }));
+    const click = vi.spyOn(dialog.getByLabelText<HTMLInputElement>('Model file'), 'click');
+    await user.click(dialog.getByRole('button', { name: /Drop the model here/ }));
     expect(click).toHaveBeenCalledOnce();
   });
 
   it('marks the drop zone while a file is dragged over it and takes the file dropped', async () => {
     const { dialog, fetch } = await openUpload({ [UPLOAD]: { status: 201, body: LSTM } });
-    const zone = dialog.getByRole('button', { name: /Drop a trained model here/ });
+    const zone = dialog.getByRole('button', { name: /Drop the model here/ });
     fireEvent.dragEnter(zone);
     expect(zone.dataset.dragging).toBe('true');
-    fireEvent.dragLeave(zone, { relatedTarget: document.body });
+    fireEvent.dragLeave(zone);
     expect(zone.dataset.dragging).toBeUndefined();
-    fireEvent.dragOver(zone);
     fireEvent.drop(zone, { dataTransfer: { files: [file('lstm-signals.keras')] } });
 
-    expect(await dialog.findByText('lstm-signals.keras is ready')).toBeDefined();
+    expect(await dialog.findByRole('heading', { name: 'Done: Model uploaded' })).toBeDefined();
     expect(fetch).toHaveBeenCalledWith('/api/v1/models?name=lstm-signals.keras', expect.anything());
   });
 
-  it('says another format is coming soon, without asking the API', async () => {
+  it.each([
+    ['an ONNX model', 'mixer.onnx', 'ONNX support is coming soon', 'For now CandleStack takes Keras models (.keras).'],
+    [
+      'a PyTorch model',
+      'tcn.pt',
+      'PyTorch files are not supported',
+      'Export the model to ONNX. For now CandleStack takes Keras models (.keras).',
+    ],
+    ['any other file', 'notes.png', 'This file is not supported', 'CandleStack takes Keras models (.keras).'],
+  ])('turns away %s at once, without asking the API', async (_, name, title, line) => {
     const { dialog, fetch, choose } = await openUpload();
     const asked = fetch.mock.calls.length;
-    choose(file('tcn-signals.pt', 8.1));
-
-    expect(dialog.getByText('tcn-signals.pt')).toBeDefined();
-    expect(dialog.getByText('PyTorch · 8.1 MB')).toBeDefined();
-    expect(dialog.getByTitle('PyTorch')).toBeDefined();
-    expect(checks(dialog)).toEqual([
-      'Not yet: Support for this format is coming soonFor now CandleStack takes Keras models (.keras).',
-    ]);
-    expect(dialog.getByRole('button', { name: 'Cancel' })).toBeDefined();
-    expect(dialog.getByRole('button', { name: 'Choose another file' })).toBeDefined();
+    choose(file(name));
+    const alert = dialog.getByRole('alert');
+    expect(alert.textContent).toBe(`${title}${line}Choose another file`);
+    expect(steps(dialog)[0]).toBe('Failed: Upload the model');
     expect(fetch.mock.calls.length).toBe(asked);
   });
 
-  it('shows a file of no known format by its name only', async () => {
-    const { dialog, choose } = await openUpload();
-    choose(file('notes.txt'));
-    const row = dialog.getByText('notes.txt').closest('div');
-    expect(row?.textContent).toBe('notes.txt');
-    expect(row?.querySelector('[title]')).toBeNull();
-    expect(checks(dialog)[0]).toContain('Support for this format is coming soon');
+  it('says a file over the limit is too large without sending it', async () => {
+    const { fetch, dialog, choose } = await openUpload();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/v1/models', expect.anything()));
+    choose(file('lstm-signals.keras', 61.2));
+    expect(dialog.getByRole('alert').textContent).toBe('Larger than 50 MBThe file is 61.2 MB.Choose another file');
+    expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   });
 
-  it('shows both checks pending in their place while the upload runs', async () => {
-    const { dialog, choose } = await openUpload({ [UPLOAD]: () => new Promise(() => {}) });
-    choose(file('lstm-signals.keras'));
-
-    expect(dialog.getByText('Keras · 12.4 MB')).toBeDefined();
-    expect(checks(dialog)).toEqual([
-      'Checking: Opens as a Keras model, no custom code inside',
-      'Checking: Trained weights inside',
-    ]);
-    expect(dialog.getByRole('button', { name: 'Cancel' })).toBeDefined();
-    expect(dialog.queryByRole('button', { name: 'Done' })).toBeNull();
-  });
-
-  it('sends the file as the raw body, its name in the query', async () => {
-    const { fetch, dialog, choose } = await openUpload({ [UPLOAD]: { status: 201, body: LSTM } });
+  it('shows the file being checked, then what the model takes and gives', async () => {
+    let answer = (_value: { status: number; body: unknown }) => undefined as void;
+    const { dialog, choose, fetch } = await openUpload({
+      [UPLOAD]: () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    });
     const chosen = file('lstm-signals.keras');
     choose(chosen);
-    await dialog.findByText('lstm-signals.keras is ready');
+    expect(steps(dialog)[0]).toBe('Checking: Upload the model');
+    expect(dialog.getByText('Keras · 12.4 MB')).toBeDefined();
+    expect(dialog.queryByRole('button', { name: /Drop the model here/ })).toBeNull();
+
+    answer({ status: 201, body: LSTM });
+    expect(await dialog.findByRole('heading', { name: 'Done: Model uploaded' })).toBeDefined();
+    const facts = [...dialog.getAllByRole('term')].map(
+      (term) => `${term.textContent}=${term.nextSibling?.textContent}`,
+    );
+    expect(facts).toEqual(['Format=Keras', 'Input=[25, 5]', 'Output=[1]', 'Size=12.4 MB']);
+    expect(steps(dialog)).toEqual(['Done: Model uploaded', 'Upload the manifest', 'Add the model']);
     const init = fetch.mock.calls.find(([, options]) => options?.method === 'POST')?.[1];
     expect(init?.body).toBe(chosen);
     expect(init?.headers).toMatchObject({ 'Content-Type': 'application/octet-stream' });
-  });
-
-  it('passes both checks: the model is ready and joins the page', async () => {
-    const kept = model({ ...LSTM, name: 'lstm-signals (2).keras', parameters: 1_240_000, input_shape: [25, 101] });
-    const { dialog, choose, user } = await openUpload({
-      [UPLOAD]: { status: 201, body: kept },
-    });
-    stubApi({ ...modelsAnswer([kept]), [UPLOAD]: { status: 201, body: kept } });
-    choose(file('lstm-signals.keras'));
-
-    expect(await dialog.findByText('lstm-signals (2).keras is ready')).toBeDefined();
-    expect(checks(dialog)).toEqual([
-      'Passed: Opens as a Keras model, no custom code inside',
-      'Passed: Trained weights inside1.24 M parameters',
-    ]);
-    expect(dialog.getByText('Keras · 1.24 M parameters · in 25 × 101 → 1')).toBeDefined();
-    expect(screen.getByText('1 model · 12.4 MB of 100 MB used')).toBeDefined();
-    // The page behind the dialog is hidden from screen readers while it is open.
-    expect(screen.getAllByRole('article', { hidden: true })).toHaveLength(1);
-
-    await user.click(dialog.getByRole('button', { name: 'Done' }));
-    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  });
-
-  it('leaves the shape out of the summary when the file does not say it', async () => {
-    const kept = model({ ...LSTM, parameters: 9_325, input_shape: null, output_shape: null });
-    const { dialog, choose } = await openUpload({ [UPLOAD]: { status: 201, body: kept } });
-    choose(file('lstm-signals.keras'));
-    expect(await dialog.findByText('Keras · 9,325 parameters')).toBeDefined();
-    expect(checks(dialog)[1]).toBe('Passed: Trained weights inside9,325 parameters');
-  });
-
-  it('goes to the Models page on Done when it was opened elsewhere', async () => {
-    stubApi({ ...modelsAnswer([]), [UPLOAD]: { status: 201, body: LSTM } });
-    const router = renderElsewhere();
-    const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Upload' }));
-    const dialog = within(screen.getByRole('dialog', { name: 'Upload model' }));
-    fireEvent.change(dialog.getByLabelText('Model file'), { target: { files: [file('lstm-signals.keras')] } });
-    await dialog.findByText('lstm-signals.keras is ready');
-    await user.click(dialog.getByRole('button', { name: 'Done' }));
-    await vi.waitFor(() => expect(router.state.location.pathname).toBe('/models'));
-    expect(screen.queryByRole('dialog')).toBeNull();
-  });
-
-  it('opens New backtest from Backtest with it', async () => {
-    const { dialog, choose, user } = await openUpload({ [UPLOAD]: { status: 201, body: LSTM } });
-    choose(file('lstm-signals.keras'));
-    await dialog.findByText('lstm-signals.keras is ready');
-    await user.click(dialog.getByRole('button', { name: 'Backtest with it' }));
-
-    const next = await screen.findByRole('dialog', { name: 'New backtest' });
-    expect(next.textContent).toContain('Coming soon');
-    expect(screen.queryByRole('dialog', { name: 'Upload model' })).toBeNull();
   });
 
   // Once the file is in, the API checks and keeps it whatever the page does: closing the dialog
@@ -237,35 +154,17 @@ describe('the upload dialog', () => {
     await user.click(dialog.getByRole('button', { name: 'Cancel' }));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(request?.signal?.aborted ?? false).toBe(false);
-    expect(screen.getByText('0 models · 0 MB of 100 MB used')).toBeDefined();
 
     stubApi(modelsAnswer([LSTM]));
     answer({ status: 201, body: LSTM });
-    expect(await screen.findByText('1 model · 12.4 MB of 100 MB used')).toBeDefined();
+    expect(await screen.findByText(/^1 model · 12.4 MB of 100 MB used/)).toBeDefined();
     expect(screen.getAllByRole('article')).toHaveLength(1);
-  });
-
-  it('asks for the models again when an upload ends without the model: the API may have kept it', async () => {
-    let fail = () => undefined as void;
-    const { fetch, dialog, choose, user } = await openUpload({
-      [UPLOAD]: () =>
-        new Promise((_resolve, reject) => {
-          fail = () => reject(new TypeError('Failed to fetch'));
-        }),
-    });
-    choose(file('lstm-signals.keras'));
-    await user.click(dialog.getByRole('button', { name: 'Cancel' }));
-    const listed = () => fetch.mock.calls.filter(([path]) => path === '/api/v1/models').length;
-    const before = listed();
-    fail();
-    await vi.waitFor(() => expect(listed()).toBe(before + 1));
   });
 
   it.each([
     ['a server error', { status: 503, body: { detail: 'Down.' } }, 1],
     ['a refusal of the file', problem(413, 'model-too-large', 'Too large.'), 0],
     ['a failed check', problem(422, 'model-check-failed', 'No weights.', { check: 'weights' }), 0],
-    ['a full storage', problem(409, 'storage-full', 'Full.'), 0],
   ])('after %s asks for the models again only when the API may have kept the file', async (_, answer, again) => {
     const { fetch, dialog, choose } = await openUpload({ [UPLOAD]: answer });
     const listed = () => fetch.mock.calls.filter(([path]) => path === '/api/v1/models').length;
@@ -277,53 +176,60 @@ describe('the upload dialog', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(listed()).toBe(before + again);
   });
-
-  it('says a file over the limit is too large without sending it', async () => {
-    const { fetch, dialog, choose } = await openUpload();
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/v1/models', expect.anything()));
-    choose(file('lstm-signals.keras', 61.2));
-    expect(checks(dialog)).toEqual(['Failed: Larger than 50 MBThe file is 61.2 MB.']);
-    expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
-    expect(dialog.getByRole('button', { name: 'Choose another file' })).toBeDefined();
-  });
 });
 
-describe('a failed upload', () => {
-  async function failWith(answer: Answers[string]) {
-    const opened = await openUpload({ [UPLOAD]: answer });
+describe('a refused model', () => {
+  async function failWith(answer: Answers[string], answers: Answers = {}) {
+    const opened = await openUpload({ [UPLOAD]: answer, ...answers });
     opened.choose(file('lstm-signals.keras'));
-    await vi.waitFor(() => expect(opened.dialog.getByRole('button', { name: 'Choose another file' })).toBeDefined());
-    return opened;
+    const alert = await opened.dialog.findByRole('alert');
+    return { ...opened, text: alert.textContent?.replace(/Choose another file$/, '') };
   }
 
-  it('without trained weights: the first check passed, the second did not', async () => {
-    const { dialog } = await failWith(problem(422, 'model-check-failed', 'No weights.', { check: 'weights' }));
-    expect(checks(dialog)).toEqual([
-      'Passed: Opens as a Keras model, no custom code inside',
-      'Failed: No trained weights in the fileIt holds the layers only. Save the model after training and upload that file.',
-    ]);
-    expect(dialog.getByRole('button', { name: 'Cancel' })).toBeDefined();
-  });
-
-  it('that does not open: why, in the words of the API, and no second check', async () => {
-    const { dialog } = await failWith(
+  it.each([
+    [
+      'without trained weights',
+      problem(422, 'model-check-failed', 'No weights.', { check: 'weights' }),
+      'No trained weights in the fileIt holds the layers only. Save the model after training and upload that file.',
+    ],
+    [
+      'that does not open',
       problem(422, 'model-check-failed', 'The file holds custom code (a Lambda layer).', { check: 'opens' }),
-    );
-    expect(checks(dialog)).toEqual([
-      'Failed: Does not open as a safe Keras modelThe file holds custom code (a Lambda layer).',
-    ]);
-  });
-
-  it('too large', async () => {
-    const { dialog } = await failWith(problem(413, 'model-too-large', 'The file is 61.2 MB; the limit is 50 MB.'));
-    expect(checks(dialog)).toEqual(['Failed: Larger than 50 MBThe file is 61.2 MB; the limit is 50 MB.']);
-  });
-
-  it('with the storage full: what is used of it', async () => {
-    const { dialog } = await failWith(
+      'Does not open as a safe Keras modelThe file holds custom code (a Lambda layer).',
+    ],
+    ['too large', problem(413, 'model-too-large', 'The file is 61.2 MB.'), 'Larger than 50 MBThe file is 61.2 MB.'],
+    [
+      'with the storage full',
       problem(409, 'storage-full', 'Full.', { used_bytes: Math.round(92.3 * MB), quota_bytes: 100 * MB }),
-    );
-    expect(checks(dialog)).toEqual(['Failed: Not enough storage92.3 MB of 100 MB used. Delete a model to free space.']);
+      'Not enough storage92.3 MB of 100 MB used. Delete a model to free space.',
+    ],
+    [
+      'while another upload runs',
+      problem(409, 'upload-in-progress', 'Wait for it to finish.'),
+      'Another upload is in progressWait for it to finish.',
+    ],
+    ['with too many models', problem(409, 'too-many-models', 'Delete one first.'), 'Too many modelsDelete one first.'],
+    ['that took too long', problem(408, 'upload-timeout', 'Try again.'), 'Upload timed outTry again.'],
+    ['for another reason', { status: 500, body: { detail: 'Broke.' } }, 'Upload failedBroke.'],
+    [
+      "by the API's check of the request",
+      problem(422, 'validation', "query parameter 'name': too long"),
+      'Upload failedThe file could not be sent. Rename it and try again.',
+    ],
+    [
+      'of a format the API does not take',
+      problem(415, 'unsupported-model-format', 'Keras only.'),
+      'This file is not supportedCandleStack takes Keras models (.keras).',
+    ],
+    [
+      'without an answer',
+      () => Promise.reject(new TypeError('Failed to fetch')),
+      'Upload failedCannot reach the server. Check your connection.',
+    ],
+  ])('%s says why in its step', async (_, answer, text) => {
+    const failed = await failWith(answer);
+    expect(failed.text).toBe(text);
+    expect(steps(failed.dialog)[0]).toBe('Failed: Upload the model');
   });
 
   it('with the storage full and no numbers in the answer: the numbers the app has', async () => {
@@ -331,65 +237,32 @@ describe('a failed upload', () => {
       ...modelsAnswer([model({ size_bytes: 92 * MB })]),
       [UPLOAD]: problem(409, 'storage-full', 'Full.'),
     });
-    await dialog.findByRole('button', { name: /Drop a trained model here/ });
-    await vi.waitFor(() => expect(screen.getByText('1 model · 92 MB of 100 MB used')).toBeDefined());
+    await vi.waitFor(() => expect(screen.getByText(/^1 model · 92 MB of 100 MB used/)).toBeDefined());
     choose(file('lstm-signals.keras'));
-    await vi.waitFor(() =>
-      expect(checks(dialog)).toEqual(['Failed: Not enough storage92 MB of 100 MB used. Delete a model to free space.']),
+    expect((await dialog.findByRole('alert')).textContent).toBe(
+      'Not enough storage92 MB of 100 MB used. Delete a model to free space.Choose another file',
     );
-  });
-
-  it('while another upload is in progress: why, in the words of the API', async () => {
-    const { dialog } = await failWith(
-      problem(409, 'upload-in-progress', 'Another upload of yours is still in progress. Wait for it to finish.'),
-    );
-    expect(checks(dialog)).toEqual([
-      'Failed: Another upload is in progressAnother upload of yours is still in progress. Wait for it to finish.',
-    ]);
-    expect(dialog.getByRole('button', { name: 'Cancel' })).toBeDefined();
-  });
-
-  it('with as many models as allowed: why, in the words of the API', async () => {
-    const { dialog } = await failWith(
-      problem(409, 'too-many-models', 'You have 100 models, the most you can keep. Delete one first.', { limit: 100 }),
-    );
-    expect(checks(dialog)).toEqual([
-      'Failed: Too many modelsYou have 100 models, the most you can keep. Delete one first.',
-    ]);
-  });
-
-  it('that took too long: why, in the words of the API', async () => {
-    const { dialog } = await failWith(problem(408, 'upload-timeout', 'The file did not arrive in time. Try again.'));
-    expect(checks(dialog)).toEqual(['Failed: Upload timed outThe file did not arrive in time. Try again.']);
-  });
-
-  it('for any other reason: the message', async () => {
-    const { dialog } = await failWith({ status: 500, body: { detail: 'Something broke on our side.' } });
-    expect(checks(dialog)).toEqual(['Failed: Upload failedSomething broke on our side.']);
-  });
-
-  it("refused by the API's check of the request: plain words, not the API's", async () => {
-    const { dialog } = await failWith(
-      problem(422, 'validation', "query parameter 'name': String should have at most 255 characters"),
-    );
-    expect(checks(dialog)).toEqual(['Failed: Upload failedThe file could not be sent. Rename it and try again.']);
-  });
-
-  it('without an answer: the message', async () => {
-    const { dialog } = await failWith(() => Promise.reject(new TypeError('Failed to fetch')));
-    expect(checks(dialog)).toEqual(['Failed: Upload failedCannot reach the server. Check your connection.']);
-  });
-
-  it('of a format the API does not take: coming soon', async () => {
-    const { dialog } = await failWith(problem(415, 'unsupported-model-format', 'Keras only.'));
-    expect(checks(dialog)[0]).toContain('Support for this format is coming soon');
   });
 
   it('offers another file: back to the drop zone, with the file picker open', async () => {
     const { dialog, user } = await failWith(problem(413, 'model-too-large', 'Too large.'));
     const click = vi.spyOn(dialog.getByLabelText<HTMLInputElement>('Model file'), 'click');
     await user.click(dialog.getByRole('button', { name: 'Choose another file' }));
-    expect(dialog.getByRole('button', { name: /Drop a trained model here/ })).toBeDefined();
+    expect(dialog.getByRole('button', { name: /Drop the model here/ })).toBeDefined();
     expect(click).toHaveBeenCalledOnce();
+  });
+});
+
+describe('Add model elsewhere', () => {
+  it("opens the model's page on Add model when it was opened elsewhere", async () => {
+    stubApi({ ...modelsAnswer([]), [UPLOAD]: { status: 201, body: LSTM } });
+    const router = renderElsewhere();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Upload' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Add a model' }));
+    fireEvent.change(dialog.getByLabelText('Model file'), { target: { files: [file('lstm-signals.keras')] } });
+    await user.click(await dialog.findByRole('button', { name: 'Add the model without a manifest' }));
+    await user.click(addButton(dialog));
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe('/models/mdl_a2b3c4d5e6'));
   });
 });

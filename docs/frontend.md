@@ -261,27 +261,54 @@ The two sections with the account's preferences load them in the route's loader
 
 ## Models
 
-`/models` (`src/features/models/`, #208) follows `mockups/app` (`ddModels`, `mdTile`, the
-upload, rename and delete modals):
+`/models` and `/models/<id>` (`src/features/models/`, #208, #272) follow `mockups/app`
+(`ddModels`, `mdTileA`, the upload in three steps, `pageModel`, `inputMatrix`, the rename and
+delete modals):
 
 - One query, `modelsQueryOptions()` in `src/api/models.ts` under `['account', 'models']`, feeds
-  the page and the sidebar's count and storage. Every change writes the API's answer into it at
+  the pages and the sidebar's count and storage. Every change writes the API's answer into it at
   once and then asks again; the star changes before the API answers and goes back when it
-  refuses.
+  refuses. A model's whole manifest (its example too, which the list leaves out) is its own query,
+  `['account', 'manifest', <id>]`, and the catalog (`GET /api/v1/preprocessing/catalog`) is asked
+  for once.
+- The line under the title says how many models there are, the storage they take and, in the
+  warning colour, how many still need a manifest.
 - A tile per model, oldest first: the framework's mark (Simple Icons paths and brand colours in
-  `frameworks.ts`, a quarter lighter in the dark theme), the star (`src/components/StarButton.tsx`,
-  shared with the backtests later), the name, `Keras · size · added day`, the shape it reads, the
-  best Sharpe and the backtest count, Rename and Delete. Sizes are binary MB like the API's
-  limits. The day goes through `src/lib/dates.ts` in the account's zone and date format: "Today",
-  else `13 Oct` in the default format while it is this year's, else the whole date.
-- Upload model (`UploadDialog`, exported for the dashboard): the file goes to
-  `POST /api/v1/models?name=…` as the raw body. A file of another format (by its extension)
-  never reaches the API: it shows that support is coming soon. While the API checks the file,
-  both checks show pending in their place; then both pass (the model is ready, Backtest with it
-  opens New backtest) or the one that failed says why (`check` of `model-check-failed`, 413,
-  `storage-full`, anything else); a file over the limit fails before it is sent. Closing the
-  dialog aborts the upload and asks for the list again, as the API may have kept the file. A
-  model deleted meanwhile (404) closes its Rename or Delete dialog and leaves the list.
+  `frameworks.ts`, a quarter lighter in the dark theme), the state (Verified, Ready, Needs setup;
+  `StatePill.tsx`), the star (`src/components/StarButton.tsx`), the name, `Keras · size · added
+  day`, what it reads from its manifest ("Renko · 30m · 25 × 23", else "in 25 × 23 · no
+  manifest"), then the best Sharpe and the backtest count, or Add manifest while it has none. The
+  name's link is stretched over the tile, so the whole tile opens the model's page; the star and
+  Add manifest sit above it. Sizes are binary MB like the API's limits. The day goes through
+  `src/lib/dates.ts` in the account's zone and date format.
+- Add a model (`UploadDialog`, exported for the dashboard): three steps, all in view
+  (`UploadParts.tsx`). 1, the model: a Keras file goes to `POST /api/v1/models?name=…` as the raw
+  body; an ONNX file says ONNX is coming soon, a PyTorch, TensorFlow or scikit-learn file says to
+  export it to ONNX, and any other file that it is not supported, all without a request (as does
+  a file over the limit). 2, the manifest: the file is read as JSON and sent to
+  `PUT /api/v1/models/{id}/manifest`; a file that is no JSON or over 1 MB fails before it is sent,
+  and a refused one shows the API's sentences (`problems`, then how many more) in the step with
+  Choose another file. A kept manifest folds into a line of facts (input, output, what it reads,
+  the warm-up) and the bar "model [25, 5] = manifest [25, 5]", which opens the input matrix.
+  "Add the model without a manifest" skips the step. 3, one line of what goes to Models, and Add
+  model, which opens the model's page. The API keeps the model, and then the manifest, as soon as
+  each passed its checks, so closing the dialog early keeps what was uploaded (as Needs setup
+  without a manifest); an upload still running goes on to its answer. Add manifest
+  (`ManifestDialog`) is the same steps with the model done, ending in Save.
+- The model's page (`src/pages/ModelPage.tsx`), one screen without tabs: the header (the name,
+  the state, `Keras · size · added day`; Backtest with it and Download manifest, or Add manifest;
+  Rename and Delete), a strip of facts (what it reads and the warm-up, or the input shape without
+  a manifest; the backtests and the best Sharpe), the input drawn as a matrix beside the checks,
+  then the first 10 backtests of `GET /api/v1/backtests?model=<name>` with a link to all of them.
+  Backtest with it opens New backtest until the builder exists. Delete goes back to Models.
+- The matrix (`InputMatrix.tsx`): the window's rows down (the oldest at the top, at most 32 drawn,
+  spread over a longer window), the columns across under their catalog groups, then the one
+  number it predicts. The cells are shaded by the first sample of the manifest's `example`,
+  scaled per column; without one every cell has the same tint, as there are no values to draw.
+  A column is a button (one tab stop for all, the arrows, Home and End move between them): it
+  shows its catalog description, its parameters and its scaling ("as is", "BLESK scaling").
+- A model deleted meanwhile (404) closes its Rename or Delete dialog, and its page says it is not
+  found.
 
 ## Instrument icons
 

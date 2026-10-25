@@ -6,7 +6,8 @@ description: >-
 inputs:
   command:
     description: >-
-      candlestack-deploy command, e.g. "up stage <version> <backend@digest> <frontend@digest>"
+      candlestack-deploy command, e.g.
+      "up stage <version> <backend@digest> <frontend@digest> <worker@digest>"
     required: true
   ssh-key:
     description: Private deploy key of the environment (DEPLOY_SSH_KEY)
@@ -39,8 +40,9 @@ inputs:
 outputs:
   images:
     description: >-
-      The images an "up" command started, "<backend@digest> <frontend@digest>" (for "up prod",
-      the ones the VM chose from its stage record); empty for other commands
+      The images an "up" command started, "<backend@digest> <frontend@digest>" followed by
+      "<worker@digest>" when it started the worker (stage); for "up prod", the ones the VM chose
+      from its stage record; empty for other commands
     value: ${{ steps.run.outputs.images }}
 
 runs:
@@ -106,7 +108,7 @@ runs:
             printf '%s\n' "$ENV_SECRETS"
           fi
         } | ssh candlestack "$COMMAND" | tee "$RUNNER_TEMP/deploy-output"
-        # "up" ends with "images <backend@digest> <frontend@digest>".
+        # "up" ends with "images <backend@digest> <frontend@digest> [<worker@digest>]".
         sed -n 's/^images /images=/p' "$RUNNER_TEMP/deploy-output" >>"$GITHUB_OUTPUT"
 
     - name: Wait until healthy

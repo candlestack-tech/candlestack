@@ -1,6 +1,16 @@
 import { vi } from 'vitest';
 
-import type { Backtest, BacktestsPage, Dashboard, Me, Model, Preferences } from '@/api';
+import type {
+  Backtest,
+  BacktestsPage,
+  Catalog,
+  CatalogBlock,
+  Dashboard,
+  Manifest,
+  Me,
+  Model,
+  Preferences,
+} from '@/api';
 
 // A signed-in user as GET /api/v1/me sends it.
 export const ARSEN: Me = {
@@ -204,3 +214,61 @@ export const modelsAnswer = (list: Model[]): Record<string, Answer> => ({
     },
   },
 });
+
+// A manifest of raw candles: the five prices of the last `rows` candles, nothing scaled.
+export const manifest = (rows = 25, fields: Partial<Manifest> = {}): Manifest => ({
+  version: 1,
+  input: {
+    timeframe: '30m',
+    session: 'regular',
+    representation: { id: 'candles@1' },
+    features: ['open', 'high', 'low', 'close', 'volume'].map((name) => ({
+      name,
+      id: `${name}@1`,
+      norm: { id: 'none@1' },
+    })),
+    window: { length: rows, last: 'closed' },
+  },
+  signature: {
+    input: { shape: [rows, 5], dtype: 'float32' },
+    output: { shape: [1], dtype: 'float32', meaning: 'score' },
+  },
+  ...fields,
+});
+
+// The summary the API gives a model with that manifest.
+export const rawCandlesSummary = (rows = 25): NonNullable<Model['manifest_summary']> => ({
+  representation: { id: 'candles@1', params: {} },
+  timeframe: '30m',
+  session: 'regular',
+  input_shape: [rows, 5],
+  warm_up: { candles: rows - 1, kind: 'exact' },
+});
+
+const block = (
+  id: string,
+  step: CatalogBlock['step'],
+  description: string,
+  group: string | null = null,
+): CatalogBlock => ({
+  id,
+  step,
+  description,
+  group,
+  params: [],
+  warm_up: '0',
+});
+
+// GET /api/v1/preprocessing/catalog as the API has it so far.
+export const CATALOG: Catalog = {
+  blocks: [
+    block('candles@1', 'representation', 'Every candle a row'),
+    ...['open', 'high', 'low', 'close', 'volume'].map((name) =>
+      block(`${name}@1`, 'feature', `The ${name} of the candle`, 'Candle'),
+    ),
+    block('none@1', 'normalization', 'No normalization: the values as they are'),
+    block('window@1', 'window', 'The last rows up to each row make one sample'),
+  ],
+};
+
+export const catalogAnswer = { 'GET /api/v1/preprocessing/catalog': { status: 200, body: CATALOG } };

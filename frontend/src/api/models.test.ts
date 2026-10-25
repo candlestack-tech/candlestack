@@ -1,10 +1,18 @@
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { model, modelsAnswer, problem, stubApi } from '@/test/api';
+import { CATALOG, catalogAnswer, manifest, model, modelsAnswer, problem, stubApi } from '@/test/api';
 
 import { ApiError } from './client';
-import { deleteModel, modelsQueryOptions, updateModel, uploadModel } from './models';
+import {
+  catalogQueryOptions,
+  deleteModel,
+  manifestQueryOptions,
+  modelsQueryOptions,
+  setManifest,
+  updateModel,
+  uploadModel,
+} from './models';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -61,5 +69,53 @@ describe('deleteModel', () => {
     const fetch = stubApi({ 'DELETE /api/v1/models/mdl_7f3k2m9qx4': { status: 204 } });
     await expect(deleteModel('mdl_7f3k2m9qx4')).resolves.toBeUndefined();
     expect(fetch).toHaveBeenCalledOnce();
+  });
+});
+
+describe('manifestQueryOptions', () => {
+  it("reads a model's whole manifest under the account, apart from the list", async () => {
+    stubApi({ 'GET /api/v1/models/mdl_7f3k2m9qx4/manifest': { status: 200, body: manifest() } });
+    const options = manifestQueryOptions('mdl_7f3k2m9qx4');
+    expect(options.queryKey).toEqual(['account', 'manifest', 'mdl_7f3k2m9qx4']);
+    await expect(new QueryClient().fetchQuery(options)).resolves.toEqual(manifest());
+  });
+
+  it('passes a model without one on as no-manifest', async () => {
+    stubApi({ 'GET /api/v1/models/mdl_7f3k2m9qx4/manifest': problem(404, 'no-manifest', 'No manifest yet.') });
+    await expect(new QueryClient().fetchQuery(manifestQueryOptions('mdl_7f3k2m9qx4'))).rejects.toMatchObject({
+      status: 404,
+      problem: 'no-manifest',
+    });
+  });
+});
+
+describe('setManifest', () => {
+  it('puts the manifest as JSON and answers with the model', async () => {
+    const ready = model({ state: 'ready' });
+    const fetch = stubApi({ 'PUT /api/v1/models/mdl_7f3k2m9qx4/manifest': { status: 200, body: ready } });
+    await expect(setManifest('mdl_7f3k2m9qx4', manifest())).resolves.toEqual(ready);
+    const init = fetch.mock.calls[0]?.[1];
+    expect(init?.body).toBe(JSON.stringify(manifest()));
+    expect(init?.headers).toMatchObject({ 'Content-Type': 'application/json' });
+  });
+
+  it('passes a failed check on with its problems', async () => {
+    const problems = [{ check: 'model', detail: 'The manifest gives [24, 5], the model takes [25, 5].' }];
+    stubApi({
+      'PUT /api/v1/models/mdl_7f3k2m9qx4/manifest': problem(422, 'manifest-check-failed', 'Wrong.', { problems }),
+    });
+    await expect(setManifest('mdl_7f3k2m9qx4', {})).rejects.toMatchObject({
+      problem: 'manifest-check-failed',
+      body: { problems },
+    });
+  });
+});
+
+describe('catalogQueryOptions', () => {
+  it('reads the catalog once', async () => {
+    stubApi(catalogAnswer);
+    const options = catalogQueryOptions();
+    expect(options.staleTime).toBe(Infinity);
+    await expect(new QueryClient().fetchQuery(options)).resolves.toEqual(CATALOG);
   });
 });

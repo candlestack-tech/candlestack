@@ -27,14 +27,8 @@ export function formatUsage(used: number, quota: number): string {
   return `${formatMegabytes(usedMb)} MB of ${formatMegabytes(quotaMb)} MB`;
 }
 
-// From 100,000 in millions with 2 decimals (1.24 M), below it the grouped digits (9,325).
-export function formatParameters(count: number): string {
-  if (count >= 100_000) return `${formatPriceWith(count / 1_000_000, 2)} M`;
-  return formatPriceWith(count, 0);
-}
-
-// The shape a model reads and gives: "25×23 → 1" on a tile, "25 × 23 → 1" spaced in the upload
-// dialog. Without an input shape there is nothing to say (null); without an output, the input.
+// The shape a model reads and gives: "25×23 → 1" in the dashboard's starred models, "25 × 23 → 1"
+// spaced. Without an input shape there is nothing to say (null); without an output, the input.
 export function formatShape(input: number[] | null, output: number[] | null, spaced = false): string | null {
   if (input === null || input.length === 0) return null;
   const times = spaced ? ' × ' : '×';

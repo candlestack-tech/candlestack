@@ -51,7 +51,7 @@ export function GetStarted({ onNewBacktest }: { onNewBacktest: () => void }) {
           hint="Pick the data, a representation, a model and a rule"
           onClick={onNewBacktest}
         />
-        <UploadDialog onBacktest={onNewBacktest}>
+        <UploadDialog>
           <Step step={2} title="Upload your own model" hint="We check that it is a real model with trained weights" />
         </UploadDialog>
       </div>

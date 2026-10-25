@@ -29,7 +29,7 @@ case $1 in
     if [[ $file != /opt/candlestack/* ]]; then
       echo "  file $(head -n 1 "$file")" >>"$CALLS"
     fi
-    env | grep -E '^(ENV_NAME|APP_VERSION|BACKEND_IMAGE|FRONTEND_IMAGE|IMAGE|EDGE_NETWORK|REDIS_[A-Z_]+|POSTGRES_PASSWORD|ALPACA_[A-Z_]+|LOGO_DEV_KEY|SENTRY_DSN|OAUTH_[A-Z_]+|BETA_ALLOWLIST)=' |
+    env | grep -E '^(ENV_NAME|APP_VERSION|BACKEND_IMAGE|FRONTEND_IMAGE|WORKER_IMAGE|COMPOSE_PROFILES|IMAGE|EDGE_NETWORK|REDIS_[A-Z_]+|POSTGRES_PASSWORD|ALPACA_[A-Z_]+|LOGO_DEV_KEY|SENTRY_DSN|OAUTH_[A-Z_]+|BETA_ALLOWLIST)=' |
       sort | sed 's/^/  env /' >>"$CALLS"
     [[ $FAKE_DOCKER != fail-up || $* != *" up "* ]]
     ;;
@@ -69,8 +69,12 @@ image() {
 BACKEND=$(image backend)
 FRONTEND=$(image frontend)
 AGENT=$(image agent)
+WORKER=$(image worker)
+# What prod takes from the stage record; stage also gets the worker's image.
 IMAGES="$BACKEND $FRONTEND"
+STAGE_IMAGES="$IMAGES $WORKER"
 OLD_IMAGES="$(image old-backend) $(image old-frontend)"
+OLD_STAGE_IMAGES="$OLD_IMAGES $(image old-worker)"
 TOKEN=ghs_TestToken0123456789
 KEY_ID=PKTEST0123456789
 SECRET='t3st/Secret+0123=~!'
@@ -185,19 +189,37 @@ release_git() {
 
 # up_calls <env> <version> <maxmemory> <container limit> [with-secrets [with-dsn [with-logo
 # [with-db [with-oauth]]]]]: what "up"
-# asks of Docker; prod with the compose file of its release tag.
+# asks of Docker; prod with the compose file of its release tag and never the worker, stage with
+# the worker ($WORKER) and its queue, or without them and removing them when $no_worker is set.
 up_calls() {
+  local worker=
+  if [[ $1 == stage && -z ${no_worker-} ]]; then
+    worker=$WORKER
+  fi
   echo "docker login ghcr.io --username deploy --password-stdin"
   echo "  stdin $TOKEN"
   echo "  config TMP"
   echo "docker pull --quiet $BACKEND"
   echo "docker pull --quiet $FRONTEND"
+  if [[ -n $worker ]]; then
+    echo "docker pull --quiet $worker"
+  fi
   if [[ $1 == prod ]]; then
     echo "docker compose -p prod -f TMP/compose.yaml up --detach --remove-orphans"
     echo "  file # infra/env/compose.yaml of the release"
   else
     echo "docker compose -p $1 -f /opt/candlestack/infra/env/compose.yaml up --detach --remove-orphans"
   fi
+  up_env "$@"
+  if [[ $1 == stage && -z $worker ]]; then
+    echo "docker compose -p $1 -f /opt/candlestack/infra/env/compose.yaml rm --stop --force worker queue"
+    up_env "$@"
+  fi
+  echo "docker image prune --all --force"
+}
+
+# up_env <up_calls' arguments>: the variables compose gets from "up", sorted (uses $worker).
+up_env() {
   if [[ -n ${5:-} ]]; then
     echo "  env ALPACA_KEY_ID=$KEY_ID"
     echo "  env ALPACA_SECRET_KEY=$SECRET"
@@ -206,6 +228,9 @@ up_calls() {
   echo "  env BACKEND_IMAGE=$BACKEND"
   if [[ -n ${9:-} ]]; then
     echo "  env BETA_ALLOWLIST=ada@example.com,bob@example.com"
+  fi
+  if [[ -n $worker ]]; then
+    echo "  env COMPOSE_PROFILES=worker"
   fi
   echo "  env EDGE_NETWORK=edge"
   echo "  env ENV_NAME=$1"
@@ -227,7 +252,9 @@ up_calls() {
   if [[ -n ${6:-} ]]; then
     echo "  env SENTRY_DSN=$DSN"
   fi
-  echo "docker image prune --all --force"
+  if [[ -n $worker ]]; then
+    echo "  env WORKER_IMAGE=$worker"
+  fi
 }
 
 echo "# The keys: every one is restricted to candlestack-deploy with one of the scopes"
@@ -242,6 +269,7 @@ else
 fi
 
 echo "# What each key may run"
+# A line from before the worker: three fields.
 echo "main-$COMMIT $IMAGES" >"$RECORD"
 allowed "prod: up prod, with the compose file of the release" prod "up prod v0.2.0" \
   "$TOKEN
@@ -251,30 +279,35 @@ FAKE_GIT=not-shallow allowed "prod: up prod, a release candidate in a full clone
   "up prod v0.3.0-rc.1" "$TOKEN
 $SECRETS" "$(release_git v0.3.0-rc.1 6 | sed 's/ --unshallow//')
 $(up_calls prod v0.3.0-rc.1 256mb 288m with-secrets)"
-allowed "stage: up stage" stage "up stage main-0123abc $IMAGES" "$TOKEN
+allowed "stage: up stage, with the worker and its queue" stage "up stage main-0123abc $STAGE_IMAGES" "$TOKEN
 $SECRETS" "$(up_calls stage main-0123abc 256mb 288m with-secrets)"
+# A stage workflow run from before the worker (re-run) passes no worker image.
+allowed "stage: up stage without a worker image removes the worker and its queue" \
+  stage "up stage main-0123abc $IMAGES" "$TOKEN
+$SECRETS" "$(no_worker=1 up_calls stage main-0123abc 256mb 288m with-secrets)"
 # The organization's new name, while both are accepted.
-old_backend=$BACKEND old_frontend=$FRONTEND
+old_backend=$BACKEND old_frontend=$FRONTEND old_worker=$WORKER
 BACKEND=${BACKEND/candlestack-fei-stu/candlestack-tech}
 FRONTEND=${FRONTEND/candlestack-fei-stu/candlestack-tech}
-allowed "stage: up stage with images of candlestack-tech" stage "up stage main-0123abc $BACKEND $FRONTEND" "$TOKEN
+WORKER=${WORKER/candlestack-fei-stu/candlestack-tech}
+allowed "stage: up stage with images of candlestack-tech" stage "up stage main-0123abc $BACKEND $FRONTEND $WORKER" "$TOKEN
 $SECRETS" "$(up_calls stage main-0123abc 256mb 288m with-secrets)"
-BACKEND=$old_backend FRONTEND=$old_frontend
-allowed "stage: up stage with the Sentry DSN" stage "up stage main-0123abc $IMAGES" "$TOKEN
+BACKEND=$old_backend FRONTEND=$old_frontend WORKER=$old_worker
+allowed "stage: up stage with the Sentry DSN" stage "up stage main-0123abc $STAGE_IMAGES" "$TOKEN
 $SECRETS
 SENTRY_DSN=$DSN" "$(up_calls stage main-0123abc 256mb 288m with-secrets with-dsn)"
-allowed "stage: up stage with the logo.dev key" stage "up stage main-0123abc $IMAGES" "$TOKEN
+allowed "stage: up stage with the logo.dev key" stage "up stage main-0123abc $STAGE_IMAGES" "$TOKEN
 $SECRETS
 LOGO_DEV_KEY=$LOGO_KEY
 SENTRY_DSN=$DSN" "$(up_calls stage main-0123abc 256mb 288m with-secrets with-dsn with-logo)"
 allowed "stage: up stage with the database, the OAuth apps and the beta list" stage \
-  "up stage main-0123abc $IMAGES" "$TOKEN
+  "up stage main-0123abc $STAGE_IMAGES" "$TOKEN
 $SECRETS
 LOGO_DEV_KEY=$LOGO_KEY
 SENTRY_DSN=$DSN
 POSTGRES_PASSWORD=$DB_PASSWORD
 $OAUTH" "$(up_calls stage main-0123abc 256mb 288m with-secrets with-dsn with-logo with-db with-oauth)"
-allowed "stage: up stage without secrets" stage "up stage main-0123abc $IMAGES" "$TOKEN" \
+allowed "stage: up stage without secrets" stage "up stage main-0123abc $STAGE_IMAGES" "$TOKEN" \
   "$(up_calls stage main-0123abc 256mb 288m)"
 allowed "stage: edge" stage "edge" "" \
   "git -C /opt/candlestack fetch --quiet --depth 1 origin main
@@ -292,11 +325,11 @@ docker compose -p agent -f /opt/candlestack/infra/agent/compose.yaml up --detach
 echo "# What each key may not run"
 refused "stage: up prod" stage "up prod v0.2.0" "$TOKEN" \
   "the stage key may not deploy 'prod'"
-refused "stage: up another environment" stage "up test main-0123abc $IMAGES" "$TOKEN" \
+refused "stage: up another environment" stage "up test main-0123abc $STAGE_IMAGES" "$TOKEN" \
   "the stage key may not deploy 'test'"
-refused "prod: up stage" prod "up stage main-0123abc $IMAGES" "$TOKEN" \
+refused "prod: up stage" prod "up stage main-0123abc $STAGE_IMAGES" "$TOKEN" \
   "the prod key may not deploy 'stage'"
-refused "prod: up another environment" prod "up test main-0123abc $IMAGES" "$TOKEN" \
+refused "prod: up another environment" prod "up test main-0123abc $STAGE_IMAGES" "$TOKEN" \
   "the prod key may not deploy 'test'"
 refused "prod: edge" prod "edge" "" "only the stage key updates the edge"
 refused "prod: agent" prod "agent $AGENT" "$TOKEN" "only the stage key deploys the server agent"
@@ -334,33 +367,43 @@ recorded() {
 }
 
 echo "# The stage record: up stage adds its images, up prod runs the last ones of its commit"
+# printed <name> <expected output>: the output of the last run is "images ...".
+printed() {
+  tests=$((tests + 1))
+  if [[ $output == "$2" ]]; then
+    echo "ok    $1"
+  else
+    failed "$1" "expected '$2', got: $output"
+  fi
+}
+
 rm -f "$RECORD"
-recorded "stage: up stage starts the record" "main-$COMMIT $OLD_IMAGES" \
-  stage "up stage main-$COMMIT $OLD_IMAGES" "$TOKEN"
-recorded "stage: every up stage adds a line" "main-$COMMIT $OLD_IMAGES
-main-0123abc $OLD_IMAGES" stage "up stage main-0123abc $OLD_IMAGES" "$TOKEN"
-recorded "stage: the same commit again" "main-$COMMIT $OLD_IMAGES
-main-0123abc $OLD_IMAGES
-main-$COMMIT $IMAGES" stage "up stage main-$COMMIT $IMAGES" "$TOKEN"
+recorded "stage: up stage starts the record" "main-$COMMIT $OLD_STAGE_IMAGES" \
+  stage "up stage main-$COMMIT $OLD_STAGE_IMAGES" "$TOKEN"
+printed "stage: up prints the images it runs, the worker's too" "images $OLD_STAGE_IMAGES"
+recorded "stage: every up stage adds a line" "main-$COMMIT $OLD_STAGE_IMAGES
+main-0123abc $OLD_STAGE_IMAGES" stage "up stage main-0123abc $OLD_STAGE_IMAGES" "$TOKEN"
+recorded "stage: the same commit again" "main-$COMMIT $OLD_STAGE_IMAGES
+main-0123abc $OLD_STAGE_IMAGES
+main-$COMMIT $STAGE_IMAGES" stage "up stage main-$COMMIT $STAGE_IMAGES" "$TOKEN"
 record=$(<"$RECORD")
 FAKE_DOCKER=fail-up recorded "stage: a failed up stage adds nothing" "$record" \
-  stage "up stage main-$COMMIT $OLD_IMAGES" "$TOKEN"
+  stage "up stage main-$COMMIT $OLD_STAGE_IMAGES" "$TOKEN"
 # A version that only starts with the commit is another stage deploy, never the release's.
-echo "main-$COMMIT-x $OLD_IMAGES" >>"$RECORD"
+echo "main-$COMMIT-x $OLD_STAGE_IMAGES" >>"$RECORD"
 record=$(<"$RECORD")
-allowed "prod: the images of the last up stage of the tag's commit" prod "up prod v0.2.0" \
-  "$TOKEN" "$(release_git v0.2.0 6)
+allowed "prod: the images of the last up stage of the tag's commit, without its worker" prod \
+  "up prod v0.2.0" "$TOKEN" "$(release_git v0.2.0 6)
 $(up_calls prod v0.2.0 256mb 288m)"
 recorded "prod: up prod adds nothing" "$record" prod "up prod v0.2.0" "$TOKEN"
-
-tests=$((tests + 1))
-if [[ $output == "images $IMAGES" ]]; then
-  echo "ok    up prints the images it runs"
-else
-  failed "up prints the images it runs" "expected 'images $IMAGES', got: $output"
-fi
+printed "prod: up prints the images it runs, no worker" "images $IMAGES"
+recorded "stage: up stage without a worker image records three fields" "$record
+main-0123abc $OLD_IMAGES" stage "up stage main-0123abc $OLD_IMAGES" "$TOKEN"
+printed "stage: up without a worker image prints two images" "images $OLD_IMAGES"
 
 refused "prod: images in the command" prod "up prod v0.2.0 $IMAGES" "$TOKEN" \
+  "up prod takes no images: it runs the ones stage ran for the release's commit"
+refused "prod: a worker image in the command" prod "up prod v0.2.0 $STAGE_IMAGES" "$TOKEN" \
   "up prod takes no images: it runs the ones stage ran for the release's commit"
 printf '%s\n' "main-0123abc $IMAGES" "main-$COMMIT-x $IMAGES" >"$RECORD"
 not_run="stage has not run $COMMIT: release a commit of main that stage deployed"
@@ -377,7 +420,7 @@ echo "# Malformed arguments"
 long=$(printf 'v%.0s' {1..65})
 # shellcheck disable=SC2016 # a command substitution the script must not run
 for version in "$long" 'v1;id' 'v1$(id)' "v1'" 'main/0123' 'v1*'; do
-  refused "version '${version:0:12}'" stage "up stage $version $IMAGES" "$TOKEN" \
+  refused "version '${version:0:12}'" stage "up stage $version $STAGE_IMAGES" "$TOKEN" \
     "bad version: '$version'"
 done
 refused "no images" stage "up stage v1" "$TOKEN" \
@@ -391,9 +434,11 @@ for bad in \
   "ghcr.io/candlestack-fei-stu/candlestack/../backend@${BACKEND#*@}" \
   "registry.example/$BACKEND" \
   "$BACKEND;id"; do
-  refused "image ${bad:0:60}" stage "up stage v1 $bad $FRONTEND" "$TOKEN" \
+  refused "image ${bad:0:60}" stage "up stage v1 $bad $FRONTEND $WORKER" "$TOKEN" \
     "image must be a GHCR digest reference: '$bad'"
-  refused "frontend ${bad:0:57}" stage "up stage v1 $BACKEND $bad" "$TOKEN" \
+  refused "frontend ${bad:0:57}" stage "up stage v1 $BACKEND $bad $WORKER" "$TOKEN" \
+    "image must be a GHCR digest reference: '$bad'"
+  refused "worker ${bad:0:59}" stage "up stage v1 $IMAGES $bad" "$TOKEN" \
     "image must be a GHCR digest reference: '$bad'"
 done
 refused "agent image" stage "agent ${AGENT%@*}:latest" "$TOKEN" \
@@ -401,18 +446,18 @@ refused "agent image" stage "agent ${AGENT%@*}:latest" "$TOKEN" \
 
 echo "# stdin: the token, then only the environment's secrets, with safe values"
 only_secrets="only ALPACA_KEY_ID, ALPACA_SECRET_KEY, LOGO_DEV_KEY, SENTRY_DSN, POSTGRES_PASSWORD, the OAUTH_ keys and BETA_ALLOWLIST may follow the token on stdin"
-refused "up without a token" stage "up stage v1 $IMAGES" "" "expected a GHCR token on stdin"
+refused "up without a token" stage "up stage v1 $STAGE_IMAGES" "" "expected a GHCR token on stdin"
 refused "agent without a token" stage "agent $AGENT" "" "expected a GHCR token on stdin"
-refused "another variable" stage "up stage v1 $IMAGES" "$TOKEN
+refused "another variable" stage "up stage v1 $STAGE_IMAGES" "$TOKEN
 LD_PRELOAD=/tmp/x.so" "$only_secrets" \
   /tmp/x.so
-refused "PATH" stage "up stage v1 $IMAGES" "$TOKEN
+refused "PATH" stage "up stage v1 $STAGE_IMAGES" "$TOKEN
 PATH=/tmp" "$only_secrets"
-refused "a line without =" stage "up stage v1 $IMAGES" "$TOKEN
+refused "a line without =" stage "up stage v1 $STAGE_IMAGES" "$TOKEN
 $KEY_ID" "expected KEY=VALUE lines after the token on stdin"
 for value in 'with space' 'quote"d' "quote'd" 'back`tick' 'back\slash' $'tab\there' \
   "$(printf 'x%.0s' {1..257})" $'caf\xc3\xa9'; do
-  refused "secret value ${value:0:12}" stage "up stage v1 $IMAGES" "$TOKEN
+  refused "secret value ${value:0:12}" stage "up stage v1 $STAGE_IMAGES" "$TOKEN
 ALPACA_SECRET_KEY=$value" \
     "ALPACA_SECRET_KEY must be at most 256 printable characters without spaces or quotes" \
     "$value"
@@ -420,22 +465,22 @@ done
 # The password goes into the database URL as it is: '@', '%', '/', ':' would change the URL.
 for value in 'p@ss-0123456789abcdef' 'pass%40-0123456789abc' 'pass/0123456789abcdef' \
   'pass:0123456789abcdef' 'short-0123456' ''; do
-  refused "database password ${value:0:12}" stage "up stage v1 $IMAGES" "$TOKEN
+  refused "database password ${value:0:12}" stage "up stage v1 $STAGE_IMAGES" "$TOKEN
 POSTGRES_PASSWORD=$value" \
     "POSTGRES_PASSWORD must be 16 to 256 letters, digits or the characters . _ ~ -" ${value:+"$value"}
 done
 secret=$SECRET
 SECRET=$(printf '~%.0s' {1..256})
-allowed "secret value of 256 characters, blank lines" stage "up stage v1 $IMAGES" "$TOKEN
+allowed "secret value of 256 characters, blank lines" stage "up stage v1 $STAGE_IMAGES" "$TOKEN
 
 ALPACA_KEY_ID=$KEY_ID
 ALPACA_SECRET_KEY=$SECRET
 " "$(up_calls stage v1 256mb 288m with-secrets)"
 SECRET=$secret
 long_list=$(printf 'person%04d@example.com,' {1..175})
-allowed "a beta list longer than 256 characters" stage "up stage v1 $IMAGES" "$TOKEN
+allowed "a beta list longer than 256 characters" stage "up stage v1 $STAGE_IMAGES" "$TOKEN
 BETA_ALLOWLIST=${long_list%,}" "$(up_calls stage v1 256mb 288m | sed "s|^  env BACKEND_IMAGE=.*|&\n  env BETA_ALLOWLIST=${long_list%,}|")"
-refused "a beta list over 4096 characters" stage "up stage v1 $IMAGES" "$TOKEN
+refused "a beta list over 4096 characters" stage "up stage v1 $STAGE_IMAGES" "$TOKEN
 BETA_ALLOWLIST=${long_list}${long_list:0:100}" \
   "BETA_ALLOWLIST must be at most 4096 printable characters without spaces or quotes"
 

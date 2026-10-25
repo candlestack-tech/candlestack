@@ -31,8 +31,8 @@ compresses the responses (zstd or gzip) on the way to Cloudflare.
 | `migrate` | the backend image, `alembic upgrade head` | runs once per deploy, before the backend starts | `160m` |
 | `backup` | `prodrigestivill/postgres-backup-local:18-alpine`, pinned by digest | nothing reaches it | `32m` |
 | `models-backup` | `offen/docker-volume-backup`, pinned by digest | nothing reaches it, no network | `32m` |
-| `worker` | the stage `worker` of `backend/Dockerfile`; stage only, not deployed yet ([Worker](#worker)) | nothing reaches it; it reaches only `queue`, on the internal network `<env>_jobs` | `1g`, no swap, one CPU |
-| `queue` | `redis:8-alpine`, pinned by digest; stage only, not deployed yet | `queue:6379` on `<env>_jobs` only | `32m` |
+| `worker` | `ghcr.io/candlestack-tech/candlestack/worker` (the stage `worker` of `backend/Dockerfile`); stage only ([Worker](#worker)) | nothing reaches it; it reaches only `queue`, on the internal network `<env>_jobs` | `1g`, no swap, one CPU |
+| `queue` | `redis:8-alpine`, pinned by digest; stage only | `queue:6379` on `<env>_jobs` only | `32m` |
 
 The frontend image holds the app, built with Node in the image's build stage and served by its
 Caddy (`frontend/Caddyfile`), the same in every environment. A path that is no file gets the
@@ -80,8 +80,8 @@ them. After the resize to 4 GB (2026-10-25, the worker not deployed yet), the VM
 | `postgres` | `128m` | about 30 MB with the backend's pool connected |
 | `backup`, `models-backup` | `32m` each | about 2 MB between their nightly runs; the models archive took under 32 MB for 300 MB of files |
 | `migrate` | `160m` | runs only during a deploy |
-| `worker` (stage only, not deployed yet) | `1g`, no swap | about 85 MB idle (the loop); a job adds a process with Keras and JAX (below) |
-| `queue` (stage only, not deployed yet) | `32m` (`maxmemory` 16 MB) | a few MB idle, a few kilobytes per job |
+| `worker` (stage only) | `1g`, no swap | about 85 MB idle (the loop); a job adds a process with Keras and JAX (below) |
+| `queue` (stage only) | `32m` (`maxmemory` 16 MB) | a few MB idle, a few kilobytes per job |
 
 The limits of one environment add up to 896 MB without `migrate`, 1.79 GB for prod and stage,
 on top of the edge Caddy, cloudflared, the server agent (`2 x 64m`) and the system. Besides
@@ -218,8 +218,8 @@ The Docker networks:
 | `<env>_jobs` (internal) | the backend, and on stage the worker and its queue (the profile `worker`): no way out |
 | `agent_docker` (internal) | the server agent and its Docker socket proxy |
 
-Every push to `main` builds the backend, frontend and agent images once, and a release builds
-nothing. The images that keep
+Every push to `main` builds the backend, worker, frontend and agent images once, and a release
+builds nothing. The images that keep
 running on the VM (Redis, the edge Caddy, the agent's Docker socket proxy) are pinned in the
 compose files, and Dependabot proposes their updates; `edge` recreates the edge Caddy when its
 version changes.
@@ -246,24 +246,40 @@ worker's log (`sudo docker logs stage-worker-1`) has the traceback under the job
 | Environment | Worker and queue |
 | --- | --- |
 | prod | off, until the tech lead decides otherwise |
-| stage | on, once the deploy starts them (below) |
+| stage | on: every stage deploy starts them with the worker image of its commit |
 
-The deploy does not start them yet. What it still needs, for stage only:
+Every push to `main` builds the stage `worker` of `backend/Dockerfile` (`build.yml` with the
+input `target`) next to the backend, as `ghcr.io/candlestack-tech/candlestack/worker`, and
+`stage.yml` passes it to `up stage` as a third image
+([How a deployment reaches the VM](#how-a-deployment-reaches-the-vm)). `vm/candlestack-deploy`
+checks it (a GHCR digest reference) and pulls it like the other two, and for stage only
+(`runs_worker`) sets `COMPOSE_PROFILES=worker` and `WORKER_IMAGE=<worker@digest>`: prod sets
+neither, so its `up` starts neither service, whatever the stage record holds. CI builds and
+scans the image (job `e2e`), and `security-scan.yml` scans the one stage runs every Monday
+(`worker-stage`).
 
-1. `build.yml` takes a build target (it builds the Dockerfile's last stage, `api`), and
-   `stage.yml` builds the stage `worker` of `backend/Dockerfile` with it next to the backend,
-   as `ghcr.io/candlestack-tech/candlestack/worker`.
-2. `up stage` takes a third image, `<worker@digest>`, checked and pulled like the other two and
-   written to the stage record as a fourth field (`stage.yml` passes it).
-3. `vm/candlestack-deploy` sets, next to `redis_memory`, `COMPOSE_PROFILES=worker` and
-   `WORKER_IMAGE=<worker@digest>` for stage only; prod sets neither, so its `up` starts neither
-   service. Once prod runs them too, `up prod` takes the worker's image from the stage record
-   like the other two, and `release.yml` tags it.
-4. `vm/test-candlestack-deploy.sh` covers the third image (malformed, missing, recorded) and
-   that `up prod` starts no worker.
-5. `security-scan.yml` scans the worker image stage runs, like the backend's.
-6. The status page shows the two new containers (`stage-worker-1`, `stage-queue-1`) from the
-   agent's snapshot.
+An `up stage` without a worker image, as a re-run of a stage workflow run from before the
+worker sends it, runs stage without the worker and its queue: the script removes them
+(`compose rm --stop --force worker queue`), since compose leaves the services of a profile it
+was not given running, and the worker of an earlier deploy would go on next to a backend it was
+not built with. The next stage deploy starts them again.
+
+The status page lists them under stage as `worker` (with its deploy's version) and `queue`: the
+server agent reports every container (`stage-worker-1`, `stage-queue-1`). prod's backend has
+`JOBS_REDIS_URL` too, pointing to a queue that does not run there; reporting that cleanly is a
+part of #269.
+
+What prod still needs, once the tech lead turns it on:
+
+1. `runs_worker` in `vm/candlestack-deploy` true for prod too: `up prod` then runs the worker
+   image of the stage record's line (`stage_images_of` reads it already), and a release of a
+   commit that stage ran without one (three fields: every commit before the worker) runs prod
+   without the worker, removing it as above.
+2. `release.yml` tags the worker image too: `up` prints it as the third image, and the `tag`
+   job reads only the first two.
+3. `security-scan.yml` scans `worker-prod` (`worker:<release tag>`, once the release tags it).
+4. The memory budget ([Memory](#memory)) with the worker on prod too, and the tests: `up prod`
+   with and without a recorded worker.
 
 ### Test backtests
 
@@ -337,11 +353,11 @@ report-only mode: browsers report what it would block to the Sentry project `fro
 (environments `prod`, `stage`), and once the reports show nothing the pages need, it
 becomes enforcing. The smoke test checks these headers after every deploy.
 
-Trivy scans the images for vulnerabilities. In CI the backend image (job `e2e`) and the frontend
-and agent images (job `infra`) fail on a HIGH or CRITICAL one that has a fix, except those
-`.trivyignore.yaml` accepts until a date. Every Monday `security-scan.yml` scans the images prod
-and stage run and the third-party ones the compose files pin, and every finding, accepted ones
-included, shows up in the repository's Security tab. Trivy comes from its release archive,
+Trivy scans the images for vulnerabilities. In CI the backend and worker images (job `e2e`) and
+the frontend and agent images (job `infra`) fail on a HIGH or CRITICAL one that has a fix,
+except those `.trivyignore.yaml` accepts until a date. Every Monday `security-scan.yml` scans
+the images prod and stage run and the third-party ones the compose files pin, and every
+finding, accepted ones included, shows up in the repository's Security tab. Trivy comes from its release archive,
 checked against a pinned SHA-256 (`.github/actions/trivy`), not from an action or an image tag:
 its release channels were compromised in March 2026.
 
@@ -354,16 +370,32 @@ environment, and each key is forced to run `vm/candlestack-deploy` for its own s
 example, the stage key cannot touch prod).
 
 ```text
-up stage <version> <backend image@digest> <frontend image@digest>
+up stage <version> <backend image@digest> <frontend image@digest> [<worker image@digest>]
 up prod <release tag>
 ```
 
-Every `up stage` adds a line `<version> <backend@digest> <frontend@digest>` to the stage record,
-`/home/deploy/stage-images` on the VM, once its containers run. `up prod` takes no images: it
-finds the commit of the release tag and runs the images of the last `up stage main-<commit>` in
-the record, or fails when there is none. Only the stage key writes the record, and only the
-workflow of `main` holds that key. Every `up` prints `images <backend@digest> <frontend@digest>`
-at the end; the release tags those images with the version in the registry.
+Every `up stage` adds a line `<version> <backend@digest> <frontend@digest> <worker@digest>` to
+the stage record, `/home/deploy/stage-images` on the VM, once its containers run. `up prod`
+takes no images: it finds the commit of the release tag and runs the images of the last
+`up stage main-<commit>` in the record, or fails when there is none. Only the stage key writes
+the record, and only the workflow of `main` holds that key. Every `up` prints
+`images <backend@digest> <frontend@digest>` at the end, followed by `<worker@digest>` when it
+started the worker (stage); the release tags the images prod runs with the version in the
+registry.
+
+The lines from before the worker have three fields, and so does the line of an `up stage`
+without a worker image: the record needs no migration. The first stage deploy with the worker
+adds the first line of four; `up prod` reads both kinds and runs only the backend and frontend
+of either ([Worker](#worker)).
+
+To roll back stage, re-run the `deploy` job of the stage workflow run of the commit to go back
+to: its `edge` step resets the VM's checkout to main first, so it runs main's deploy script and
+compose file with that run's images, and adds its line to the record. A run from before the
+worker passes no worker image, so stage runs without the worker until the next deploy. To roll
+back prod, release a commit that stage ran before (a new tag on it): `up prod` takes its images
+from the record and its compose file from the tag, so prod gets exactly what it ran then.
+Neither goes back past a migration: the older image's `migrate` does not know the database's
+revision and fails the deploy.
 
 `up` reads its stdin: the first line is a GHCR token used once for the pull, then `KEY=VALUE`
 lines with the environment's secrets. Only `ALPACA_KEY_ID`, `ALPACA_SECRET_KEY`,
@@ -429,10 +461,12 @@ cd backend && uv run ruff check ../infra/agent && uv run ruff format --check ../
   token and secrets on stdin) with fake `docker` and `git` that record their calls. It checks
   which key may run what, that malformed images, versions and secrets are refused before
   anything runs, that prod takes only a release tag on main's history and starts
-  with that tag's compose file and the images stage last ran for its commit, that only a
-  successful `up stage` adds to the stage record, that no token or secret is printed (the
-  database password and the OAuth secrets included), and the Docker commands of every allowed
-  command. It touches nothing outside a temporary directory.
+  with that tag's compose file and the images stage last ran for its commit, never the worker
+  (from lines of three or four fields), that stage starts the worker and its queue with its
+  third image and removes them without one, that only a successful `up stage` adds to the
+  stage record (four fields, or three without a worker image), that no token or secret is
+  printed (the database password and the OAuth secrets included), and the Docker commands of
+  every allowed command. It touches nothing outside a temporary directory.
 - `agent/test_agent.py` (standard library `unittest`, like the agent) pins the schema-2
   snapshot that ops reads, the order of its containers and the HTTP answers (`starting`, the
   snapshot, `stale`), with a stub Docker API and fixture files for `/proc`. The agent is linted

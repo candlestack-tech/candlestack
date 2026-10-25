@@ -1,11 +1,14 @@
 import type { Model } from '@/api';
 
 // The frameworks a model can come from, in the order the app lists them, with their marks
-// (Simple Icons, CC0) and brand colours, as in mockups/app (FW_IC). Only Keras is taken for now;
-// the others show the way: a file of theirs gets "Support for this format is coming soon".
+// (Simple Icons, CC0) and brand colours, as in mockups/app (FW_IC). Only Keras is taken for now,
+// ONNX comes next; the others export to ONNX, and the upload says so for a file of theirs.
 
 export const FRAMEWORKS = ['Keras', 'TensorFlow', 'PyTorch', 'ONNX', 'scikit-learn'] as const;
 export type Framework = (typeof FRAMEWORKS)[number];
+
+// The formats the upload names and shows the marks of: Keras now, ONNX next.
+export const UPLOAD_FRAMEWORKS = ['Keras', 'ONNX'] as const satisfies readonly Framework[];
 
 export const FRAMEWORK_MARKS: Record<Framework, { color: string; path: string }> = {
   Keras: {
@@ -39,7 +42,7 @@ export function frameworkOf(name: string): Framework | undefined {
   return FRAMEWORKS.find((framework) => framework.toLowerCase() === name.toLowerCase());
 }
 
-// The file extensions of each framework; the file picker offers all of them.
+// The file extensions of each framework, by which the upload tells what a file is.
 const EXTENSIONS: Record<Framework, string[]> = {
   Keras: ['.keras'],
   TensorFlow: ['.h5', '.pb', '.zip'],
@@ -48,7 +51,8 @@ const EXTENSIONS: Record<Framework, string[]> = {
   'scikit-learn': ['.joblib', '.pkl', '.skops'],
 };
 
-export const ACCEPTED_EXTENSIONS = Object.values(EXTENSIONS).flat().join(',');
+// What the file picker offers: the formats the upload names.
+export const ACCEPTED_EXTENSIONS = UPLOAD_FRAMEWORKS.flatMap((framework) => EXTENSIONS[framework]).join(',');
 
 // The framework a file name says it is from, by its extension; null for any other file.
 export function frameworkOfFile(name: string): Framework | null {

@@ -16,10 +16,9 @@
 # models-backup service archives every night into <ENV_NAME>_model_backups (infra/README.md,
 # "Backups").
 # The worker that runs the models and its job queue are in the profile "worker": stage only,
-# prod runs without them until the tech lead decides otherwise. The deploy does not start them
-# yet; once it does, it sets COMPOSE_PROFILES=worker and WORKER_IMAGE=<image@digest> for stage
-# only (as it sets Redis' memory per environment), and they join the backend on the internal
-# network <ENV_NAME>_jobs (infra/README.md, "Worker").
+# prod runs without them until the tech lead decides otherwise. The deploy sets
+# COMPOSE_PROFILES=worker and WORKER_IMAGE=<image@digest> for stage only, and they join the
+# backend on the internal network <ENV_NAME>_jobs (infra/README.md, "Worker").
 services:
   backend:
     image: ${BACKEND_IMAGE:?}

@@ -20,7 +20,7 @@ export function QuickActions({ onNewBacktest }: { onNewBacktest: () => void }) {
         line={<span className={LINE}>Pick the data, a model and a rule</span>}
         onClick={onNewBacktest}
       />
-      <UploadDialog onBacktest={onNewBacktest}>
+      <UploadDialog>
         <UploadCard />
       </UploadDialog>
       <CompareDialog>

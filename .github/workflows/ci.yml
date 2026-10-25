@@ -398,7 +398,7 @@ jobs:
             REDIS_MAXMEMORY=256mb REDIS_MEM_LIMIT=288m EDGE_NETWORK=edge \
             POSTGRES_PASSWORD=check \
             docker compose -f infra/env/compose.yaml config --quiet
-          # The worker and its queue, which the deploy does not start yet.
+          # The worker and its queue, as stage runs them.
           WORKER_IMAGE=worker ENV_NAME=stage APP_VERSION=check BACKEND_IMAGE=backend \
             FRONTEND_IMAGE=frontend REDIS_MAXMEMORY=256mb REDIS_MEM_LIMIT=288m EDGE_NETWORK=edge \
             POSTGRES_PASSWORD=check \

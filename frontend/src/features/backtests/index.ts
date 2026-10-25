@@ -2,6 +2,7 @@
 // Backtest and Compare dialogs, and the queries with the star.
 export { BacktestsList } from './BacktestsList';
 export { CompareDialog } from './CompareDialog';
+export { ModelBacktests } from './ModelBacktests';
 export { hasResults, representationName, returnClass } from './format';
 export { BacktestNumber, BacktestReturn, BacktestWhen, InstrumentChips, Missing } from './parts';
 export { BacktestCell, CELL, HEAD, NUMBER, ROW, ROW_OPENER, RowOpener, RowStar, SortButton, TABLE } from './table';
