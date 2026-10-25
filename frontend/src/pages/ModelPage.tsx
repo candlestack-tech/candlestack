@@ -1,7 +1,7 @@
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useState } from 'react';
 
-import type { Model } from '@/api';
+import { errorMessage, type Model } from '@/api';
 import { ACCENT_BUTTON, BUTTON_SIZES } from '@/components/buttonStyles';
 import { PageTitle } from '@/components/PageTitle';
 import { Button } from '@/components/ui/button';
@@ -32,16 +32,23 @@ function BackToModels() {
   );
 }
 
-// A model of the user that is gone (deleted in another tab, say) or never was.
-function NoSuchModel({ message }: { message: string }) {
-  usePageTitle('Not found');
+// A model of the user that is gone (deleted in another tab, say) or never was; or, with the
+// title Model, why the models could not load.
+function NoModel({ title, message }: { title: string; message: string }) {
+  usePageTitle(title);
   return (
     <>
       <BackToModels />
-      <PageTitle variant="workspace" title="Not found" description={message} />
+      <PageTitle variant="workspace" title={title} description={message} />
     </>
   );
 }
+
+// Why the models could not load. Once they did, the list stays when asking for it again fails
+// (after a rename, say), so the page does too.
+const ListError = ({ error }: { error: Error }) => (
+  <NoModel title="Model" message={errorMessage(error, 'Could not load the model.')} />
+);
 
 type InputProps = {
   model: Model;
@@ -86,9 +93,8 @@ export function ModelPage() {
   const [adding, setAdding] = useState(false);
   usePageTitle(model?.name ?? 'Model');
 
-  if (models.error) return <NoSuchModel message={models.error.message} />;
-  if (!models.data) return <BackToModels />;
-  if (!model) return <NoSuchModel message="You have no model with this ID." />;
+  if (!models.data) return models.error ? <ListError error={models.error} /> : <BackToModels />;
+  if (!model) return <NoModel title="Not found" message="You have no model with this ID." />;
 
   const addManifest = () => setAdding(true);
   return (

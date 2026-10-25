@@ -211,6 +211,13 @@ describe("a model's page", () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Not found' })).toBeDefined();
     expect(screen.getByText('You have no model with this ID.')).toBeDefined();
   });
+
+  it('says why the models could not load', async () => {
+    stubApi({ ...session(ARSEN), 'GET /api/v1/models': { status: 503, body: { detail: 'Down for a minute.' } } });
+    await renderApp(PAGE);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Model' })).toBeDefined();
+    expect(screen.getByText('Down for a minute.')).toBeDefined();
+  });
 });
 
 describe('a model without a manifest', () => {
@@ -283,6 +290,25 @@ describe('Rename model', () => {
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(fetch.mock.calls.find(([, init]) => init?.method === 'PATCH')?.[1]?.body).toBe('{"name":"tsmixer-v2"}');
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('tsmixer-v2.keras');
+  });
+
+  it('stays on the page when asking for the list again fails', async () => {
+    const { user, input } = await openRename();
+    const renamed = model({ ...READY, name: 'tsmixer-v2.keras' });
+    const fetch = stubApi({
+      'GET /api/v1/models': { status: 503, body: { detail: 'Down for a minute.' } },
+      ...catalogAnswer,
+      [MANIFEST]: { status: 200, body: manifest() },
+      ...backtestsAnswer({ backtests: [] }, '?model=tsmixer-v2.keras'),
+      [`PATCH /api/v1/models/${ID}`]: { status: 200, body: renamed },
+    });
+    await user.clear(input);
+    await user.type(input, 'tsmixer-v2{Enter}');
+
+    await vi.waitFor(() => expect(fetch.mock.calls.some(([path]) => path === '/api/v1/models')).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('tsmixer-v2.keras');
+    expect(screen.queryByText('Down for a minute.')).toBeNull();
   });
 
   it('turns the help line red when the user already has the name', async () => {
