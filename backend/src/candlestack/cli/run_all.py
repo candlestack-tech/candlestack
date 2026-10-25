@@ -35,14 +35,10 @@ import polars as pl
 
 from candlestack.cli.options import _at_least, _fraction, _list, _non_negative
 from candlestack.cli.post_processing import (
-    PostProcessing,
     add_drawdown_stop,
     add_post_processing,
     check_post_processing,
-    decide,
-    describe,
     post_processing,
-    prepare,
     rule_limit,
 )
 from candlestack.cli.run import (
@@ -56,7 +52,7 @@ from candlestack.cli.run import (
 )
 from candlestack.engine import ENGINE_VERSION, Settings, backtest
 from candlestack.metrics import stats
-from candlestack.signals import relabel
+from candlestack.signals import PostProcessing, decide, describe, prepare, relabel
 
 # Read by Polars when it starts, so it reaches the worker processes through their environment.
 _THREADS = "POLARS_MAX_THREADS"

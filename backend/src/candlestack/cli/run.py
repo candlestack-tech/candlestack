@@ -32,18 +32,15 @@ import polars as pl
 
 from candlestack.cli.options import _fraction, _non_negative
 from candlestack.cli.post_processing import (
-    PostProcessing,
     add_drawdown_stop,
     add_post_processing,
     check_post_processing,
-    describe,
-    make_signal,
     post_processing,
     rule_limit,
 )
 from candlestack.engine import Result, Settings, backtest
 from candlestack.metrics import drawdown, stats
-from candlestack.signals import AlignReport, align, relabel
+from candlestack.signals import AlignReport, PostProcessing, align, describe, make_signal, relabel
 
 Stats = dict[str, float | int | None]
 

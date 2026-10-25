@@ -17,7 +17,7 @@ flowchart LR
 
 | Module | Public names | Job |
 | --- | --- | --- |
-| `signals` | `relabel`, `align`, `AlignReport`, `zscore`, `rank`, `ema`, `threshold`, `hysteresis`, `kmeans`, `long_only`, `confirm`, `min_hold` | put predictions next to their candles and turn them into a signal of -1, 0 or +1 |
+| `signals` | `relabel`, `align`, `AlignReport`, `zscore`, `rank`, `ema`, `threshold`, `hysteresis`, `kmeans`, `long_only`, `confirm`, `min_hold`; `PostProcessing`, `make_signal` (`prepare`, `decide`), `describe` | put predictions next to their candles and turn them into a signal of -1, 0 or +1; apply the post-processing in its order and record it |
 | `engine` | `backtest`, `Settings`, `Result`, `InvalidInput`, `ENGINE_VERSION` | the loop: candles and a signal in, trades and an equity series out |
 | `metrics` | `stats`, `drawdown` | the statistics of one run and its drawdown curve |
 | `cli` | `main` (the `candlestack-bt` command) | read files, call the three modules above in order, write the results |
@@ -522,8 +522,9 @@ files, rename their time column to `ts`, `relabel` both with `--labels close`, `
 (strict unless `--allow-gaps`), the post-processing in the order of [Signals](#signals)
 (calibration, `ema`, one rule, `long_only`, `confirm`, `min_hold`; by default only
 `threshold`), `backtest`, `stats`. The order of the steps is in one place in the code,
-`prepare` and `decide` (together `make_signal`) in `cli/post_processing.py`, which `run-all`
-uses too.
+`prepare` and `decide` (together `make_signal`) of `PostProcessing` in
+`signals/post_processing.py`, which `run-all` uses too, and `describe` records them in
+`run.json`; the command's options for them are in `cli/post_processing.py`.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
