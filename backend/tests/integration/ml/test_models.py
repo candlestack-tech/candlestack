@@ -1,11 +1,13 @@
 """The models API over HTTP, against a real Postgres, with the model storage in a temporary
 directory (conftest.py): uploads and their checks, the quota, the list, renaming, starring,
-deleting, and deleting the account."""
+deleting, the manifests, and deleting the account."""
 
 import hashlib
+import json
 import logging
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from redis import Redis
@@ -24,6 +26,20 @@ FIXTURES = Path(__file__).parents[2] / "fixtures" / "keras"
 
 def keras_file(name: str) -> bytes:
     return (FIXTURES / f"{name}.keras").read_bytes()
+
+
+def raw_manifest() -> dict[str, Any]:
+    """The manifest of ``raw_candles.keras``: 25 candles of 5 columns, no preprocessing."""
+    return json.loads((FIXTURES / "raw_candles.manifest.json").read_text(encoding="utf-8"))
+
+
+RAW_SUMMARY = {
+    "representation": {"id": "candles@1", "params": {}},
+    "timeframe": "30m",
+    "session": "regular",
+    "input_shape": [25, 5],
+    "warm_up": {"candles": 24, "kind": "exact"},
+}
 
 
 def chunked(content: bytes, size: int = 64 * 1024) -> Iterator[bytes]:
@@ -70,6 +86,8 @@ def test_upload(ada, sql, storage, caplog) -> None:
         "starred": False,
         "backtest_count": 0,
         "best_sharpe": None,
+        "state": "needs_setup",
+        "manifest_summary": None,
     }
     model_id = response.json()["id"]
     [row] = sql(
@@ -511,6 +529,187 @@ def test_without_backtests_every_model_is_unused(ada) -> None:
     [model] = ada.models().json()["models"]
 
     assert (model["backtest_count"], model["best_sharpe"]) == (0, None)
+
+
+# --- Manifests -------------------------------------------------------------------------------
+
+
+def test_a_manifest_makes_the_model_ready(ada, sql, caplog) -> None:
+    model = ada.upload(keras_file("raw_candles"), name="raw.keras").json()
+
+    with caplog.at_level(logging.INFO):
+        response = ada.set_manifest(model["id"], json.dumps(raw_manifest()))
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    ready = {**model, "state": "ready", "manifest_summary": RAW_SUMMARY}
+    assert response.json() == ready
+    assert ada.models().json()["models"] == [ready]
+    assert sql("SELECT manifest, verified_at FROM models") == [(raw_manifest(), None)]
+    assert f"User {ada.id} set the manifest of model {model['id']}" in caplog.text
+
+
+def test_the_manifest_reads_back_as_it_was_given(ada) -> None:
+    model = ada.upload(keras_file("raw_candles"), name="raw.keras").json()
+    given = raw_manifest()
+    del given["input"]["features"][0]["norm"]  # a default the manifest leaves out
+    ada.set_manifest(model["id"], json.dumps(given))
+
+    response = ada.manifest(model["id"])
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == given
+    assert list(response.json()) == ["version", "input", "signature", "about"]
+
+
+def test_a_model_without_a_manifest_needs_setup(ada) -> None:
+    model = ada.upload(keras_file("raw_candles"), name="raw.keras").json()
+
+    response = ada.manifest(model["id"])
+
+    assert ada.models().json()["models"][0]["state"] == "needs_setup"
+    assert response.status_code == 404
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "type": PROBLEMS + "no-manifest",
+        "title": "No manifest",
+        "status": 404,
+        "detail": "This model has no manifest yet. Add one to tell CandleStack how to build its "
+        "input.",
+    }
+
+
+def test_a_manifest_that_does_not_fit_the_model_is_refused(ada, sql, caplog) -> None:
+    model = ada.upload(keras_file("functional")).json()  # takes [25, 23]
+
+    with caplog.at_level(logging.INFO):
+        response = ada.set_manifest(model["id"], json.dumps(raw_manifest()))
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "type": PROBLEMS + "manifest-check-failed",
+        "title": "Manifest check failed",
+        "status": 422,
+        "detail": "The manifest gives [25, 5], the model takes [25, 23].",
+        "problems": [
+            {"check": "model", "detail": "The manifest gives [25, 5], the model takes [25, 23]."}
+        ],
+        "more_problems": 0,
+        "unknown_blocks": [],
+    }
+    assert sql("SELECT manifest FROM models") == [(None,)]
+    assert f"A manifest of user {ada.id} was refused (model)" in caplog.text
+
+
+def test_every_check_runs_and_names_the_unknown_blocks(ada) -> None:
+    model = ada.upload(keras_file("functional")).json()
+    manifest = raw_manifest()
+    manifest["input"]["features"][4]["id"] = "pocket-pivot@1"
+    manifest["input"]["features"][1]["name"] = "open"
+
+    problems = ada.set_manifest(model["id"], json.dumps(manifest)).json()
+
+    assert problems["problems"] == [
+        {
+            "check": "catalog",
+            "detail": "The catalog has no block pocket-pivot@1 yet, so it cannot run.",
+        },
+        {
+            "check": "names",
+            "detail": "The feature name open is used 2 times. Each feature needs a name of its "
+            "own.",
+        },
+        {"check": "model", "detail": "The manifest gives [25, 5], the model takes [25, 23]."},
+    ]
+    assert problems["unknown_blocks"] == ["pocket-pivot@1"]
+
+
+def test_a_document_that_is_no_manifest_is_refused(ada) -> None:
+    model = ada.upload(keras_file("raw_candles"), name="raw.keras").json()
+
+    response = ada.set_manifest(model["id"], b'{"version": 1}')
+
+    assert response.status_code == 422
+    assert [problem["check"] for problem in response.json()["problems"]] == ["schema"] * 2
+    assert response.json()["detail"] == "input is missing. signature is missing."
+
+
+def test_a_long_list_of_problems_is_cut(ada) -> None:
+    model = ada.upload(keras_file("raw_candles"), name="raw.keras").json()
+    manifest = raw_manifest()
+    for feature in manifest["input"]["features"]:
+        feature["params"] = {"a": 1, "b": 2, "c": 3}
+
+    problem = ada.set_manifest(model["id"], json.dumps(manifest)).json()
+
+    assert len(problem["problems"]) == 10
+    assert problem["more_problems"] == 5
+    assert problem["detail"].endswith(
+        "input.features[3].params.a is not a parameter of close@1. And 5 more problems."
+    )
+
+
+def test_a_manifest_larger_than_1_mb_is_refused(ada, sql) -> None:
+    model = ada.upload(keras_file("raw_candles"), name="raw.keras").json()
+    manifest = raw_manifest()
+    manifest["about"]["note"] = "x" * MB
+
+    announced = ada.set_manifest(model["id"], json.dumps(manifest))
+    streamed = ada.set_manifest(model["id"], chunked(json.dumps(manifest).encode()))
+
+    for response in (announced, streamed):
+        assert response.status_code == 413
+        assert response.json() == {
+            "type": PROBLEMS + "manifest-too-large",
+            "title": "Manifest too large",
+            "status": 413,
+            "detail": "The manifest is larger than 1 MB, the largest one CandleStack keeps. Give "
+            "it a smaller example.",
+        }
+    assert sql("SELECT manifest FROM models") == [(None,)]
+
+
+def test_a_replaced_manifest_is_no_longer_verified(ada, sql) -> None:
+    model = ada.upload(keras_file("raw_candles"), name="raw.keras").json()
+    ada.set_manifest(model["id"], json.dumps(raw_manifest()))
+    # What the trial run of the worker will do (#268).
+    sql("UPDATE models SET verified_at = now()")
+    assert ada.models().json()["models"][0]["state"] == "verified"
+    manifest = raw_manifest()
+    manifest["about"] = {"note": "Trained again"}
+
+    response = ada.set_manifest(model["id"], json.dumps(manifest))
+
+    assert response.json()["state"] == "ready"
+    assert ada.manifest(model["id"]).json()["about"] == {"note": "Trained again"}
+    assert sql("SELECT verified_at FROM models") == [(None,)]
+
+
+def test_a_change_keeps_the_manifest(ada) -> None:
+    model = ada.upload(keras_file("raw_candles"), name="raw.keras").json()
+    ada.set_manifest(model["id"], json.dumps(raw_manifest()))
+
+    response = ada.update(model["id"], starred=True)
+
+    assert response.json()["state"] == "ready"
+    assert response.json()["manifest_summary"] == RAW_SUMMARY
+
+
+def test_the_manifest_of_another_users_model_is_not_found(ada, bob, sql) -> None:
+    model = bob.upload(keras_file("raw_candles"), name="raw.keras").json()
+
+    responses = [
+        ada.set_manifest(model["id"], json.dumps(raw_manifest())),
+        ada.manifest(model["id"]),
+        ada.set_manifest("mdl_zzzzzzzzzz", json.dumps(raw_manifest())),
+        ada.manifest("mdl_zzzzzzzzzz"),
+    ]
+
+    for response in responses:
+        assert response.status_code == 404
+        assert response.json()["type"] == PROBLEMS + "not-found"
+    assert sql("SELECT manifest FROM models") == [(None,)]
 
 
 # --- Deleting the account --------------------------------------------------------------------

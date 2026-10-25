@@ -797,6 +797,61 @@
         "title": "BlockOut",
         "type": "object"
       },
+      "BlockRef": {
+        "additionalProperties": false,
+        "description": "One step: a block of the catalog with its parameters.",
+        "properties": {
+          "id": {
+            "description": "A block of the catalog and its version",
+            "examples": [
+              "candles@1"
+            ],
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*@[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "The block's parameters, checked against the catalog",
+            "maxProperties": 32,
+            "title": "Params",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "BlockRef",
+        "type": "object"
+      },
+      "BlockUse": {
+        "properties": {
+          "id": {
+            "description": "A block of the catalog and its version",
+            "examples": [
+              "candles@1"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "Its parameters as the manifest gives them",
+            "examples": [
+              {}
+            ],
+            "title": "Params",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "params"
+        ],
+        "title": "BlockUse",
+        "type": "object"
+      },
       "CandlesMeta": {
         "properties": {
           "count": {
@@ -1156,6 +1211,45 @@
         "title": "EquitySeries",
         "type": "object"
       },
+      "Example": {
+        "additionalProperties": false,
+        "description": "A small input with the output the model must give for it (within 1e-4).",
+        "properties": {
+          "input": {
+            "description": "Samples of the shape of `signature.input`",
+            "items": {
+              "items": {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "minItems": 1,
+            "title": "Input",
+            "type": "array"
+          },
+          "output": {
+            "description": "The model's output for each sample",
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "minItems": 1,
+            "title": "Output",
+            "type": "array"
+          }
+        },
+        "required": [
+          "input",
+          "output"
+        ],
+        "title": "Example",
+        "type": "object"
+      },
       "Exchange": {
         "description": "Where the instruments of the catalog trade: for stocks the listing exchanges Alpaca\nreports for tradable US equities without OTC (docs/data.md, \"Alpaca\"), for crypto pairs\nBinance.",
         "enum": [
@@ -1168,6 +1262,46 @@
         ],
         "title": "Exchange",
         "type": "string"
+      },
+      "Feature": {
+        "additionalProperties": false,
+        "description": "One column of the input: its name, the block that computes it and its normalization.",
+        "properties": {
+          "id": {
+            "description": "A block of the catalog and its version",
+            "examples": [
+              "candles@1"
+            ],
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*@[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "The column's name, unique in the manifest",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "norm": {
+            "$ref": "#/components/schemas/BlockRef",
+            "description": "How the column is scaled; without one it is not (none@1)"
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "The block's parameters, checked against the catalog",
+            "maxProperties": 32,
+            "title": "Params",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "id"
+        ],
+        "title": "Feature",
+        "type": "object"
       },
       "Framework": {
         "description": "The framework a model file belongs to; only Keras is accepted for now.",
@@ -1225,6 +1359,60 @@
           "postgres"
         ],
         "title": "Health",
+        "type": "object"
+      },
+      "Input": {
+        "additionalProperties": false,
+        "description": "The candles the model expects and how its input is built from them.",
+        "properties": {
+          "features": {
+            "description": "The columns, in their order",
+            "items": {
+              "$ref": "#/components/schemas/Feature"
+            },
+            "maxItems": 256,
+            "minItems": 1,
+            "title": "Features",
+            "type": "array"
+          },
+          "representation": {
+            "$ref": "#/components/schemas/BlockRef",
+            "description": "Which rows the model sees"
+          },
+          "session": {
+            "description": "`regular`: US trading hours; `24/7`: around the clock, as crypto trades",
+            "enum": [
+              "regular",
+              "24/7"
+            ],
+            "title": "Session",
+            "type": "string"
+          },
+          "timeframe": {
+            "enum": [
+              "1m",
+              "5m",
+              "15m",
+              "30m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "Timeframe",
+            "type": "string"
+          },
+          "window": {
+            "$ref": "#/components/schemas/Window"
+          }
+        },
+        "required": [
+          "timeframe",
+          "session",
+          "representation",
+          "features",
+          "window"
+        ],
+        "title": "Input",
         "type": "object"
       },
       "InstrumentDetailOut": {
@@ -1706,6 +1894,100 @@
         "title": "InstrumentSort",
         "type": "string"
       },
+      "Manifest": {
+        "additionalProperties": false,
+        "description": "What a model takes and gives, stored with the model (docs/preprocessing.md).",
+        "properties": {
+          "about": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Free text for people: trained on which instruments, which period, notes",
+            "title": "About",
+            "type": "object"
+          },
+          "example": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Example"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "input": {
+            "$ref": "#/components/schemas/Input"
+          },
+          "signature": {
+            "$ref": "#/components/schemas/Signature"
+          },
+          "version": {
+            "const": 1,
+            "description": "The version of the manifest's form",
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "input",
+          "signature"
+        ],
+        "title": "CandleStack model manifest",
+        "type": "object"
+      },
+      "ManifestSummary": {
+        "description": "What the model's manifest says, in short; the whole manifest is\n`GET /api/v1/models/{model_id}/manifest`.",
+        "properties": {
+          "input_shape": {
+            "description": "One sample: rows by columns (the features, in their order)",
+            "examples": [
+              [
+                25,
+                5
+              ]
+            ],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Input Shape",
+            "type": "array"
+          },
+          "representation": {
+            "$ref": "#/components/schemas/BlockUse",
+            "description": "Which rows the model sees"
+          },
+          "session": {
+            "description": "`regular` (US trading hours) or `24/7` (around the clock)",
+            "examples": [
+              "regular"
+            ],
+            "title": "Session",
+            "type": "string"
+          },
+          "timeframe": {
+            "description": "The timeframe of the candles it reads",
+            "examples": [
+              "30m"
+            ],
+            "title": "Timeframe",
+            "type": "string"
+          },
+          "warm_up": {
+            "$ref": "#/components/schemas/WarmUpOut"
+          }
+        },
+        "required": [
+          "representation",
+          "timeframe",
+          "session",
+          "input_shape",
+          "warm_up"
+        ],
+        "title": "ManifestSummary",
+        "type": "object"
+      },
       "Market": {
         "enum": [
           "crypto",
@@ -1899,6 +2181,17 @@
             ],
             "title": "Input Shape"
           },
+          "manifest_summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManifestSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What its manifest says, in short; null without one"
+          },
           "name": {
             "description": "File name, extension included; Rename changes only the part before it",
             "examples": [
@@ -1947,6 +2240,9 @@
             "description": "The user starred the model",
             "title": "Starred",
             "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ModelState"
           }
         },
         "required": [
@@ -1960,10 +2256,22 @@
           "starred",
           "backtest_count",
           "best_sharpe",
-          "created_at"
+          "created_at",
+          "state",
+          "manifest_summary"
         ],
         "title": "ModelOut",
         "type": "object"
+      },
+      "ModelState": {
+        "description": "How far a model got: `needs_setup` (no manifest yet, so it cannot run), `ready` (its\nmanifest passed every check that reads the files, against this model too) or `verified`\n(a trial run in the worker gave the output of the manifest's example; set by the worker,\nnot yet).",
+        "enum": [
+          "needs_setup",
+          "ready",
+          "verified"
+        ],
+        "title": "ModelState",
+        "type": "string"
       },
       "ModelUpdate": {
         "additionalProperties": false,
@@ -2022,6 +2330,45 @@
           "usage"
         ],
         "title": "ModelsOut",
+        "type": "object"
+      },
+      "Output": {
+        "additionalProperties": false,
+        "properties": {
+          "dtype": {
+            "const": "float32",
+            "title": "Dtype",
+            "type": "string"
+          },
+          "meaning": {
+            "const": "score",
+            "description": "`score`: the sign is the direction, the size is compared with the threshold",
+            "title": "Meaning",
+            "type": "string"
+          },
+          "shape": {
+            "examples": [
+              [
+                25,
+                5
+              ]
+            ],
+            "items": {
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Shape",
+            "type": "array"
+          }
+        },
+        "required": [
+          "shape",
+          "dtype",
+          "meaning"
+        ],
+        "title": "Output",
         "type": "object"
       },
       "ParamOut": {
@@ -2347,6 +2694,24 @@
         "title": "SignInMethodOut",
         "type": "object"
       },
+      "Signature": {
+        "additionalProperties": false,
+        "description": "What goes into the model and what comes out; must equal what the model file says.",
+        "properties": {
+          "input": {
+            "$ref": "#/components/schemas/Tensor"
+          },
+          "output": {
+            "$ref": "#/components/schemas/Output"
+          }
+        },
+        "required": [
+          "input",
+          "output"
+        ],
+        "title": "Signature",
+        "type": "object"
+      },
       "SortOrder": {
         "enum": [
           "asc",
@@ -2498,6 +2863,39 @@
         "title": "StorageUsage",
         "type": "object"
       },
+      "Tensor": {
+        "additionalProperties": false,
+        "description": "The shape of one sample without the batch axis, and its type.",
+        "properties": {
+          "dtype": {
+            "const": "float32",
+            "title": "Dtype",
+            "type": "string"
+          },
+          "shape": {
+            "examples": [
+              [
+                25,
+                5
+              ]
+            ],
+            "items": {
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Shape",
+            "type": "array"
+          }
+        },
+        "required": [
+          "shape",
+          "dtype"
+        ],
+        "title": "Tensor",
+        "type": "object"
+      },
       "Theme": {
         "enum": [
           "light",
@@ -2579,6 +2977,61 @@
           "framework"
         ],
         "title": "UsedModel",
+        "type": "object"
+      },
+      "WarmUpOut": {
+        "properties": {
+          "candles": {
+            "description": "Candles a backtest loads before the first sample",
+            "examples": [
+              24
+            ],
+            "title": "Candles",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "`exact` when every candle is a row; `estimate` with rows that span several candles (Renko), where the run loads more and reports what the warm-up used",
+            "enum": [
+              "exact",
+              "estimate"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "candles",
+          "kind"
+        ],
+        "title": "WarmUpOut",
+        "type": "object"
+      },
+      "Window": {
+        "additionalProperties": false,
+        "description": "How rows make one sample: the parameters of the catalog's ``window@1``.",
+        "properties": {
+          "last": {
+            "default": "closed",
+            "description": "The last row of a sample: the last finished one (`closed`), or the row still forming (`current`, for representations with rows that span several candles)",
+            "enum": [
+              "closed",
+              "current"
+            ],
+            "title": "Last",
+            "type": "string"
+          },
+          "length": {
+            "description": "How many rows make one sample",
+            "maximum": 1000.0,
+            "minimum": 1.0,
+            "title": "Length",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "length"
+        ],
+        "title": "Window",
         "type": "object"
       }
     }
@@ -3952,7 +4405,7 @@
         ]
       },
       "post": {
-        "description": "Uploads a model file: the body is the file, `name` its file name. The file is checked\nbefore it is kept: `opens` (a real Keras model with no custom code inside, nothing from\nthe file is executed) and `weights` (it holds trained weights). A file with a name the user\nalready has gets a number, as `lstm (2).keras`.",
+        "description": "Uploads a model file: the body is the file, `name` its file name. The file is checked\nbefore it is kept: `opens` (a real Keras model with no custom code inside, nothing from\nthe file is executed) and `weights` (it holds trained weights). A file with a name the user\nalready has gets a number, as `lstm (2).keras`. The model is `needs_setup` until its\nmanifest is added (`PUT /api/v1/models/{model_id}/manifest`).",
         "operationId": "upload_model_api_v1_models_post",
         "parameters": [
           {
@@ -4053,7 +4506,7 @@
                 }
               }
             },
-            "description": "Not a format the app takes yet, only Keras (`.keras`) for now (`unsupported-model-format`)."
+            "description": "Not a format the app takes: Keras (`.keras`) now, ONNX (`.onnx`) later, never pickle-based files (`unsupported-model-format`)."
           },
           "422": {
             "content": {
@@ -4234,6 +4687,171 @@
           }
         },
         "summary": "Update Model",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/manifest": {
+      "get": {
+        "description": "The model's manifest as it was given, without the defaults it left out.",
+        "operationId": "get_manifest_api_v1_models__model_id__manifest_get",
+        "parameters": [
+          {
+            "description": "Public ID of the model",
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "description": "Public ID of the model",
+              "examples": [
+                "mdl_7f3k2m9qx4"
+              ],
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Manifest"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The user has no model with this ID (`not-found`), or the model has no manifest yet (`no-manifest`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          }
+        },
+        "summary": "Get Manifest",
+        "tags": [
+          "models"
+        ]
+      },
+      "put": {
+        "description": "Adds the model's manifest, or replaces the one it has; the body is the manifest. It is\nkept only when every check passes: its form, the catalog (every block exists, in its\nstep), the blocks' parameters, the names of the columns, the signature against the window\nand the columns, the shapes of the example, and the signature against the input and\noutput the upload read from the model file. The model is then `ready`; a trial run\nmakes it `verified` (not yet).",
+        "operationId": "set_manifest_api_v1_models__model_id__manifest_put",
+        "parameters": [
+          {
+            "description": "Public ID of the model",
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "description": "Public ID of the model",
+              "examples": [
+                "mdl_7f3k2m9qx4"
+              ],
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Manifest"
+              }
+            }
+          },
+          "description": "The manifest (docs/preprocessing.md), as JSON",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not come from the app's own pages (`cross-origin-request`)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The user has no model with this ID (`not-found`)."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The manifest is larger than 1 MB (`manifest-too-large`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A check failed (`manifest-check-failed`): `problems` lists what is wrong, at most 10, each with its `check` (`schema`, `catalog`, `params`, `names`, `signature`, `example` or `model`) and a `detail` of one sentence; `more_problems` counts the rest and `unknown_blocks` names the blocks the catalog does not have. `detail` says the same in words."
+          }
+        },
+        "summary": "Set Manifest",
         "tags": [
           "models"
         ]

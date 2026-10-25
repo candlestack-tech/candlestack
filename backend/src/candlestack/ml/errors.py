@@ -1,11 +1,32 @@
 """Errors of the models service. They know nothing about HTTP: the API turns each into its
 problem."""
 
+from collections.abc import Sequence
+
 from candlestack.ml.schemas import ModelCheck
+from candlestack.preprocessing import ManifestProblem
 
 
 class UnsupportedModelFormat(Exception):
     """The file is not a Keras model (``.keras``), the only format taken for now."""
+
+
+class ManifestTooLarge(Exception):
+    """The manifest is larger than a manifest may be."""
+
+
+class ManifestCheckFailed(Exception):
+    """The manifest failed checks: ``problems`` says which and why, in plain sentences;
+    ``unknown_blocks`` are the blocks it names that the catalog does not have."""
+
+    def __init__(self, problems: Sequence[ManifestProblem], unknown_blocks: Sequence[str]) -> None:
+        super().__init__(", ".join(problem.check for problem in problems))
+        self.problems = list(problems)
+        self.unknown_blocks = list(unknown_blocks)
+
+
+class NoManifest(Exception):
+    """The model has no manifest yet."""
 
 
 class ModelTooLarge(Exception):

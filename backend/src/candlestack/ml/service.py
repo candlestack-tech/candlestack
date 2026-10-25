@@ -1,5 +1,5 @@
-"""The models of a user: uploading a file, listing, renaming, starring and deleting them, and
-deleting them with the account.
+"""The models of a user: uploading a file, listing, renaming, starring and deleting them,
+adding their manifests, and deleting them with the account.
 
 A user uploads one file at a time (``uploads.py``). An upload streams to an incoming file of
 the storage while it is counted and hashed, never held in memory, within a time limit, and is
@@ -7,6 +7,10 @@ checked there in a child process (``sandbox.py``). Only a file that passed is ke
 transaction under the lock of the user's models, so two uploads cannot both pass the quota or
 take the same name, its row goes in and the file moves to its place; the file goes again when
 the commit fails. The incoming files are removed whatever happens.
+
+A manifest is added to a model that is kept, and replaces the one it had: it is checked alone,
+then against the shapes the upload's check read from the file, and kept only when every check
+passed, which makes the model ``ready``.
 """
 
 import hashlib
@@ -23,10 +27,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from candlestack.accounts import AfterDeletion
 from candlestack.ml.errors import (
     AccountGone,
+    ManifestCheckFailed,
+    ManifestTooLarge,
     ModelCheckFailed,
     ModelNameTaken,
     ModelNotFound,
     ModelTooLarge,
+    NoManifest,
     StorageFull,
     TooManyModels,
     UnsupportedModelFormat,
@@ -37,23 +44,40 @@ from candlestack.ml.models import Model, new_model_id
 from candlestack.ml.sandbox import check_upload
 from candlestack.ml.schemas import (
     FILE_MAX_BYTES,
+    MANIFEST_MAX_BYTES,
     MODELS_MAX,
     NAME_MAX,
     QUOTA_BYTES,
+    BlockUse,
     Framework,
+    ManifestSummary,
     ModelCheck,
     ModelOut,
     ModelsOut,
+    ModelState,
     ModelUpdate,
     StorageUsage,
+    WarmUpOut,
     without_invisible,
 )
 from candlestack.ml.storage import ModelStorage
 from candlestack.ml.store import ModelStore
 from candlestack.ml.uploads import UploadLocks
 from candlestack.ml.usage import UNUSED, ModelUsageStats
+from candlestack.preprocessing import (
+    InvalidManifest,
+    Manifest,
+    ManifestProblem,
+    check_manifest,
+    check_with_model,
+    parse_manifest,
+    unknown_blocks,
+    warm_up,
+)
 
 logger = logging.getLogger(__name__)
+# The one character a JSON text may hold that Postgres cannot keep in JSONB.
+NUL = "\x00"
 
 KERAS_SUFFIX = ".keras"
 # The name a file without a usable one gets (".keras").
@@ -117,7 +141,33 @@ def _split(name: str) -> tuple[str, str]:
     return name[: -len(KERAS_SUFFIX)], name[-len(KERAS_SUFFIX) :]
 
 
-def _out(model: Model, usage: ModelUsageStats = UNUSED) -> ModelOut:
+def _spec(model: Model) -> Manifest | None:
+    """The model's manifest without its example and notes, as the store's queries load it."""
+    return None if model.manifest_spec is None else parse_manifest(model.manifest_spec)
+
+
+def _summary(manifest: Manifest) -> ManifestSummary:
+    spec, start = manifest.input, warm_up(manifest)
+    return ManifestSummary(
+        representation=BlockUse(id=spec.representation.id, params=spec.representation.params),
+        timeframe=spec.timeframe,
+        session=spec.session,
+        input_shape=manifest.signature.input.shape,
+        warm_up=WarmUpOut(candles=start.candles, kind=start.kind),
+    )
+
+
+def _state(model: Model, manifest: Manifest | None) -> ModelState:
+    if manifest is None:
+        return ModelState.needs_setup
+    return ModelState.ready if model.verified_at is None else ModelState.verified
+
+
+def _out(
+    model: Model, usage: ModelUsageStats = UNUSED, manifest: Manifest | None = None
+) -> ModelOut:
+    """The model as the API shows it; `manifest` is its manifest, or the part of it the store's
+    queries load (``_spec``)."""
     return ModelOut(
         id=model.id,
         name=model.name,
@@ -130,6 +180,8 @@ def _out(model: Model, usage: ModelUsageStats = UNUSED) -> ModelOut:
         backtest_count=usage.backtest_count,
         best_sharpe=usage.best_sharpe,
         created_at=model.created_at,
+        state=_state(model, manifest),
+        manifest_summary=None if manifest is None else _summary(manifest),
     )
 
 
@@ -173,6 +225,61 @@ async def _receive(chunks: AsyncIterable[bytes], path: Path) -> tuple[int, bytes
     return size, digest.digest()
 
 
+async def _read_manifest(chunks: AsyncIterable[bytes]) -> bytes:
+    """The manifest the client sends, held in memory as it is small.
+
+    Raises:
+        ManifestTooLarge: It is larger than a manifest may be (it stops reading there).
+    """
+    document = bytearray()
+    async for chunk in chunks:
+        document += chunk
+        if len(document) > MANIFEST_MAX_BYTES:
+            raise ManifestTooLarge
+    return bytes(document)
+
+
+def _checked_alone(document: bytes) -> tuple[Manifest | None, list[ManifestProblem]]:
+    """The manifest in `document` and the problems of the checks that need no model: its form
+    (no manifest when that fails), then the catalog, the parameters, the names, the signature
+    and the example."""
+    try:
+        manifest = parse_manifest(document)
+    except InvalidManifest as invalid:
+        return None, [invalid.problem]
+    return manifest, check_manifest(manifest) + _with_nul(manifest)
+
+
+def _with_nul(manifest: Manifest) -> list[ManifestProblem]:
+    """A problem of the form for the texts of the manifest that hold the character NUL: JSON
+    takes it, but Postgres cannot keep it in a JSONB column. The example holds numbers only."""
+    texts = _texts_with_nul(manifest.model_dump(mode="json", exclude={"example"}), "")
+    sentences = tuple(
+        f"{where} holds the character NUL, which CandleStack cannot keep. Remove it."
+        for where in texts
+    )
+    return [ManifestProblem("schema", sentences)] if sentences else []
+
+
+def _texts_with_nul(value: object, where: str) -> list[str]:
+    """Where in `value` a text, or the name of a field, holds NUL."""
+    if isinstance(value, str):
+        return [where] if NUL in value else []
+    if isinstance(value, dict):
+        found = [f"A field name in {where}" for key in value if NUL in key]
+        return found + [
+            text
+            for key, item in value.items()
+            if NUL not in key
+            for text in _texts_with_nul(item, f"{where}.{key}" if where else key)
+        ]
+    if isinstance(value, list):
+        return [
+            text for i, item in enumerate(value) for text in _texts_with_nul(item, f"{where}[{i}]")
+        ]
+    return []
+
+
 class ModelsService:
     def __init__(self, store: ModelStore, storage: ModelStorage, uploads: UploadLocks) -> None:
         self._store = store
@@ -184,7 +291,7 @@ class ModelsService:
         models = await self._store.models(user_id)
         usage = await self._store.backtest_usage(user_id, [model.id for model in models])
         return ModelsOut(
-            models=[_out(model, usage.get(model.id, UNUSED)) for model in models],
+            models=[_out(model, usage.get(model.id, UNUSED), _spec(model)) for model in models],
             usage=StorageUsage(
                 used_bytes=sum(model.size_bytes for model in models),
                 quota_bytes=QUOTA_BYTES,
@@ -321,6 +428,8 @@ class ModelsService:
         model = await self._store.model(user_id, model_id)
         if model is None:
             raise ModelNotFound
+        # Read before the change: writing the row resets what the query loaded with it.
+        manifest = _spec(model)
         if update.name is not None:
             name = update.name + _split(model.name)[1]
             if await self._store.name_taken(user_id, name, other_than=model.id):
@@ -330,7 +439,57 @@ class ModelsService:
             model.starred = update.starred
         usage = await self._store.backtest_usage(user_id, [model.id])
         await self._store.commit()
-        return _out(model, usage.get(model.id, UNUSED))
+        return _out(model, usage.get(model.id, UNUSED), manifest)
+
+    async def set_manifest(
+        self,
+        user_id: str,
+        model_id: str,
+        declared_size: int | None,
+        chunks: AsyncIterable[bytes],
+    ) -> ModelOut:
+        """Checks the manifest the client sends against the user's model and keeps it in place
+        of the one the model had, if any: the model is ``ready``, until a trial run verifies
+        it again. `declared_size` is the size the client announced (Content-Length), if any.
+
+        Raises:
+            ManifestTooLarge: The manifest is larger than a manifest may be.
+            ModelNotFound: The user has no model with the ID.
+            ManifestCheckFailed: A check failed; nothing changes.
+        """
+        if declared_size is not None and declared_size > MANIFEST_MAX_BYTES:
+            raise ManifestTooLarge
+        manifest, problems = _checked_alone(await _read_manifest(chunks))
+        await self._store.lock_user(user_id)
+        model = await self._store.model(user_id, model_id)
+        if model is None:
+            raise ModelNotFound
+        if manifest is None:
+            raise ManifestCheckFailed(problems, [])
+        problems += check_with_model(manifest, model.input_shape, model.output_shape)
+        if problems:
+            raise ManifestCheckFailed(problems, unknown_blocks(manifest))
+        # What the user wrote, without the defaults filled in, so it reads back as it was given.
+        model.manifest = manifest.model_dump(mode="json", exclude_unset=True)
+        model.verified_at = None
+        usage = await self._store.backtest_usage(user_id, [model.id])
+        await self._store.commit()
+        logger.info("User %s set the manifest of model %s", user_id, model.id)
+        return _out(model, usage.get(model.id, UNUSED), manifest)
+
+    async def manifest(self, user_id: str, model_id: str) -> Manifest:
+        """The manifest of the user's model.
+
+        Raises:
+            ModelNotFound: The user has no model with the ID.
+            NoManifest: The model has no manifest yet.
+        """
+        row = await self._store.manifest(user_id, model_id)
+        if row is None:
+            raise ModelNotFound
+        if row[0] is None:
+            raise NoManifest
+        return parse_manifest(row[0])
 
     async def delete(self, user_id: str, model_id: str) -> None:
         """Deletes the user's model, then its file; a file that cannot be removed stays as an
@@ -339,6 +498,9 @@ class ModelsService:
         Raises:
             ModelNotFound: The user has no model with the ID.
         """
+        # Under the lock of the user's models, so a rename or a manifest being kept finishes
+        # first instead of updating a row that is gone.
+        await self._store.lock_user(user_id)
         if not await self._store.delete(user_id, model_id):
             raise ModelNotFound
         await self._store.commit()

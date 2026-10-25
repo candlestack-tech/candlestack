@@ -13,7 +13,7 @@ would describe an input it does not build.
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, FailFast, Field, field_validator
 from pydantic_core import PydanticCustomError
 
 # The only version of the manifest so far: a manifest of any other is refused.
@@ -29,6 +29,12 @@ BLOCK_ID = r"^[a-z][a-z0-9]*(-[a-z0-9]+)*@[1-9][0-9]*$"
 # 30-minute candles are about 77 trading days already.
 WINDOW_MAX = 1000
 
+# Caps on what a manifest lists, far above any real model's, so the checks of a large document
+# stay a few sentences: the columns, the parameters of a block and the axes of a shape.
+FEATURES_MAX = 256
+PARAMS_MAX = 32
+AXES_MAX = 8
+
 # The time of a row (``ts``) is a column of the rows next to the features.
 RESERVED_NAMES = frozenset({"ts"})
 
@@ -38,15 +44,19 @@ BlockId = Annotated[
     str,
     Field(
         pattern=BLOCK_ID,
+        max_length=64,
         description="A block of the catalog and its version",
         examples=["candles@1"],
     ),
 ]
 Params = Annotated[
     dict[str, Any],
-    Field(description="The block's parameters, checked against the catalog"),
+    Field(max_length=PARAMS_MAX, description="The block's parameters, checked against the catalog"),
 ]
 Number = Annotated[float, Field(allow_inf_nan=False)]
+# A list stops at its first wrong item: an example full of NaN is one error, not one per value.
+Row = Annotated[list[Number], FailFast()]
+Sample = Annotated[list[Row], FailFast()]
 
 
 class _Strict(BaseModel):
@@ -95,14 +105,18 @@ class Input(_Strict):
         description="`regular`: US trading hours; `24/7`: around the clock, as crypto trades"
     )
     representation: BlockRef = Field(description="Which rows the model sees")
-    features: list[Feature] = Field(min_length=1, description="The columns, in their order")
+    features: Annotated[list[Feature], FailFast()] = Field(
+        min_length=1, max_length=FEATURES_MAX, description="The columns, in their order"
+    )
     window: Window
 
 
 class Tensor(_Strict):
     """The shape of one sample without the batch axis, and its type."""
 
-    shape: list[Annotated[int, Field(ge=1)]] = Field(min_length=1, examples=[[25, 5]])
+    shape: Annotated[list[Annotated[int, Field(ge=1)]], FailFast()] = Field(
+        min_length=1, max_length=AXES_MAX, examples=[[25, 5]]
+    )
     dtype: Literal["float32"]
 
 
@@ -122,10 +136,10 @@ class Signature(_Strict):
 class Example(_Strict):
     """A small input with the output the model must give for it (within 1e-4)."""
 
-    input: list[list[list[Number]]] = Field(
+    input: Annotated[list[Sample], FailFast()] = Field(
         min_length=1, description="Samples of the shape of `signature.input`"
     )
-    output: list[list[Number]] = Field(
+    output: Annotated[list[Row], FailFast()] = Field(
         min_length=1, description="The model's output for each sample"
     )
 

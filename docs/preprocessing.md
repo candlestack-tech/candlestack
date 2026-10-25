@@ -188,20 +188,26 @@ input.
 ### The upload
 
 The model and its manifest are two files, `model.keras` (or `model.onnx`) and `manifest.json`;
-both can be dropped at once, and the app tells which is which.
+both can be dropped at once, and the app tells which is which. They are two requests: the
+model file is uploaded and kept first (`POST /api/v1/models`), then its manifest is added to
+it (`PUT /api/v1/models/{model_id}/manifest`, [architecture.md](architecture.md#models)).
 
 1. The model file: its checks run (the model checks below), and it shows what it takes and
    gives: "input [25, 23] · output [1]".
 2. How to feed it, one of: upload `manifest.json`; pick a template ("BLESK NO-VOL
    25 x 23", "Raw candles 25 x 5"); or build it in a form from the catalog (blocks, order,
-   window). Its checks run at once, and the two are compared side by side: "the manifest
-   gives [25, 23], the model takes [25, 23]".
-3. An example input with its output, optional: the model is `verified` when it matches.
-4. Save. Step 2 can be skipped: the model is kept as `needs_setup`, and its manifest is added
-   later from the Models page.
+   window). Its checks run at once (checks 2 and 3 below), and the two are compared side by
+   side: "the manifest gives [25, 23], the model takes [25, 23]". The manifest is kept only
+   when every check passed, and the model is then `ready`. An `example` in it is optional:
+   the trial run compares it, and the model is `verified` when it matches.
+3. Add model. Step 2 can be skipped: the model is kept as `needs_setup`, and its manifest is
+   added later from the Models page ("Add manifest"). A manifest added again replaces the one
+   the model had, and the model is `ready` until a trial run verifies it again.
 
 Each check shows as passed or failed with what is wrong, in plain words ("The model has 2
-inputs; CandleStack takes models with one input"). Save is disabled while a check fails.
+inputs; CandleStack takes models with one input"), one sentence for each thing wrong: at most
+10, then how many more, so a manifest wrong throughout cannot flood the page. Add model (Save,
+when a manifest is added later) is disabled while a check fails.
 
 ## The blocks
 
@@ -281,7 +287,9 @@ Checks 1 to 3 read the files only and run on upload; 4 and 5 run the model in th
    - the output is `[batch, 1]`: one score per sample.
 2. **The manifest.** Valid against the JSON Schema, which also caps the window at 1000 rows
    (the run loads the window's warm-up before its first day; 1000 rows of 30-minute candles
-   are about 77 trading days); every block and version in the catalog and in its own step,
+   are about 77 trading days) and what a manifest lists, far above any real model's: 256
+   features, 32 parameters of a block, 8 axes of a shape, block ids of 64 characters; every
+   block and version in the catalog and in its own step,
    each parameter of the right type and in its range; the feature names unique and none
    named `ts`; `signature.input` equal to `[window.length, number of features]` and
    `signature.output` equal to `[1]`; the shapes of the `example`.

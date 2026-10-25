@@ -2,12 +2,22 @@
 Nothing here commits; the service does, once a change is complete."""
 
 from collections.abc import Mapping, Sequence
+from typing import Any
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, literal_column, select, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import with_expression
 
 from candlestack.ml.models import Model
 from candlestack.ml.usage import ModelUsage, ModelUsageStats, no_usage
+
+# The manifest without its example and notes (``Model.manifest_spec``): a few KB where the
+# manifest may be 1 MB, so a list of 100 models never reads their examples.
+_WITH_SPEC = with_expression(
+    Model.manifest_spec,
+    Model.manifest.op("-", return_type=JSONB)(literal_column("ARRAY['example', 'about']")),
+)
 
 
 class ModelStore:
@@ -25,9 +35,10 @@ class ModelStore:
         await self._db.commit()
 
     async def lock_user(self, user_id: str) -> None:
-        """Takes the lock of the user's models until the transaction ends, so the uploads and
-        renames of one user run one after the other: two uploads cannot both pass the quota,
-        nor take the same name. An advisory lock, as the rows to lock may not exist yet."""
+        """Takes the lock of the user's models until the transaction ends, so the uploads,
+        renames, manifests and deletions of one user run one after the other: two uploads
+        cannot both pass the quota, nor take the same name, and nothing updates a row a
+        deletion removed. An advisory lock, as the rows to lock may not exist yet."""
         await self._db.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
             {"key": f"ml:models:{user_id}"},
@@ -36,15 +47,28 @@ class ModelStore:
     async def models(self, user_id: str) -> list[Model]:
         """The user's models, oldest first."""
         rows = await self._db.scalars(
-            select(Model).where(Model.user_id == user_id).order_by(Model.created_at, Model.id)
+            select(Model)
+            .options(_WITH_SPEC)
+            .where(Model.user_id == user_id)
+            .order_by(Model.created_at, Model.id)
         )
         return list(rows)
 
     async def model(self, user_id: str, model_id: str) -> Model | None:
         """The user's model with the ID; None also when it is another user's."""
         return await self._db.scalar(
-            select(Model).where(Model.id == model_id, Model.user_id == user_id)
+            select(Model).options(_WITH_SPEC).where(Model.id == model_id, Model.user_id == user_id)
         )
+
+    async def manifest(self, user_id: str, model_id: str) -> tuple[dict[str, Any] | None] | None:
+        """The manifest of the user's model, in a row of one (None in it without one); None
+        when the user has no model with the ID."""
+        row = (
+            await self._db.execute(
+                select(Model.manifest).where(Model.id == model_id, Model.user_id == user_id)
+            )
+        ).one_or_none()
+        return None if row is None else (row[0],)
 
     async def backtest_usage(
         self, user_id: str, model_ids: Sequence[str]
