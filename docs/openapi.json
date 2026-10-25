@@ -725,6 +725,78 @@
         "title": "BestBacktests",
         "type": "object"
       },
+      "BlockOut": {
+        "properties": {
+          "description": {
+            "examples": [
+              "Every candle a row"
+            ],
+            "title": "Description",
+            "type": "string"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the app shows a feature when it draws the input: Candle, Bands, Momentum, Trend, Volume or Brick; null for the other steps",
+            "examples": [
+              "Candle"
+            ],
+            "title": "Group"
+          },
+          "id": {
+            "description": "The versioned name a manifest uses",
+            "examples": [
+              "candles@1"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "params": {
+            "description": "Its parameters, in the order of the block",
+            "items": {
+              "$ref": "#/components/schemas/ParamOut"
+            },
+            "title": "Params",
+            "type": "array"
+          },
+          "step": {
+            "description": "The step of the input the block is for",
+            "enum": [
+              "representation",
+              "feature",
+              "normalization",
+              "window"
+            ],
+            "title": "Step",
+            "type": "string"
+          },
+          "warm_up": {
+            "description": "How many earlier candles the block needs before its first complete value (rows, for the window), in its parameters",
+            "examples": [
+              "0",
+              "length - 1"
+            ],
+            "title": "Warm Up",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "step",
+          "description",
+          "group",
+          "warm_up",
+          "params"
+        ],
+        "title": "BlockOut",
+        "type": "object"
+      },
       "CandlesMeta": {
         "properties": {
           "count": {
@@ -952,6 +1024,23 @@
           "v"
         ],
         "title": "CandlesOut",
+        "type": "object"
+      },
+      "CatalogOut": {
+        "properties": {
+          "blocks": {
+            "description": "Every block, by step in the order they apply",
+            "items": {
+              "$ref": "#/components/schemas/BlockOut"
+            },
+            "title": "Blocks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "blocks"
+        ],
+        "title": "CatalogOut",
         "type": "object"
       },
       "DashboardOut": {
@@ -1933,6 +2022,175 @@
           "usage"
         ],
         "title": "ModelsOut",
+        "type": "object"
+      },
+      "ParamOut": {
+        "properties": {
+          "default": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The value without one in the manifest; null when it is required",
+            "title": "Default"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "How many rows make one sample"
+            ],
+            "title": "Description"
+          },
+          "exclusive_maximum": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Values must be below it",
+            "title": "Exclusive Maximum"
+          },
+          "exclusive_minimum": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Values must be above it",
+            "title": "Exclusive Minimum"
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The largest value allowed",
+            "examples": [
+              1000
+            ],
+            "title": "Maximum"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The smallest value allowed",
+            "examples": [
+              1
+            ],
+            "title": "Minimum"
+          },
+          "name": {
+            "examples": [
+              "length"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The values allowed, for a choice",
+            "examples": [
+              [
+                "closed",
+                "current"
+              ]
+            ],
+            "title": "Options"
+          },
+          "required": {
+            "description": "The manifest must give it; else `default` applies",
+            "title": "Required",
+            "type": "boolean"
+          },
+          "tunable": {
+            "description": "A user may change it on a trained model (a later experiment mode)",
+            "title": "Tunable",
+            "type": "boolean"
+          },
+          "type": {
+            "description": "The JSON type of the value",
+            "enum": [
+              "integer",
+              "number",
+              "string",
+              "boolean"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "description",
+          "required",
+          "default",
+          "minimum",
+          "maximum",
+          "exclusive_minimum",
+          "exclusive_maximum",
+          "options",
+          "tunable"
+        ],
+        "title": "ParamOut",
         "type": "object"
       },
       "PreferencesOut": {
@@ -3978,6 +4236,28 @@
         "summary": "Update Model",
         "tags": [
           "models"
+        ]
+      }
+    },
+    "/api/v1/preprocessing/catalog": {
+      "get": {
+        "description": "Every block a model's manifest can name, by step (representation, feature,\nnormalization, window): its versioned id, what it does, its warm-up and its parameters\nwith their types, ranges and defaults. The app builds the manifest form from it. A block\nthat is not listed yet makes a manifest that cannot run.",
+        "operationId": "preprocessing_catalog_api_v1_preprocessing_catalog_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Preprocessing Catalog",
+        "tags": [
+          "preprocessing"
         ]
       }
     }

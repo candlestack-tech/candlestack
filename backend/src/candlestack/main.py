@@ -40,6 +40,7 @@ from candlestack.ml import (
     ModelStorage,
     keep_incoming_swept,
     models_router,
+    preprocessing_router,
 )
 
 logger = logging.getLogger(__name__)
@@ -181,6 +182,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(data_router)
     app.include_router(accounts_router)
     app.include_router(models_router)
+    app.include_router(preprocessing_router)
     app.include_router(backtests_router)
     if dev_sign_in_allowed(settings.app_env):
         app.include_router(dev_sign_in_router)

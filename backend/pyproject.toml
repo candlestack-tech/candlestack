@@ -15,6 +15,7 @@ dependencies = [
     "granian>=2.8.3",
     "h5py>=3.16.0",
     "httpx>=0.28.1",
+    "numpy>=2.5.4",
     "orjson>=3.12.0",
     "polars>=1.44.2",
     "pydantic>=2.13.5",
@@ -231,6 +232,12 @@ protected_modules = ["candlestack.metrics.*"]
 allowed_importers = ["candlestack.metrics"]
 
 [[tool.importlinter.contracts]]
+name = "Other modules import preprocessing only through its package root"
+type = "protected"
+protected_modules = ["candlestack.preprocessing.*"]
+allowed_importers = ["candlestack.preprocessing"]
+
+[[tool.importlinter.contracts]]
 name = "Only core uses the Sentry SDK"
 type = "forbidden"
 source_modules = [
@@ -241,13 +248,17 @@ forbidden_modules = ["sentry_sdk"]
 # They reach Sentry through core (logging, setup_sentry), never by importing it themselves.
 allow_indirect_imports = true
 
-# The backtest is plain functions on Polars frames: no app, settings, Redis or outgoing HTTP.
-# The modules and libraries are named one by one: a new module of the project or a new server
-# library goes into forbidden_modules.
+# The backtest and the model's input are plain functions on Polars frames: no app, settings,
+# Redis or outgoing HTTP (the worker runs preprocessing without network). The modules and
+# libraries are named one by one: a new module of the project or a new server library goes into
+# forbidden_modules.
 [[tool.importlinter.contracts]]
-name = "Engine, signals and metrics stand alone"
+name = "Engine, signals, metrics and preprocessing stand alone"
 type = "forbidden"
-source_modules = ["candlestack.engine", "candlestack.signals", "candlestack.metrics"]
+source_modules = [
+    "candlestack.engine", "candlestack.signals", "candlestack.metrics",
+    "candlestack.preprocessing",
+]
 forbidden_modules = [
     "candlestack.accounts", "candlestack.core", "candlestack.data", "candlestack.cli",
     "candlestack.experiments", "candlestack.main", "candlestack.ml",
@@ -256,9 +267,12 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "Engine, signals and metrics do not know each other"
+name = "Engine, signals, metrics and preprocessing do not know each other"
 type = "independence"
-modules = ["candlestack.engine", "candlestack.signals", "candlestack.metrics"]
+modules = [
+    "candlestack.engine", "candlestack.signals", "candlestack.metrics",
+    "candlestack.preprocessing",
+]
 
 # The CLI wires signals, the engine and metrics together; it is an entry point, not a library.
 # The modules are named one by one: a new module of the project goes into source_modules.
@@ -267,7 +281,7 @@ name = "Nothing imports the CLI"
 type = "forbidden"
 source_modules = [
     "candlestack.accounts", "candlestack.core", "candlestack.data", "candlestack.experiments",
-    "candlestack.main", "candlestack.ml", "candlestack.openapi",
+    "candlestack.main", "candlestack.ml", "candlestack.openapi", "candlestack.preprocessing",
 ]
 forbidden_modules = ["candlestack.cli"]
 
@@ -347,10 +361,14 @@ forbidden_modules = [
 
 # The API checks an uploaded model by reading its file, never by loading it: a load could run
 # code from the file, and the API image has no Keras or TensorFlow (the worker will).
+# Preprocessing serves the catalog in the API and builds the input in the worker, so it builds
+# arrays for a model without knowing the framework that runs it.
 [[tool.importlinter.contracts]]
 name = "The API never imports a deep learning framework"
 type = "forbidden"
-source_modules = ["candlestack.experiments", "candlestack.ml", "candlestack.main"]
+source_modules = [
+    "candlestack.experiments", "candlestack.ml", "candlestack.main", "candlestack.preprocessing",
+]
 forbidden_modules = ["keras", "tensorflow", "torch", "jax"]
 
 # What the sources share lives in sources.base.

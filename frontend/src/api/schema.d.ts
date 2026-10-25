@@ -471,6 +471,29 @@ export interface paths {
         patch: operations["update_model_api_v1_models__model_id__patch"];
         trace?: never;
     };
+    "/api/v1/preprocessing/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preprocessing Catalog
+         * @description Every block a model's manifest can name, by step (representation, feature,
+         *     normalization, window): its versioned id, what it does, its warm-up and its parameters
+         *     with their types, ranges and defaults. The app builds the manifest form from it. A block
+         *     that is not listed yet makes a manifest that cannot run.
+         */
+        get: operations["preprocessing_catalog_api_v1_preprocessing_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -854,6 +877,44 @@ export interface components {
             /** Win Rate */
             win_rate: components["schemas"]["BacktestOut"][];
         };
+        /** BlockOut */
+        BlockOut: {
+            /**
+             * Description
+             * @example Every candle a row
+             */
+            description: string;
+            /**
+             * Group
+             * @description Where the app shows a feature when it draws the input: Candle, Bands, Momentum, Trend, Volume or Brick; null for the other steps
+             * @example Candle
+             */
+            group: string | null;
+            /**
+             * Id
+             * @description The versioned name a manifest uses
+             * @example candles@1
+             */
+            id: string;
+            /**
+             * Params
+             * @description Its parameters, in the order of the block
+             */
+            params: components["schemas"]["ParamOut"][];
+            /**
+             * Step
+             * @description The step of the input the block is for
+             * @enum {string}
+             */
+            step: "representation" | "feature" | "normalization" | "window";
+            /**
+             * Warm Up
+             * @description How many earlier candles the block needs before its first complete value (rows, for the window), in its parameters
+             * @example 0
+             * @example length - 1
+             */
+            warm_up: string;
+        };
         /** CandlesMeta */
         CandlesMeta: {
             /**
@@ -987,6 +1048,14 @@ export interface components {
              *     ]
              */
             v: number[];
+        };
+        /** CatalogOut */
+        CatalogOut: {
+            /**
+             * Blocks
+             * @description Every block, by step in the order they apply
+             */
+            blocks: components["schemas"]["BlockOut"][];
         };
         /**
          * DashboardOut
@@ -1506,6 +1575,71 @@ export interface components {
              */
             models: components["schemas"]["ModelOut"][];
             usage: components["schemas"]["StorageUsage"];
+        };
+        /** ParamOut */
+        ParamOut: {
+            /**
+             * Default
+             * @description The value without one in the manifest; null when it is required
+             */
+            default: number | string | boolean | null;
+            /**
+             * Description
+             * @example How many rows make one sample
+             */
+            description: string | null;
+            /**
+             * Exclusive Maximum
+             * @description Values must be below it
+             */
+            exclusive_maximum: number | null;
+            /**
+             * Exclusive Minimum
+             * @description Values must be above it
+             */
+            exclusive_minimum: number | null;
+            /**
+             * Maximum
+             * @description The largest value allowed
+             * @example 1000
+             */
+            maximum: number | null;
+            /**
+             * Minimum
+             * @description The smallest value allowed
+             * @example 1
+             */
+            minimum: number | null;
+            /**
+             * Name
+             * @example length
+             */
+            name: string;
+            /**
+             * Options
+             * @description The values allowed, for a choice
+             * @example [
+             *       "closed",
+             *       "current"
+             *     ]
+             */
+            options: string[] | null;
+            /**
+             * Required
+             * @description The manifest must give it; else `default` applies
+             */
+            required: boolean;
+            /**
+             * Tunable
+             * @description A user may change it on a trained model (a later experiment mode)
+             */
+            tunable: boolean;
+            /**
+             * Type
+             * @description The JSON type of the value
+             * @enum {string}
+             */
+            type: "integer" | "number" | "string" | "boolean";
         };
         /**
          * PreferencesOut
@@ -2860,6 +2994,26 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    preprocessing_catalog_api_v1_preprocessing_catalog_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogOut"];
                 };
             };
         };

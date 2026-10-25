@@ -7,7 +7,9 @@ repository root:
         "pip install --quiet keras==3.15.1 jax==0.11.2 \
          && KERAS_BACKEND=jax python /out/make_models.py"
 
-Each file is a few kilobytes; the seed keeps the weights the same between runs.
+Each file is a few kilobytes; the seed keeps the weights the same between runs. To build one
+file only, call its function instead (`python -c "import make_models; make_models.raw_candles()"`
+from `/out`), so the other files stay as they are.
 """
 
 import sys
@@ -89,6 +91,21 @@ def sequential() -> None:
     model.save(OUT / "sequential.keras")
 
 
+def raw_candles() -> None:
+    """The model of raw_candles.manifest.json, the manifest without preprocessing: the last 25
+    candles (open, high, low, close, volume) in, one score out. The Normalization layer scales
+    the raw prices inside the model, which the manifest therefore leaves as they are."""
+    candles = (100 + np.random.rand(64, 25, 5) * 10).astype("float32")
+    normalization = layers.Normalization(axis=-1)
+    normalization.adapt(candles)
+    inputs = keras.Input((25, 5))
+    x = layers.Flatten()(normalization(inputs))
+    x = layers.Dense(8, activation="relu")(x)
+    model = keras.Model(inputs, layers.Dense(1, activation="tanh")(x))
+    fit(model, candles)
+    model.save(OUT / "raw_candles.keras")
+
+
 def custom_regularizer() -> None:
     """A user's own regularizer and metric only shape and report training; the model runs
     without them."""
@@ -153,6 +170,7 @@ if __name__ == "__main__":
         operations,
         functional,
         sequential,
+        raw_candles,
         custom_regularizer,
         lambda_layer,
         custom_layer,

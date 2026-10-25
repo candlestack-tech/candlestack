@@ -1,4 +1,5 @@
-"""HTTP API of the ml module: the signed-in user's models under ``/api/v1/models``.
+"""HTTP API of the ml module: the signed-in user's models under ``/api/v1/models``, and the
+catalog their manifests are made of under ``/api/v1/preprocessing/catalog``.
 
 An upload is the file itself as the request body (``application/octet-stream``) with its name
 in ``?name=``, so the server streams it to disk instead of holding a multipart form in memory.
@@ -36,10 +37,17 @@ from candlestack.ml.schemas import (
     ModelUpdate,
 )
 from candlestack.ml.service import RECEIVE_TIMEOUT
+from candlestack.preprocessing import CatalogOut, describe_catalog
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["models"])
+# The manifest belongs to a model, which ml checks on upload; preprocessing is plain functions
+# and serves no HTTP itself, so its catalog is served here.
+preprocessing_router = APIRouter(tags=["preprocessing"])
+
+# The catalog is code: it changes only with a release.
+_CATALOG = describe_catalog()
 
 
 ModelId = Annotated[str, Path(description="Public ID of the model", examples=["mdl_7f3k2m9qx4"])]
@@ -308,3 +316,12 @@ async def delete_model(model_id: ModelId, user: CurrentUserDep, service: ModelsS
         await service.delete(user.id, model_id)
     except ModelNotFound:
         raise _not_found() from None
+
+
+@preprocessing_router.get("/api/v1/preprocessing/catalog")
+async def preprocessing_catalog() -> CatalogOut:
+    """Every block a model's manifest can name, by step (representation, feature,
+    normalization, window): its versioned id, what it does, its warm-up and its parameters
+    with their types, ranges and defaults. The app builds the manifest form from it. A block
+    that is not listed yet makes a manifest that cannot run."""
+    return _CATALOG

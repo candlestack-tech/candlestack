@@ -90,6 +90,8 @@ def opens_fails(path: Path, scratch: Path, file_max: int = FILE_MAX) -> str:
     [
         ("functional", ModelFacts("3.15.1", 9325, [25, 23], [1])),
         ("sequential", ModelFacts("3.15.1", 1235, [30, 5], [3])),
+        # The model of the manifest without preprocessing; Normalization keeps its statistics.
+        ("raw_candles", ModelFacts("3.15.1", 1028, [25, 5], [1])),
         # A user's regularizer and metric only shape and report training.
         ("custom_regularizer", ModelFacts("3.15.1", 4617, [25, 23], [1])),
         ("two_inputs", ModelFacts("3.15.1", 586, None, [1])),

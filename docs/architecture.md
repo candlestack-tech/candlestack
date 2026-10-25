@@ -73,6 +73,7 @@ flowchart LR
 | `POST /api/v1/models?name=<file name>` | uploads a model: the body is the file (`application/octet-stream`); checked before it is kept ([Models](#models)); a name the user has already gets a number (`lstm (2).keras`); one upload at a time per user, 100 models at most |
 | `PATCH /api/v1/models/{model_id}` | renames a model (the extension stays; `409 model-name-taken`) or stars and unstars it |
 | `DELETE /api/v1/models/{model_id}` | deletes a model and its file |
+| `GET /api/v1/preprocessing/catalog` | the blocks a model's manifest can name, by step: id, description, the display group of a feature (`Candle`, `Bands`, `Momentum`, `Trend`, `Volume`, `Brick`), warm-up and parameters (type, range, default, `tunable`); public, served by `ml` ([preprocessing.md](preprocessing.md#the-blocks)) |
 | `GET /api/v1/backtests` | a page of 10 of the user's backtests: search `q` (number, symbol or model name), `show` (`all`, `starred`, `failed`), `model` (a model's name), `sort` and `order`, `page`; with the total, the pages and what the filter panel shows (the counts of all, starred and failed backtests, the models used) ([Backtests](#backtests)) |
 | `PATCH /api/v1/backtests/{backtest_id}` | stars or unstars a backtest |
 | `GET /api/v1/dashboard` | everything the Dashboard shows in one response: the counts, the 6 newest backtests, the 5 best finished ones by Sharpe ratio, return, drawdown and win rate, the 4 best starred ones |
@@ -315,7 +316,7 @@ A module is a subpackage of `candlestack` under `backend/src/candlestack/`.
 | `core` | now | settings, logging, problem errors, Redis, Postgres and HTTP clients, CSRF protection, health endpoint |
 | `data` | now | instrument catalog, candles, sessions, cache, source adapters, rate limits |
 | `accounts` | now | users, GitHub and Google sign-in, sessions, the beta list, Settings (name, sign-in methods, preferences, deleting the account); `CurrentUserDep` for the routes of the signed-in user, `AccountDeletionHook` for what other modules delete with an account |
-| `preprocessing` | later | the model's input from its manifest: representation (candles, Renko, Kagi), features, normalization, windows ([preprocessing.md](preprocessing.md)) |
+| `preprocessing` | started | the model's input from its manifest: the manifest's schema and checks, the catalog of blocks, and the input built from candles: representation (candles now; Renko, Kagi later), features, normalization, windows ([preprocessing.md](preprocessing.md)) |
 | `ml` | now | the models users upload: the upload and its static check, the file storage, the list, rename, star, delete; running models later, in a worker (below) |
 | `signals` | started | turn predictions into signals: align them with the candles, thresholds, long only; later smoothing, holding period, sizing, risk limits |
 | `engine` | started | the backtest loop: candles and signals in, trades and an equity series out; `ENGINE_VERSION` names its rules ([engine.md](engine.md)) |
@@ -329,22 +330,27 @@ the ones whose folder exists while their code is being written.
 
 ## Import rules
 
-- Dependencies point one way: `experiments` -> `ml` -> `accounts` | `data` -> `core`, later
-  with `preprocessing` between `experiments` and `data`. `core` imports no other module. For
-  now `experiments` imports only `ml`, `accounts` and `core`: not `data` and not the backtest
-  modules, as it runs no backtest yet.
-- The backtest modules `signals`, `engine` and `metrics` stand alone: they import no other
-  module of the project, not each other, and no server library (`fastapi`, `starlette`,
-  `scalar_fastapi`, `granian`, `redis`, `httpx`, `sentry_sdk`, `pydantic_settings`,
-  `sqlalchemy`, `asyncpg`, `alembic`, `authlib`). They are
-  plain functions on Polars frames, put together only by the code that runs them: `cli` now,
-  `experiments` later.
+- Dependencies point one way: `experiments` -> `ml` -> `accounts` | `data` -> `core`. `core`
+  imports no other module. For now `experiments` imports only `ml`, `accounts` and `core`: not
+  `data` and not the backtest modules, as it runs no backtest yet.
+- The backtest modules `signals`, `engine` and `metrics`, and `preprocessing`, stand alone:
+  they import no other module of the project, not each other, and no server library
+  (`fastapi`, `starlette`, `scalar_fastapi`, `granian`, `redis`, `httpx`, `sentry_sdk`,
+  `pydantic_settings`, `sqlalchemy`, `asyncpg`, `alembic`, `authlib`). They are
+  plain functions on Polars frames (Pydantic for their settings and the manifest, NumPy for
+  the model's input), put together only by the code that runs them: `cli` now, `experiments`
+  and the worker later. The worker runs `preprocessing` without network, so it must not need
+  the server's libraries.
+- `preprocessing` serves no HTTP itself: `ml` imports it and serves its catalog
+  (`GET /api/v1/preprocessing/catalog`), as the manifest belongs to a model and `ml` will check
+  it on upload. `experiments` will import it to build a backtest's input.
 - No module imports `cli`: it is the entry point of the `candlestack-bt` command
   (`[project.scripts]` in `backend/pyproject.toml`).
 - The API part of `ml` reads the uploaded files (zip, JSON, the HDF5 metadata with h5py, in
   the check's child process) and never imports a deep learning framework, so the API process
-  never loads one and never runs code from a file. An import-linter `forbidden` contract enforces it: sources `candlestack.ml`
-  and `candlestack.main`, forbidden `keras`, `tensorflow`, `torch` and `jax`
+  never loads one and never runs code from a file. An import-linter `forbidden` contract enforces it: sources `candlestack.ml`,
+  `candlestack.main` and `candlestack.preprocessing` (which builds arrays for a model without
+  knowing the framework that runs it), forbidden `keras`, `tensorflow`, `torch` and `jax`
   (`include_external_packages = true`). Running models comes later, in a worker: only its
   composition root (a future `candlestack/worker.py`) will import the framework, which goes
   into a `worker` dependency group (or extra) that the API image does not install, and the

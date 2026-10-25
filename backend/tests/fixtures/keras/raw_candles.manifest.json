@@ -1,0 +1,21 @@
+{
+  "schema": "candlestack.manifest/1",
+  "input": {
+    "timeframe": "30m",
+    "session": "regular",
+    "representation": {"id": "candles@1"},
+    "features": [
+      {"name": "open", "id": "open@1", "norm": {"id": "none@1"}},
+      {"name": "high", "id": "high@1", "norm": {"id": "none@1"}},
+      {"name": "low", "id": "low@1", "norm": {"id": "none@1"}},
+      {"name": "close", "id": "close@1", "norm": {"id": "none@1"}},
+      {"name": "volume", "id": "volume@1", "norm": {"id": "none@1"}}
+    ],
+    "window": {"length": 25}
+  },
+  "signature": {
+    "input": {"shape": [25, 5], "dtype": "float32"},
+    "output": {"shape": [1], "dtype": "float32", "meaning": "score"}
+  },
+  "about": {"note": "Test model for the pipeline"}
+}
