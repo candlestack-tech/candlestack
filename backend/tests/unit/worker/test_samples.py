@@ -48,6 +48,20 @@ def test_the_regular_session_marks_the_last_candle_of_each(
     assert (marked % per_session == per_session - 1).all()
 
 
+def test_a_manifest_that_reads_the_marks_makes_its_samples(manifest: dict[str, Any]) -> None:
+    manifest["input"]["features"][-1] = {
+        "name": "is_last_bar",
+        "id": "session-last-candle@1",
+        "norm": {"id": "none@1"},
+    }
+    parsed = parse_manifest(manifest)
+
+    made = build_input(sample_candles(parsed), parsed)
+
+    assert made.samples.shape == (SAMPLES, 25, 5)
+    assert set(made.samples[:, :, -1].ravel().tolist()) == {0.0, 1.0}
+
+
 def test_candles_around_the_clock_have_no_sessions(manifest: dict[str, Any]) -> None:
     manifest["input"]["session"] = "24/7"
 
