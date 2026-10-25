@@ -116,8 +116,8 @@ def _checked(candles: pl.DataFrame) -> pl.DataFrame:
     """The candles cast to Int64 ``ts`` and Float64 values.
 
     Raises:
-        ValueError: A column is missing or not numeric, a value is missing, or a ``ts`` is not
-            after the one before it.
+        ValueError: A column is missing or not numeric, a value is missing or not finite, or a
+            ``ts`` is not after the one before it.
     """
     missing = [name for name in ("ts", *CANDLE_COLUMNS) if name not in candles.columns]
     if missing:
@@ -132,6 +132,9 @@ def _checked(candles: pl.DataFrame) -> pl.DataFrame:
     )
     if frame.null_count().sum_horizontal().item():
         raise ValueError("A candle has a missing value")
+    # A NaN or infinite price would pass for a feature's warm-up and be dropped without a word.
+    if not frame.select(pl.all_horizontal(pl.col(CANDLE_COLUMNS).is_finite())).to_series().all():
+        raise ValueError("A candle has a value that is not a finite number")
     if (frame["ts"].diff().drop_nulls() <= 0).any():
         raise ValueError("Each candle's ts must be after the one before it")
     return frame

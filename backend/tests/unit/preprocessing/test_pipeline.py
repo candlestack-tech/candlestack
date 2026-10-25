@@ -139,6 +139,14 @@ def test_a_manifest_that_cannot_run_is_refused(raw: dict[str, Any]) -> None:
             "A candle has a missing value",
         ),
         (
+            candles(3).with_columns(close=pl.Series([float("nan"), 101.5, 102.5])),
+            "A candle has a value that is not a finite number",
+        ),
+        (
+            candles(3).with_columns(volume=pl.Series([0.0, float("inf"), 2000.0])),
+            "A candle has a value that is not a finite number",
+        ),
+        (
             candles(3).with_columns(ts=pl.Series([0, 1800, 1800])),
             "Each candle's ts must be after the one before it",
         ),
@@ -147,7 +155,7 @@ def test_a_manifest_that_cannot_run_is_refused(raw: dict[str, Any]) -> None:
             "Each candle's ts must be after the one before it",
         ),
     ],
-    ids=["missing", "float-ts", "text", "null", "repeated-ts", "unsorted"],
+    ids=["missing", "float-ts", "text", "null", "nan", "infinite", "repeated-ts", "unsorted"],
 )
 def test_candles_that_break_their_rules(
     raw: dict[str, Any], frame: pl.DataFrame, message: str
