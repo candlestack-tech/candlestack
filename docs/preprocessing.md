@@ -9,7 +9,7 @@ turns candles into the model's input from it. It is the design agreed on 2026-10
 
 Built so far: the `preprocessing` module (the manifest and its checks, the catalog and the
 first blocks: `candles@1`, `renko-triples@1` ([below](#renko-triples)), `open@1` to
-`volume@1`, `session-last-candle@1`, the indicators of the BLESK models
+`volume@1`, `rel-open@1` to `rel-close@1` ([below](#the-relative-prices)), `session-last-candle@1`, the indicators of the BLESK models
 ([below](#the-indicators-of-the-blesk-models)), `renko-direction@1`, `none@1`, `window@1` with
 `last` `closed` and `current`), the
 catalog endpoint `GET /api/v1/preprocessing/catalog`, the manifest's JSON Schema,
@@ -130,10 +130,11 @@ What the same schema says for the BLESK NO-VOL models, as far as research knows 
 ([research #117], [research #263]): indicators on the 30-minute candles, Renko bricks of
 0.6 x ATR(14) of the brick's first candle, rows of three bricks taken at the candle where the
 third one ends, a window of the last 24 finished rows and the current one. It cannot run yet:
-the catalog has its indicators (`bollinger-high@1`, `rsi@1`, ...), `renko-triples@1` and
-`renko-direction@1`, but not `blesk-norm@1` (its formulas are research #262's) nor the four
-`rel_*` columns. Without them, the manifest of the other 19 features (each with `none@1`)
-builds an input of `[25, 19]` already.
+the catalog has its indicators (`bollinger-high@1`, `rsi@1`, ...), `renko-triples@1`,
+`renko-direction@1` and the four `rel_*` columns (`rel-open@1` to `rel-close@1`), but not
+`blesk-norm@1` (its formulas are research #262's). Without it, the manifest of the 23
+features (each with `none@1`) builds an input of the right shape, `[25, 23]`, whose
+indicators are not scaled as his were.
 
 The features are shortened to four here, so as written this manifest fails the signature
 check (4 features give `[25, 4]`, not `[25, 23]`). The full manifest has all 23, in this order
@@ -226,7 +227,7 @@ other module of the project and no server library. It is registered in the catal
 versioned name, with its step, a Pydantic model of its parameters, its warm-up (how many
 earlier candles it needs; rows, for the window) and a short description. A feature also has a
 display group (`Candle`, `Bands`, `Momentum`, `Trend`, `Volume`, `Brick`; `open@1` to
-`volume@1` and `session-last-candle@1` are `Candle`), and each block names its `tunable` parameters (none yet).
+`volume@1`, `rel-open@1` to `rel-close@1` and `session-last-candle@1` are `Candle`), and each block names its `tunable` parameters (none yet).
 `GET /api/v1/preprocessing/catalog` serves the catalog, so the app builds its forms from it
 and a new block needs no frontend change: each block with its id, step, description, `group`
 (null except for features; a string, not an enum, so a new group breaks no client), its
@@ -236,7 +237,7 @@ warm-up as a short expression of its parameters (`"0"`, `"length - 1"`) and its 
 | Step | In, out | Blocks, in the order they come |
 | --- | --- | --- |
 | representation | candles, rows: each row with `ts`, the candle at whose close it is known (labelled by its open time, [data.md](data.md#time)), and the row's own columns; rows that span several candles also give `row_id`, the same on the rows of one row still forming | `candles@1` (every candle a row); `renko-triples@1` (rows of three Renko bricks, one a candle, [below](#renko-triples)); then `kagi@1`; later Heikin-Ashi, range bars, volume bars |
-| features | rows, the same rows with one column per feature, computed on the candles and taken at each row's candle, or for a feature of the rows read from the rows | `open@1` ... `volume@1`; `session-last-candle@1` (1 on the last candle of its session, [below](#the-last-candle-of-a-session)); the indicators of the BLESK models ([below](#the-indicators-of-the-blesk-models)); `renko-direction@1`, a feature of the rows of `renko-triples@1` |
+| features | rows, the same rows with one column per feature, computed on the candles and taken at each row's candle, or for a feature of the rows read from the rows | `open@1` ... `volume@1`; `rel-open@1` ... `rel-close@1` ([below](#the-relative-prices)); `session-last-candle@1` (1 on the last candle of its session, [below](#the-last-candle-of-a-session)); the indicators of the BLESK models ([below](#the-indicators-of-the-blesk-models)); `renko-direction@1`, a feature of the rows of `renko-triples@1` |
 | normalization | a column, the column scaled | `none@1`; then `blesk-norm@1`, a rolling z-score, price-relative; fitted numbers come only from the manifest, never from the backtest's own data |
 | window | rows, a `float32` array `(samples, length, features)` and the `ts` of each sample | `window@1`: the last `length` rows up to each row. `last: closed` (the default) takes the `length` rows up to each row, each finished at its own candle, and needs rows that are (`candles@1`). `last: current` takes the `length - 1` most recent finished rows before each row and then the row, which may still be forming, and needs rows that span several candles (`renko-triples@1`); a manifest with the other rule is refused |
 
@@ -292,9 +293,27 @@ ADX smooths twice, and the TSI and the MACD chain two EMAs, so theirs are longer
 defaults the longest is 280 candles (RSI and ADX), about 22 trading days of 30-minute candles.
 
 Not here: `direction` is `renko-direction@1`, the direction of a Renko triple
-([below](#renko-triples)). `rel_open`, `rel_high`, `rel_low` and `rel_close` exist only in
-the normalized data, and their formula is not known yet ([research #117]). `is_last_bar` is
+([below](#renko-triples)). `rel_open`, `rel_high`, `rel_low` and `rel_close` are
+`rel-open@1` to `rel-close@1`, [below](#the-relative-prices). `is_last_bar` is
 `session-last-candle@1`, [below](#the-last-candle-of-a-session).
+
+### The relative prices
+
+The BLESK models take the candle's prices free of the price level, as the columns `rel_open`,
+`rel_high`, `rel_low` and `rel_close` of his normalized data ([research #117]):
+
+| Block | Value | Warm-up |
+| --- | --- | --- |
+| `rel-open@1` | open / close - 1 | 0 |
+| `rel-high@1` | high / close - 1 | 0 |
+| `rel-low@1` | low / close - 1 | 0 |
+| `rel-close@1` | close / the previous candle's close - 1, across sessions too | 1 |
+
+They come from the candle's own prices, and his triples take them at the candle where the
+third brick ends, as every other feature; the model gets them as they are, scaled no further.
+They equal his values on every candle of AAPL and TSLA (34 860 each) but his first
+`rel_close`, which has no previous close in his data and holds 1. The tests against his data
+are in `tests/unit/preprocessing/test_supervisor.py`.
 
 ### The last candle of a session
 

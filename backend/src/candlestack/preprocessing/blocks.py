@@ -104,6 +104,23 @@ def candle_column(name: str) -> Callable[[pl.DataFrame, NoParams], pl.Series]:
     return feature
 
 
+def relative_to_close(name: str) -> Callable[[pl.DataFrame, NoParams], pl.Series]:
+    """The column ``name`` of each candle over the candle's close, minus 1: ``rel-open@1``,
+    ``rel-high@1`` and ``rel-low@1``, the candle's shape whatever its price."""
+
+    def feature(frame: pl.DataFrame, _params: NoParams) -> pl.Series:
+        return frame[name].cast(pl.Float64) / frame["close"].cast(pl.Float64) - 1
+
+    return feature
+
+
+def close_change(frame: pl.DataFrame, _params: NoParams) -> pl.Series:
+    """``rel-close@1``: the close over the previous candle's close, minus 1 (across sessions
+    too); null on the first candle, which has no previous one."""
+    close = frame["close"].cast(pl.Float64)
+    return close / close.shift(1) - 1
+
+
 def session_last(frame: pl.DataFrame, _params: NoParams) -> pl.Series:
     """``session-last-candle@1``: 1 on the last candle of its trading session, else 0.
 
@@ -208,3 +225,7 @@ def window_warm_up(params: Window) -> int:
 
 def no_warm_up(_params: BaseModel) -> int:
     return 0
+
+
+def previous_candle_warm_up(_params: BaseModel) -> int:
+    return 1

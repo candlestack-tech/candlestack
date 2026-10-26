@@ -230,6 +230,30 @@ def _candle_column(name: str) -> Block:
     )
 
 
+# The candle's prices as the BLESK models take them, price-independent (their rel_* columns).
+_RELATIVE = (
+    *(
+        Block(
+            id=f"rel-{name}@1",
+            step="feature",
+            description=f"The {name} of the candle over its close, minus 1",
+            run=blocks.relative_to_close(name),
+            group="Candle",
+        )
+        for name in ("open", "high", "low")
+    ),
+    Block(
+        id="rel-close@1",
+        step="feature",
+        description="The close over the previous candle's close, minus 1",
+        run=blocks.close_change,
+        warm_up=blocks.previous_candle_warm_up,
+        warm_up_rule="1",
+        group="Candle",
+    ),
+)
+
+
 CATALOG: Mapping[str, Block] = MappingProxyType(
     {
         block.id: block
@@ -258,6 +282,7 @@ CATALOG: Mapping[str, Block] = MappingProxyType(
                 candles_per_row=renko.candles_per_row,
             ),
             *(_candle_column(name) for name in blocks.CANDLE_COLUMNS),
+            *_RELATIVE,
             Block(
                 id="session-last-candle@1",
                 step="feature",

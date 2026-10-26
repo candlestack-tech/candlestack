@@ -65,6 +65,30 @@ def test_a_candle_column_is_float64_from_integers() -> None:
     assert result.to_list() == [100.0, 200.0, 300.0]
 
 
+@pytest.mark.parametrize(
+    ("block", "expected"),
+    [
+        ("rel-open@1", [10 / 11 - 1, 11 / 12 - 1, 12 / 13 - 1]),
+        ("rel-high@1", [11.5 / 11 - 1, 12.5 / 12 - 1, 13.5 / 13 - 1]),
+        ("rel-low@1", [9.5 / 11 - 1, 10.5 / 12 - 1, 11.5 / 13 - 1]),
+        ("rel-close@1", [None, 12 / 11 - 1, 13 / 12 - 1]),
+    ],
+)
+def test_a_relative_price_is_over_the_close(block: str, expected: list[float | None]) -> None:
+    assert CATALOG[block].run(CANDLES, NONE).to_list() == expected
+
+
+def test_a_relative_price_is_float64_from_integers() -> None:
+    whole = CANDLES.with_columns(pl.col("open", "close").cast(pl.Int64))
+
+    assert CATALOG["rel-open@1"].run(whole, NONE).dtype == pl.Float64
+    assert CATALOG["rel-close@1"].run(whole, NONE).to_list() == [None, 12 / 11 - 1, 13 / 12 - 1]
+
+
+def test_the_close_s_change_needs_the_previous_candle() -> None:
+    assert CATALOG["rel-close@1"].warm_up(NONE) == 1
+
+
 def test_the_last_candle_of_a_session_is_one_and_the_others_zero() -> None:
     marked = CANDLES.with_columns(session_last=pl.Series([False, True, False]))
 
@@ -261,6 +285,9 @@ def test_the_window_needs_length_minus_one_earlier_rows(length: int, rows_before
         "low@1",
         "close@1",
         "volume@1",
+        "rel-open@1",
+        "rel-high@1",
+        "rel-low@1",
         "session-last-candle@1",
         "none@1",
     ],

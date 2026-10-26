@@ -11,6 +11,8 @@ from candlestack.preprocessing import CATALOG, Block, ParamOut, describe_catalog
 from candlestack.preprocessing.catalog import _describe
 from candlestack.preprocessing.manifest import BLOCK_ID
 
+# The candle's prices over its close, and the close's change, as the BLESK models take them.
+RELATIVE = ["rel-open@1", "rel-high@1", "rel-low@1", "rel-close@1"]
 # The indicators of the BLESK models, in the order of their input, with their display group.
 INDICATORS = {
     "bollinger-high@1": "Bands",
@@ -41,6 +43,7 @@ def test_the_blocks_are_registered() -> None:
         "low@1": "feature",
         "close@1": "feature",
         "volume@1": "feature",
+        **dict.fromkeys(RELATIVE, "feature"),
         "session-last-candle@1": "feature",
         **dict.fromkeys(INDICATORS, "feature"),
         "renko-direction@1": "feature",
@@ -77,6 +80,7 @@ def test_the_catalog_lists_the_blocks_by_step() -> None:
         "low@1",
         "close@1",
         "volume@1",
+        *RELATIVE,
         "session-last-candle@1",
         *INDICATORS,
         "renko-direction@1",
@@ -102,9 +106,8 @@ def test_the_features_are_in_their_display_groups() -> None:
     groups = {block.id: block.group for block in describe_catalog().blocks if block.group}
 
     assert groups == {
-        **dict.fromkeys(
-            ["open@1", "high@1", "low@1", "close@1", "volume@1", "session-last-candle@1"], "Candle"
-        ),
+        **dict.fromkeys(["open@1", "high@1", "low@1", "close@1", "volume@1"], "Candle"),
+        **dict.fromkeys([*RELATIVE, "session-last-candle@1"], "Candle"),
         **INDICATORS,
         "renko-direction@1": "Brick",
     }
