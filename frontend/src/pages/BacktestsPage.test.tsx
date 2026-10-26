@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ARSEN, backtest, backtestsAnswer, failedBacktest, problem, sessionWithPreferences, stubApi } from '@/test/api';
-import { renderApp } from '@/test/app';
+import { renderApp, viewerIn } from '@/test/app';
 
 // #12 finished today at 10:05 in New York, #11 failed yesterday, #10 on three instruments.
 const TWELVE = backtest();
@@ -29,12 +29,14 @@ const PAGE = { backtests: [TWELVE, ELEVEN, TEN], counts: COUNTS, models: MODELS 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-10-17T16:00:00Z'));
+  viewerIn('America/New_York');
 });
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const subtitle = () => screen.getByRole('heading', { level: 1 }).parentElement?.querySelector('p')?.textContent;

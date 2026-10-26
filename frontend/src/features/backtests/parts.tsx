@@ -1,6 +1,6 @@
 import type { Backtest, BacktestStatus } from '@/api';
 import { FrameworkMini, frameworkOf } from '@/features/models';
-import { useDateStyle } from '@/features/preferences';
+import { useViewerDateStyle } from '@/features/preferences';
 import { formatRecentTime } from '@/lib/dates';
 import { formatPercent, MISSING } from '@/lib/results';
 import { cn } from '@/lib/utils';
@@ -97,8 +97,8 @@ export function BacktestReturn({ backtest }: { backtest: Backtest }) {
   return value === null ? <FailedBadge /> : <ReturnValue value={value} />;
 }
 
-// When it ran, in the user's zone and formats: "Today 16:05".
+// When it ran, on the viewer's clock in the user's formats: "Today 16:05".
 export function BacktestWhen({ backtest }: { backtest: Backtest }) {
-  const dateStyle = useDateStyle();
+  const dateStyle = useViewerDateStyle();
   return formatRecentTime(new Date(backtest.created_at), dateStyle);
 }

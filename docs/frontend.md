@@ -249,6 +249,9 @@ The two sections with the account's preferences load them in the route's loader
   (a visitor sees the market's zone: New York for stocks, their own for crypto,
   `src/features/instrument/time.ts`). The list's mini candles write their day in the user's date
   format.
+  The zone setting is for market times (candles, trades). When something happened here (a
+  backtest ran, a model was added) is on the viewer's own clock in the user's formats
+  (`useViewerDateStyle()`).
 - The cards are the dashboard's (`src/components/DashboardCard.tsx`: the icon tile by the title),
   their rows in `src/features/settings/rows.tsx` and their text field and segments in
   `controls.tsx`. A failure is a line in the design's hint style (12 px, muted) with

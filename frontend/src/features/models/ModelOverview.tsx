@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import type { Manifest, Model } from '@/api';
 import { FactsStrip } from '@/components/FactsStrip';
 import { HINT } from '@/components/Hint';
-import { useDateStyle } from '@/features/preferences';
+import { useViewerDateStyle } from '@/features/preferences';
 import { formatRecentDay } from '@/lib/dates';
 import { formatSharpe } from '@/lib/results';
 import { cn } from '@/lib/utils';
@@ -31,7 +31,7 @@ export function PageBox({ title, children, className }: { title: ReactNode; chil
 // The framework's mark, the name over what it is, the state, and the page's buttons (.p5-hd).
 export function ModelHeader({ model, actions }: { model: Model; actions: ReactNode }) {
   const framework = API_FRAMEWORKS[model.framework];
-  const dateStyle = useDateStyle();
+  const dateStyle = useViewerDateStyle();
   return (
     <div className="mb-[18px] flex flex-wrap items-center gap-3">
       <FrameworkTile framework={framework} size="xl" />

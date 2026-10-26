@@ -13,7 +13,7 @@ import {
   sessionWithPreferences,
   stubApi,
 } from '@/test/api';
-import { renderApp } from '@/test/app';
+import { renderApp, viewerIn } from '@/test/app';
 
 const TWELVE = backtest({ starred: true, sharpe: 1.344 });
 const ELEVEN = failedBacktest({ id: 'bt_a2b3c4d5e6', number: 11, starred: true, created_at: '2026-10-16T22:10:00Z' });
@@ -48,12 +48,14 @@ const TSMIXER = model({ starred: true, backtest_count: 10, best_sharpe: 1.34 });
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-10-17T16:00:00Z'));
+  viewerIn('America/New_York');
 });
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const heading = () => screen.getByRole('heading', { level: 1 }).textContent;

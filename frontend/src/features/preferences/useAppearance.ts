@@ -3,7 +3,7 @@ import { useMemo } from 'react';
 
 import { preferencesQueryOptions, type Appearance } from '@/api';
 import { useMe } from '@/features/account';
-import { NEW_YORK, dateStyleOf, type DateStyle } from '@/lib/dates';
+import { NEW_YORK, dateStyleOf, viewerTimeZone, type DateStyle } from '@/lib/dates';
 
 // The account's appearance settings while someone is signed in and the API has sent them;
 // undefined otherwise.
@@ -25,4 +25,12 @@ export function useDateStyle(visitorZone = NEW_YORK): DateStyle {
     () => (appearance ? dateStyleOf(appearance) : { ...dateStyleOf(), timeZone: visitorZone }),
     [appearance, visitorZone],
   );
+}
+
+// How a time is written that says when something happened here (a backtest ran, a model was
+// added): on the viewer's own clock, whatever the time zone setting, which is for market times
+// (candles, trades). The account's date and time formats still apply.
+export function useViewerDateStyle(): DateStyle {
+  const style = useDateStyle();
+  return useMemo(() => ({ ...style, timeZone: viewerTimeZone() }), [style]);
 }

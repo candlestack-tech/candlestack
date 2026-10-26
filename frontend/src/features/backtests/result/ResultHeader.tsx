@@ -4,7 +4,7 @@ import { Download } from 'lucide-react';
 import { backtestDownloadUrl, type BacktestDocument } from '@/api';
 import { BUTTON_SIZES, OUTLINE_BUTTON } from '@/components/buttonStyles';
 import { Button } from '@/components/ui/button';
-import { useDateStyle } from '@/features/preferences';
+import { useViewerDateStyle } from '@/features/preferences';
 import { formatRecentTime } from '@/lib/dates';
 import { cn } from '@/lib/utils';
 
@@ -98,7 +98,7 @@ function ModelLink({ model }: { model: BacktestDocument['model'] }) {
 // The title with the status and the buttons, then what it ran on, with what, over which days and
 // when (mockups/app, runHead).
 export function ResultHeader({ doc }: { doc: BacktestDocument }) {
-  const dateStyle = useDateStyle();
+  const dateStyle = useViewerDateStyle();
   const { backtest } = doc;
   const when = formatRecentTime(new Date(backtest.created_at), dateStyle);
   return (
