@@ -91,7 +91,7 @@ PowerShell 5.1, chain commands with `;` instead of `&&` and set a variable befor
 `$env:E2E_PORT='18001'; uv run pytest -m e2e` (it stays set in that window). From `backend/`:
 
 ```sh
-uv sync                                               # virtualenv with the dev tools and the worker's Keras and JAX
+uv sync                                               # virtualenv with the dev tools and the worker's Keras, JAX and onnxruntime
 uv run ruff check . && uv run ruff format --check .   # lint and format
 uv run ty check                                       # types
 uv run lint-imports                                   # module boundaries
