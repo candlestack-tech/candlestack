@@ -13,7 +13,8 @@ from candlestack.preprocessing.manifest import BLOCK_ID
 
 # The candle's prices over its close, and the close's change, as the BLESK models take them.
 RELATIVE = ["rel-open@1", "rel-high@1", "rel-low@1", "rel-close@1"]
-# The indicators of the BLESK models, in the order of their input, with their display group.
+# The indicators of the BLESK models, in the order of their input, with their display group;
+# each recursive one with its @2 version, started as TA-Lib does, next to it.
 INDICATORS = {
     "bollinger-high@1": "Bands",
     "bollinger-low@1": "Bands",
@@ -21,16 +22,22 @@ INDICATORS = {
     "keltner-low@1": "Bands",
     "squeeze@1": "Bands",
     "rsi@1": "Momentum",
+    "rsi@2": "Momentum",
     "roc@1": "Momentum",
     "tsi@1": "Momentum",
+    "tsi@2": "Momentum",
     "atr@1": "Bands",
+    "atr@2": "Bands",
     "adx@1": "Trend",
+    "adx@2": "Trend",
     "aroon-up@1": "Trend",
     "aroon@1": "Trend",
     "aroon-down@1": "Trend",
     "sma@1": "Trend",
     "ema@1": "Trend",
+    "ema@2": "Trend",
     "macd-diff@1": "Trend",
+    "macd-diff@2": "Trend",
 }
 
 
@@ -38,6 +45,7 @@ def test_the_blocks_are_registered() -> None:
     assert {block: CATALOG[block].step for block in CATALOG} == {
         "candles@1": "representation",
         "renko-triples@1": "representation",
+        "renko-triples@2": "representation",
         "open@1": "feature",
         "high@1": "feature",
         "low@1": "feature",
@@ -76,6 +84,7 @@ def test_the_catalog_lists_the_blocks_by_step() -> None:
     assert [block.id for block in blocks] == [
         "candles@1",
         "renko-triples@1",
+        "renko-triples@2",
         "open@1",
         "high@1",
         "low@1",
@@ -148,6 +157,16 @@ def test_the_catalog_describes_an_indicator_with_its_defaults_and_warm_up() -> N
         ("ema@1", "7 * window"),
         ("macd-diff@1", "7 * (max(fast, slow) + signal)"),
         ("renko-triples@1", "15 * atr_window - 1 + ceil(2 * (1 + 2 * atr_multiple))"),
+        ("rsi@2", "window"),
+        ("tsi@2", "slow + fast - 1"),
+        ("atr@2", "window"),
+        ("adx@2", "2 * window - 1"),
+        ("ema@2", "window - 1"),
+        ("macd-diff@2", "max(fast, slow) + signal - 2"),
+        (
+            "renko-triples@2",
+            "max(first_brick, atr_window) + ceil(2 * (1 + 2 * atr_multiple))",
+        ),
     ],
 )
 def test_the_warm_up_rule_says_what_the_warm_up_counts(block: str, rule: str) -> None:
@@ -160,12 +179,15 @@ def test_the_warm_up_rule_says_what_the_warm_up_counts(block: str, rule: str) ->
 
 
 def test_only_a_representation_may_span_several_candles_a_row() -> None:
-    assert [block.id for block in CATALOG.values() if block.candles_per_row] == ["renko-triples@1"]
+    assert [block.id for block in CATALOG.values() if block.candles_per_row] == [
+        "renko-triples@1",
+        "renko-triples@2",
+    ]
 
 
 def test_only_the_direction_of_a_triple_is_a_feature_of_the_rows() -> None:
     assert {block.id: block.of_rows for block in CATALOG.values() if block.of_rows} == {
-        "renko-direction@1": "renko-triples@1"
+        "renko-direction@1": ("renko-triples@1", "renko-triples@2")
     }
 
 
@@ -179,6 +201,19 @@ def test_the_catalog_describes_renko_triples_with_their_parameters() -> None:
         ("atr_at", "string", "brick_start", ["brick_start"]),
     ]
     assert (triples.params[0].exclusive_minimum, triples.params[0].maximum) == (0, 10)
+
+
+def test_the_catalog_describes_renko_triples_2_with_the_candle_of_their_first_brick() -> None:
+    triples = next(block for block in describe_catalog().blocks if block.id == "renko-triples@2")
+
+    assert (triples.step, triples.group) == ("representation", None)
+    assert [(p.name, p.type, p.default, p.options) for p in triples.params] == [
+        ("atr_multiple", "number", 0.6, None),
+        ("atr_window", "integer", 14, None),
+        ("atr_at", "string", "brick_start", ["brick_start"]),
+        ("first_brick", "integer", 49, None),
+    ]
+    assert (triples.params[3].minimum, triples.params[3].maximum) == (0, 1000)
 
 
 def test_the_catalog_describes_the_window_and_its_parameters() -> None:

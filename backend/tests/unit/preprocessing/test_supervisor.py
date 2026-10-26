@@ -14,9 +14,9 @@ Never commit that data. Without the variable the tests are skipped, as in CI. Fr
 His ``rel_*`` columns are in his ``normalized.parquet``, which a stock folder may also have
 (``<CANDLESTACK_SUPERVISOR_DATA>/AAPL/normalized.parquet``); they are checked where it is, and
 so is ``blesk-norm@1`` on his indicators. Where a folder has his ``all_triples.parquet``, the
-whole BLESK NO-VOL manifest is built on his candles and its 23 normalized features compared
-with his triples (``test_the_blesk_input_is_his_normalized_triples``; read the counts with
-``-rP``).
+whole BLESK NO-VOL manifest, of the @2 blocks, is built on his candles and its 23 normalized
+features compared with his triples (``test_the_blesk_input_is_his_normalized_triples``; read
+the counts with ``-rP``).
 
 Every stock folder with both files is checked, each of his columns a test of its own. His rows
 are labelled by the candle's close in ``unix`` seconds, and his volume is ``volume_base``. A
@@ -31,6 +31,10 @@ noise:
   ``atol`` 1e-6 there (seen: up to 2e-5 of the value, within the first 40 rows).
 - ``squeeze`` compares a Bollinger band with the channel's edge; where they are equal but for
   the last bits of a float (within ``TIE`` of the close), his 0 or 1 may be the other one.
+
+His recursive indicators are TA-Lib's (research #265): the @2 blocks, started as TA-Lib does,
+give them on every row from his first candle, with no allowance for the first rows
+(``test_the_2_block_gives_his_column_from_his_first_candle``).
 
 His ``is_last_bar`` and the ``end_bar`` of his candles mark the last candle of each session.
 The data module marks it from Alpaca's calendar, which a test cannot ask, so here the calendar
@@ -85,8 +89,18 @@ RELATIVE = {
     "rel_low": "rel-low@1",
     "rel_close": "rel-close@1",
 }
+# His recursive columns, each with the @2 block, started as TA-Lib does, that gives it.
+TALIB: dict[str, tuple[str, dict[str, Any]]] = {
+    "rsi": ("rsi@2", {}),
+    "tsi": ("tsi@2", {}),
+    "atr": ("atr@2", {}),
+    "adx": ("adx@2", {}),
+    "ema20": ("ema@2", {"window": 20}),
+    "ema50": ("ema@2", {"window": 50}),
+    "macd_diff": ("macd-diff@2", {}),
+}
 EXACT = {"squeeze", "is_last_bar"}
-RECURSIVE = {"rsi", "tsi", "atr", "adx", "ema20", "ema50", "macd_diff"}
+RECURSIVE = set(TALIB)
 EARLY_ROWS = 64
 TIE = 1e-12
 HIGH, LOW, CLOSE = pl.col("high"), pl.col("low"), pl.col("close")
@@ -215,6 +229,27 @@ def test_the_block_gives_his_column(stock: str, column: str) -> None:
     )
 
 
+@pytest.mark.parametrize("column", list(TALIB))
+@pytest.mark.parametrize("stock", STOCKS)
+def test_the_2_block_gives_his_column_from_his_first_candle(stock: str, column: str) -> None:
+    """The @2 block on his candles gives his column on every one of his rows, from the first:
+    his first candle with every indicator is past each block's warm-up."""
+    block_id, given = TALIB[column]
+    block = CATALOG[block_id]
+    frame = candles(stock)
+    ours = frame.select("unix", ours=block.run(frame, block.params.model_validate(given)))
+    his_rows = indicators(stock).select("unix", his=column)
+    rows = his_rows.join(ours, on="unix", how="left")
+    a, b = rows["ours"].to_numpy(), rows["his"].to_numpy()
+
+    within = np.isclose(a, b, rtol=1e-6, atol=1e-8)
+    # Aggregates only, never his values.
+    assert within.all(), (
+        f"{stock} {column}: {int((~within).sum())} of {rows.height} rows differ, "
+        f"first at row {int(np.argmin(within))}, max |diff| {float(np.nanmax(np.abs(a - b))):.3g}"
+    )
+
+
 @pytest.mark.parametrize("column", list(RELATIVE))
 @pytest.mark.parametrize("stock", STOCKS)
 def test_the_block_gives_his_relative_price(stock: str, column: str) -> None:
@@ -290,21 +325,23 @@ def test_blesk_norm_gives_his_normalized_column(stock: str, column: str) -> None
 
 
 # The BLESK NO-VOL input (docs/preprocessing.md): his 23 features in their order, each block
-# with his parameters (the defaults but the EMAs') and blesk-norm@1.
+# with his parameters (the defaults but the EMAs') and blesk-norm@1; the recursive indicators
+# are the @2 blocks, started as TA-Lib does, as his are.
 BLESK_FEATURES: dict[str, tuple[str, dict[str, Any]]] = {
-    **{column: COLUMNS[column] for column in list(COLUMNS)[:-1]},
+    **{column: TALIB.get(column, COLUMNS[column]) for column in list(COLUMNS)[:-1]},
     "direction": ("renko-direction@1", {}),
     **{column: (block, {}) for column, block in RELATIVE.items()},
     "is_last_bar": COLUMNS["is_last_bar"],
 }
-# His bricks: 0.6 x the ATR of 14 candles at the candle that starts each brick.
-RENKO = {"atr_multiple": 0.6, "atr_window": 14, "atr_at": "brick_start"}
+# His bricks: 0.6 x TA-Lib's ATR of 14 candles at the candle that starts each brick, the first
+# brick on his first candle with every indicator, the candle 49.
+RENKO = {"atr_multiple": 0.6, "atr_window": 14, "atr_at": "brick_start", "first_brick": 49}
 BLESK_NO_VOL: dict[str, Any] = {
     "version": 1,
     "input": {
         "timeframe": "30m",
         "session": "regular",
-        "representation": {"id": "renko-triples@1", "params": RENKO},
+        "representation": {"id": "renko-triples@2", "params": RENKO},
         "features": [
             {"name": name, "id": block, "params": params, "norm": {"id": "blesk-norm@1"}}
             for name, (block, params) in BLESK_FEATURES.items()
@@ -322,12 +359,6 @@ BLESK_NO_VOL: dict[str, Any] = {
 # standard deviation, where ours are on it.
 PERCENT = {"bb_bbh", "bb_bbl", "kch_high", "kch_low", "sma", "ema20", "ema50", "atr"}
 PERCENT_ATOL = 1e-4
-# The first rows of a recursive indicator after the warm-up differ from his by up to 2e-5 of its
-# value (above): on the first EARLY_TRIPLES rows they are compared within EARLY_ATOL. The
-# difference fades as the EMA of 50 does, by 1 - 2 / 51 a row, from 1e-4 to 1e-8 in about 240
-# rows (seen: up to 1.4e-5, within the first 160 rows).
-EARLY_TRIPLES = 256
-EARLY_ATOL = 1e-4
 
 
 def his_bricks(bricks: pl.DataFrame, his_rows: pl.DataFrame) -> pl.DataFrame:
@@ -345,12 +376,24 @@ def his_bricks(bricks: pl.DataFrame, his_rows: pl.DataFrame) -> pl.DataFrame:
     return rows.select("ts", his_bricks=pl.Series(differ[1:] - differ[since] == 0))
 
 
+def his_triples(triples: Path, names: list[str]) -> pl.DataFrame:
+    """His triples by our ``ts``, with his bricks' first candle and edges and his features."""
+    return pl.read_parquet(triples).select(
+        ts=pl.col("end_unix").cast(pl.Int64) - HALF_HOUR,
+        his_start=pl.col("start_unix").cast(pl.Int64) - HALF_HOUR,
+        his_bottom=pl.col("bottom").cast(pl.Float64),
+        his_top=pl.col("top").cast(pl.Float64),
+        **{f"his_{name}": pl.col(name).cast(pl.Float64) for name in names},
+    )
+
+
 @pytest.mark.parametrize("stock", STOCKS)
 def test_the_blesk_input_is_his_normalized_triples(stock: str) -> None:
     """The whole BLESK NO-VOL manifest on his candles gives the 23 normalized features of his
     triples at each candle after the warm-up: the 22 of the candle on every row, the direction
-    on the rows whose three bricks are his. Our bricks start on our own ATR, not his, so on
-    many stocks they part from his for a while or for good (test_supervisor_renko.py)."""
+    on the rows whose three bricks are his. With TA-Lib's ATR the bricks are his but where a
+    close lies on a grid line (research #263, R10), after which they may part from his for a
+    while or for good (test_supervisor_renko.py)."""
     triples = ROOT / stock / "all_triples.parquet"
     if not triples.is_file():
         pytest.skip(f"{stock} has no all_triples.parquet")
@@ -358,15 +401,9 @@ def test_the_blesk_input_is_his_normalized_triples(stock: str) -> None:
     built = build_input(frame, parse_manifest(BLESK_NO_VOL))
     names = list(BLESK_FEATURES)
     ours = built.rows.filter(pl.all_horizontal(pl.col(names).is_finite()))
-    renko = CATALOG["renko-triples@1"]
+    renko = CATALOG["renko-triples@2"]
     bricks = renko.run(frame, renko.params.model_validate(RENKO))
-    his_rows = pl.read_parquet(triples).select(
-        ts=pl.col("end_unix").cast(pl.Int64) - HALF_HOUR,
-        his_start=pl.col("start_unix").cast(pl.Int64) - HALF_HOUR,
-        his_bottom=pl.col("bottom").cast(pl.Float64),
-        his_top=pl.col("top").cast(pl.Float64),
-        **{f"his_{name}": pl.col(name).cast(pl.Float64) for name in names},
-    )
+    his_rows = his_triples(triples, names)
     rows = (
         ours.join(his_rows, on="ts", how="inner")
         .join(
@@ -376,7 +413,9 @@ def test_the_blesk_input_is_his_normalized_triples(stock: str) -> None:
         )
         .with_columns(tie=pl.col("ts").is_in(frame.filter(squeeze_tie())["ts"].implode()))
     )
-    assert rows.height == ours.height, f"{stock}: {ours.height - rows.height} rows not his"
+    # Our rows are his but before his first, where a close on a grid line made our third brick
+    # before his (seen on DE and DOC, on his third candle).
+    early = ours.filter(pl.col("ts") < his_rows["ts"].min()).height
     wrong = {
         name: int((~within).sum())
         for name in BLESK_FEATURES
@@ -385,9 +424,10 @@ def test_the_blesk_input_is_his_normalized_triples(stock: str) -> None:
 
     # Aggregates only, never his values.
     print(  # noqa: T201
-        f"{stock}: {rows.height} rows, the direction on the {int(rows['his_bricks'].sum())} "
-        "whose bricks are his"
+        f"{stock}: {rows.height} of his {his_rows.height} rows, the direction on the "
+        f"{int(rows['his_bricks'].sum())} whose bricks are his"
     )
+    assert rows.height + early == ours.height, f"{stock}: {ours.height - rows.height} rows not his"
     assert not wrong, f"{stock}: rows that differ, of {rows.height}: {wrong}"
 
 
@@ -401,9 +441,6 @@ def as_his(rows: pl.DataFrame, name: str) -> np.ndarray:
         within = a == b
     else:
         within = np.isclose(a, b, rtol=1e-6, atol=PERCENT_ATOL if name in PERCENT else 1e-8)
-    if name in RECURSIVE:
-        early = slice(0, EARLY_TRIPLES)
-        within[early] |= np.isclose(a[early], b[early], rtol=1e-6, atol=EARLY_ATOL)
     if name == "direction":
         within |= ~rows["his_bricks"].to_numpy()
     return within

@@ -8,8 +8,9 @@ prevents that: the **manifest** stored with every model, and the `preprocessing`
 turns candles into the model's input from it. It is the design agreed on 2026-10-18.
 
 Built so far: the `preprocessing` module (the manifest and its checks, the catalog and the
-first blocks: `candles@1`, `renko-triples@1` ([below](#renko-triples)), `open@1` to
+first blocks: `candles@1`, `renko-triples@1` and `@2` ([below](#renko-triples)), `open@1` to
 `volume@1`, `rel-open@1` to `rel-close@1` ([below](#the-relative-prices)), `session-last-candle@1`, the indicators of the BLESK models
+with the `@2` versions of the recursive ones
 ([below](#the-indicators-of-the-blesk-models)), `renko-direction@1`, `none@1`, `blesk-norm@1`
 ([below](#the-normalization-of-the-blesk-models)), `window@1` with
 `last` `closed` and `current`), the
@@ -128,19 +129,21 @@ features are the raw prices, nothing is normalized, a sample is the last 25 cand
 ### Example: the BLESK NO-VOL models (25 x 23)
 
 What the same schema says for the BLESK NO-VOL models, as far as research knows their pipeline
-([research #117], [research #263]): indicators on the 30-minute candles, Renko bricks of
-0.6 x ATR(14) of the brick's first candle, rows of three bricks taken at the candle where the
-third one ends, a window of the last 24 finished rows and the current one, each feature scaled
-by `blesk-norm@1` ([below](#the-normalization-of-the-blesk-models)). The catalog has every
-block of it, so the full manifest of the 23 features builds the `[25, 23]` input from raw
-candles: on the candles of the BLESK data it gives the normalized features of its triples
-([below](#the-normalization-of-the-blesk-models)).
+([research #117], [research #263], [research #265]): indicators on the 30-minute candles, the
+recursive ones started as TA-Lib starts them (the `@2` blocks), Renko bricks of 0.6 x TA-Lib's
+ATR(14) of the brick's first candle from the candle 49, rows of three bricks taken at the
+candle where the third one ends, a window of the last 24 finished rows and the current one,
+each feature scaled by `blesk-norm@1` ([below](#the-normalization-of-the-blesk-models)). The
+catalog has every block of it, so the full manifest of the 23 features builds the `[25, 23]`
+input from raw candles: on the candles of the BLESK data it gives the normalized features of
+its triples ([below](#the-normalization-of-the-blesk-models)).
 
 The features are shortened to four here, so as written this manifest fails the signature
 check (4 features give `[25, 4]`, not `[25, 23]`). The full manifest has all 23, in this order
 ([research #117]): `bb_bbh, bb_bbl, kch_high, kch_low, squeeze, rsi, roc, tsi, atr, adx,
 aroon_up, aroon, aroon_down, sma, ema20, ema50, macd_diff, direction, rel_open, rel_high,
-rel_low, rel_close, is_last_bar`. Here `direction` and `is_last_bar` keep the default
+rel_low, rel_close, is_last_bar`, with `rsi@2`, `tsi@2`, `atr@2`, `adx@2`, `ema@2` and
+`macd-diff@2` for the recursive ones. Here `direction` and `is_last_bar` keep the default
 `none@1`, which gives the same numbers: `blesk-norm@1` leaves them as they are.
 
 ```json
@@ -150,12 +153,12 @@ rel_low, rel_close, is_last_bar`. Here `direction` and `is_last_bar` keep the de
     "timeframe": "30m",
     "session": "regular",
     "representation": {
-      "id": "renko-triples@1",
-      "params": {"atr_multiple": 0.6, "atr_window": 14, "atr_at": "brick_start"}
+      "id": "renko-triples@2",
+      "params": {"atr_multiple": 0.6, "atr_window": 14, "atr_at": "brick_start", "first_brick": 49}
     },
     "features": [
       {"name": "bb_bbh", "id": "bollinger-high@1", "params": {"window": 20, "dev": 2}, "norm": {"id": "blesk-norm@1"}},
-      {"name": "rsi", "id": "rsi@1", "params": {"window": 20}, "norm": {"id": "blesk-norm@1"}},
+      {"name": "rsi", "id": "rsi@2", "params": {"window": 20}, "norm": {"id": "blesk-norm@1"}},
       {"name": "direction", "id": "renko-direction@1"},
       {"name": "is_last_bar", "id": "session-last-candle@1"}
     ],
@@ -237,8 +240,8 @@ warm-up as a short expression of its parameters (`"0"`, `"length - 1"`) and its 
 
 | Step | In, out | Blocks, in the order they come |
 | --- | --- | --- |
-| representation | candles, rows: each row with `ts`, the candle at whose close it is known (labelled by its open time, [data.md](data.md#time)), and the row's own columns; rows that span several candles also give `row_id`, the same on the rows of one row still forming | `candles@1` (every candle a row); `renko-triples@1` (rows of three Renko bricks, one a candle, [below](#renko-triples)); then `kagi@1`; later Heikin-Ashi, range bars, volume bars |
-| features | rows, the same rows with one column per feature, computed on the candles and taken at each row's candle, or for a feature of the rows read from the rows | `open@1` ... `volume@1`; `rel-open@1` ... `rel-close@1` ([below](#the-relative-prices)); `session-last-candle@1` (1 on the last candle of its session, [below](#the-last-candle-of-a-session)); the indicators of the BLESK models ([below](#the-indicators-of-the-blesk-models)); `renko-direction@1`, a feature of the rows of `renko-triples@1` |
+| representation | candles, rows: each row with `ts`, the candle at whose close it is known (labelled by its open time, [data.md](data.md#time)), and the row's own columns; rows that span several candles also give `row_id`, the same on the rows of one row still forming | `candles@1` (every candle a row); `renko-triples@1` and `renko-triples@2` (rows of three Renko bricks, one a candle, [below](#renko-triples)); then `kagi@1`; later Heikin-Ashi, range bars, volume bars |
+| features | rows, the same rows with one column per feature, computed on the candles and taken at each row's candle, or for a feature of the rows read from the rows | `open@1` ... `volume@1`; `rel-open@1` ... `rel-close@1` ([below](#the-relative-prices)); `session-last-candle@1` (1 on the last candle of its session, [below](#the-last-candle-of-a-session)); the indicators of the BLESK models ([below](#the-indicators-of-the-blesk-models)); `renko-direction@1`, a feature of the rows of `renko-triples@1` and `@2` |
 | normalization | a feature's column of the rows, the close of each row's candle (the candle its features are taken at) and the feature's block; the column scaled. The close goes to the normalization only, never into the rows, so it takes no feature's name and the window never sees it | `none@1`; `blesk-norm@1` (the BLESK models' scaling, a rule per feature, [below](#the-normalization-of-the-blesk-models)); then a rolling z-score, price-relative; fitted numbers come only from the manifest, never from the backtest's own data |
 | window | rows, a `float32` array `(samples, length, features)` and the `ts` of each sample | `window@1`: the last `length` rows up to each row. `last: closed` (the default) takes the `length` rows up to each row, each finished at its own candle, and needs rows that are (`candles@1`). `last: current` takes the `length - 1` most recent finished rows before each row and then the row, which may still be forming, and needs rows that span several candles (`renko-triples@1`); a manifest with the other rule is refused |
 
@@ -256,7 +259,9 @@ warm-up as a short expression of its parameters (`"0"`, `"length - 1"`) and its 
   window's `length - 1` rows. A feature over the last `window` candles needs the candles before
   its first full window. A recursive one (an EMA, Wilder's smoothing) depends on every earlier
   candle, so its warm-up lasts until the first candles weigh less than 1e-6 in a value: after
-  it, its values do not depend on where the candles start. With `candles@1` the number is
+  it, its values do not depend on where the candles start. The `@2` versions, started as
+  TA-Lib does, wait only for TA-Lib's first value, which does depend on it
+  ([below](#two-starts-of-the-recursive-indicators)). With `candles@1` the number is
   `exact`, and the build drops just that many rows. With rows that span several candles (Renko, Kagi) it is an `estimate` from
   the candles a row takes, so the run loads more and the report says how many the warm-up
   used. Renko bricks also depend on the candle they start on, which no warm-up removes
@@ -269,9 +274,10 @@ warm-up as a short expression of its parameters (`"0"`, `"length - 1"`) and its 
 
 The features of the BLESK NO-VOL models that are computed on the candles, in the order of their
 input. Each gives the numbers the models were trained on: those of the `ta` library 0.11, its
-quirks included, except Aroon, which is `ta` 0.10's ([research #118]). They are computed with
-Polars and NumPy, without `ta`. The defaults are the BLESK parameters; `ema20` and `ema50` are
-`ema@1` with `window` 20 and 50.
+quirks included, except Aroon, which is `ta` 0.10's ([research #118]), and the recursive ones,
+which are TA-Lib's ([research #265]): their `@2` versions below start as TA-Lib does. They are
+computed with Polars and NumPy, without `ta` or TA-Lib. The defaults are the BLESK
+parameters; `ema20` and `ema50` are `ema@2` (or `ema@1`) with `window` 20 and 50.
 
 | Input column | Block | Parameters (defaults) | Warm-up (candles) | Group |
 | --- | --- | --- | --- | --- |
@@ -288,10 +294,41 @@ Polars and NumPy, without `ta`. The defaults are the BLESK parameters; `ema20` a
 | `ema20`, `ema50` | `ema@1`: the EMA of the close from the first candle | `window` 20 | `7 * window` | Trend |
 | `macd_diff` | `macd-diff@1`: the MACD histogram, the fast EMA minus the slow EMA minus the signal EMA of that | `fast` 12, `slow` 26, `signal` 9 | `7 * (max(fast, slow) + signal)` | Trend |
 
-The recursive warm-ups come from the smoothing: after `7 * window` candles of an EMA, or
-`14 * window` of Wilder's smoothing, the first candles weigh less than e^-14, under 1e-6. The
-ADX smooths twice, and the TSI and the MACD chain two EMAs, so theirs are longer. With the
+The `@2` versions of the recursive ones, with the same parameters and groups, as TA-Lib computes
+them:
+
+| Input column | Block | Warm-up (candles) |
+| --- | --- | --- |
+| `rsi` | `rsi@2`: `100 * rise / (rise + fall)` of the mean rise and fall, Wilder's smoothing from the means of the `window` changes after the first candle; 0 on long flat stretches as `rsi@1` | `window` |
+| `tsi` | `tsi@2`: as `tsi@1`, with two TA-Lib EMAs, the first from the second candle's change on | `slow + fast - 1` |
+| `atr` | `atr@2`: Wilder's smoothing of the true range from the mean of the true ranges of the candles 1 to `window` | `window` |
+| `adx` | `adx@2`: TA-Lib's ADX: the true range and the directional movements summed over the candles 1 to `window - 1`, then smoothed by Wilder; the directional index averaged over its first `window` candles, then smoothed by Wilder; where the smoothed true range or the sum of the directional indicators is under 1e-14 the index counts 0 in that average and leaves the ADX as it was afterwards | `2 * window - 1` |
+| `ema20`, `ema50` | `ema@2`: the EMA of the close from the mean of the first `window` closes | `window - 1` |
+| `macd_diff` | `macd-diff@2`: TA-Lib's MACD histogram: the fast and the slow EMA both start at the candle `slow - 1`, each from the mean of its own window up to it, the signal EMA from the mean of the first `signal` MACDs; the shorter of `fast` and `slow` is the fast one | `max(fast, slow) + signal - 2` |
+
+The recursive warm-ups of `@1` come from the smoothing: after `7 * window` candles of an EMA,
+or `14 * window` of Wilder's smoothing, the first candles weigh less than e^-14, under 1e-6.
+The ADX smooths twice, and the TSI and the MACD chain two EMAs, so theirs are longer. With the
 defaults the longest is 280 candles (RSI and ADX), about 22 trading days of 30-minute candles.
+
+#### Two starts of the recursive indicators
+
+An EMA or Wilder's smoothing needs a first value. `ta` 0.11, which the `@1` blocks follow,
+starts the EMA and the RSI from the first candle, and the ATR from the mean of the first
+`window` true ranges, the first candle's included. TA-Lib starts each from the mean of its
+first window, and skips the first candle where it has no close before it ([research #265]).
+The BLESK data took its recursive indicators from TA-Lib, so only the `@2` blocks give them on
+every candle from its first.
+
+- **After the `@1` warm-up the two agree** within 1e-6: a backtest gets the same features from
+  either, past the warm-up. Before it they differ, and so do the Renko bricks, which depend on
+  every ATR before them ([below](#renko-triples)).
+- **The `@2` warm-up is TA-Lib's**, the candles before its first value. That value depends on
+  where the candles start, as TA-Lib's does, so a backtest's first candles see the `@2` values
+  of the history it loaded. With the defaults the longest is 49 candles (the EMA of 50).
+- The golden tests (`tests/unit/preprocessing/test_supervisor.py`) give the BLESK `rsi`,
+  `tsi`, `atr`, `adx`, `ema20`, `ema50` and `macd_diff` from the `@2` blocks on every row of
+  all 521 stocks, from the first, within `rtol` 1e-6 and `atol` 1e-8.
 
 Not here: `direction` is `renko-direction@1`, the direction of a Renko triple
 ([below](#renko-triples)). `rel_open`, `rel_high`, `rel_low` and `rel_close` are
@@ -337,18 +374,23 @@ model trained on stock sessions would read as "never the last candle".
 
 `renko-triples@1` makes the rows of the BLESK models: rows of three Renko bricks, one per
 candle. Its rules are research #263's ([research #263]), which rebuild the bricks and triples
-of the BLESK data on all 521 of its stocks (below).
+of the BLESK data on all 521 of its stocks (below). `renko-triples@2` makes the same rows with
+the bricks of the BLESK data itself: TA-Lib's ATR (`atr@2`) and the first brick where the
+BLESK data has it ([research #265]).
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `atr_multiple` | 0.6 | the height of a brick in ATRs, above 0 and at most 10 |
-| `atr_window` | 14 | the candles of the ATR, `atr@1`'s window (2 to 1000) |
+| `atr_window` | 14 | the candles of the ATR, `atr@1`'s window (`atr@2`'s for `@2`), 2 to 1000 |
 | `atr_at` | `brick_start` | the candle whose ATR sizes a brick: the one that starts it, the only option |
+| `first_brick` | 49 | `@2` only: the candle of the first brick, counted from 0, never before the ATR's first value (the candle `atr_window`); 49 is the first candle where every indicator of the BLESK data has a value, the first of the EMA of 50 closes |
 
 - **Bricks** are built on the close of each candle, in float64. A brick is `atr_multiple`
-  times the ATR (`atr@1`) of the candle that starts it high, and never changes afterwards.
-- **The first brick** lies on the first candle's mid price, `(high + low) / 2`, one height
-  high, without a direction.
+  times the ATR (`atr@1`, or `atr@2` for `@2`) of the candle that starts it high, and never
+  changes afterwards.
+- **The first brick** lies on the mid price of its candle, `(high + low) / 2`, one height
+  high, without a direction: the first candle out of the ATR's warm-up for `@1`, the candle
+  `first_brick` for `@2`.
 - **A new brick**: on each later candle the close is compared with the current brick
   `[bottom, top]`. Inside it, edges included, nothing happens. Above `top` the new brick is the
   cell that holds the close on a grid of the candle's brick height, anchored at `top`, and
@@ -364,7 +406,7 @@ of the BLESK data on all 521 of its stocks (below).
   lowest bottom and the highest top of the three).
 - **Its features**: a feature of the candles takes its value at the row's candle (the
   indicators, `session-last-candle@1`); `renko-direction@1` is the row's `direction`, and
-  needs `renko-triples@1`.
+  needs `renko-triples@1` or `@2`.
 - **Finished rows**: the rows of one `row_id` are one triple at successive candles, and the
   last of them is finished: the next candle starts another brick. That is known only at the
   next candle, so the rows carry no `finished` column. The window `last: current` tells a
@@ -372,33 +414,38 @@ of the BLESK data on all 521 of its stocks (below).
   sample is the 24 most recent finished rows before a candle's row and that row (research
   #117), one sample per candle from the first with 24 finished rows after the warm-up.
 
-The **warm-up** is an `estimate`. The bricks start on the first candle whose ATR is out of its
-warm-up (`15 * atr_window - 1`, 209 candles for 14), so a brick's height is `atr_multiple`
-times the `atr` feature of its first candle whatever candle the load starts on. The first row
+The **warm-up** is an `estimate`. The bricks of `@1` start on the first candle whose ATR is out
+of its warm-up (`15 * atr_window - 1`, 209 candles for 14), so a brick's height is
+`atr_multiple` times the `atr` feature of its first candle whatever candle the load starts on;
+those of `@2` on the candle `max(first_brick, atr_window)`, 49 by default. The first row
 waits for two more bricks, and a sample for 24 finished rows. A brick takes about
 `1 + 2 * atr_multiple` candles: on the 30-minute candles of the BLESK data a brick of 0.6 ATR
 takes 1.7 on average and under 1.8 on 95 % of the stocks, and the rule is above the 95 % of
 every multiple from 0.2 to 3, so the estimate is rather too long than too short. With the
-BLESK features the warm-up is 350 candles (the EMA of 50) and then 53 for the 24 rows: 403
-candles, about 31 trading days.
+BLESK features of `@1` the warm-up is 350 candles (the EMA of 50) and then 53 for the 24 rows:
+403 candles, about 31 trading days. With the `@2` blocks it is 54 candles (the first brick on
+the candle 49, then two bricks) and then 53: 107 candles, about 8 trading days.
 
 **The bricks depend on the whole history** the build sees: each brick is anchored at the one
 before, back to the first brick on the first candle. The same candles always give the same
 bricks, but a backtest of another period loads candles from another first candle and gets
-other bricks, which mostly do not line up again: with our own ATR from the first candle of
-the BLESK data, the bricks of 170 of its 521 stocks line up with the BLESK bricks for good
-(12 of them from 2016, 35 only in 2026), and 351 never do. So the model sees bricks of the
-rules it was trained on, not the same bricks, and a backtest's samples depend a little on its
-start date; two runs of one period are the same.
+other bricks, which mostly do not line up again. On the candles of the BLESK data from their
+first one, `renko-triples@1` (its own ATR and first candle) lines up with the BLESK bricks for
+good on 170 of its 521 stocks (12 of them from 2016, 35 only in 2026), and never on 351.
+`renko-triples@2` gives the BLESK triples on every row of 385 stocks; on the others a close on
+a grid line parts the bricks (R10, below), after which 67 line up again for good and 69 never
+do. So the model sees bricks of the rules it was trained on, not the same bricks, and a
+backtest's samples depend a little on its start date; two runs of one period are the same.
 
 **Golden tests** (`tests/unit/preprocessing/test_supervisor_renko.py`, run where the BLESK
-data is): on all 521 stocks the brick loop with the BLESK ATR from the first candle of its
-indicators gives every row of its bricks (start, bottom, top, direction, skipped, finished),
-and the triples built from them every row of the structural columns of its triples (start,
-end, direction, finished, bottom, top and the OHLCV of both candles). Two kinds of exception,
-each handled narrowly: 187 closes on 136 stocks that lie on a line of the brick's grid within
-float rounding (at most 5 a stock), where the BLESK arithmetic picked the cell on the other
-side (research #263, R10); and 65 stocks whose bricks have no row for their first candle (R9).
+data is): on all 521 stocks the brick loop from the first candle of the BLESK indicators, with
+the BLESK ATR and with `atr@2` of the BLESK candles, gives every row of its bricks (start,
+bottom, top, direction, skipped, finished), and the triples built from them every row of the
+structural columns of its triples (start, end, direction, finished, bottom, top and the OHLCV
+of both candles). Two kinds of exception, each handled narrowly and the same with either ATR:
+187 closes on 136 stocks that lie on a line of the brick's grid within float rounding (at most
+5 a stock), where the BLESK arithmetic picked the cell on the other side (research #263, R10);
+and 65 stocks whose bricks have no row for their first candle (R9).
 
 ### The normalization of the BLESK models
 
@@ -410,10 +457,10 @@ look ahead and needs no fitted numbers.
 
 | Rule | Features (blocks) | Value |
 | --- | --- | --- |
-| a price level, in percent from the close | `bollinger-high@1`, `bollinger-low@1`, `keltner-high@1`, `keltner-low@1`, `sma@1`, `ema@1` | (x / close - 1) x 100 |
-| an oscillator, centered | `rsi@1`, `aroon-up@1`, `aroon-down@1`; `adx@1` | x - 50; x - 25 |
-| a range, in percent of the close | `atr@1` | x / close x 100 |
-| as it is | `squeeze@1`, `roc@1`, `tsi@1`, `aroon@1`, `macd-diff@1`, `renko-direction@1`, `session-last-candle@1`, `rel-open@1` ... `rel-close@1` | x |
+| a price level, in percent from the close | `bollinger-high@1`, `bollinger-low@1`, `keltner-high@1`, `keltner-low@1`, `sma@1`, `ema@1`, `ema@2` | (x / close - 1) x 100 |
+| an oscillator, centered | `rsi@1`, `rsi@2`, `aroon-up@1`, `aroon-down@1`; `adx@1`, `adx@2` | x - 50; x - 25 |
+| a range, in percent of the close | `atr@1`, `atr@2` | x / close x 100 |
+| as it is | `squeeze@1`, `roc@1`, `tsi@1`, `tsi@2`, `aroon@1`, `macd-diff@1`, `macd-diff@2`, `renko-direction@1`, `session-last-candle@1`, `rel-open@1` ... `rel-close@1` | x |
 
 A feature whose block has no rule (`open@1` ... `volume@1`, or a block added later) cannot take
 it: the manifest fails the `catalog` check ("input.features[0].norm is blesk-norm@1, which has
@@ -425,11 +472,12 @@ NO-VOL models do not take and the catalog does not have.
 The evidence: research #262 reproduces every column of the BLESK normalized data from its
 indicators with these rules on every row of four stocks, within 1.4e-14. The golden tests
 (`tests/unit/preprocessing/test_supervisor.py`) give the BLESK normalized data from its
-indicators on every row of AAPL and TSLA, and build the whole BLESK NO-VOL manifest above on
-the candles of all 521 stocks of the BLESK data: the 22 features of the candle equal the
-normalized features of its triples on every row after the warm-up (17.6 million rows), and the
-direction on the 4.1 million rows whose bricks line up with the BLESK bricks (our bricks start
-on our own ATR, [above](#renko-triples)). A price level is compared within 1e-4 percentage
+indicators on every row of AAPL and TSLA, and build the whole BLESK NO-VOL manifest above, of
+the `@2` blocks, on the candles of all 521 stocks of the BLESK data: it gives every row of the
+BLESK triples (17.7 million rows), the 22 features of the candle equal their normalized
+features on every one of them, and the direction on the 16.4 million rows whose bricks line up
+with the BLESK bricks, every row of 385 stocks (a close on a grid line parts the others,
+[above](#renko-triples)). A price level is compared within 1e-4 percentage
 points, 1e-6 of the close as for the indicators, since on stretches of one unchanged close
 the BLESK Bollinger bands lie up to 2.1e-5 off it, float noise of their standard deviation.
 
@@ -517,7 +565,8 @@ Checks 1 to 3 read the files only and run on upload; 4 and 5 run the model in th
 Kept for the supervisor until the pipeline is built, then asked together with what else is
 missing: the reward formula and `pocket_pivot`, the feature order
 of the 25 x 7 models, the window rule of the 25 x 28 and 25 x 7 models, where his candles come
-from, and of the Renko bricks ([research #263]): how his ATR is started, why some stocks have
+from, whether his recursive indicators come from TA-Lib, as research #265 finds, and of the
+Renko bricks ([research #263]): why some stocks have
 no row for their first candle, whether a close exactly on a brick's edge stays in the brick
 (here it does), and the exact arithmetic of a close on a grid line. Until then the research
 tasks derive what they can from his data: normalization (#262), the Renko rules (#263), the
@@ -527,3 +576,4 @@ reward and `pocket_pivot` (#264), and his predictions reproduced from raw candle
 [research #118]: https://github.com/candlestack-tech/research/blob/main/notes/118-indicators.md
 [research #262]: https://github.com/candlestack-tech/research/blob/main/notes/262-normalization.md
 [research #263]: https://github.com/candlestack-tech/research/blob/main/notes/263-renko-rules.md
+[research #265]: https://github.com/candlestack-tech/research/blob/main/notes/265-reproduce-predictions.md

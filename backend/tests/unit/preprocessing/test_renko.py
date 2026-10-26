@@ -13,6 +13,7 @@ from candlestack.preprocessing.renko import (
     Brick,
     Bricks,
     RenkoTriples,
+    TaLibRenkoTriples,
     bricks,
     candles_per_row,
     renko_rows,
@@ -277,3 +278,62 @@ def test_the_warm_up_is_the_atr_s_then_two_bricks_and_a_brick_takes_about_two_ca
 def test_parameters_out_of_range_are_refused(params: dict[str, object]) -> None:
     with pytest.raises(ValueError, match="validation error"):
         RenkoTriples.model_validate(params)
+
+
+def test_the_2_block_starts_the_bricks_on_first_brick_with_talib_s_atr() -> None:
+    block = CATALOG["renko-triples@2"]
+    params = TaLibRenkoTriples(atr_window=2, first_brick=5)
+    candles = frame(12)
+
+    rows = block.run(candles, params)
+
+    # TA-Lib's ATR of 2 candles from the first candle: true ranges of 2 from the second on.
+    atr = ind.talib_atr(candles, ind.Atr(window=2)).to_numpy()
+    expected = renko_rows(candles.slice(5), 0.6 * atr[5:])
+    assert rows.equals(expected)
+    assert np.allclose(atr[2:], 2.0)
+    assert rows["start"][0] == 5 * 1800
+
+
+def test_the_2_block_starts_no_earlier_than_the_atr_s_first_value() -> None:
+    block = CATALOG["renko-triples@2"]
+    candles = frame(20)
+
+    early = block.run(candles, TaLibRenkoTriples(atr_window=4, first_brick=0))
+    at_the_atr = block.run(candles, TaLibRenkoTriples(atr_window=4, first_brick=4))
+
+    assert early.equals(at_the_atr)
+    assert early["start"][0] == 4 * 1800
+
+
+def test_the_2_block_on_fewer_candles_than_its_first_brick_gives_no_row() -> None:
+    rows = CATALOG["renko-triples@2"].run(frame(30), TaLibRenkoTriples())
+
+    assert rows.is_empty()
+    assert rows.schema == CATALOG["renko-triples@1"].run(frame(10), RenkoTriples()).schema
+
+
+def test_the_direction_feature_takes_the_rows_of_the_2_block() -> None:
+    rows = CATALOG["renko-triples@2"].run(frame(80), TaLibRenkoTriples())
+
+    direction = CATALOG["renko-direction@1"].run(rows, CATALOG["renko-direction@1"].params())
+
+    assert direction.equals(rows["direction"])
+    assert direction.len() > 0
+
+
+def test_the_2_warm_up_is_the_first_brick_then_two_bricks() -> None:
+    block = CATALOG["renko-triples@2"]
+
+    # The first brick on the candle 49, as in the BLESK data; a brick of 0.6 ATR takes about
+    # 2.2 candles.
+    assert block.warm_up(TaLibRenkoTriples()) == 49 + 5
+    assert block.warm_up(TaLibRenkoTriples(first_brick=3, atr_window=14)) == 14 + 5
+    assert block.candles_per_row is not None
+    assert block.candles_per_row(TaLibRenkoTriples()) == pytest.approx(2.2)
+
+
+@pytest.mark.parametrize("params", [{"first_brick": -1}, {"first_brick": 1001}, {"atr_window": 1}])
+def test_the_2_parameters_out_of_range_are_refused(params: dict[str, object]) -> None:
+    with pytest.raises(ValueError, match="validation error"):
+        TaLibRenkoTriples.model_validate(params)

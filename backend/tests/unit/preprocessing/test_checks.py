@@ -82,6 +82,30 @@ def test_the_blesk_manifest_can_run() -> None:
     assert check_manifest(manifest) == []
 
 
+# The recursive indicators and the bricks of the BLESK manifest in their @2 versions, started
+# as TA-Lib does.
+TALIB_START = {
+    "rsi@1": "rsi@2",
+    "tsi@1": "tsi@2",
+    "atr@1": "atr@2",
+    "adx@1": "adx@2",
+    "ema@1": "ema@2",
+    "macd-diff@1": "macd-diff@2",
+}
+
+
+def test_the_blesk_manifest_of_the_2_versions_can_run() -> None:
+    document = copy.deepcopy(BLESK_NO_VOL)
+    document["input"]["representation"]["id"] = "renko-triples@2"
+    document["input"]["representation"]["params"]["first_brick"] = 49
+    for feature in document["input"]["features"]:
+        feature["id"] = TALIB_START.get(feature["id"], feature["id"])
+    manifest = parse_manifest(document)
+
+    assert unknown_blocks(manifest) == []
+    assert check_manifest(manifest) == []
+
+
 def test_a_feature_its_normalization_has_no_rule_for(raw: dict[str, Any]) -> None:
     raw["input"]["features"][1]["norm"] = {"id": "blesk-norm@1"}
     raw["input"]["features"][4]["norm"] = {"id": "blesk-norm@1"}
@@ -157,7 +181,7 @@ def test_the_direction_of_a_triple_needs_the_triples(raw: dict[str, Any]) -> Non
 
     assert problems(raw) == {
         "catalog": "input.features[3] is renko-direction@1, a column of the rows of "
-        "renko-triples@1, but the representation is candles@1."
+        "renko-triples@1 or renko-triples@2, but the representation is candles@1."
     }
 
 
