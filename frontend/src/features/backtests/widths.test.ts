@@ -19,11 +19,13 @@ describe('the widths of the backtest columns (#315)', () => {
 
   // The longest When of every date and time format: a day of an earlier year in the default
   // format, with a two-digit hour on the 12-hour clock. 139.8 px in Geist at 13 px, measured in
-  // Chrome over every month.
-  it('leave room for the longest time a backtest ran at', () => {
+  // Chrome over every month. The When cell wraps, so it takes two lines of the column; this year's
+  // times ("12 Oct 22:34", "Yesterday 15:29") take one.
+  it('leave room for the longest time a backtest ran at, on two lines', () => {
     const style = { timeZone: 'UTC', dateFormat: 'dmy', timeFormat: '12' } as const;
     const when = formatRecentTime(new Date('2025-05-28T11:58:00Z'), style, new Date('2026-10-26T12:00:00Z'));
     expect(when).toBe('28 May 2025 11:58 AM');
-    expect(room(WIDTH.when)).toBeGreaterThanOrEqual(139.8);
+    // "28 May 2025" and "11:58 AM" each fit a line: about 81 and 61 px.
+    expect(room(WIDTH.when)).toBeGreaterThanOrEqual(81);
   });
 });
