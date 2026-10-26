@@ -18,6 +18,32 @@ from candlestack.preprocessing import (
 )
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "keras"
+# The 23 features of the BLESK NO-VOL models, by their names and blocks, in their order.
+BLESK_FEATURES = {
+    "bb_bbh": "bollinger-high@1",
+    "bb_bbl": "bollinger-low@1",
+    "kch_high": "keltner-high@1",
+    "kch_low": "keltner-low@1",
+    "squeeze": "squeeze@1",
+    "rsi": "rsi@1",
+    "roc": "roc@1",
+    "tsi": "tsi@1",
+    "atr": "atr@1",
+    "adx": "adx@1",
+    "aroon_up": "aroon-up@1",
+    "aroon": "aroon@1",
+    "aroon_down": "aroon-down@1",
+    "sma": "sma@1",
+    "ema20": "ema@1",
+    "ema50": "ema@1",
+    "macd_diff": "macd-diff@1",
+    "direction": "renko-direction@1",
+    "rel_open": "rel-open@1",
+    "rel_high": "rel-high@1",
+    "rel_low": "rel-low@1",
+    "rel_close": "rel-close@1",
+    "is_last_bar": "session-last-candle@1",
+}
 BLESK_NO_VOL: dict[str, Any] = {
     "version": 1,
     "input": {
@@ -28,12 +54,8 @@ BLESK_NO_VOL: dict[str, Any] = {
             "params": {"atr_multiple": 0.6, "atr_window": 14, "atr_at": "brick_start"},
         },
         "features": [
-            {
-                "name": name,
-                "id": "rsi@1" if name == "rsi" else "close@1",
-                "norm": {"id": "blesk-norm@1"},
-            }
-            for name in ["bb_bbh", "rsi", *(f"f{index}" for index in range(21))]
+            {"name": name, "id": block, "norm": {"id": "blesk-norm@1"}}
+            for name, block in BLESK_FEATURES.items()
         ],
         "window": {"length": 25, "last": "current"},
     },
@@ -53,15 +75,47 @@ def test_the_manifest_without_preprocessing_can_run(raw: dict[str, Any]) -> None
     assert unknown_blocks(parse_manifest(raw)) == []
 
 
-def test_blocks_still_to_come_parse_but_cannot_run() -> None:
+def test_the_blesk_manifest_can_run() -> None:
     manifest = parse_manifest(BLESK_NO_VOL)
 
-    assert unknown_blocks(manifest) == ["blesk-norm@1"]
-    assert check_manifest(manifest) == [
+    assert unknown_blocks(manifest) == []
+    assert check_manifest(manifest) == []
+
+
+def test_a_feature_its_normalization_has_no_rule_for(raw: dict[str, Any]) -> None:
+    raw["input"]["features"][1]["norm"] = {"id": "blesk-norm@1"}
+    raw["input"]["features"][4]["norm"] = {"id": "blesk-norm@1"}
+
+    assert check_manifest(parse_manifest(raw)) == [
         ManifestProblem(
-            "catalog", ("The catalog has no block blesk-norm@1 yet, so it cannot run.",)
+            "catalog",
+            (
+                (
+                    "input.features[1].norm is blesk-norm@1, which has no rule for high@1, so it "
+                    "cannot scale that feature."
+                ),
+                (
+                    "input.features[4].norm is blesk-norm@1, which has no rule for volume@1, so "
+                    "it cannot scale that feature."
+                ),
+            ),
         )
     ]
+
+
+def test_a_feature_in_the_wrong_step_is_not_checked_against_the_rules(
+    raw: dict[str, Any],
+) -> None:
+    raw["input"]["features"][1] = {
+        "name": "rows",
+        "id": "candles@1",
+        "norm": {"id": "blesk-norm@1"},
+    }
+
+    assert problems(raw) == {
+        "catalog": "input.features[1] is candles@1, a representation block, where a feature "
+        "block goes."
+    }
 
 
 def blesk_without_normalization() -> dict[str, Any]:

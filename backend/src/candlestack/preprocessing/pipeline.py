@@ -11,7 +11,7 @@ import polars as pl
 from candlestack.preprocessing.blocks import CANDLE_COLUMNS, ROW_ID, SESSION_LAST, Samples
 from candlestack.preprocessing.catalog import CATALOG, WINDOW
 from candlestack.preprocessing.checks import check_manifest
-from candlestack.preprocessing.manifest import Manifest
+from candlestack.preprocessing.manifest import Feature, Manifest
 
 
 @dataclass(frozen=True, eq=False)
@@ -115,10 +115,15 @@ def build_input(candles: pl.DataFrame, manifest: Manifest) -> ModelInput:
             for feature in spec.features
         ),
     )
+    # The close of each row's candle, which a normalization may scale by: kept out of the rows,
+    # so the window never sees it and it takes no feature's name.
+    close = (
+        made_rows.select("ts")
+        .join(frame.select("ts", "close"), on="ts", how="left", maintain_order="left")
+        .get_column("close")
+    )
     rows = rows.with_columns(
-        _run(feature.norm.id, rows[feature.name], feature.norm.params)
-        .cast(pl.Float64)
-        .alias(feature.name)
+        _normalized(feature, rows[feature.name], close).cast(pl.Float64).alias(feature.name)
         for feature in spec.features
     )
     made = CATALOG[WINDOW].run(rows, spec.window)
@@ -129,6 +134,13 @@ def build_input(candles: pl.DataFrame, manifest: Manifest) -> ModelInput:
 def _run(block_id: str, data: pl.DataFrame | pl.Series, params: dict[str, object]) -> pl.Series:
     block = CATALOG[block_id]
     return block.run(data, block.params.model_validate(params))
+
+
+def _normalized(feature: Feature, column: pl.Series, close: pl.Series) -> pl.Series:
+    """The feature's column scaled by its normalization, which gets the close of each row's
+    candle and the feature's block, for a rule of its own (``blesk-norm@1``)."""
+    block = CATALOG[feature.norm.id]
+    return block.run(column, close, feature.id, block.params.model_validate(feature.norm.params))
 
 
 def _warm_up(block_id: str, params: dict[str, object]) -> int:

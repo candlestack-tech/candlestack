@@ -48,6 +48,7 @@ def test_the_blocks_are_registered() -> None:
         **dict.fromkeys(INDICATORS, "feature"),
         "renko-direction@1": "feature",
         "none@1": "normalization",
+        "blesk-norm@1": "normalization",
         "window@1": "window",
     }
 
@@ -85,6 +86,7 @@ def test_the_catalog_lists_the_blocks_by_step() -> None:
         *INDICATORS,
         "renko-direction@1",
         "none@1",
+        "blesk-norm@1",
         "window@1",
     ]
     assert blocks[0].model_dump() == {

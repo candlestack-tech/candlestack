@@ -184,9 +184,28 @@ def _catalog(manifest: Manifest) -> list[str]:
                 f"{step.where} is {step.id}, which marks the last candle of each trading "
                 f"session, but {session} candles have no sessions. Use it with the regular session."
             )
+    found += _has_rules(manifest)
     rep = CATALOG.get(manifest.input.representation.id)
     if rep is not None and rep.step == "representation":
         found += _fits_representation(manifest, rep.id, forming=rep.candles_per_row is not None)
+    return found
+
+
+def _has_rules(manifest: Manifest) -> list[str]:
+    """Each feature against its normalization, where that has a rule of its own per feature
+    (``blesk-norm@1``)."""
+    found = []
+    for index, feature in enumerate(manifest.input.features):
+        block, norm = CATALOG.get(feature.id), CATALOG.get(feature.norm.id)
+        # A block that is unknown or in the wrong step is a problem of its own above.
+        if block is None or block.step != "feature" or norm is None:
+            continue
+        rules = norm.normalizes if norm.step == "normalization" else None
+        if rules is not None and feature.id not in rules:
+            found.append(
+                f"input.features[{index}].norm is {norm.id}, which has no rule for "
+                f"{feature.id}, so it cannot scale that feature."
+            )
     return found
 
 
