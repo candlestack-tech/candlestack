@@ -5,5 +5,6 @@ It imports no other module and no server library. Other modules import only from
 """
 
 from candlestack.metrics.summary import drawdown, stats
+from candlestack.metrics.trades import trade_stats
 
-__all__ = ["drawdown", "stats"]
+__all__ = ["drawdown", "stats", "trade_stats"]

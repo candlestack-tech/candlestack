@@ -511,6 +511,21 @@ The worked example with `signal_close` gives:
 | `fees_paid` | 0.001970 | the trade's `fees` |
 | `buy_and_hold_return` | -0.02 | `98 / 100 - 1` |
 
+`trade_stats(trades, series)` describes the trades themselves and returns a dict with these
+names, always in this order. A trade wins when its `return` is above 0 and loses otherwise, as
+in `win_rate`. Counts and streaks are ints; the rest are floats or None.
+
+| Name | Formula | None when |
+| --- | --- | --- |
+| `profit_factor` | `sum(return > 0) / -sum(return < 0)`: gross profit over gross loss, 0 when no trade wins | no trade with a return below 0 |
+| `expectancy` | `win_rate * avg_win + (1 - win_rate) * avg_loss`, the mean return of the wins and of the losses; it equals `avg_trade_return` | no trades |
+| `avg_holding_candles`, `median_holding_candles` | mean and median of the rows of `series` from `open_ts` to `close_ts`: 0 for a trade opened and closed on one candle, a gap between sessions is no candle | no trades |
+| `longest_win_streak`, `longest_loss_streak` | the most wins and the most losses in a row, in the order of `trades` | never (0 without trades) |
+| `long_trades`, `short_trades` | trades with `side` +1 and -1 | never |
+| `long_win_rate`, `short_win_rate` | `count(return > 0) / trades` of that side | no trades of that side |
+| `long_avg_return`, `short_avg_return` | `mean(return)` of that side | no trades of that side |
+| `exits_signal`, `exits_stop`, `exits_gap`, `exits_end`, `exits_ruin`, `exits_drawdown` | trades with that `exit_reason`, 0 included so every run has the same names | never |
+
 ## The command
 
 `candlestack-bt run` backtests one model's predictions on the candles of one stock from
