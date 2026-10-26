@@ -72,14 +72,15 @@ export function ReturnValue({ value }: { value: number }) {
 }
 
 // The model by its framework's 14 px mark (.bt-m), the name beside it. Where it has less room than
-// it needs (an entry of the Filters panel on a phone, the Backtests table), the name ends in an
-// ellipsis.
-export function ModelName({ name, framework }: { name: string; framework: string }) {
+// it needs (an entry of the Filters panel on a phone), the name ends in an ellipsis; with `wrap`
+// (the Backtests table, where long file names are common) it takes up to two lines, broken
+// anywhere, and only then ends in one.
+export function ModelName({ name, framework, wrap = false }: { name: string; framework: string; wrap?: boolean }) {
   const mark = frameworkOf(framework);
   return (
-    <span className="inline-flex max-w-full items-center gap-[7px]">
+    <span className={cn('inline-flex max-w-full gap-[7px]', wrap ? 'items-start' : 'items-center')}>
       {mark && <FrameworkMini framework={mark} />}
-      <span className="min-w-0 truncate">{name}</span>
+      <span className={cn('min-w-0', wrap ? 'line-clamp-2 [overflow-wrap:anywhere]' : 'truncate')}>{name}</span>
     </span>
   );
 }

@@ -107,7 +107,10 @@ describe('the Backtests page', () => {
     expect(model.tagName).toBe('A');
     expect(model.getAttribute('href')).toBe('/models/mdl_7f3k2m9qx4');
     expect(model.className.split(' ')).toEqual(expect.arrayContaining(['text-[12px]', 'max-w-full', 'min-w-0']));
-    expect(within(model).getByText(name).className.split(' ')).toEqual(expect.arrayContaining(['truncate', 'min-w-0']));
+    // Up to two lines, broken anywhere (file names have no spaces), then an ellipsis.
+    expect(within(model).getByText(name).className.split(' ')).toEqual(
+      expect.arrayContaining(['line-clamp-2', '[overflow-wrap:anywhere]', 'min-w-0']),
+    );
 
     const width = (label: RegExp) =>
       screen

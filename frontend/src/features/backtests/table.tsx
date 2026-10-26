@@ -106,11 +106,11 @@ export function BacktestCell({ backtest, onStar }: { backtest: Backtest; onStar:
 
 const MODEL = 'inline-flex max-w-full min-w-0 align-middle text-[12px]';
 
-// The model of a row in the Backtests table (#315): one step smaller than the row, its name cut
-// with an ellipsis where the column is narrower, the full name in the title. While the model
+// The model of a row in the Backtests table (#315): one step smaller than the row, its name on up
+// to two lines and then cut with an ellipsis, the full name in the title. While the model
 // exists, a link to its page above the row's own link.
 export function ModelCell({ model }: { model: Backtest['model'] }) {
-  const name = <ModelName name={model.name} framework={model.framework} />;
+  const name = <ModelName name={model.name} framework={model.framework} wrap />;
   if (!model.id) {
     return (
       <span title={model.name} className={MODEL}>
