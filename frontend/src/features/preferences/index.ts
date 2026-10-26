@@ -3,4 +3,4 @@
 export { AppearanceSync } from './AppearanceSync';
 export { useDateStyle, useViewerDateStyle } from './useAppearance';
 export { useThemeSetting } from './useThemeSetting';
-export { useAppearanceError, useUpdateAppearance } from './useUpdateAppearance';
+export { useAppearanceSave, useUpdateAppearance } from './useUpdateAppearance';

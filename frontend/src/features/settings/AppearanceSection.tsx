@@ -12,11 +12,12 @@ import { DashboardCard } from '@/components/DashboardCard';
 import { ErrorNote } from '@/components/ErrorNote';
 import { AppearanceIcon } from '@/components/icons';
 import { Switch } from '@/components/ui/switch';
-import { useAppearanceError, useThemeSetting, useUpdateAppearance } from '@/features/preferences';
+import { useAppearanceSave, useThemeSetting, useUpdateAppearance } from '@/features/preferences';
 import { cityOf, formatDate, formatTime, viewerTimeZone } from '@/lib/dates';
 
 import { Choice } from './controls';
 import { SettingsRow } from './rows';
+import { SaveIndicator } from './SaveIndicator';
 
 // The formats show themselves on one moment: 12 October 2024, 16:05.
 const EXAMPLE = new Date(Date.UTC(2024, 9, 12, 16, 5));
@@ -78,14 +79,14 @@ function TimeRows({ appearance, update }: RowsProps) {
   );
 }
 
-// How the app looks for this account; each control saves as it changes, and a failed change goes
-// back and says why.
+// How the app looks for this account; each control saves as it changes, the indicator by the
+// title says how that went, and a failed change goes back and says why (Retry makes it again).
 export function AppearanceSection() {
   const { appearance } = useSuspenseQuery(preferencesQueryOptions()).data;
   const { mutate } = useUpdateAppearance();
-  const error = useAppearanceError();
+  const { status, error, retry } = useAppearanceSave();
   return (
-    <DashboardCard icon={AppearanceIcon} title="Appearance">
+    <DashboardCard icon={AppearanceIcon} title="Appearance" aside={<SaveIndicator state={{ status, retry }} />}>
       <ThemeRow />
       <TimeRows appearance={appearance} update={mutate} />
       <SettingsRow label="Reduce motion" hint="Turns off the small animations">

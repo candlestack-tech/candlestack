@@ -1,4 +1,4 @@
-import { useMutation, useMutationState, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useMutationState, useQueryClient, type MutationState } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { preferencesQueryOptions, updateAppearance, type Appearance, type Preferences } from '@/api';
@@ -41,11 +41,13 @@ export function useUpdateAppearance() {
   });
 }
 
-// Why the latest change failed, wherever it was made (Settings or the header's toggle); null once
-// a change went through. Changes that had ended when the caller showed up do not count: a failure
-// from before, still in the cache for a while, is not shown again on coming back to Settings.
-export function useAppearanceError(): Error | null {
+// The latest change, wherever it was made (Settings or the header's toggle): where it stands, why
+// it failed, and Retry, which makes it again. Changes that had ended when the caller showed up do
+// not count: a failure from before, still in the cache for a while, is not shown again on coming
+// back to Settings.
+export function useAppearanceSave() {
   const queryClient = useQueryClient();
+  const { mutate } = useUpdateAppearance();
   // The cache numbers mutations as they are made.
   const [ended] = useState(() =>
     Math.max(
@@ -56,9 +58,12 @@ export function useAppearanceError(): Error | null {
         .map((mutation) => mutation.mutationId),
     ),
   );
-  const errors = useMutationState({
+  const latest = useMutationState({
     filters: { mutationKey: MUTATION_KEY, predicate: (mutation) => mutation.mutationId > ended },
-    select: (mutation) => mutation.state.error,
-  });
-  return errors.at(-1) ?? null;
+    select: (mutation) => mutation.state as MutationState<Appearance, Error, Partial<Appearance>>,
+  }).at(-1);
+  const retry = () => {
+    if (latest?.variables) mutate(latest.variables);
+  };
+  return { status: latest?.status ?? 'idle', error: latest?.error ?? null, retry };
 }
