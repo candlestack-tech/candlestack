@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from candlestack.ml.errors import UnsupportedModelFormat
-from candlestack.ml.schemas import ModelUpdate
+from candlestack.ml.schemas import Framework, ModelUpdate
 from candlestack.ml.service import free_name, numbered, upload_name
 
 
@@ -25,13 +25,28 @@ from candlestack.ml.service import free_name, numbered, upload_name
     ],
 )
 def test_the_name_of_an_upload(file_name: str, name: str) -> None:
-    assert upload_name(file_name) == name
+    assert upload_name(file_name) == (name, Framework.keras)
 
 
 @pytest.mark.parametrize(
-    "file_name", ["model.pt", "model.h5", "model.keras.zip", "keras", "model.keras/", "model"]
+    ("file_name", "name"),
+    [
+        ("mixer.onnx", "mixer.onnx"),
+        ("Mixer.ONNX", "Mixer.ONNX"),
+        ("C:\\models\\mixer.onnx", "mixer.onnx"),
+        (".onnx", "model.onnx"),
+        ("a" * 80 + ".onnx", "a" * 60 + ".onnx"),
+    ],
 )
-def test_only_keras_files_are_taken(file_name: str) -> None:
+def test_the_name_of_an_onnx_upload(file_name: str, name: str) -> None:
+    assert upload_name(file_name) == (name, Framework.onnx)
+
+
+@pytest.mark.parametrize(
+    "file_name",
+    ["model.pt", "model.h5", "model.keras.zip", "keras", "model.keras/", "model", "model.onnx.gz"],
+)
+def test_only_keras_and_onnx_files_are_taken(file_name: str) -> None:
     with pytest.raises(UnsupportedModelFormat):
         upload_name(file_name)
 
@@ -42,6 +57,11 @@ def test_only_keras_files_are_taken(file_name: str) -> None:
 )
 def test_a_taken_name_gets_a_number(number: int, name: str) -> None:
     assert numbered("lstm.keras", number) == name
+
+
+def test_an_onnx_name_gets_its_number_before_its_extension() -> None:
+    assert numbered("mixer.onnx", 2) == "mixer (2).onnx"
+    assert numbered("a" * 60 + ".onnx", 10) == "a" * 55 + " (10).onnx"
 
 
 def test_a_numbered_name_stays_within_what_rename_takes() -> None:

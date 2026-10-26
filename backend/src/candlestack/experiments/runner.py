@@ -42,6 +42,7 @@ from candlestack.experiments.schemas import EQUITY_POINTS, BacktestStatus
 from candlestack.experiments.spec import RunReport, RunSpec
 from candlestack.experiments.store import BacktestStore
 from candlestack.jobs import DEFAULT_WAIT, JobClient, JobResult
+from candlestack.ml import model_file
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,7 @@ class BacktestRunner:
         candles = await self._candles(spec)
         timings["candles"] = _ms(clock)
         # The file as the model storage keeps it (ml.LocalModelStorage).
-        model = f"{backtest.user_id}/{backtest.model_id}.keras"
+        model = model_file(backtest.user_id, backtest.model_id, spec.model.framework)
         result, predictions = await self._predict(backtest_id, model, spec, candles.marked_frame())
         timings.update({f"job_{name}": value for name, value in result.timings})
         clock = time.monotonic()

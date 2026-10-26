@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from candlestack.ml.errors import ModelNameTaken
 from candlestack.ml.inspect import ModelFacts
 from candlestack.ml.models import Model
-from candlestack.ml.schemas import ModelState
+from candlestack.ml.schemas import Framework, ModelState
 from candlestack.ml.service import ModelsService, _checked_alone, _out
 from candlestack.preprocessing import Manifest, ManifestProblem, parse_manifest
 
@@ -62,6 +62,7 @@ async def keep(tmp_path: Path, refusal: Exception) -> None:
         "usr_7f3k2m9qx4",
         tmp_path / "upload.part",
         name="lstm.keras",
+        framework=Framework.keras,
         size=10,
         sha256=b"\0" * 32,
         facts=ModelFacts("3.15.1", 1, None, None),

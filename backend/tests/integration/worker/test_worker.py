@@ -1,7 +1,7 @@
 """The worker as it runs: its loop on a real Redis at REDIS_URL (flushed before each test) and
-a real process with Keras for each job, against the backend's ``JobClient``. The raw-candles
-test model (tests/fixtures/keras) is the model; each job's process takes a few seconds to
-import Keras."""
+a real process with Keras or onnxruntime for each job, against the backend's ``JobClient``. The
+raw-candles test models (tests/fixtures/keras and tests/fixtures/onnx) are the models; each
+Keras job's process takes a few seconds to import Keras."""
 
 import hashlib
 import json
@@ -25,6 +25,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "keras"
 MODEL = "user-1/raw_candles.keras"
 SHA256 = hashlib.sha256((FIXTURES / "raw_candles.keras").read_bytes()).hexdigest()
+ONNX_FILE = Path(__file__).parents[2] / "fixtures" / "onnx" / "raw_candles.onnx"
+ONNX_MODEL = "user-1/raw_candles.onnx"
 
 
 @pytest.fixture
@@ -40,6 +42,7 @@ def settings(redis_url: str, tmp_path: Path) -> Settings:
     models = tmp_path / "models"
     (models / "user-1").mkdir(parents=True)
     shutil.copy(FIXTURES / "raw_candles.keras", models / MODEL)
+    shutil.copy(ONNX_FILE, models / ONNX_MODEL)
     return Settings(
         app_env="test",
         jobs_redis_url=redis_url,
@@ -98,3 +101,20 @@ async def test_check_runs_the_trial_and_fails_a_wrong_model_file(jobs: JobClient
 
     assert (passed.status, passed.samples, passed.verified) == ("done", 64, False)
     assert (changed.status, changed.reason) == ("failed", "model-changed")
+
+
+async def test_an_onnx_model_with_its_example_is_verified(jobs: JobClient) -> None:
+    import onnxruntime  # noqa: PLC0415 (the worker's dependency, here to make the example)
+
+    inputs = np.stack([np.full((25, 5), 101.0), np.linspace(95, 110, 125).reshape(25, 5)])
+    session = onnxruntime.InferenceSession(ONNX_FILE, providers=["CPUExecutionProvider"])
+    (output,) = session.run(None, {"candles": inputs.astype(np.float32)})
+    example = {"input": inputs.tolist(), "output": np.asarray(output).tolist()}
+    document = {**manifest(), "example": example}
+    sha256 = hashlib.sha256(ONNX_FILE.read_bytes()).hexdigest()
+
+    result = await jobs.check(model=ONNX_MODEL, sha256=sha256, manifest=document, wait=60)
+
+    assert (result.status, result.samples, result.verified) == ("done", 64, True), result.error
+    assert result.runner is not None
+    assert (result.runner.keras, result.runner.backend) == (None, "onnxruntime")

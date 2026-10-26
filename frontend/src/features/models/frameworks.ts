@@ -1,13 +1,13 @@
 import type { Model } from '@/api';
 
 // The frameworks a model can come from, in the order the app lists them, with their marks
-// (Simple Icons, CC0) and brand colours, as in mockups/app (FW_IC). Only Keras is taken for now,
-// ONNX comes next; the others export to ONNX, and the upload says so for a file of theirs.
+// (Simple Icons, CC0) and brand colours, as in mockups/app (FW_IC). Keras and ONNX are taken; the
+// others export to ONNX, and the upload says so for a file of theirs.
 
 export const FRAMEWORKS = ['Keras', 'TensorFlow', 'PyTorch', 'ONNX', 'scikit-learn'] as const;
 export type Framework = (typeof FRAMEWORKS)[number];
 
-// The formats the upload names and shows the marks of: Keras now, ONNX next.
+// The formats the upload takes, names and shows the marks of.
 export const UPLOAD_FRAMEWORKS = ['Keras', 'ONNX'] as const satisfies readonly Framework[];
 
 export const FRAMEWORK_MARKS: Record<Framework, { color: string; path: string }> = {
@@ -34,7 +34,7 @@ export const FRAMEWORK_MARKS: Record<Framework, { color: string; path: string }>
 };
 
 // The API's name of a model's framework, as the app writes it.
-export const API_FRAMEWORKS: Record<Model['framework'], Framework> = { keras: 'Keras' };
+export const API_FRAMEWORKS: Record<Model['framework'], Framework> = { keras: 'Keras', onnx: 'ONNX' };
 
 // The framework of a name as the API writes it ('keras', 'onnx'), or undefined for one the app has
 // no mark for.

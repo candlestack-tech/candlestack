@@ -26,7 +26,7 @@ Reason = Literal[
     "model-changed",  # the file's SHA-256 is not the job's
     "manifest",  # the manifest is not valid or cannot run
     "candles",  # the candles break their rules or are too few for one sample
-    "load",  # Keras refused the file
+    "load",  # Keras or onnxruntime refused the file
     "predict",  # the model failed on its input
     "output",  # the model's output has the wrong shape or numbers that are not finite
     "example",  # the output for the manifest's example is not the expected one
@@ -55,9 +55,9 @@ RESULT_PREFIX = "jobs:result:"
 # A result nobody popped (the backend stopped waiting) goes after this, in seconds.
 RESULT_TTL = 600
 
-# The model files are ``<user_id>/<model_id>.keras``: no absolute path, no "..", no other
-# extension.
-MODEL_PATH = r"^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*\.keras$"
+# The model files are ``<user_id>/<model_id>.keras`` or ``.onnx``: no absolute path, no "..",
+# no other extension. The extension says how the worker loads the file.
+MODEL_PATH = r"^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*\.(keras|onnx)$"
 SHA256 = r"^[0-9a-f]{64}$"
 
 
@@ -94,9 +94,10 @@ class Job(_Frozen):
 
 
 class Runner(_Frozen):
-    """What ran the model: the Keras release, its backend and the backend's release."""
+    """What ran the model: the Keras release (None for an ONNX model), its backend and the
+    backend's release; onnxruntime and its release for an ONNX model."""
 
-    keras: str
+    keras: str | None = None
     backend: str
     backend_version: str
 

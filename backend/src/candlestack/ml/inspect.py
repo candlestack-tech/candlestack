@@ -19,7 +19,8 @@ be safe. Two checks, in order:
 
 It runs in a child process with resource limits (``sandbox.py``), as ``main``: a damaged file
 can then crash or exhaust only that process. Only the standard library, the allowlist and h5py
-(imported when the weights are read, after the limits are set).
+(imported when the weights are read, after the limits are set). The same process checks an
+ONNX file (``inspect_onnx.py``, imported after the limits too).
 """
 
 import json
@@ -132,9 +133,9 @@ class CheckFailed(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ModelFacts:
-    """What the check read from a file that passed it."""
+    """What the check read from a file that passed it; an ONNX file has no Keras version."""
 
-    keras_version: str
+    keras_version: str | None
     parameters: int
     input_shape: list[int] | None
     output_shape: list[int] | None
@@ -509,10 +510,20 @@ def limit_resources(resource: Any, *, file_max: int) -> None:
         resource.setrlimit(limit, (value, value))
 
 
+def _inspect(path: Path, scratch: Path, *, file_max: int, framework: str) -> ModelFacts:
+    if framework == "onnx":
+        # onnx and protobuf only in a check of an ONNX file, after the limits are set.
+        from candlestack.ml.inspect_onnx import inspect_onnx  # noqa: PLC0415
+
+        return inspect_onnx(path)
+    return inspect_keras(path, scratch, file_max=file_max)
+
+
 def main(argv: Sequence[str], *, limits: bool) -> int:
-    """The check's process: ``<file> <scratch> <file_max>``; writes one JSON object to
-    stdout, ``{"facts": {...}}`` or ``{"failed": {"check": ..., "detail": ...}}``."""
-    path, scratch, file_max = Path(argv[0]), Path(argv[1]), int(argv[2])
+    """The check's process: ``<file> <scratch> <file_max> <framework>`` (``keras`` or
+    ``onnx``); writes one JSON object to stdout, ``{"facts": {...}}`` or
+    ``{"failed": {"check": ..., "detail": ...}}``."""
+    path, scratch, file_max, framework = Path(argv[0]), Path(argv[1]), int(argv[2]), argv[3]
     # Only the check's own process is limited (`limits`), never one that imports this module
     # to call it, such as the tests.
     if limits and sys.platform == "linux":
@@ -520,7 +531,8 @@ def main(argv: Sequence[str], *, limits: bool) -> int:
 
         limit_resources(resource, file_max=file_max)
     try:
-        result: dict[str, Any] = {"facts": asdict(inspect_keras(path, scratch, file_max=file_max))}
+        facts = _inspect(path, scratch, file_max=file_max, framework=framework)
+        result: dict[str, Any] = {"facts": asdict(facts)}
     except CheckFailed as failed:
         result = {"failed": {"check": failed.check, "detail": failed.detail}}
     sys.stdout.write(json.dumps(result))

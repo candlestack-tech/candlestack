@@ -44,3 +44,9 @@ requested interval), and Alpaca bars merged from every `bars-<SYMBOL>-<timeframe
 the manifest without preprocessing of [docs/preprocessing.md](../../../docs/preprocessing.md),
 for the manifest checks (`candlestack.preprocessing`);
 `keras/make_allowlist.py` writes `candlestack/ml/allowlist.py` from Keras the same way.
+
+`onnx/raw_candles.onnx` is the same kind of model in ONNX (25 x 5 in, one score out, 128
+weights), which takes the same manifest, for the ONNX upload check and the worker's onnxruntime
+runner. `onnx/make_models.py` builds it with onnx from `backend/`
+(`uv run python tests/fixtures/onnx/make_models.py`); the hostile ONNX files are built in the
+tests themselves.

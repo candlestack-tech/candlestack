@@ -86,7 +86,7 @@ def test_changes_need_the_apps_own_origin(client: TestClient, method: str, path:
 
 
 @pytest.mark.parametrize(
-    "name", ["photo.png", "model.pt", "weights.h5", "model.onnx", "lstm.keras.zip"]
+    "name", ["photo.png", "model.pt", "weights.h5", "model.onnx.zip", "lstm.keras.zip"]
 )
 @pytest.mark.usefixtures("signed_in")
 def test_other_files_are_not_supported(client: TestClient, name: str) -> None:
@@ -97,18 +97,21 @@ def test_other_files_are_not_supported(client: TestClient, name: str) -> None:
         "type": PROBLEMS + "unsupported-model-format",
         "title": "Unsupported model format",
         "status": 415,
-        "detail": "This file is not supported. CandleStack takes Keras models (.keras) now and "
-        "ONNX models (.onnx) later. Export PyTorch, TensorFlow and scikit-learn models to ONNX. "
+        "detail": "This file is not supported. CandleStack takes Keras models (.keras) and ONNX "
+        "models (.onnx). Export PyTorch, TensorFlow and scikit-learn models to ONNX. "
         "Pickle-based files (.pt, .pth, .pkl, .joblib) are never taken, as loading them can run "
         "any code.",
     }
 
 
+@pytest.mark.parametrize("name", ["lstm.keras", "mixer.onnx"])
 @pytest.mark.usefixtures("signed_in")
-def test_a_file_announced_larger_than_50_mb_is_refused_at_once(client: TestClient) -> None:
+def test_a_file_announced_larger_than_50_mb_is_refused_at_once(
+    client: TestClient, name: str
+) -> None:
     response = client.post(
         "/api/v1/models",
-        params={"name": "lstm.keras"},
+        params={"name": name},
         content=b"x",
         headers={**ORIGIN, "Content-Length": str(50 * MB + 1)},
     )
