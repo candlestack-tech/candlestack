@@ -105,7 +105,7 @@ function Row({ backtest, onStar }: RowProps) {
       </td>
       <td className={cn(CELL, NUMBER, hideOf('Sharpe'))}>{result(formatSharpe(backtest.sharpe))}</td>
       <td className={cn(CELL, NUMBER, hideOf('Max drawdown'))}>{result(formatPercent(backtest.max_drawdown))}</td>
-      <td className={cn(CELL, hideOf('When'), 'text-muted-foreground')}>
+      <td className={cn(CELL, hideOf('When'), 'whitespace-normal text-muted-foreground')}>
         <BacktestWhen backtest={backtest} />
       </td>
     </tr>

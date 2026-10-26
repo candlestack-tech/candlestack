@@ -119,7 +119,7 @@ describe('the Backtests page', () => {
         .find((name) => name.startsWith('w-'));
     expect(width(/^Model/)).toBeUndefined();
     expect([/^Backtest/, /^Instruments/, /^Status/, /^Return/, /^Sharpe/, /^Max drawdown/, /^When/].map(width)).toEqual(
-      ['w-[84px]', 'w-[112px]', 'w-[88px]', 'w-[100px]', 'w-[76px]', 'w-[128px]', 'w-[160px]'],
+      ['w-[84px]', 'w-[112px]', 'w-[80px]', 'w-[100px]', 'w-[76px]', 'w-[128px]', 'w-[128px]'],
     );
 
     const [, , , status, result] = within(rows()[0]!).getAllByRole('cell');
