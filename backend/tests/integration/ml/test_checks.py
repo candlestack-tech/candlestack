@@ -72,6 +72,18 @@ def queued(settings: Settings) -> int:
         return queue.llen("jobs:queue")
 
 
+def test_the_check_of_an_onnx_model_names_its_onnx_file(ada, worker) -> None:
+    onnx_file = Path(__file__).parents[2] / "fixtures" / "onnx" / "raw_candles.onnx"
+    model = ada.upload(onnx_file.read_bytes(), name="raw.onnx").json()
+
+    assert ada.set_manifest(model["id"], json.dumps(raw_manifest())).status_code == 200
+    until(lambda: only(ada)["state"] == "verified")
+
+    (job,) = worker.jobs
+    assert job.model == f"{ada.id}/{model['id']}.onnx"
+    assert job.sha256 == hashlib.sha256(onnx_file.read_bytes()).hexdigest()
+
+
 def test_a_check_that_gives_the_example_verifies_the_model(ada, sql, worker) -> None:
     model = with_manifest(ada)
 

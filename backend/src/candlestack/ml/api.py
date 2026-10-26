@@ -3,8 +3,9 @@ catalog their manifests are made of under ``/api/v1/preprocessing/catalog``.
 
 An upload is the file itself as the request body (``application/octet-stream``) with its name
 in ``?name=``, so the server streams it to disk instead of holding a multipart form in memory.
-It runs two checks on the file, ``opens`` and ``weights`` (``ModelCheck``), without executing
-anything from it; a failed check answers 422 ``model-check-failed`` naming the check.
+It takes Keras (``.keras``) and ONNX (``.onnx``) files and runs two checks on the file,
+``opens`` and ``weights`` (``ModelCheck``), without executing anything from it; a failed check
+answers 422 ``model-check-failed`` naming the check.
 
 A model's manifest is its own resource, ``/api/v1/models/{model_id}/manifest``: added or
 replaced with PUT, which keeps it only when every check passed (else 422
@@ -116,10 +117,9 @@ def _unsupported(_error: Exception) -> ProblemError:
         415,
         "unsupported-model-format",
         "Unsupported model format",
-        "This file is not supported. CandleStack takes Keras models (.keras) now and ONNX "
-        "models (.onnx) later. Export PyTorch, TensorFlow and scikit-learn models to ONNX. "
-        "Pickle-based files (.pt, .pth, .pkl, .joblib) are never taken, as loading them can "
-        "run any code.",
+        "This file is not supported. CandleStack takes Keras models (.keras) and ONNX models "
+        "(.onnx). Export PyTorch, TensorFlow and scikit-learn models to ONNX. Pickle-based "
+        "files (.pt, .pth, .pkl, .joblib) are never taken, as loading them can run any code.",
     )
 
 
@@ -288,7 +288,7 @@ async def list_models(
         **problem_doc(413, "The file is larger than 50 MB (`model-too-large`)."),
         **problem_doc(
             415,
-            "Not a format the app takes: Keras (`.keras`) now, ONNX (`.onnx`) later, never "
+            "Not a format the app takes: Keras (`.keras`) and ONNX (`.onnx`), never "
             "pickle-based files (`unsupported-model-format`).",
         ),
         **problem_doc(
@@ -307,11 +307,13 @@ async def upload_model(
     service: ModelsServiceDep,
     response: Response,
 ) -> ModelOut:
-    """Uploads a model file: the body is the file, `name` its file name. The file is checked
-    before it is kept: `opens` (a real Keras model with no custom code inside, nothing from
-    the file is executed) and `weights` (it holds trained weights). A file with a name the user
-    already has gets a number, as `lstm (2).keras`. The model is `needs_setup` until its
-    manifest is added (`PUT /api/v1/models/{model_id}/manifest`)."""
+    """Uploads a model file, Keras (`.keras`) or ONNX (`.onnx`): the body is the file, `name`
+    its file name. The file is checked before it is kept: `opens` (a real model of its format
+    with no custom code inside, for ONNX the standard operators only, all in the one file, with
+    one float32 input and output; nothing from the file is executed) and `weights` (it holds
+    trained weights). A file with a name the user already has gets a number, as
+    `lstm (2).keras`. The model is `needs_setup` until its manifest is added
+    (`PUT /api/v1/models/{model_id}/manifest`)."""
     response.headers.update(NO_STORE)
     try:
         return await service.upload(user.id, name, _declared_size(request), request.stream())

@@ -48,6 +48,7 @@ from candlestack.ml.schemas import (
     MODELS_MAX,
     NAME_MAX,
     QUOTA_BYTES,
+    SUFFIXES,
     BlockUse,
     Framework,
     ManifestSummary,
@@ -79,8 +80,7 @@ logger = logging.getLogger(__name__)
 # The one character a JSON text may hold that Postgres cannot keep in JSONB.
 NUL = "\x00"
 
-KERAS_SUFFIX = ".keras"
-# The name a file without a usable one gets (".keras").
+# The name a file without a usable one gets (".keras", ".onnx").
 DEFAULT_STEM = "model"
 # How long the file may take to arrive: 50 MB at about 3.5 Mbit/s.
 RECEIVE_TIMEOUT = 120.0
@@ -91,27 +91,31 @@ _FOREIGN_KEY_VIOLATION = "23503"
 # Postgres' error of a row that a unique index refuses, and the index of the user's names.
 _UNIQUE_VIOLATION = "23505"
 _NAME_INDEX = "uq_models_user_id_name"
-_EMPTY = "The file is empty. Choose the model's .keras file and upload it again."
+_EMPTY = "The file is empty. Choose the model's {suffix} file and upload it again."
 
 
 def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def upload_name(file_name: str) -> str:
+def upload_name(file_name: str) -> tuple[str, Framework]:
     """The name an uploaded file is kept under: its base name (a client may send a path)
     without control and format characters, the part before the extension cut to what Rename
-    saves.
+    saves; and the format its extension says.
 
     Raises:
-        UnsupportedModelFormat: Not a Keras file (``.keras``, in any case).
+        UnsupportedModelFormat: Not a Keras (``.keras``) or ONNX (``.onnx``) file, in any case.
     """
     base = file_name.replace("\\", "/").rsplit("/", 1)[-1]
-    if not base.lower().endswith(KERAS_SUFFIX):
+    framework = next(
+        (framework for framework, suffix in SUFFIXES.items() if base.lower().endswith(suffix)),
+        None,
+    )
+    if framework is None:
         raise UnsupportedModelFormat
     stem, suffix = _split(base)
     stem = without_invisible(stem).strip()[:NAME_MAX].rstrip()
-    return (stem or DEFAULT_STEM) + suffix
+    return (stem or DEFAULT_STEM) + suffix, framework
 
 
 def numbered(name: str, number: int) -> str:
@@ -137,8 +141,10 @@ def free_name(name: str, lowered: str, taken: Collection[str]) -> str:
 
 
 def _split(name: str) -> tuple[str, str]:
-    """A model's name as the part Rename changes and the extension, which stays."""
-    return name[: -len(KERAS_SUFFIX)], name[-len(KERAS_SUFFIX) :]
+    """A model's name as the part Rename changes and the extension, which stays; a name
+    always ends with the extension of its format."""
+    stem, dot, extension = name.rpartition(".")
+    return stem, dot + extension
 
 
 def _spec(model: Model) -> Manifest | None:
@@ -199,8 +205,10 @@ def _check_room(used: int, count: int, size: int) -> None:
         raise StorageFull(used, QUOTA_BYTES)
 
 
-async def _receive(chunks: AsyncIterable[bytes], path: Path) -> tuple[int, bytes]:
-    """Writes the uploaded file to `path`; its size and SHA-256.
+async def _receive(
+    chunks: AsyncIterable[bytes], path: Path, framework: Framework
+) -> tuple[int, bytes]:
+    """Writes the uploaded file, of the format `framework`, to `path`; its size and SHA-256.
 
     Raises:
         UploadTimeout: The file did not arrive within ``RECEIVE_TIMEOUT``.
@@ -222,7 +230,7 @@ async def _receive(chunks: AsyncIterable[bytes], path: Path) -> tuple[int, bytes
     except TimeoutError:
         raise UploadTimeout from None
     if size == 0:
-        raise ModelCheckFailed(ModelCheck.opens, _EMPTY)
+        raise ModelCheckFailed(ModelCheck.opens, _EMPTY.format(suffix=SUFFIXES[framework]))
     return size, digest.digest()
 
 
@@ -312,7 +320,8 @@ class ModelsService:
         is read, as does any file when the storage is full or the user has the most models.
 
         Raises:
-            UnsupportedModelFormat: `file_name` is not that of a Keras file; nothing is read.
+            UnsupportedModelFormat: `file_name` is not that of a Keras or ONNX file; nothing is
+                read.
             ModelTooLarge: The file is larger than an upload may be.
             UploadInProgress: Another upload of the user is in progress.
             TooManyModels: The user has as many models as a user may keep.
@@ -322,7 +331,7 @@ class ModelsService:
             AccountGone: The account was deleted meanwhile.
             ModelNameTaken: Postgres compares the name it got as one the user has.
         """
-        name = upload_name(file_name)
+        name, framework = upload_name(file_name)
         if declared_size is not None and declared_size > FILE_MAX_BYTES:
             raise ModelTooLarge
         async with self._uploads.hold(user_id):
@@ -333,20 +342,26 @@ class ModelsService:
             # Without a size announced, a full storage still fails at once (a file is 1 byte
             # at least).
             _check_room(used, count, declared_size or 1)
-            model = await self._receive_and_keep(user_id, name, chunks)
+            model = await self._receive_and_keep(user_id, name, framework, chunks)
         logger.info("User %s uploaded model %s (%d bytes)", user_id, model.id, model.size_bytes)
         return _out(model)
 
     async def _receive_and_keep(
-        self, user_id: str, name: str, chunks: AsyncIterable[bytes]
+        self, user_id: str, name: str, framework: Framework, chunks: AsyncIterable[bytes]
     ) -> Model:
         incoming = self._storage.incoming_path()
         scratch = self._storage.incoming_path()
         try:
-            size, sha256 = await _receive(chunks, incoming)
-            facts = await check_upload(incoming, scratch)
+            size, sha256 = await _receive(chunks, incoming, framework)
+            facts = await check_upload(incoming, scratch, framework)
             return await self._keep(
-                user_id, incoming, name=name, size=size, sha256=sha256, facts=facts
+                user_id,
+                incoming,
+                name=name,
+                framework=framework,
+                size=size,
+                sha256=sha256,
+                facts=facts,
             )
         finally:
             # Also when the request is cancelled (the client went away).
@@ -354,12 +369,13 @@ class ModelsService:
                 await self._storage.discard(incoming)
                 await self._storage.discard(scratch)
 
-    async def _keep(
+    async def _keep(  # noqa: PLR0913 (keyword-only: what the upload and its check found)
         self,
         user_id: str,
         incoming: Path,
         *,
         name: str,
+        framework: Framework,
         size: int,
         sha256: bytes,
         facts: ModelFacts,
@@ -379,7 +395,7 @@ class ModelsService:
             id=new_model_id(),
             user_id=user_id,
             name=await self._free_name(user_id, name),
-            framework=Framework.keras.value,
+            framework=framework.value,
             size_bytes=size,
             sha256=sha256,
             parameters=facts.parameters,
@@ -401,7 +417,7 @@ class ModelsService:
             if state == _UNIQUE_VIOLATION and _NAME_INDEX in str(error.orig):
                 raise ModelNameTaken(model.name) from None
             raise
-        await self._storage.save(incoming, user_id, model.id)
+        await self._storage.save(incoming, user_id, model.id, framework)
         try:
             await self._store.commit()
         except BaseException:

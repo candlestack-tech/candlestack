@@ -16,6 +16,7 @@ dependencies = [
     "h5py>=3.16.0",
     "httpx>=0.28.1",
     "numpy>=2.5.4",
+    "onnx>=1.23.2",
     "orjson>=3.12.0",
     "polars>=1.44.2",
     "pydantic>=2.13.5",
@@ -48,12 +49,14 @@ dev = [
     "ruff>=0.16.9",
     "ty==0.0.84",
 ]
-# What only the worker runs models with (candlestack.worker): Keras on the JAX backend. Keras is
-# pinned to the release the upload's allowlist was generated from (ml/allowlist.py); a new one
-# comes with the allowlist regenerated. The API image installs neither (backend/Dockerfile).
+# What only the worker runs models with (candlestack.worker): Keras on the JAX backend, and
+# onnxruntime for ONNX files. Keras is pinned to the release the upload's allowlist was
+# generated from (ml/allowlist.py); a new one comes with the allowlist regenerated. The API
+# image installs none of them (backend/Dockerfile): its check of an ONNX file reads it with onnx.
 worker = [
     "jax>=0.11.2",
     "keras==3.15.1",
+    "onnxruntime>=1.31.0",
 ]
 
 # The uv release line of the whole toolchain: local, CI (setup-uv reads this) and the image.
@@ -350,9 +353,9 @@ layers = [
 
 # Inside ml, the same: routes, their dependencies, the service and the checks of the models in
 # the worker, then the queries, the file storage, the upload locks and the runner of the upload
-# check, the check itself (which runs in a child process with the allowlist alone), then the
-# table, the errors, the allowlist and what the backtests' usage of a model looks like, and the
-# bodies at the bottom.
+# check, the check itself (which runs in a child process with the allowlist alone; the Keras
+# check's process runs the ONNX check too), then the table, the errors, the allowlist and what
+# the backtests' usage of a model looks like, and the bodies at the bottom.
 [[tool.importlinter.contracts]]
 name = "Inside ml: HTTP -> dependencies -> service -> store, storage and check -> models"
 type = "layers"
@@ -362,7 +365,7 @@ layers = [
     "dependencies",
     "service | checks",
     "store | storage | uploads | sandbox",
-    "inspect",
+    "inspect : inspect_onnx",
     "models | errors | allowlist | usage",
     "schemas",
 ]
@@ -388,7 +391,8 @@ layers = [
 ]
 
 # The API checks an uploaded model by reading its file, never by loading it: a load could run
-# code from the file, and the API image has no Keras or TensorFlow (the worker has).
+# code from the file, and the API image has no Keras, TensorFlow or onnxruntime (the worker
+# has); it reads an ONNX file with onnx, which runs nothing.
 # Preprocessing serves the catalog in the API and builds the input in the worker, so it builds
 # arrays for a model without knowing the framework that runs it. The API hands models to the
 # worker through jobs, which knows no framework either.
@@ -399,17 +403,18 @@ source_modules = [
     "candlestack.experiments", "candlestack.jobs", "candlestack.ml", "candlestack.main",
     "candlestack.preprocessing",
 ]
-forbidden_modules = ["keras", "tensorflow", "torch", "jax"]
+forbidden_modules = ["keras", "tensorflow", "torch", "jax", "onnxruntime"]
 
 # The worker's own process takes jobs from the queue and runs each in a child process
-# (worker.runner), the only one that imports Keras: the loop stays small and outlives a model
-# that crashes, hangs or exhausts its memory.
+# (worker.runner), the only one that imports Keras or onnxruntime: the loop stays small and
+# outlives a model that crashes, hangs or exhausts its memory.
 [[tool.importlinter.contracts]]
 name = "The worker's loop never imports a deep learning framework"
 type = "forbidden"
 source_modules = ["candlestack.worker.service"]
 forbidden_modules = [
-    "keras", "tensorflow", "torch", "jax", "candlestack.worker.model", "candlestack.worker.runner",
+    "keras", "tensorflow", "torch", "jax", "onnxruntime", "candlestack.worker.model",
+    "candlestack.worker.onnx_model", "candlestack.worker.runner",
 ]
 
 # What the sources share lives in sources.base.

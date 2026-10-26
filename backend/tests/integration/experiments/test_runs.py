@@ -230,6 +230,21 @@ def test_a_run_with_the_real_worker(ada) -> None:
     assert document["data"]["predictions"]["count"] == 240
 
 
+@pytest.mark.usefixtures("real_worker")
+def test_a_run_of_an_onnx_model_with_the_real_worker(ada) -> None:
+    onnx_file = Path(__file__).parents[2] / "fixtures" / "onnx" / "raw_candles.onnx"
+    model_id = ada.runnable_model(file=onnx_file, name="raw-candles.onnx", framework="onnx")
+
+    started = ada.start(body(model_id))
+    document = ada.ended(started.json()["backtest"]["id"], timeout=120)
+
+    assert document["backtest"]["status"] == "finished", document["backtest"]["error"]
+    runner = document["software"]["runner"]
+    assert (runner["format"], runner["keras"]) == ("onnx", None)
+    assert runner["backend"].startswith("onnxruntime ")
+    assert document["data"]["predictions"]["count"] == 240
+
+
 # --- What fails a run -----------------------------------------------------------------------
 
 

@@ -3,8 +3,9 @@ the request as JSON on stdin, runs the job and writes its outcome as JSON on std
 
 A fresh process per job: a model that crashes, hangs or exhausts the memory takes down this
 process only, the loop fails the job and goes on, and no state of one model reaches the next.
-It is the only process that imports Keras. It gets no keys and no Redis URL from the loop, and
-the container it runs in has no network.
+It is the only process that imports Keras or onnxruntime, and only the one the job's model
+needs (the extension of its file says which): Keras takes seconds to import. It gets no keys
+and no Redis URL from the loop, and the container it runs in has no network.
 """
 
 import hashlib
@@ -13,13 +14,12 @@ import sys
 import tempfile
 import time
 import traceback
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, Protocol
 
-import jax
-import keras
 import numpy as np
 import polars as pl
 
@@ -34,7 +34,6 @@ from candlestack.preprocessing import (
     parse_manifest,
     warm_up,
 )
-from candlestack.worker.model import load_keras
 from candlestack.worker.protocol import Outcome, Request
 from candlestack.worker.samples import sample_candles
 
@@ -46,14 +45,69 @@ BATCH = 1024
 # a part does not. 32 MB are 11264 samples of 25 x 28 (11 batches): few calls of the model, and
 # far under the worker's limit beside Keras and JAX (docs/architecture.md, "Worker").
 PART_BYTES = 32 * 1024 * 1024
-# The largest file the process may write (Linux): the model's copy without its compile config
-# (a file of at most 50 MB, unpacked to 100 MB of weights at most) and the predictions.
+# The largest file the process may write (Linux): the model's copy (a Keras file without its
+# compile config, of at most 50 MB unpacked to 100 MB of weights at most, or an ONNX file of at
+# most 50 MB) and the predictions.
 FILE_MAX = 512 * 1024 * 1024
-_SAVE_AGAIN = 'Save the model again with model.save("model.keras") and upload that file.'
+ONNX_SUFFIX = ".onnx"
 INTERNAL = "The worker failed on this job. This is a bug of CandleStack and it was reported."
 OUT_OF_MEMORY = (
     "The model needs more memory than the worker has. Choose a shorter period or a smaller model."
 )
+
+
+class Model(Protocol):
+    """A loaded model: Keras' own, or ``onnx_model.OnnxModel``, which answers alike."""
+
+    def predict(self, x: Any, *, batch_size: int, verbose: int) -> Any: ...
+
+
+@dataclass(frozen=True, slots=True)
+class Framework:
+    """What runs the models of one format: how a file loads (from its path, with a scratch
+    directory), what the result names as the runner, and what the user reads when the file
+    does not load (with ``{error}``, the type of the error)."""
+
+    load: Callable[[Path, Path], Model]
+    runner: Runner
+    refused: str
+
+
+def _keras() -> Framework:
+    # Only the job of a Keras model imports Keras (2 to 4 s).
+    import jax  # noqa: PLC0415
+    import keras  # noqa: PLC0415
+
+    from candlestack.worker import model  # noqa: PLC0415
+
+    return Framework(
+        load=model.load_keras,
+        runner=Runner(
+            keras=keras.__version__,
+            backend=keras.backend.backend(),
+            backend_version=jax.__version__,
+        ),
+        refused="Keras could not load the model ({error}). Save the model again with "
+        'model.save("model.keras") and upload that file.',
+    )
+
+
+def _onnx() -> Framework:
+    import onnxruntime  # noqa: PLC0415 (only the job of an ONNX model)
+
+    from candlestack.worker import onnx_model  # noqa: PLC0415
+
+    return Framework(
+        load=onnx_model.load_onnx,
+        runner=Runner(backend="onnxruntime", backend_version=onnxruntime.__version__),
+        refused="onnxruntime could not load the model ({error}). Export the model to ONNX "
+        "again and upload that file.",
+    )
+
+
+def framework_of(model: str) -> Framework:
+    """What runs the model file named `model`, by its extension."""
+    return _onnx() if model.endswith(ONNX_SUFFIX) else _keras()
 
 
 class JobFailed(Exception):
@@ -72,11 +126,14 @@ def run(request: Request) -> Outcome:
     job = request.job
     timings: dict[str, float] = {}
     trace = None
+    framework = None
     try:
-        result = _run(request, timings)
+        framework = framework_of(job.model)
+        result = _run(request, framework, timings)
     except JobFailed as failed:
+        runner = None if framework is None else framework.runner
         result = JobResult.failed(job.id, job.kind, failed.reason, failed.message).model_copy(
-            update={"runner": _runner(), **failed.found}
+            update={"runner": runner, **failed.found}
         )
     except MemoryError:
         # An allocation larger than the memory can ever give (a long period of a large window)
@@ -93,12 +150,12 @@ def run(request: Request) -> Outcome:
     )
 
 
-def _run(request: Request, timings: dict[str, float]) -> JobResult:
+def _run(request: Request, framework: Framework, timings: dict[str, float]) -> JobResult:
     job = request.job
     manifest = _manifest(job.manifest)
     path = _model_file(request.models_dir, job.model, job.sha256)
     with tempfile.TemporaryDirectory() as scratch, _timed(timings, "load"):
-        model = _load(path, Path(scratch))
+        model = _load(framework, path, Path(scratch))
     files = JobFiles(request.files_dir)
     if job.kind == "predict":
         candles = _candles(files, job.id)
@@ -115,7 +172,7 @@ def _run(request: Request, timings: dict[str, float]) -> JobResult:
             status="done",
             samples=predictions.height,
             dropped=made.dropped,
-            runner=_runner(),
+            runner=framework.runner,
         )
     made = _input(sample_candles(manifest), manifest, timings)
     with _timed(timings, "predict"):
@@ -129,7 +186,7 @@ def _run(request: Request, timings: dict[str, float]) -> JobResult:
         dropped=made.dropped,
         verified=difference is not None,
         example_difference=difference,
-        runner=_runner(),
+        runner=framework.runner,
     )
 
 
@@ -140,12 +197,6 @@ def _timed(timings: dict[str, float], step: str) -> Iterator[None]:
         yield
     finally:
         timings[step] = round((time.perf_counter() - start) * 1000, 1)
-
-
-def _runner() -> Runner:
-    return Runner(
-        keras=keras.__version__, backend=keras.backend.backend(), backend_version=jax.__version__
-    )
 
 
 def _manifest(document: dict[str, Any]) -> Manifest:
@@ -177,15 +228,13 @@ def _model_file(models_dir: Path, name: str, sha256: str) -> Path:
     return path
 
 
-def _load(path: Path, scratch: Path) -> keras.Model:
+def _load(framework: Framework, path: Path, scratch: Path) -> Model:
     try:
-        return load_keras(path, scratch)
+        return framework.load(path, scratch)
     except MemoryError:
         raise
-    except Exception as error:  # noqa: BLE001 (Keras raises any error on a file it cannot load)
-        raise JobFailed(
-            "load", f"Keras could not load the model ({type(error).__name__}). " + _SAVE_AGAIN
-        ) from None
+    except Exception as error:  # noqa: BLE001 (any error on a file the framework cannot load)
+        raise JobFailed("load", framework.refused.format(error=type(error).__name__)) from None
 
 
 def _candles(files: JobFiles, job_id: str) -> pl.DataFrame:
@@ -211,7 +260,7 @@ def _input(candles: pl.DataFrame, manifest: Manifest, timings: dict[str, float])
     return made
 
 
-def _predict(model: keras.Model, windows: Samples, manifest: Manifest) -> np.ndarray:
+def _predict(model: Model, windows: Samples, manifest: Manifest) -> np.ndarray:
     """The model's output for every sample, checked to be one finite score per sample.
 
     The samples are built and predicted a part at a time (``part_sizes``), and the outputs
@@ -239,9 +288,7 @@ def part_sizes(sample_bytes: int) -> tuple[int, int]:
     return per_part // batch * batch, batch
 
 
-def _predict_part(
-    model: keras.Model, samples: np.ndarray, batch: int, manifest: Manifest
-) -> np.ndarray:
+def _predict_part(model: Model, samples: np.ndarray, batch: int, manifest: Manifest) -> np.ndarray:
     """The model's output for ``samples``, checked to be of the manifest's shape."""
     try:
         output = np.asarray(model.predict(samples, batch_size=batch, verbose=0))
@@ -273,7 +320,7 @@ def _finite(output: np.ndarray) -> np.ndarray:
     return output
 
 
-def _example(model: keras.Model, manifest: Manifest) -> float | None:
+def _example(model: Model, manifest: Manifest) -> float | None:
     """The largest difference between the model's output for the manifest's example and the
     expected one; None without an example."""
     example = manifest.example
@@ -322,8 +369,8 @@ def main(stdin: IO[bytes], stdout: IO[str], *, limits: bool) -> int:
 
 
 def _result_channel() -> IO[str]:
-    """Standard output for the outcome only: what Keras, JAX or a library print goes to
-    standard error, where the container's log gets it."""
+    """Standard output for the outcome only: what Keras, JAX, onnxruntime or a library print
+    goes to standard error, where the container's log gets it."""
     channel = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8")
     os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
     return channel

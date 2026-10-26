@@ -1,5 +1,6 @@
-"""Fixtures of the worker's tests: a model storage with the Keras test files
-(tests/fixtures/keras) and the manifest of ``raw_candles.keras``, and jobs for them."""
+"""Fixtures of the worker's tests: a model storage with the Keras and ONNX test files
+(tests/fixtures/keras, tests/fixtures/onnx) and the manifest of ``raw_candles.keras``, which
+``raw_candles.onnx`` takes too, and jobs for them."""
 
 import hashlib
 import json
@@ -16,6 +17,7 @@ import pytest
 from candlestack.jobs import Job
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "keras"
+ONNX_FIXTURES = Path(__file__).parents[2] / "fixtures" / "onnx"
 USER = "user-1"
 
 
@@ -25,10 +27,11 @@ def raw_manifest() -> dict[str, Any]:
 
 @pytest.fixture
 def models(tmp_path: Path) -> Path:
-    """The model storage, with every Keras test file as ``user-1/<name>.keras``."""
+    """The model storage, with every Keras test file as ``user-1/<name>.keras`` and every ONNX
+    one as ``user-1/<name>.onnx``."""
     root = tmp_path / "models"
     (root / USER).mkdir(parents=True)
-    for path in FIXTURES.glob("*.keras"):
+    for path in [*FIXTURES.glob("*.keras"), *ONNX_FIXTURES.glob("*.onnx")]:
         shutil.copy(path, root / USER / path.name)
     return root
 
@@ -41,12 +44,16 @@ def files_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def make_job(models: Path) -> Callable[..., Job]:
     def make(
-        kind: str = "predict", name: str = "raw_candles", manifest: Any = None, **changes: Any
+        kind: str = "predict",
+        name: str = "raw_candles",
+        manifest: Any = None,
+        suffix: str = ".keras",
+        **changes: Any,
     ) -> Job:
-        path = models / USER / f"{name}.keras"
+        path = models / USER / f"{name}{suffix}"
         fields = {
             "kind": kind,
-            "model": f"{USER}/{name}.keras",
+            "model": f"{USER}/{name}{suffix}",
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else "0" * 64,
             "manifest": raw_manifest() if manifest is None else manifest,
             "deadline": time.time() + 60,
