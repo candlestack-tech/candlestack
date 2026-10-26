@@ -1,3 +1,5 @@
+import type { ComponentProps } from 'react';
+
 import type { Direction } from '@/api';
 import { ArrowDownIcon, ArrowUpIcon } from '@/components/icons';
 import { Input } from '@/components/ui/input';
@@ -7,13 +9,17 @@ import { cn } from '@/lib/utils';
 
 // The controls of the Backtest defaults card (mockups/app, ddSettings).
 
+// What Settings listens to on a text field, to save it on leaving it or on Enter (autosave.ts).
+type FieldKeys = Pick<ComponentProps<'input'>, 'onBlur' | 'onKeyDown'>;
+
 const DIRECTIONS: readonly { value: Direction; title: string; about: string; short: boolean }[] = [
   { value: 'long', title: 'Long only', about: 'Buy on a signal, sell on the exit', short: false },
   { value: 'both', title: 'Long and short', about: 'Also sell short when it points down', short: true },
 ];
 
 // A slider with its value beside it (.st-sl, .st-val), at most 320 px wide unless `className`
-// says otherwise (the builder's take the row).
+// says otherwise (the builder's take the row). `onCommit` gets the value once it is let go (or set
+// with a key).
 export function ValueSlider({
   className,
   label,
@@ -23,6 +29,7 @@ export function ValueSlider({
   step,
   format,
   onChange,
+  onCommit,
 }: {
   className?: string;
   label: string;
@@ -32,6 +39,7 @@ export function ValueSlider({
   step: number;
   format: (value: number) => string;
   onChange: (value: number) => void;
+  onCommit?: (value: number) => void;
 }) {
   return (
     <div className={cn('flex max-w-[320px] items-center gap-3', className)}>
@@ -44,6 +52,7 @@ export function ValueSlider({
         step={step}
         value={[value]}
         onValueChange={([next]) => next !== undefined && onChange(next)}
+        onValueCommit={([next]) => next !== undefined && onCommit?.(next)}
       />
       <span className="min-w-[52px] rounded-md bg-muted px-2 py-[3px] text-center font-mono text-[13px]/[normal] font-semibold">
         {format(value)}
@@ -61,7 +70,8 @@ export function UnitInput({
   value,
   invalid,
   onChange,
-}: {
+  ...keys
+}: FieldKeys & {
   className?: string;
   label: string;
   unit: string;
@@ -84,6 +94,7 @@ export function UnitInput({
         aria-label={label}
         aria-invalid={invalid || undefined}
         onChange={(event) => onChange(event.target.value)}
+        {...keys}
       />
       <span className="grid place-items-center self-stretch rounded-r-md border-l bg-muted px-3 font-mono text-[13px] whitespace-nowrap text-muted-foreground">
         {unit}
@@ -125,7 +136,8 @@ export function PeriodInput({
   value,
   invalid,
   onChange,
-}: {
+  ...keys
+}: FieldKeys & {
   label: string;
   value: string;
   invalid: boolean;
@@ -139,6 +151,7 @@ export function PeriodInput({
       aria-label={label}
       aria-invalid={invalid || undefined}
       onChange={(event) => onChange(event.target.value)}
+      {...keys}
     />
   );
 }

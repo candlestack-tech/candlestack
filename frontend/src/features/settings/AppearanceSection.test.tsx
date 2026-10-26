@@ -26,6 +26,7 @@ const answered = (change: Partial<Appearance>) => ({
 });
 
 const card = () => within(screen.getByRole('region', { name: 'Appearance' }));
+const indicator = () => card().getByRole('status');
 const choices = (name: string) =>
   within(card().getByRole('radiogroup', { name }))
     .getAllByRole('radio')
@@ -77,6 +78,7 @@ describe('Appearance', () => {
     await user.click(card().getByRole('radio', { name: '4:05 PM' }));
     await vi.waitFor(() => expect(sentBody(fetch, UPDATE)).toEqual({ time_format: '12' }));
     await vi.waitFor(() => expect(queryClient.isMutating()).toBe(0));
+    expect(indicator().textContent).toBe('Saved');
   });
 
   it('turns the animations off for the whole page with Reduce motion', async () => {
@@ -91,15 +93,25 @@ describe('Appearance', () => {
     await vi.waitFor(() => expect(sentBody(fetch, UPDATE)).toEqual({ reduce_motion: true }));
   });
 
-  it('goes back and says why when a change cannot be saved', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), [UPDATE]: { status: 503, body: { detail: 'Down for a minute.' } } });
+  it('goes back and says why when a change cannot be saved, and Retry makes it again', async () => {
+    const answers = [{ status: 503, body: { detail: 'Down for a minute.' } }, answered({ theme: 'light' })];
+    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [UPDATE]: async () => answers.shift()! });
     const { queryClient } = await renderApp('/settings/appearance');
-    await userEvent.setup().click(card().getByRole('radio', { name: 'Light' }));
+    const user = userEvent.setup();
+    await user.click(card().getByRole('radio', { name: 'Light' }));
 
     expect((await card().findByRole('alert')).textContent).toBe('Down for a minute.');
+    expect(indicator().textContent).toBe("Couldn't save");
     expect(document.documentElement.dataset.theme).toBe('dark');
     expect(choices('Theme')).toEqual(['Light', 'Dark *']);
     expect(queryClient.getQueryData(preferencesQueryOptions().queryKey)?.appearance.theme).toBe('dark');
+
+    await user.click(card().getByRole('button', { name: 'Retry' }));
+    await vi.waitFor(() => expect(indicator().textContent).toBe('Saved'));
+    expect(sentBody(fetch, UPDATE)).toEqual({ theme: 'light' });
+    expect(choices('Theme')).toEqual(['Light *', 'Dark']);
+    await vi.waitFor(() => expect(document.documentElement.dataset.theme).toBe('light'));
+    expect(card().queryByRole('alert')).toBeNull();
   });
 
   it('does not bring back an old failure on coming back to the section', async () => {
@@ -112,5 +124,6 @@ describe('Appearance', () => {
     await router.navigate({ to: '/settings/$section', params: { section: 'appearance' } });
     expect(await screen.findByRole('region', { name: 'Appearance' })).toBeDefined();
     expect(card().queryByRole('alert')).toBeNull();
+    expect(indicator().textContent).toBe('');
   });
 });

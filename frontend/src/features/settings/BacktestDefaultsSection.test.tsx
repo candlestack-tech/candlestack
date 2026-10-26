@@ -3,7 +3,7 @@ import { cleanup, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { preferencesQueryOptions } from '@/api';
+import { preferencesQueryOptions, type BacktestDefaults } from '@/api';
 import { ARSEN, DEFAULT_PREFERENCES, problem, sentBody, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, warmUpSettings } from '@/test/app';
 
@@ -15,10 +15,20 @@ afterEach(() => {
 });
 
 const SAVE = 'PUT /api/v1/me/preferences/backtest-defaults';
+const SAVED = DEFAULT_PREFERENCES.backtest_defaults;
+
+// The API's answer to a save: what it was sent.
+const echo = async (init: RequestInit | undefined) => ({ status: 200, body: JSON.parse(init?.body as string) });
 
 const card = () => within(screen.getByRole('region', { name: 'Backtest defaults' }));
-const save = () => card().getByRole('button', { name: 'Save defaults' });
 const field = (name: string) => screen.getByLabelText<HTMLInputElement>(name);
+const indicator = () => card().getByRole('status');
+
+// Every body the stub got for the saves, in order.
+const saves = (fetch: ReturnType<typeof stubApi>) =>
+  fetch.mock.calls
+    .filter(([path, init]) => path === '/api/v1/me/preferences/backtest-defaults' && init?.method === 'PUT')
+    .map(([, init]) => JSON.parse(init?.body as string) as BacktestDefaults);
 
 // Replaces what a field holds, as a paste.
 async function retype(user: ReturnType<typeof userEvent.setup>, name: string, text: string) {
@@ -54,7 +64,7 @@ describe('Backtest defaults', () => {
     expect([field('Fees').value, field('Slippage').value]).toEqual(['0.1', '0.02']);
     expect(card().getByText('% per side')).toBeDefined();
     expect(card().getByRole('combobox', { name: 'Benchmark: Buy and hold' }).textContent).toBe('B&HBuy and hold');
-    expect(save()).toHaveProperty('disabled', false);
+    expect(card().queryByRole('button', { name: /save/i })).toBeNull();
   });
 
   it('draws no line between the title and the first row', async () => {
@@ -66,53 +76,69 @@ describe('Backtest defaults', () => {
     expect(first?.previousElementSibling?.getAttribute('data-slot')).toBe('card-head');
   });
 
-  it('saves the choices: the timeframe, the direction, the threshold and the stop loss', async () => {
-    const changed = {
-      ...DEFAULT_PREFERENCES.backtest_defaults,
-      timeframe: '1h' as const,
-      direction: 'both' as const,
-      threshold: 0.07,
-      stop_loss_pct: 6,
-    };
-    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: { status: 200, body: changed } });
+  it('saves the whole set on each click: the timeframe, then the direction', async () => {
+    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: echo });
     const { queryClient } = await renderApp('/settings/backtest-defaults');
     const user = userEvent.setup();
-    const defaults = card();
 
-    await user.click(defaults.getByRole('radio', { name: '1h' }));
-    await user.click(defaults.getByRole('radio', { name: /^Long and short/ }));
-    screen.getByLabelText('Threshold').focus();
-    await user.keyboard('{ArrowRight}{ArrowRight}');
-    screen.getByLabelText('Stop loss').focus();
-    await user.keyboard('{ArrowLeft}');
-    expect(defaults.getByText('0.07')).toBeDefined();
-    expect(defaults.getByText('6 %')).toBeDefined();
-
-    await user.click(save());
+    await user.click(card().getByRole('radio', { name: '1h' }));
+    await vi.waitFor(() => expect(sentBody(fetch, SAVE)).toEqual({ ...SAVED, timeframe: '1h' }));
+    await vi.waitFor(() => expect(indicator().textContent).toBe('Saved'));
+    await user.click(card().getByRole('radio', { name: /^Long and short/ }));
+    const changed = { ...SAVED, timeframe: '1h', direction: 'both' };
     await vi.waitFor(() => expect(sentBody(fetch, SAVE)).toEqual(changed));
     await vi.waitFor(() =>
       expect(queryClient.getQueryData(preferencesQueryOptions().queryKey)?.backtest_defaults).toEqual(changed),
     );
-    expect(save()).toHaveProperty('disabled', false);
   });
 
-  it('saves the typed fields as numbers and days, a comma working as the decimal point', async () => {
-    const changed = { ...DEFAULT_PREFERENCES.backtest_defaults, period_start: '2022-01-03', fees_pct: 0.25 };
-    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: { status: 200, body: changed } });
+  it('saves a slider once it is set: let go, or moved with a key', async () => {
+    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: echo });
+    await renderApp('/settings/backtest-defaults');
+    const user = userEvent.setup();
+
+    screen.getByLabelText('Threshold').focus();
+    await user.keyboard('{ArrowRight}{ArrowRight}');
+    screen.getByLabelText('Stop loss').focus();
+    await user.keyboard('{ArrowLeft}');
+    expect(card().getByText('0.07')).toBeDefined();
+    expect(card().getByText('6 %')).toBeDefined();
+    await vi.waitFor(() => expect(sentBody(fetch, SAVE)).toEqual({ ...SAVED, threshold: 0.07, stop_loss_pct: 6 }));
+  });
+
+  it('saves a typed field on leaving it, as numbers and days, a comma working as the decimal point', async () => {
+    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: echo });
     await renderApp('/settings/backtest-defaults');
     const user = userEvent.setup();
 
     await retype(user, 'From', '2022-01-03');
+    expect(sentBody(fetch, SAVE)).toBeUndefined();
+    await user.tab();
+    await vi.waitFor(() => expect(sentBody(fetch, SAVE)).toEqual({ ...SAVED, period_start: '2022-01-03' }));
+
     await retype(user, 'Fees', '0,25');
-    await user.click(save());
-    await vi.waitFor(() => expect(sentBody(fetch, SAVE)).toEqual(changed));
+    await user.keyboard('{Enter}');
+    await vi.waitFor(() =>
+      expect(sentBody(fetch, SAVE)).toEqual({ ...SAVED, period_start: '2022-01-03', fees_pct: 0.25 }),
+    );
+    await user.tab();
+    expect(saves(fetch)).toHaveLength(2);
   });
 
-  it('picks the benchmark from its list, each with what it is', async () => {
-    const fetch = stubApi({
-      ...sessionWithPreferences(ARSEN),
-      [SAVE]: { status: 200, body: { ...DEFAULT_PREFERENCES.backtest_defaults, benchmark: 'QQQ' } },
-    });
+  it('puts the saved value back on Esc and sends nothing', async () => {
+    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: echo });
+    await renderApp('/settings/backtest-defaults');
+    const user = userEvent.setup();
+    await retype(user, 'Slippage', '9');
+    await user.keyboard('{Escape}');
+    expect(field('Slippage').value).toBe('0.02');
+    await user.tab();
+    expect(sentBody(fetch, SAVE)).toBeUndefined();
+    expect(indicator().textContent).toBe('');
+  });
+
+  it('picks the benchmark from its list, each with what it is, and saves it', async () => {
+    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: echo });
     await renderApp('/settings/backtest-defaults');
     const user = userEvent.setup();
     await user.click(card().getByRole('combobox', { name: 'Benchmark: Buy and hold' }));
@@ -128,34 +154,58 @@ describe('Backtest defaults', () => {
     await user.click(screen.getByRole('option', { name: 'Invesco QQQ' }));
 
     expect(card().getByRole('combobox', { name: 'Benchmark: Invesco QQQ' }).textContent).toBe('QQQInvesco QQQ');
-    await user.click(save());
     await vi.waitFor(() => expect(sentBody(fetch, SAVE)).toMatchObject({ benchmark: 'QQQ' }));
   });
 
-  it('marks a typed field that is not right and sends nothing while one is, or nothing changed', async () => {
-    const fetch = stubApi(sessionWithPreferences(ARSEN));
+  it('sends nothing while a typed field is not right: the field says what to fix, the card Not saved', async () => {
+    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: echo });
     await renderApp('/settings/backtest-defaults');
     const user = userEvent.setup();
-    await user.click(save());
     await retype(user, 'To', '2020-12-31');
+    await user.tab();
     expect(field('To').getAttribute('aria-invalid')).toBe('true');
-    await user.click(save());
+    expect(card().getByText('The test period must end after it starts. Not saved until fixed.')).toBeDefined();
+    expect(indicator().textContent).toBe('Not saved');
+
+    await user.click(card().getByRole('radio', { name: '1d' }));
+    expect(indicator().textContent).toBe('Not saved');
+    expect(sentBody(fetch, SAVE)).toBeUndefined();
 
     await retype(user, 'To', '2025-06-30');
-    await retype(user, 'Slippage', '9');
+    await user.tab();
+    await vi.waitFor(() =>
+      expect(sentBody(fetch, SAVE)).toEqual({ ...SAVED, period_end: '2025-06-30', timeframe: '1d' }),
+    );
     expect(field('To').getAttribute('aria-invalid')).toBeNull();
+    expect(card().queryByText(/Not saved until fixed/)).toBeNull();
+
+    await retype(user, 'Slippage', '9');
+    await user.keyboard('{Enter}');
     expect(field('Slippage').getAttribute('aria-invalid')).toBe('true');
-    await user.click(save());
-    expect(sentBody(fetch, SAVE)).toBeUndefined();
+    expect(card().getByText('Slippage is 0 to 5 %. Not saved until fixed.')).toBeDefined();
+    expect(indicator().textContent).toBe('Not saved');
+    expect(saves(fetch)).toHaveLength(1);
   });
 
-  it('says why the defaults could not be saved', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: { status: 422, body: { detail: 'Threshold too high.' } } });
+  it("says Couldn't save and sends the latest set again with Retry", async () => {
+    const answers = [{ status: 503, body: { detail: 'Down for a minute.' } }];
+    const fetch = stubApi({
+      ...sessionWithPreferences(ARSEN),
+      [SAVE]: async (init) => answers.shift() ?? echo(init),
+    });
     await renderApp('/settings/backtest-defaults');
     const user = userEvent.setup();
     await user.click(card().getByRole('radio', { name: '1d' }));
-    await user.click(save());
-    expect((await card().findByRole('alert')).textContent).toBe('Threshold too high.');
+
+    expect((await card().findByRole('alert')).textContent).toBe('Down for a minute.');
+    expect(indicator().textContent).toBe("Couldn't save");
+    expect(card().getByRole('radio', { name: '1d' }).getAttribute('aria-checked')).toBe('true');
+    await user.click(card().getByRole('button', { name: 'Retry' }));
+    await vi.waitFor(() => expect(indicator().textContent).toBe('Saved'));
+    expect(saves(fetch)).toEqual([
+      { ...SAVED, timeframe: '1d' },
+      { ...SAVED, timeframe: '1d' },
+    ]);
   });
 
   it("says in plain words when the API refuses a value, not in the API's", async () => {
@@ -164,11 +214,63 @@ describe('Backtest defaults', () => {
       [SAVE]: problem(422, 'validation', "body 'threshold': Input should be less than or equal to 0.5"),
     });
     await renderApp('/settings/backtest-defaults');
-    const user = userEvent.setup();
-    await user.click(card().getByRole('radio', { name: '1d' }));
-    await user.click(save());
+    await userEvent.setup().click(card().getByRole('radio', { name: '1d' }));
     expect((await card().findByRole('alert')).textContent).toBe(
       'Could not save the defaults. Check the values and try again.',
     );
+  });
+
+  it('lets the last change win: one save at a time, the ones in between skipped, a slow answer no harm', async () => {
+    let answerFirst = () => undefined as void;
+    const first = new Promise<void>((resolve) => (answerFirst = resolve));
+    const fetch = stubApi({
+      ...sessionWithPreferences(ARSEN),
+      [SAVE]: async (init) => {
+        if (saves(fetch).length === 1) await first;
+        return echo(init);
+      },
+    });
+    const { queryClient } = await renderApp('/settings/backtest-defaults');
+    const user = userEvent.setup();
+
+    await user.click(card().getByRole('radio', { name: '1h' }));
+    await user.click(card().getByRole('radio', { name: '4h' }));
+    await user.click(card().getByRole('radio', { name: '1d' }));
+    expect(saves(fetch)).toEqual([{ ...SAVED, timeframe: '1h' }]);
+    answerFirst();
+
+    await vi.waitFor(() => expect(indicator().textContent).toBe('Saved'));
+    expect(saves(fetch).map((sent) => sent.timeframe)).toEqual(['1h', '1d']);
+    expect(queryClient.getQueryData(preferencesQueryOptions().queryKey)?.backtest_defaults.timeframe).toBe('1d');
+  });
+
+  it('asks before leaving with a field to fix: Keep editing stays, Discard leaves', async () => {
+    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: echo });
+    const { router } = await renderApp('/settings/backtest-defaults');
+    const user = userEvent.setup();
+    await retype(user, 'Fees', '7,5');
+    await user.click(screen.getByRole('link', { name: 'Profile' }));
+
+    const question = await screen.findByRole('dialog', { name: 'Discard the change?' });
+    expect(screen.getByText('Fees are 0 to 5 %. Not saved until fixed.')).toBeDefined();
+    await user.click(within(question).getByRole('button', { name: 'Keep editing' }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(router.state.location.pathname).toBe('/settings/backtest-defaults');
+    expect(field('Fees').value).toBe('7,5');
+
+    await user.click(screen.getByRole('link', { name: 'Profile' }));
+    await user.click(await screen.findByRole('button', { name: 'Discard' }));
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe('/settings/profile'));
+    expect(sentBody(fetch, SAVE)).toBeUndefined();
+  });
+
+  it('leaves without asking once every field is right', async () => {
+    stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: echo });
+    const { router } = await renderApp('/settings/backtest-defaults');
+    const user = userEvent.setup();
+    await retype(user, 'Fees', '0.2');
+    await user.click(screen.getByRole('link', { name: 'Profile' }));
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe('/settings/profile'));
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });

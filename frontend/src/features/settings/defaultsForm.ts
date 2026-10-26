@@ -1,7 +1,7 @@
 import type { BacktestDefaults, BacktestDefaultsIn } from '@/api';
 
 // The Backtest defaults card while it is edited: the typed fields as typed (the dates and the
-// percentages), the rest as chosen. Save sends it once every field holds what the API takes.
+// percentages), the rest as chosen. It is saved once every field holds what the API takes.
 
 export type TypedField = 'period_start' | 'period_end' | 'fees_pct' | 'slippage_pct';
 
@@ -43,7 +43,7 @@ function periodErrors({ period_start: start, period_end: end }: DefaultsForm): T
   return isDay(end) && start < end ? [] : ['period_end'];
 }
 
-// What Save sends, once every typed field holds what the API takes; until then, the fields that
+// What is saved, once every typed field holds what the API takes; until then, the fields that
 // do not. It has the nine fields and nothing else: the API refuses any other key.
 export function checkDefaults(form: DefaultsForm): { defaults?: BacktestDefaultsIn; invalid: Set<TypedField> } {
   const fees = percent(form.fees_pct);
@@ -69,6 +69,19 @@ const KEYS: readonly (keyof BacktestDefaults)[] = [
   'benchmark',
 ];
 
-export function sameDefaults(a: BacktestDefaultsIn, b: BacktestDefaults): boolean {
+export function sameDefaults(a: BacktestDefaultsIn, b: BacktestDefaultsIn): boolean {
   return KEYS.every((key) => a[key] === b[key]);
+}
+
+// What a field that is not right says to fix (the test period's two say it once, under both).
+const UNSAVED = 'Not saved until fixed.';
+export const PROBLEMS = {
+  fees_pct: `Fees are 0 to 5 %. ${UNSAVED}`,
+  slippage_pct: `Slippage is 0 to 5 %. ${UNSAVED}`,
+} as const;
+
+export function periodProblem({ period_start: start, period_end: end }: DefaultsForm): string {
+  return isDay(start) && isDay(end)
+    ? `The test period must end after it starts. ${UNSAVED}`
+    : `Write the days as YYYY-MM-DD. ${UNSAVED}`;
 }

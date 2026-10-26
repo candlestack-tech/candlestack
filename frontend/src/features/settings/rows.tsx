@@ -1,11 +1,10 @@
 import type { ReactNode } from 'react';
 
-import { ErrorNote } from '@/components/ErrorNote';
 import { HINT } from '@/components/Hint';
 import { cn } from '@/lib/utils';
 
 // What the cards of Settings hold (mockups/app, ddSettings): rows of a label and a control, the
-// account's actions, a footer with the card's button, and the hints and ids in them.
+// account's actions, what to fix in a field, and the hints and ids in them.
 
 // A row's top line, except right under the card's title. The rows are the card's own children for
 // it, so a form goes around the card, not inside it.
@@ -48,14 +47,9 @@ export function ActionRow({ title, hint, children }: { title: string; hint: stri
   );
 }
 
-// The card's button at the right under a line; a failure to save says so at the left.
-export function SettingsFooter({ error, children }: { error?: string | undefined; children: ReactNode }) {
-  return (
-    <div className="flex items-center justify-end gap-3 border-t pt-2.5">
-      {error && <ErrorNote className="mr-auto">{error}</ErrorNote>}
-      {children}
-    </div>
-  );
+// What to fix in a field whose value cannot be saved, in red under it.
+export function FieldError({ children }: { children: ReactNode }) {
+  return <p className="mt-1.5 text-[12px]/[1.5] text-down">{children}</p>;
 }
 
 // .st-id code: an id in mono on the surface.

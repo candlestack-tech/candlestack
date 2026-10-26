@@ -217,9 +217,22 @@ and an unknown section open `profile`; the others are `sign-in`, `backtest-defau
 The two sections with the account's preferences load them in the route's loader
 (`GET /api/v1/me/preferences`, under `['account', 'preferences']`, so signing out forgets them).
 
-- Profile: the drawn initials, the display name to change (`PATCH /api/v1/me`; Save sends it once
-  it changed and is not empty, an empty one is marked, the answer becomes the user in the header
-  and the menu), the email and the user ID. Save is off only while it saves, as in the design.
+- Saving (#216): no Save buttons. Each card saves itself as it changes
+  (`src/features/settings/autosave.ts`): a click on a segment, a direction card, the benchmark or
+  a switch at once, a slider once it is let go (or moved with a key), a text field on leaving it
+  or on Enter; Esc in a text field puts its saved value back. The saves of a card go out one
+  after another and the last change wins: a change that a newer one follows in the queue is not
+  sent, so no slower answer undoes a newer value. A value the API would refuse is never sent: the
+  field turns red and says what to fix (once left). The indicator at the right of the card's
+  title (`SaveIndicator.tsx`), the same in Profile, Backtest defaults and Appearance, says
+  Saving… (only after 300 ms), Saved with a check (fading out after 2 s), Not saved in amber
+  while a field is to fix, or Couldn't save with Retry, which sends the latest value again (the
+  typed value stays; why it failed is a line under the card). Leaving the section or the page
+  while a field is to fix asks first (`LeaveGuard.tsx`, the router's blocker): Keep editing or
+  Discard.
+- Profile: the drawn initials, the display name to change (`PATCH /api/v1/me`, trimmed; an empty
+  one is not sent, the answer becomes the user in the header and the menu), the email and the
+  user ID.
 - Sign-in: GitHub and Google (names and marks from `src/features/signin/providers.ts`, as on the
   sign-in page), a connected one with the email of its own account (`sign_in_methods` of
   `GET /api/v1/me`). Connect is a full page navigation to
@@ -228,15 +241,15 @@ The two sections with the account's preferences load them in the route's loader
   (`DELETE /api/v1/me/sign-in-methods/{provider}`) is off for the last method, with the title
   "Your only way to sign in"; a 409 `last-sign-in-method` says so too.
 - Backtest defaults: every control of the design (shadcn/ui ToggleGroup for the timeframe and the
-  direction cards, Slider for the threshold and the stop loss, Select for the benchmark) and Save
-  defaults, which sends the whole set, the nine fields and no other (`PUT .../backtest-defaults`,
-  `BacktestDefaultsIn`), once something changed and the typed fields are right
-  (`defaultsForm.ts`: real days, the period ending after it starts, 0 to 5 %; a wrong one is
-  marked as it is typed).
+  direction cards, Slider for the threshold and the stop loss, Select for the benchmark). Each
+  save sends the whole set, the nine fields and no other (`PUT .../backtest-defaults`,
+  `BacktestDefaultsIn`), once the typed fields are right (`defaultsForm.ts`: real days, the
+  period ending after it starts, 0 to 5 %); a change made while one is not waits for it.
 - Appearance: each control saves as it changes (`PATCH .../appearance`,
   `src/features/preferences/`): at once in the cache the page reads, then on the account, one
-  change after another; a failed one goes back and the card says why (until the next change, not
-  on coming back to the section). The theme is the page's (`src/theme.ts`): the header's
+  change after another; a failed one goes back, the indicator says Couldn't save (Retry makes the
+  change again) and the card says why (until the next change, not on coming back to the
+  section). The header's toggle shows in the indicator too. The theme is the page's (`src/theme.ts`): the header's
   toggle and the card change the same one, and signed in both save it to the account.
   `AppearanceSync`, on every page, puts the account's theme and Reduce motion on `<html>` once
   they arrive (the account wins over the browser) and keeps both in `localStorage`, which
@@ -255,7 +268,7 @@ The two sections with the account's preferences load them in the route's loader
 - The cards are the dashboard's (`src/components/DashboardCard.tsx`: the icon tile by the title),
   their rows in `src/features/settings/rows.tsx` and their text field and segments in
   `controls.tsx`. A failure is a line in the design's hint style (12 px, muted) with
-  `role="alert"`.
+  `role="alert"`; what to fix in a field is a red line under it.
 - Data and storage shows the market data and the storage the models take (the sidebar's meter
   and numbers, how many were uploaded); the backtests row comes with that page.
   API and MCP shows both cards as Coming soon, with the API docs of the same host.
