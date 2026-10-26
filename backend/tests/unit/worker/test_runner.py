@@ -5,6 +5,7 @@ manifest or its candles can be wrong, said in plain words."""
 import io
 import json
 import os
+import tracemalloc
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -14,10 +15,19 @@ import polars as pl
 import pytest
 
 from candlestack.jobs import EXAMPLE_TOLERANCE, Job, JobFiles
+from candlestack.preprocessing import build_input, parse_manifest
 from candlestack.worker import runner
 from candlestack.worker.model import load_keras
 from candlestack.worker.protocol import Outcome, Request
-from candlestack.worker.runner import FILE_MAX, INTERNAL, OUT_OF_MEMORY, main, run
+from candlestack.worker.runner import (
+    FILE_MAX,
+    INTERNAL,
+    OUT_OF_MEMORY,
+    PART_BYTES,
+    main,
+    part_sizes,
+    run,
+)
 
 USER = "user-1"
 
@@ -64,6 +74,115 @@ def test_check_runs_the_model_on_built_in_candles(
     assert (result.status, result.samples, result.dropped) == ("done", 64, 24)
     assert (result.verified, result.example_difference) == (False, None)
     assert not files_dir.exists()  # a check needs no files
+
+
+def renko_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    """The raw-candles manifest on Renko triples with the window ``last: current``: still
+    25 x 5, the volume replaced by each triple's direction."""
+    document = edited(
+        manifest,
+        representation={"id": "renko-triples@1", "params": {"atr_multiple": 0.6}},
+        window={"length": 25, "last": "current"},
+    )
+    document["input"]["features"][4] = {
+        "name": "direction",
+        "id": "renko-direction@1",
+        "norm": {"id": "none@1"},
+    }
+    return document
+
+
+class Counted:
+    """The model, with the size of every input it predicted and its batch."""
+
+    def __init__(self, model: Any) -> None:
+        self.model = model
+        self.calls: list[tuple[int, int]] = []
+
+    def predict(self, samples: np.ndarray, *, batch_size: int, **options: Any) -> np.ndarray:
+        self.calls.append((len(samples), batch_size))
+        return self.model.predict(samples, batch_size=batch_size, **options)
+
+
+@pytest.mark.parametrize("window", ["closed", "current"])
+def test_predictions_made_a_part_at_a_time_are_the_predictions_at_once(
+    make_job: Callable[..., Job],
+    make_candles: Callable[[int], pl.DataFrame],
+    run_job: Callable[[Job], Outcome],
+    models: Path,
+    files_dir: Path,
+    manifest: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    window: str,
+) -> None:
+    document = manifest if window == "closed" else renko_manifest(manifest)
+    job = make_job(manifest=document)
+    candles = make_candles(803)
+    JobFiles(files_dir).write_candles(job.id, candles)
+    (models.parent / "scratch").mkdir()
+    model = Counted(load_keras(models / USER / "raw_candles.keras", models.parent / "scratch"))
+    monkeypatch.setattr(runner, "load_keras", lambda *_: model)
+    # Parts of 8 samples of 25 x 5 float32 (500 bytes each), in batches of 4.
+    monkeypatch.setattr(runner, "BATCH", 4)
+    monkeypatch.setattr(runner, "PART_BYTES", 10 * 500)
+
+    result = run_job(job).result
+
+    built = build_input(candles, parse_manifest(document))
+    count = len(built.windows)
+    assert (result.status, result.samples, result.dropped) == ("done", count, built.dropped)
+    assert model.calls == [(8, 4)] * (count // 8) + [(count % 8, 4)]  # the last part shorter
+    at_once = model.model.predict(built.samples, batch_size=4, verbose=0)
+    predictions = JobFiles(files_dir).read_predictions(job.id)
+    assert predictions["ts"].equals(built.ts)
+    assert predictions["prediction"].to_list() == at_once[:, 0].astype(np.float64).tolist()
+
+
+@pytest.mark.parametrize(
+    ("sample_bytes", "sizes"),
+    [
+        (25 * 28 * 4, (11 * 1024, 1024)),  # 32 MB hold 11983 samples: 11 whole batches
+        (1000 * 100 * 4, (83, 83)),  # a batch of 1024 would take 400 MB
+        (PART_BYTES + 1, (1, 1)),  # one sample at least
+    ],
+)
+def test_a_part_of_the_input_is_whole_batches_within_its_memory(
+    sample_bytes: int, sizes: tuple[int, int]
+) -> None:
+    assert part_sizes(sample_bytes) == sizes
+
+
+class Zeros:
+    def predict(self, samples: np.ndarray, **_: object) -> np.ndarray:
+        return np.zeros((len(samples), 1), dtype=np.float32)
+
+
+def test_the_input_of_50000_candles_of_25_x_28_never_takes_its_whole_memory(
+    make_candles: Callable[[int], pl.DataFrame], manifest: dict[str, Any]
+) -> None:
+    """All at once, 50000 samples of 25 x 28 float32 are 140 MB; a part at a time, the numpy
+    arrays of the build and the prediction stay within a part and the rows."""
+    features = [
+        {"name": f"close{window}", "id": "sma@1", "params": {"window": window}}
+        for window in range(2, 30)
+    ]
+    document = edited(manifest, features=features)
+    document["signature"]["input"]["shape"] = [25, 28]
+    parsed = parse_manifest(document)
+    candles = make_candles(50_000)
+    model: Any = Zeros()
+
+    tracemalloc.start()
+    try:
+        built = build_input(candles, parsed)
+        scores = runner._predict(model, built.windows, parsed)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert scores.shape == (len(built.windows), 1) == (50_000 - 28 - 24, 1)
+    assert built.windows.sample_bytes * len(built.windows) > 139_000_000
+    assert peak < PART_BYTES + 24_000_000
 
 
 def example_of(models: Path, manifest: dict[str, Any], shift: float = 0.0) -> dict[str, Any]:

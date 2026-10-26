@@ -243,6 +243,12 @@ warm-up as a short expression of its parameters (`"0"`, `"length - 1"`) and its 
 - With `candles@1` every candle has a sample. With an event representation (Renko, Kagi) a
   candle without a new row repeats the last prediction: `signals.align(strict=False)` does
   this already ([engine.md](engine.md#signals)), so the signal holds and no order follows.
+- Memory: a sample copies its `length` rows, so all the samples at once take `length` times
+  the memory of the rows (134 MB for 50000 samples of 25 x 28, 5.6 MB of rows). So the window
+  keeps the rows and which rows each sample takes (`blocks.Samples`) and builds the samples of
+  a range only when asked (`Samples.part`). The worker builds and predicts them a part of at
+  most 32 MB at a time ([architecture.md](architecture.md#worker)); the samples, their `ts`
+  and the dropped candles are the same as built at once.
 - Warm-up: the run asks the data module for enough candles before the period's first day: the
   longest warm-up of the representation and of a feature with its normalization, plus the
   window's `length - 1` rows. A feature over the last `window` candles needs the candles before

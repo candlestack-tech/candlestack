@@ -8,7 +8,7 @@ from typing import Literal
 import numpy as np
 import polars as pl
 
-from candlestack.preprocessing.blocks import CANDLE_COLUMNS, ROW_ID, SESSION_LAST
+from candlestack.preprocessing.blocks import CANDLE_COLUMNS, ROW_ID, SESSION_LAST, Samples
 from candlestack.preprocessing.catalog import CATALOG, WINDOW
 from candlestack.preprocessing.checks import check_manifest
 from candlestack.preprocessing.manifest import Manifest
@@ -21,7 +21,9 @@ class ModelInput:
     - ``rows``: ``ts``, ``row_id`` for rows that span several candles (``blocks.window``),
       and one Float64 column per feature, named as in the manifest and normalized, one row
       per row of the representation;
-    - ``samples``: float32 of shape ``(samples, window length, features)``;
+    - ``windows``: the window's samples (``blocks.Samples``), which it builds a part at a
+      time (``Samples.part``), so the worker never holds all of them at once; ``samples`` is
+      all of them, float32 of shape ``(samples, window length, features)``;
     - ``ts``: Int64, one per sample, the candle at whose close it is known: its prediction goes
       to that candle (``signals.align`` joins on it as it is);
     - ``dropped``: the candles at the start without a sample, the warm-up the report counts.
@@ -30,9 +32,14 @@ class ModelInput:
     """
 
     rows: pl.DataFrame
-    samples: np.ndarray
+    windows: Samples
     ts: pl.Series
     dropped: int
+
+    @property
+    def samples(self) -> np.ndarray:
+        """Every sample at once (``Samples.samples``)."""
+        return self.windows.samples
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,7 +123,7 @@ def build_input(candles: pl.DataFrame, manifest: Manifest) -> ModelInput:
     )
     made = CATALOG[WINDOW].run(rows, spec.window)
     dropped = int(frame["ts"].search_sorted(made.ts[0])) if len(made.ts) else frame.height
-    return ModelInput(rows=rows, samples=made.samples, ts=made.ts, dropped=dropped)
+    return ModelInput(rows=rows, windows=made, ts=made.ts, dropped=dropped)
 
 
 def _run(block_id: str, data: pl.DataFrame | pl.Series, params: dict[str, object]) -> pl.Series:

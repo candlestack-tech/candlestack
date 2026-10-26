@@ -203,6 +203,43 @@ def test_the_current_window_never_reads_whether_its_own_row_is_finished() -> Non
     assert going_on.samples[:2].tolist() == finished.samples[:2].tolist()
 
 
+def by_hand(frame: pl.DataFrame, length: int) -> list[list[list[float]]]:
+    """The samples of complete rows one by one: the ``length - 1`` finished rows before each
+    row, then the row (every row is finished without ``row_id``)."""
+    values = frame.drop("ts", ROW_ID, strict=False).to_numpy().astype(np.float32).tolist()
+    ids = frame[ROW_ID].to_list() if ROW_ID in frame.columns else list(range(frame.height))
+    finished = [row for row in range(frame.height - 1) if ids[row] != ids[row + 1]]
+    samples = []
+    for row in range(frame.height):
+        earlier = [done for done in finished if done < row][-(length - 1) :] if length > 1 else []
+        if len(earlier) == length - 1:
+            samples.append([values[index] for index in [*earlier, row]])
+    return samples
+
+
+@pytest.mark.parametrize("last", ["closed", "current"])
+def test_the_samples_built_a_part_at_a_time_are_the_samples_one_by_one(
+    last: Literal["closed", "current"],
+) -> None:
+    rng = np.random.default_rng(3)
+    frame = rows(rng.normal(size=300).tolist(), rng.normal(size=300).tolist())
+    if last == "current":
+        row_id = np.cumsum(rng.random(300) < 0.4)
+        frame = frame.insert_column(1, pl.Series(ROW_ID, row_id, dtype=pl.Int64))
+
+    made = window(frame, 7, last)
+
+    expected = by_hand(frame, 7)
+    assert len(made) == len(expected) == len(made.ts)
+    assert made.samples.tolist() == expected
+    for size in (1, 5, 64, len(made) + 1):
+        parts = [made.part(start, start + size) for start in range(0, len(made), size)]
+        assert all(part.dtype == np.float32 and part.flags.c_contiguous for part in parts)
+        assert np.concatenate(parts).tolist() == expected
+    # One sample of 7 rows of two float32 features.
+    assert made.sample_bytes == 7 * 2 * 4
+
+
 def test_the_window_needs_the_rule_of_its_rows() -> None:
     with pytest.raises(ValueError, match="last: current needs rows that span several candles"):
         window(rows([1.0]), 1, "current")

@@ -42,18 +42,52 @@ class NoParams(BaseModel):
 
 @dataclass(frozen=True, eq=False)
 class Samples:
-    """What the window makes of the rows.
+    """What the window makes of the rows: the samples, built a part at a time.
 
-    - ``samples``: float32 of shape ``(samples, length, features)``, the rows of each sample in
-      time order, the features in the manifest's order;
+    A sample copies its ``length`` rows, so all of them at once take ``length`` times the
+    rows' memory (134 MB for 50000 samples of 25 x 28). They are kept as the rows and which
+    rows each sample takes, and ``part`` builds the samples of a range only.
+
+    - ``rows``: float32 of shape ``(rows, features)``, the rows from the first complete one,
+      the features in the manifest's order;
+    - ``finished``: the finished rows, as positions in ``rows`` (every row for ``closed``);
+    - ``first``: for each sample, where its ``length - 1`` earlier rows start in ``finished``:
+      they are the finished rows from there on;
+    - ``last``: for each sample, its last row, a position in ``rows``;
+    - ``length``: the rows of a sample;
     - ``ts``: the ``ts`` of each sample's last row, the candle at whose close it is known;
     - ``dropped``: the rows at the start that end no sample: the incomplete ones (a feature
       still in its warm-up) and the ones before the first full window.
     """
 
-    samples: np.ndarray
+    rows: np.ndarray
+    finished: np.ndarray
+    first: np.ndarray
+    last: np.ndarray
+    length: int
     ts: pl.Series
     dropped: int
+
+    def __len__(self) -> int:
+        return int(self.last.size)
+
+    @property
+    def sample_bytes(self) -> int:
+        """The memory of one sample: ``length`` rows of float32 features."""
+        return self.length * self.rows.shape[1] * self.rows.itemsize
+
+    def part(self, start: int, stop: int) -> np.ndarray:
+        """The samples ``start`` to ``stop`` (not included), float32 of shape
+        ``(samples, length, features)``, the rows of each sample in time order."""
+        earlier = self.first[start:stop, None] + np.arange(self.length - 1)
+        picked = np.concatenate([self.finished[earlier], self.last[start:stop, None]], axis=1)
+        return self.rows[picked]
+
+    @property
+    def samples(self) -> np.ndarray:
+        """Every sample at once: for a few of them (a model's check, the tests); the worker
+        takes them a part at a time."""
+        return self.part(0, len(self))
 
 
 def candles(frame: pl.DataFrame, _params: NoParams) -> pl.DataFrame:
@@ -128,35 +162,43 @@ def window(rows: pl.DataFrame, params: Window) -> Samples:
         raise ValueError(f"A feature is missing or not finite after the warm-up, at ts {late}")
     matrix = rows.select(features).slice(start).to_numpy().astype(np.float32)
     if forming:
-        picked = _current(rows[ROW_ID].slice(start).to_numpy(), params.length)
+        finished, first, last = _current(rows[ROW_ID].slice(start).to_numpy(), params.length)
     else:
-        picked = _closed(matrix.shape[0], params.length)
-    samples = matrix[picked] if picked.size else np.empty((0, params.length, len(features)))
-    dropped = rows.height - picked.shape[0]
+        finished, first, last = _closed(matrix.shape[0], params.length)
+    dropped = rows.height - last.size
     return Samples(
-        samples=np.ascontiguousarray(samples, dtype=np.float32),
+        rows=np.ascontiguousarray(matrix),
+        finished=finished,
+        first=first,
+        last=last,
+        length=params.length,
         ts=rows["ts"].slice(dropped),
         dropped=dropped,
     )
 
 
-def _closed(count: int, length: int) -> np.ndarray:
-    """The rows of each sample of ``last: closed``: the ``length`` rows up to each row."""
-    if count < length:
-        return np.empty((0, length), dtype=np.int64)
-    return np.arange(count - length + 1)[:, None] + np.arange(length)
+# Which rows each sample takes: the finished rows, and for each sample the first of its earlier
+# rows among them and its last row (``Samples``).
+Picks = tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
-def _current(row_id: np.ndarray, length: int) -> np.ndarray:
+def _closed(count: int, length: int) -> Picks:
+    """The rows of each sample of ``last: closed``: the ``length`` rows up to each row, every
+    row finished at its own candle."""
+    finished = np.arange(count)
+    first = np.arange(max(count - length + 1, 0))
+    return finished, first, first + length - 1
+
+
+def _current(row_id: np.ndarray, length: int) -> Picks:
     """The rows of each sample of ``last: current``: the ``length - 1`` most recent finished
     rows before a row, then the row. The samples start at the first row that has as many
     finished rows before it."""
     finished = np.flatnonzero(row_id[1:] != row_id[:-1])
     # How many finished rows come before each row: those before row i end before it.
     before = np.searchsorted(finished, np.arange(row_id.size), side="left")
-    rows = np.flatnonzero(before >= length - 1)
-    earlier = finished[before[rows, None] - (length - 1) + np.arange(length - 1)]
-    return np.concatenate([earlier, rows[:, None]], axis=1)
+    last = np.flatnonzero(before >= length - 1)
+    return finished, before[last] - (length - 1), last
 
 
 def window_warm_up(params: Window) -> int:

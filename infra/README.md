@@ -122,11 +122,33 @@ The same jobs with `env/compose.yaml` itself (stage, the profile `worker`, at th
 `512m`) ended the same way. A peak at the limit without a kill is the page cache, which the
 kernel gives back first.
 
-The job's process imports Keras and JAX (about 245 MB), loads the model and builds its input,
-25 x 28 float32 per candle for that model (134 MB for 50000 candles, plus the frames it is
-built from). So at `1g` a model of that size runs on the 50000 candles a backtest may load
-(`CANDLES_MAX`) with about 400 MB to spare; a model with up to about twice its input per candle
-should fit too (an estimate, not measured).
+Those jobs ran before the worker built the input in parts. Since then the job's process builds
+and predicts the model's input a part of at most 32 MB at a time
+([docs/architecture.md](../docs/architecture.md#worker)), where it held all of it at once.
+Measured again with the worker image locally (2026-10-26), on the 25 x 28 model with its Renko
+input (`renko-triples@1`, `last: current`): the job's process alone, its peak RSS and its own
+memory (`RssAnon`, without the libraries' pages). The container's `memory.peak` says less here:
+it counts the libraries' pages only when no earlier container read them.
+
+| Candles | Before: peak RSS / own memory | With the parts |
+| --- | --- | --- |
+| 1000 | 386 / 193 MB | 383 / 189 MB |
+| 20000 | 463 / 275 MB | 476 / 287 MB |
+| 50000 | 622 / 431 MB | 488 to 511 / 296 to 318 MB |
+| 100000 | 822 / 628 MB | 534 / 347 MB |
+
+With 50000 candles the job is `done` under a limit of `512m` and of `384m` (no swap); before
+the parts it was killed under `384m`. The predictions are the same to the bit. The same model
+on 50000 candles of `candles@1` took 623 / 426 MB before and 500 / 305 MB with the parts.
+
+The job's process imports Keras and JAX and loads the model (about 190 MB of its own memory,
+385 MB with the libraries' pages), then builds the input's rows (28 floats per candle for that
+model) and the samples a part at a time: 32 MB at most whatever the period, where all of them
+at once took 25 x 28 float32 per candle (134 MB for 50000 candles). What still grows with the
+period are the rows, the frames they are built from and the predictions, about 1 MB per 1000
+candles. So at `1g` a model of that size runs on the 50000 candles a backtest may load
+(`CANDLES_MAX`) with about 500 MB to spare, and a model with a larger input per candle needs
+more only for its rows, not for its samples (an estimate, not measured).
 
 The jobs' files (the volume `<env>_jobs`) are a tmpfs of at most 64 MB: they take memory, not
 disk, about 2 MB of candles and 0.5 MB of predictions for a `predict` of 50000 candles. The
