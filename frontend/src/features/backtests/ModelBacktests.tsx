@@ -6,18 +6,20 @@ import { formatPercent, formatSharpe } from '@/lib/results';
 import { cn } from '@/lib/utils';
 
 import { hasResults } from './format';
-import { BacktestReturn, BacktestWhen, InstrumentChips, Missing } from './parts';
+import { BacktestInstruments, BacktestReturn, BacktestWhen, Missing } from './parts';
 import { BacktestCell, CELL, HEAD, NUMBER, ROW, TABLE } from './table';
 import { useBacktestsPage, useStarBacktest } from './useBacktests';
+import { WIDTH } from './widths';
 
-// The columns, and from which width down each one hides so the table never scrolls sideways.
-const COLUMNS: readonly { label: string; number?: boolean; hide?: string }[] = [
-  { label: 'Backtest' },
+// The columns with the widths every table of backtests gives them (the instruments take the
+// rest), and from which width down each one hides so the table never scrolls sideways.
+const COLUMNS: readonly { label: string; number?: boolean; width?: string; hide?: string }[] = [
+  { label: 'Backtest', width: WIDTH.backtest },
   { label: 'Instruments', hide: 'max-[420px]:hidden' },
-  { label: 'Return', number: true },
-  { label: 'Sharpe', number: true },
-  { label: 'Max drawdown', number: true, hide: 'max-[760px]:hidden' },
-  { label: 'When', hide: 'max-[560px]:hidden' },
+  { label: 'Return', number: true, width: WIDTH.return },
+  { label: 'Sharpe', number: true, width: WIDTH.sharpe },
+  { label: 'Max drawdown', number: true, width: WIDTH.maxDrawdown, hide: 'max-[760px]:hidden' },
+  { label: 'When', width: WIDTH.when, hide: 'max-[560px]:hidden' },
 ];
 
 const hideOf = (label: string) => COLUMNS.find((column) => column.label === label)?.hide;
@@ -32,7 +34,7 @@ function Row({ backtest, onStar }: RowProps) {
         <BacktestCell backtest={backtest} onStar={onStar} />
       </td>
       <td className={cn(CELL, hideOf('Instruments'))}>
-        <InstrumentChips backtest={backtest} max={2} />
+        <BacktestInstruments backtest={backtest} max={2} />
       </td>
       <td className={cn(CELL, NUMBER)}>
         <BacktestReturn backtest={backtest} />
@@ -57,7 +59,11 @@ function Table({ backtests, onStar }: TableProps) {
         <thead>
           <tr>
             {COLUMNS.map((column) => (
-              <th key={column.label} scope="col" className={cn(HEAD, column.number && NUMBER, column.hide)}>
+              <th
+                key={column.label}
+                scope="col"
+                className={cn(HEAD, column.width, column.number && NUMBER, column.hide)}
+              >
                 {column.label}
               </th>
             ))}

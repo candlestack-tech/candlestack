@@ -1,24 +1,33 @@
 import type { Backtest } from '@/api';
-import { formatCount, formatPercent, formatSharpe } from '@/lib/results';
+import { formatPercent, formatSharpe } from '@/lib/results';
 import { cn } from '@/lib/utils';
 import type { BacktestsColumn, BacktestsSearch } from '@/routes/backtestsSearch';
 
 import { hasResults } from './format';
-import { BacktestReturn, BacktestWhen, InstrumentChips, Missing, ModelName } from './parts';
-import { BacktestCell, CELL, HEAD, NUMBER, ROW, SortButton, TABLE } from './table';
+import { BacktestInstruments, BacktestReturn, BacktestWhen, Missing, StatusBadge } from './parts';
+import { BacktestCell, CELL, HEAD, ModelCell, NUMBER, ROW, SortButton, TABLE } from './table';
+import { WIDTH } from './widths';
 
-// The columns (mockups/app, BT_COLS) and from which width down each one hides, so the table never
-// scrolls sideways: Trades at 1100 px, Max drawdown at 1060, When at 760, Model at 560, Sharpe at
-// 420. Instruments does not sort.
-const COLUMNS: readonly { label: string; sort?: BacktestsColumn; hide?: string; number?: boolean }[] = [
-  { label: 'Backtest', sort: 'number' },
-  { label: 'Instruments' },
-  { label: 'Model', sort: 'model', hide: 'max-[560px]:hidden' },
-  { label: 'Return', sort: 'return', number: true },
-  { label: 'Sharpe', sort: 'sharpe', hide: 'max-[420px]:hidden', number: true },
-  { label: 'Max drawdown', sort: 'max_drawdown', hide: 'max-[1060px]:hidden', number: true },
-  { label: 'Trades', sort: 'trades', hide: 'max-[1100px]:hidden', number: true },
-  { label: 'When', sort: 'when', hide: 'max-[760px]:hidden' },
+// The columns of the approved design (#315) with their fixed widths, and from which width down each
+// one hides, so the table never scrolls sideways and the model keeps about 120 px or more: Max
+// drawdown at 1140 px, When at 760, Model at 600, Status at 480 (Return then shows the badge),
+// Sharpe at 420. The trades are left out: with them the model would get 134 px at most, as the page
+// stops growing at 1215 px. Instruments and Status do not sort.
+const COLUMNS: readonly { label: string; sort?: BacktestsColumn; width?: string; hide?: string; number?: boolean }[] = [
+  { label: 'Backtest', sort: 'number', width: WIDTH.backtest },
+  { label: 'Instruments', width: WIDTH.instruments },
+  { label: 'Model', sort: 'model', hide: 'max-[600px]:hidden' },
+  { label: 'Status', width: WIDTH.status, hide: 'max-[480px]:hidden' },
+  { label: 'Return', sort: 'return', width: WIDTH.return, number: true },
+  { label: 'Sharpe', sort: 'sharpe', width: WIDTH.sharpe, hide: 'max-[420px]:hidden', number: true },
+  {
+    label: 'Max drawdown',
+    sort: 'max_drawdown',
+    width: WIDTH.maxDrawdown,
+    hide: 'max-[1140px]:hidden',
+    number: true,
+  },
+  { label: 'When', sort: 'when', width: WIDTH.when, hide: 'max-[760px]:hidden' },
 ];
 const hideOf = (label: string) => COLUMNS.find((column) => column.label === label)?.hide;
 
@@ -29,7 +38,7 @@ function Header({ search, onSort }: HeaderProps) {
   return (
     <thead>
       <tr>
-        {COLUMNS.map(({ label, sort, hide, number }) => {
+        {COLUMNS.map(({ label, sort, width, hide, number }) => {
           const on = sort !== undefined && search.sort === sort;
           const arrow = on ? (search.order === 'asc' ? ' ↑' : ' ↓') : '';
           return (
@@ -37,7 +46,7 @@ function Header({ search, onSort }: HeaderProps) {
               key={label}
               scope="col"
               aria-sort={on ? (search.order === 'asc' ? 'ascending' : 'descending') : undefined}
-              className={cn(HEAD, hide, number && NUMBER)}
+              className={cn(HEAD, width, hide, number && NUMBER)}
             >
               {sort ? (
                 <SortButton on={on} onClick={() => onSort(sort)}>
@@ -57,7 +66,23 @@ function Header({ search, onSort }: HeaderProps) {
 
 type RowProps = { backtest: Backtest; onStar: (backtest: Backtest) => void };
 
-// A finished backtest shows its results; a failed one the Failed badge and dashes.
+// A backtest that has not finished has a dash for its return, and its badge there once the Status
+// column is hidden.
+function ReturnCell({ backtest }: { backtest: Backtest }) {
+  if (hasResults(backtest)) return <BacktestReturn backtest={backtest} />;
+  return (
+    <>
+      <span className="min-[480px]:hidden">
+        <StatusBadge status={backtest.status} />
+      </span>
+      <span className="max-[480px]:hidden">
+        <Missing />
+      </span>
+    </>
+  );
+}
+
+// A finished backtest shows its results; a failed or running one its badge and dashes.
 function Row({ backtest, onStar }: RowProps) {
   const done = hasResults(backtest);
   const result = (text: string) => (done ? text : <Missing />);
@@ -67,17 +92,19 @@ function Row({ backtest, onStar }: RowProps) {
         <BacktestCell backtest={backtest} onStar={onStar} />
       </td>
       <td className={CELL}>
-        <InstrumentChips backtest={backtest} max={2} />
+        <BacktestInstruments backtest={backtest} max={1} />
       </td>
       <td className={cn(CELL, hideOf('Model'))}>
-        <ModelName name={backtest.model.name} framework={backtest.model.framework} />
+        <ModelCell model={backtest.model} />
+      </td>
+      <td className={cn(CELL, hideOf('Status'))}>
+        <StatusBadge status={backtest.status} />
       </td>
       <td className={cn(CELL, NUMBER)}>
-        <BacktestReturn backtest={backtest} />
+        <ReturnCell backtest={backtest} />
       </td>
       <td className={cn(CELL, NUMBER, hideOf('Sharpe'))}>{result(formatSharpe(backtest.sharpe))}</td>
       <td className={cn(CELL, NUMBER, hideOf('Max drawdown'))}>{result(formatPercent(backtest.max_drawdown))}</td>
-      <td className={cn(CELL, NUMBER, hideOf('Trades'))}>{result(formatCount(backtest.num_trades))}</td>
       <td className={cn(CELL, hideOf('When'), 'text-muted-foreground')}>
         <BacktestWhen backtest={backtest} />
       </td>
@@ -92,11 +119,12 @@ type Props = HeaderProps & {
   onStar: (backtest: Backtest) => void;
 };
 
-// The Backtests page's table (mockups/app, btTable): the star and the number, the instruments as
-// chips, the model by its mark, the results in mono at the right, and when it ran.
+// The Backtests page's table (mockups/app, btTable): the star and the number, the instruments with
+// their icons, the model by its mark, the status, the results in mono at the right, and when it
+// ran. Its layout is fixed: the columns keep their widths and the model takes the rest.
 export function BacktestsTable({ backtests, empty, search, onSort, onStar }: Props) {
   return (
-    <table className={TABLE}>
+    <table className={cn(TABLE, 'table-fixed')}>
       <Header search={search} onSort={onSort} />
       <tbody>
         {backtests.map((backtest) => (

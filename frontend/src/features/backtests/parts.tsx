@@ -1,38 +1,35 @@
 import type { Backtest, BacktestStatus } from '@/api';
+import { InstrumentSymbol } from '@/components/InstrumentSymbol';
 import { FrameworkMini, frameworkOf } from '@/features/models';
 import { useViewerDateStyle } from '@/features/preferences';
 import { formatRecentTime } from '@/lib/dates';
 import { formatPercent, MISSING } from '@/lib/results';
 import { cn } from '@/lib/utils';
 
-import { chipsOf, hasResults, returnClass, symbolsOf } from './format';
+import { hasResults, instrumentId, instrumentList, instrumentsShown, returnClass, symbolsOf } from './format';
 
 // The small parts every list of backtests draws the same way (mockups/app).
 
-// The instruments as mono chips without icons (.ichips): up to `max`, the rest as "+N". `tight`
-// is the slimmer chip of the dashboard's starred rows.
-export function InstrumentChips({
-  backtest,
-  max,
-  tight = false,
-}: {
-  backtest: Backtest;
-  max: number;
-  tight?: boolean;
-}) {
+// The instruments with their icons (InstrumentSymbol, #318): up to `max`, or `max - 1` and "+N"
+// for the rest, all of them in the title then. On one line: where the column is narrower than
+// them, the symbols give way with an ellipsis. `size` 16 is the slimmer row of the dashboard's
+// starred backtests.
+export function BacktestInstruments({ backtest, max, size = 20 }: { backtest: Backtest; max: number; size?: 16 | 20 }) {
+  const { shown, more } = instrumentsShown(backtest.instruments, max);
   return (
-    <span className="inline-flex flex-nowrap gap-1">
-      {chipsOf(symbolsOf(backtest), max).map((chip) => (
-        <span
-          key={chip}
-          className={cn(
-            'rounded-full border bg-background font-mono font-medium text-foreground',
-            tight ? 'px-1.5 text-[11px]/[normal]' : 'px-[7px] py-px text-[11.5px]/[normal]',
-          )}
-        >
-          {chip}
-        </span>
+    <span
+      title={more > 0 ? instrumentList(symbolsOf(backtest)) : undefined}
+      className="flex max-w-full min-w-0 items-center gap-2"
+    >
+      {shown.map((instrument) => (
+        <InstrumentSymbol
+          key={instrumentId(instrument)}
+          id={instrumentId(instrument)}
+          symbol={instrument.symbol}
+          size={size}
+        />
       ))}
+      {more > 0 && <span className="shrink-0 font-mono text-muted-foreground">+{more}</span>}
     </span>
   );
 }
@@ -64,11 +61,6 @@ export function StatusBadge({ status }: { status: BacktestStatus }) {
   );
 }
 
-// The red Failed badge (.badge.bad) where a failed backtest has no return.
-export function FailedBadge() {
-  return <StatusBadge status="failed" />;
-}
-
 // A missing result: a muted en dash.
 export function Missing() {
   return <span className="text-muted-foreground">{MISSING}</span>;
@@ -80,7 +72,8 @@ export function ReturnValue({ value }: { value: number }) {
 }
 
 // The model by its framework's 14 px mark (.bt-m), the name beside it. Where it has less room than
-// it needs (an entry of the Filters panel on a phone), the name ends in an ellipsis.
+// it needs (an entry of the Filters panel on a phone, the Backtests table), the name ends in an
+// ellipsis.
 export function ModelName({ name, framework }: { name: string; framework: string }) {
   const mark = frameworkOf(framework);
   return (
@@ -91,10 +84,10 @@ export function ModelName({ name, framework }: { name: string; framework: string
   );
 }
 
-// A backtest's return, or the Failed badge when it has none.
+// A backtest's return, or its badge (Failed, Running) when it has none.
 export function BacktestReturn({ backtest }: { backtest: Backtest }) {
   const value = hasResults(backtest) ? backtest.total_return : null;
-  return value === null ? <FailedBadge /> : <ReturnValue value={value} />;
+  return value === null ? <StatusBadge status={backtest.status} /> : <ReturnValue value={value} />;
 }
 
 // When it ran, on the viewer's clock in the user's formats: "Today 16:05".

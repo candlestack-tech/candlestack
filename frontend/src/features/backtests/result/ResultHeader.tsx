@@ -3,6 +3,7 @@ import { Download } from 'lucide-react';
 
 import { backtestDownloadUrl, type BacktestDocument } from '@/api';
 import { BUTTON_SIZES, OUTLINE_BUTTON } from '@/components/buttonStyles';
+import { InstrumentSymbol } from '@/components/InstrumentSymbol';
 import { Button } from '@/components/ui/button';
 import { useViewerDateStyle } from '@/features/preferences';
 import { formatRecentTime } from '@/lib/dates';
@@ -95,8 +96,8 @@ function ModelLink({ model }: { model: BacktestDocument['model'] }) {
   );
 }
 
-// The title with the status and the buttons, then what it ran on, with what, over which days and
-// when (mockups/app, runHead).
+// The title with the status and the buttons, then what it ran on (the instrument with its icon),
+// with what, over which days and when (mockups/app, runHead).
 export function ResultHeader({ doc }: { doc: BacktestDocument }) {
   const dateStyle = useViewerDateStyle();
   const { backtest } = doc;
@@ -115,8 +116,8 @@ export function ResultHeader({ doc }: { doc: BacktestDocument }) {
           </div>
         )}
       </div>
-      <div className="mt-1 mb-4 flex flex-wrap gap-x-4 gap-y-2 text-[13px] text-muted-foreground">
-        <b className="font-medium text-foreground">{doc.data.instrument.symbol}</b>
+      <div className="mt-1 mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-muted-foreground">
+        <InstrumentSymbol id={doc.data.instrument.id} symbol={doc.data.instrument.symbol} size={20} />
         <ModelLink model={doc.model} />
         <span>{periodText(doc.data.period, dateStyle)}</span>
         <span>

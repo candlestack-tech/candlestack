@@ -1,5 +1,6 @@
 import type { BacktestDocument } from '@/api';
 import { FactsStrip } from '@/components/FactsStrip';
+import { InstrumentSymbol } from '@/components/InstrumentSymbol';
 import { useDateStyle } from '@/features/preferences';
 
 import { allMetrics, basicMetrics, TONE } from './format';
@@ -14,12 +15,14 @@ const DAY = 86_400;
 type Results = NonNullable<BacktestDocument['results']>;
 type Props = { doc: BacktestDocument; results: Results };
 
-// The charts and the trades: the equity with the drawdown, the price with the trades on it.
+// The charts and the trades: the equity with the drawdown, the price with the trades on it (the box
+// named by the instrument with its icon).
 function Charts({ doc, results }: Props) {
   const dateStyle = useDateStyle();
   const { series, trades } = results;
   const daily = doc.data.timeframe_seconds >= DAY;
-  const symbol = doc.data.instrument.symbol;
+  const { instrument } = doc.data;
+  const symbol = instrument.symbol;
   // A run of days, or the light view's one point per day: no time of day on the axis.
   const time = { dateStyle, daily: daily || series.resolution === 'day' };
   const lines =
@@ -35,7 +38,7 @@ function Charts({ doc, results }: Props) {
         <EquityCharts series={series} time={time} />
       </ResultBox>
       <ResultBox
-        title={symbol}
+        title={<InstrumentSymbol id={instrument.id} symbol={symbol} size={16} />}
         aside={
           showsMarkers(trades) && (
             <Legend

@@ -5,6 +5,7 @@ export { CompareDialog } from './CompareDialog';
 export { ModelBacktests } from './ModelBacktests';
 export { BackLink, BacktestResult, useBacktestResult } from './result';
 export { hasResults, representationName, returnClass } from './format';
-export { BacktestNumber, BacktestReturn, BacktestWhen, InstrumentChips, Missing } from './parts';
+export { BacktestInstruments, BacktestNumber, BacktestReturn, BacktestWhen, Missing } from './parts';
 export { BacktestCell, CELL, HEAD, NUMBER, ROW, ROW_OPENER, RowOpener, RowStar, SortButton, TABLE } from './table';
+export { WIDTH } from './widths';
 export { useBacktestsPage, useDashboard, useStarBacktest } from './useBacktests';

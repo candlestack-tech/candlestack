@@ -4,10 +4,10 @@ import type { Backtest, BestMetric, Dashboard } from '@/api';
 import { Hint } from '@/components/Hint';
 import { TrophyIcon } from '@/components/icons';
 import {
+  BacktestInstruments,
   BacktestNumber,
   CELL,
   HEAD,
-  InstrumentChips,
   NUMBER,
   ROW,
   RowOpener,
@@ -36,7 +36,7 @@ const METRICS: readonly { metric: BestMetric; label: string; by: string; format:
 
 type RowProps = { backtest: Backtest; rank: number; by: BestMetric };
 
-// The rank, the number with up to two instruments, then the four results; the one ranked by in
+// The rank, the number with up to two instruments and their icons, then the four results; the one ranked by in
 // semibold, the return in its colour.
 function Row({ backtest, rank, by }: RowProps) {
   return (
@@ -47,7 +47,7 @@ function Row({ backtest, rank, by }: RowProps) {
           <RowOpener backtest={backtest}>
             <BacktestNumber backtest={backtest} />
           </RowOpener>
-          <InstrumentChips backtest={backtest} max={2} />
+          <BacktestInstruments backtest={backtest} max={2} />
         </span>
       </td>
       {METRICS.map(({ metric, format }) => (

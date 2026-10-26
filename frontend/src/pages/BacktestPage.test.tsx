@@ -92,6 +92,23 @@ describe("a finished backtest's page", () => {
     expect(screen.queryByRole('navigation', { name: 'Workspace' })).toBeNull();
   });
 
+  // #318: the instrument with its icon in the header, the Setup and the price chart's title.
+  it('names its instrument with the icon in the header, the setup and the price chart', async () => {
+    await openPage({ status: 200, body: backtestDocument() });
+    const title = await screen.findByRole('heading', { level: 1 });
+    const icon = '/api/v1/data/instruments/stock%3AAAPL/icon';
+    const header = title.parentElement!.parentElement!.nextElementSibling!;
+    expect(header.querySelector('img')?.getAttribute('src')).toBe(icon);
+    expect(header.firstElementChild?.textContent).toBe('AAPL');
+    const setup = screen.getByRole('heading', { level: 2, name: 'Setup' }).closest('section')!;
+    const data = within(setup).getByText('Data').parentElement!;
+    expect(data.querySelector('img')?.getAttribute('src')).toBe(icon);
+    expect(within(data).getByText('Apple Inc.').getAttribute('title')).toBe('Apple Inc.');
+    expect(screen.getByRole('heading', { level: 2, name: 'AAPL' }).querySelector('img')?.getAttribute('src')).toBe(
+      icon,
+    );
+  });
+
   it('downloads the whole document, links its format and shows Compare', async () => {
     await openPage({ status: 200, body: backtestDocument() });
     const download = await screen.findByRole('link', { name: 'Download JSON' });
