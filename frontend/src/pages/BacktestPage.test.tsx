@@ -13,7 +13,7 @@ import {
   sessionWithPreferences,
   stubApi,
 } from '@/test/api';
-import { renderApp } from '@/test/app';
+import { renderApp, viewerIn } from '@/test/app';
 
 // The charts draw on a canvas, which jsdom has not: a stand-in keeps what they were given.
 const charts = vi.hoisted(() => ({
@@ -54,12 +54,16 @@ const DOCUMENT = `GET /api/v1/backtests/${ID}`;
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-10-17T16:00:00Z'));
+  // A viewer in Europe with the New York setting: when it ran is on their clock, the trades on
+  // New York's.
+  viewerIn('Europe/Bratislava');
 });
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   Object.assign(charts, { made: 0, series: [], markers: [], options: [] });
 });
 
@@ -82,7 +86,7 @@ describe("a finished backtest's page", () => {
     expect(screen.getByText('Finished')).toBeDefined();
     expect(screen.getByRole('link', { name: 'raw-candles.keras' }).getAttribute('href')).toBe('/models/mdl_7f3k2m9qx4');
     expect(screen.getByText('3 Jun 2024 – 3 Jun 2024')).toBeDefined();
-    expect(screen.getByText('Today 10:05 · 2 min 42 s')).toBeDefined();
+    expect(screen.getByText('Today 16:05 · 2 min 42 s')).toBeDefined();
     expect(screen.getByRole('link', { name: '← Backtests' }).getAttribute('href')).toBe('/backtests');
     // The page takes the whole width, as in the design.
     expect(screen.queryByRole('navigation', { name: 'Workspace' })).toBeNull();

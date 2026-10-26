@@ -8,13 +8,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { meQueryOptions } from '@/api';
 import { viewerTimeZone } from '@/lib/dates';
 import { ARSEN, DEFAULT_PREFERENCES, session, sessionWithPreferences, stubApi } from '@/test/api';
-import { renderApp } from '@/test/app';
+import { renderApp, viewerIn } from '@/test/app';
 
-import { useDateStyle } from './useAppearance';
+import { useDateStyle, useViewerDateStyle } from './useAppearance';
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   document.documentElement.dataset.theme = 'dark';
   delete document.documentElement.dataset.motion;
   localStorage.clear();
@@ -143,6 +144,39 @@ describe('useDateStyle', () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(meQueryOptions().queryKey, null);
     const { result } = renderHook(() => useDateStyle('Europe/Bratislava'), { wrapper: wrapper(queryClient) });
+    expect(result.current).toEqual({ timeZone: 'Europe/Bratislava', dateFormat: 'dmy', timeFormat: '24' });
+  });
+});
+
+describe('useViewerDateStyle', () => {
+  function wrapper(queryClient: QueryClient) {
+    return ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+  }
+
+  it('is the viewer’s own zone in the account’s formats, though the setting is New York', async () => {
+    viewerIn('Europe/Bratislava');
+    stubApi(
+      sessionWithPreferences(ARSEN, {
+        ...DEFAULT_PREFERENCES,
+        appearance: { ...DEFAULT_PREFERENCES.appearance, time_zone: 'ny', date_format: 'iso', time_format: '12' },
+      }),
+    );
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(meQueryOptions().queryKey, ARSEN);
+    const { result } = renderHook(useViewerDateStyle, { wrapper: wrapper(queryClient) });
+    await vi.waitFor(() =>
+      expect(result.current).toEqual({ timeZone: 'Europe/Bratislava', dateFormat: 'iso', timeFormat: '12' }),
+    );
+  });
+
+  it('is the viewer’s own zone for a visitor too', () => {
+    viewerIn('Europe/Bratislava');
+    stubApi({});
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(meQueryOptions().queryKey, null);
+    const { result } = renderHook(useViewerDateStyle, { wrapper: wrapper(queryClient) });
     expect(result.current).toEqual({ timeZone: 'Europe/Bratislava', dateFormat: 'dmy', timeFormat: '24' });
   });
 });

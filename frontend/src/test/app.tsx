@@ -7,6 +7,13 @@ import { createAppRouter } from '@/router';
 
 import { ARSEN, sessionWithPreferences, stubApi } from './api';
 
+// The browser in `zone`, as viewerTimeZone reads it, so a time on the viewer's clock reads the same
+// on every machine. vi.restoreAllMocks() takes it back.
+export function viewerIn(zone: string) {
+  const resolved = new Intl.DateTimeFormat().resolvedOptions();
+  vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({ ...resolved, timeZone: zone });
+}
+
 // Radix measures and captures the pointer, and the router restores the scroll position, through
 // browser APIs jsdom lacks.
 function polyfillDom() {

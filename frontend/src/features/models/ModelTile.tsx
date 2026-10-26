@@ -5,7 +5,7 @@ import { BUTTON_SIZES, OUTLINE_BUTTON } from '@/components/buttonStyles';
 import { HINT } from '@/components/Hint';
 import { StarButton } from '@/components/StarButton';
 import { Button } from '@/components/ui/button';
-import { useDateStyle } from '@/features/preferences';
+import { useViewerDateStyle } from '@/features/preferences';
 import { formatRecentDay } from '@/lib/dates';
 import { pluralNoun } from '@/lib/plural';
 import { formatSharpe } from '@/lib/results';
@@ -79,7 +79,7 @@ function TileTop({ model, onStar }: Pick<Props, 'model' | 'onStar'>) {
 // while it has none. The whole tile opens the model's page: the name's link is stretched over it,
 // and the star and Add manifest sit above it.
 export function ModelTile({ model, onStar, onAddManifest }: Props) {
-  const dateStyle = useDateStyle();
+  const dateStyle = useViewerDateStyle();
   return (
     <article className="relative flex aspect-square min-w-0 flex-col gap-2.5 rounded-lg border bg-card p-4 transition-[border-color,box-shadow] duration-150 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring/60 hover:border-[color-mix(in_srgb,var(--accent)_40%,var(--rule))] hover:shadow-[0_4px_14px_var(--shadow)] motion-reduce:transition-none">
       <TileTop model={model} onStar={onStar} />
