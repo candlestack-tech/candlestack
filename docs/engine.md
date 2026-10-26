@@ -526,6 +526,27 @@ in `win_rate`. Counts and streaks are ints; the rest are floats or None.
 | `long_avg_return`, `short_avg_return` | `mean(return)` of that side | no trades of that side |
 | `exits_signal`, `exits_stop`, `exits_gap`, `exits_end`, `exits_ruin`, `exits_drawdown` | trades with that `exit_reason`, 0 included so every run has the same names | never |
 
+`benchmark_stats(strategy, benchmark, periods_per_year=252)` compares the run's `series` with a
+benchmark's equity on the same `ts` (for example holding SPY over the same candles) and returns
+a dict with these names, always in this order; other `ts` raise `ValueError`. `s` and `b` are
+the daily returns of the strategy and the benchmark, taken as for Sharpe, and `a = s - b`;
+`var`, `cov` and `std` take ddof 1. `monthly_returns(series)` gives the return of each UTC
+calendar month with rows, from the last equity of the month before (the first from 1.0), as
+`month` (`YYYY-MM`) and `return`.
+
+| Name | Formula | None when |
+| --- | --- | --- |
+| `excess_return` | `equity[last] - benchmark_equity[last]` | no rows |
+| `beta` | `cov(s, b) / var(b)` | fewer than 2 days, or `var(b)` is 0 |
+| `alpha` | `(mean(s) - beta * mean(b)) * periods_per_year` | as `beta` |
+| `correlation` | `cov(s, b) / (std(s) * std(b))` | fewer than 2 days, or either `std` is 0 |
+| `tracking_error` | `std(a) * sqrt(periods_per_year)` | fewer than 2 days |
+| `information_ratio` | `mean(a) / std(a) * sqrt(periods_per_year)` | fewer than 2 days, or `std(a)` is 0 (a benchmark equal to the strategy) |
+| `positive_months` | `count(r > 0) / months` over the strategy's monthly returns | no month with a return |
+
+As with Sharpe, once either equity has reached 0 there are no daily returns, so all the daily
+values are None.
+
 ## The command
 
 `candlestack-bt run` backtests one model's predictions on the candles of one stock from

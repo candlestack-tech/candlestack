@@ -4,7 +4,8 @@ It imports no other module and no server library. Other modules import only from
 (``from candlestack.metrics import stats``), never from the submodules.
 """
 
+from candlestack.metrics.benchmark import benchmark_stats, monthly_returns
 from candlestack.metrics.summary import drawdown, stats
 from candlestack.metrics.trades import trade_stats
 
-__all__ = ["drawdown", "stats", "trade_stats"]
+__all__ = ["benchmark_stats", "drawdown", "monthly_returns", "stats", "trade_stats"]
