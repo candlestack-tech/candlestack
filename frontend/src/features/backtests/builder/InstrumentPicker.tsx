@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 import { errorMessage, type Market } from '@/api';
 import { DROPDOWN_CHEVRON, DROPDOWN_TRIGGER } from '@/components/buttonStyles';
+import { InstrumentSymbol } from '@/components/InstrumentSymbol';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
@@ -21,7 +22,7 @@ type OptionsProps = {
   onChoose: (instrument: ChosenInstrument) => void;
 };
 
-// An instrument of the list: its symbol in mono, then its name.
+// An instrument of the list: its icon, its symbol in mono, then its name.
 function Option({ item, chosen, onChoose }: { item: ChosenInstrument } & Omit<OptionsProps, 'query' | 'market'>) {
   const picked = item.id === chosen?.id;
   return (
@@ -35,8 +36,13 @@ function Option({ item, chosen, onChoose }: { item: ChosenInstrument } & Omit<Op
           picked && 'text-primary',
         )}
       >
-        <b className="min-w-[74px] font-mono text-[13px] font-semibold">{item.symbol}</b>
-        <span className="min-w-0 truncate text-muted-foreground">{item.name}</span>
+        <InstrumentSymbol
+          id={item.id}
+          symbol={item.symbol}
+          name={item.name}
+          size={20}
+          symbolClassName={cn('min-w-[74px] text-[13px] font-semibold', picked && 'text-primary')}
+        />
       </button>
     </li>
   );
@@ -69,7 +75,7 @@ type Props = {
   onChoose: (instrument: ChosenInstrument) => void;
 };
 
-// The button: the symbol and the name of the chosen one.
+// The button: the icon, the symbol and the name of the chosen one.
 function Trigger({ chosen }: { chosen: ChosenInstrument | undefined }) {
   return (
     <PopoverTrigger
@@ -77,10 +83,13 @@ function Trigger({ chosen }: { chosen: ChosenInstrument | undefined }) {
       className={cn(DROPDOWN_TRIGGER, 'max-w-full min-w-0 data-[state=open]:border-primary')}
     >
       {chosen ? (
-        <>
-          <b className="font-mono text-[13px] font-semibold text-foreground">{chosen.symbol}</b>
-          <span className="min-w-0 truncate text-foreground">{chosen.name}</span>
-        </>
+        <InstrumentSymbol
+          id={chosen.id}
+          symbol={chosen.symbol}
+          name={chosen.name}
+          size={24}
+          symbolClassName="text-[13px] font-semibold"
+        />
       ) : (
         <span>Choose</span>
       )}
@@ -89,8 +98,8 @@ function Trigger({ chosen }: { chosen: ChosenInstrument | undefined }) {
   );
 }
 
-// One instrument of the model's market (.fp-t.b-it with .b-ip): the symbol and the name on the
-// button, a search over the list in its panel. Picking one closes it.
+// One instrument of the model's market (.fp-t.b-it with .b-ip): the icon, the symbol and the name
+// on the button, a search over the list in its panel. Picking one closes it.
 export function InstrumentPicker({ market, chosen, onChoose }: Props) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');

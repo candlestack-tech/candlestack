@@ -5,7 +5,7 @@ import type { Backtest } from '@/api';
 import { StarButton } from '@/components/StarButton';
 import { cn } from '@/lib/utils';
 
-import { BacktestNumber } from './parts';
+import { BacktestNumber, ModelName } from './parts';
 
 // The tables of backtests (mockups/app, .tbl): 13 px, the headers medium and muted over a line,
 // the rows 8 px high around their text with a line under each but the last, 10 px at the sides
@@ -101,5 +101,34 @@ export function BacktestCell({ backtest, onStar }: { backtest: Backtest; onStar:
         <BacktestNumber backtest={backtest} />
       </RowOpener>
     </span>
+  );
+}
+
+const MODEL = 'inline-flex max-w-full min-w-0 align-middle text-[12px]';
+
+// The model of a row in the Backtests table (#315): one step smaller than the row, its name cut
+// with an ellipsis where the column is narrower, the full name in the title. While the model
+// exists, a link to its page above the row's own link.
+export function ModelCell({ model }: { model: Backtest['model'] }) {
+  const name = <ModelName name={model.name} framework={model.framework} />;
+  if (!model.id) {
+    return (
+      <span title={model.name} className={MODEL}>
+        {name}
+      </span>
+    );
+  }
+  return (
+    <Link
+      to="/models/$modelId"
+      params={{ modelId: model.id }}
+      title={model.name}
+      className={cn(
+        MODEL,
+        'relative z-10 outline-none hover:text-primary focus-visible:text-primary focus-visible:underline',
+      )}
+    >
+      {name}
+    </Link>
   );
 }

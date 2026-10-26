@@ -2,9 +2,9 @@ import type { Backtest, Dashboard } from '@/api';
 import { Hint } from '@/components/Hint';
 import { BacktestsIcon } from '@/components/icons';
 import {
+  BacktestInstruments,
   BacktestNumber,
   BacktestReturn,
-  InstrumentChips,
   RowOpener,
   RowStar,
   hasResults,
@@ -17,9 +17,9 @@ import { MoreRow, STARRED_ROW, Sparkline, Widget } from './widgets';
 
 type RowProps = { backtest: Backtest; onStar: (backtest: Backtest) => void };
 
-// Two lines (.dd-sb): the star beside both; the number with up to two instruments, the small
-// equity line and the return; under them the representation and the model, and the Sharpe ratio.
-// A failed backtest has the Failed badge instead, without a line.
+// Two lines (.dd-sb): the star beside both; the number with up to two instruments and their icons,
+// the small equity line and the return; under them the representation and the model, and the
+// Sharpe ratio. A failed backtest has the Failed badge instead, without a line.
 function Row({ backtest, onStar }: RowProps) {
   const done = hasResults(backtest);
   return (
@@ -31,7 +31,7 @@ function Row({ backtest, onStar }: RowProps) {
         <RowOpener backtest={backtest}>
           <BacktestNumber backtest={backtest} />
         </RowOpener>
-        <InstrumentChips backtest={backtest} max={2} tight />
+        <BacktestInstruments backtest={backtest} max={2} size={16} />
       </span>
       {done && backtest.equity ? <Sparkline equity={backtest.equity} /> : <span />}
       <span className="text-right font-mono text-sm/[1.5] font-semibold whitespace-nowrap">

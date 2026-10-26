@@ -1,4 +1,7 @@
+import type { ReactNode } from 'react';
+
 import type { Model } from '@/api';
+import { InstrumentSymbol } from '@/components/InstrumentSymbol';
 
 import type { BuilderForm, ChosenInstrument, DateWriter } from './form';
 import { costsLine, decisionLine, fillLine, periodLine, preprocessingLine } from './format';
@@ -13,7 +16,7 @@ type Props = {
   onEdit: (step: number) => void;
 };
 
-type Line = { step: number; title: string; main: string; detail?: string | undefined };
+type Line = { step: number; title: string; main: ReactNode; detail?: string | undefined };
 
 // A step in a line (.b-rev): its name, what it chose over the details, and Edit.
 function SummaryLine({ line, onEdit }: { line: Line; onEdit: (step: number) => void }) {
@@ -56,12 +59,18 @@ function Warnings({ form }: { form: BuilderForm }) {
   );
 }
 
-// Step 5 (stepRun): the four steps in a line each, with Edit, then the warnings.
+// Step 5 (stepRun): the four steps in a line each, with Edit (the data's instrument with its icon),
+// then the warnings.
 export function RunStep({ form, model, instrument, write, problem, onEdit }: Props) {
   const summary = model.manifest_summary;
   const lines: Line[] = [
     { step: 0, title: 'Model', main: model.name, detail: summary ? preprocessingLine(summary) : undefined },
-    { step: 1, title: 'Data', main: instrument.symbol, detail: periodLine(form, write) },
+    {
+      step: 1,
+      title: 'Data',
+      main: <InstrumentSymbol id={instrument.id} symbol={instrument.symbol} name={instrument.name} size={20} />,
+      detail: periodLine(form, write),
+    },
     { step: 2, title: 'Decision', main: decisionLine(form) },
     { step: 3, title: 'Execution', main: fillLine(form.honestFill), detail: costsLine(form) },
   ];

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { backtest, failedBacktest } from '@/test/api';
 
-import { chipsOf, hasResults, instrumentList, representationName } from './format';
+import { hasResults, instrumentId, instrumentList, instrumentsShown, representationName } from './format';
 
 describe('hasResults', () => {
   it('is true for a finished backtest only', () => {
@@ -23,12 +23,20 @@ describe('instrumentList', () => {
   });
 });
 
-describe('chipsOf', () => {
-  it('shows every symbol that fits, else one less and the rest as +N', () => {
-    expect(chipsOf(['AAPL', 'MSFT'], 2)).toEqual(['AAPL', 'MSFT']);
-    expect(chipsOf(['AAPL', 'MSFT', 'NVDA'], 2)).toEqual(['AAPL', '+2']);
-    expect(chipsOf(['AAPL', 'MSFT', 'NVDA'], 3)).toEqual(['AAPL', 'MSFT', 'NVDA']);
-    expect(chipsOf(['AAPL', 'MSFT', 'NVDA', 'SPY', 'TSLA'], 3)).toEqual(['AAPL', 'MSFT', '+3']);
+describe('instrumentsShown', () => {
+  it('shows every instrument that fits, else one less (at least one) and how many more', () => {
+    expect(instrumentsShown(['AAPL', 'MSFT'], 2)).toEqual({ shown: ['AAPL', 'MSFT'], more: 0 });
+    expect(instrumentsShown(['AAPL', 'MSFT', 'NVDA'], 2)).toEqual({ shown: ['AAPL'], more: 2 });
+    expect(instrumentsShown(['AAPL', 'MSFT', 'NVDA'], 3)).toEqual({ shown: ['AAPL', 'MSFT', 'NVDA'], more: 0 });
+    expect(instrumentsShown(['AAPL', 'MSFT', 'NVDA', 'SPY', 'TSLA'], 3)).toEqual({ shown: ['AAPL', 'MSFT'], more: 3 });
+    expect(instrumentsShown(['AAPL', 'MSFT'], 1)).toEqual({ shown: ['AAPL'], more: 1 });
+  });
+});
+
+describe('instrumentId', () => {
+  it('is the market and the symbol, as the icon is asked for', () => {
+    expect(instrumentId({ market: 'stock', symbol: 'BRK.B' })).toBe('stock:BRK.B');
+    expect(instrumentId({ market: 'crypto', symbol: 'BTCUSDT' })).toBe('crypto:BTCUSDT');
   });
 });
 

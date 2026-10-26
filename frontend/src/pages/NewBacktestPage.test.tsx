@@ -152,6 +152,16 @@ describe('the backtest builder', () => {
       screen.getByLabelText<HTMLInputElement>('To').value,
     ]).toEqual(['2021-01-04', '2024-12-31']);
     await user.click(screen.getByRole('button', { name: 'Instrument: BTCUSDT' }));
+    // #318: the button and every option name the instrument with its icon.
+    const icon = (element: Element | null | undefined) => element?.querySelector('img')?.getAttribute('src');
+    expect(icon(screen.getByRole('button', { name: 'Instrument: BTCUSDT' }))).toBe(
+      '/api/v1/data/instruments/crypto%3ABTCUSDT/icon',
+    );
+    const options = within(await screen.findByRole('list', { name: 'Instruments' })).getAllByRole('button');
+    expect(options.map(icon)).toEqual([
+      '/api/v1/data/instruments/crypto%3ABTCUSDT/icon',
+      '/api/v1/data/instruments/crypto%3AETHUSDT/icon',
+    ]);
     await user.type(screen.getByRole('textbox', { name: 'Search instruments' }), 'eth');
     await user.click(await screen.findByRole('button', { name: /^ETHUSDT/ }));
     expect(screen.getByRole('button', { name: 'Instrument: ETHUSDT' })).toBeDefined();
@@ -215,10 +225,13 @@ describe('the backtest builder', () => {
     const terms = screen.getAllByRole('term').map((term) => `${term.textContent}: ${term.nextSibling?.textContent}`);
     expect(terms).toEqual([
       'Model: btc-1h.kerasCandles · 1h · 5 features · window 25',
-      'Data: BTCUSDT4 Jan 2021 – 31 Dec 2024',
+      'Data: BTCUSDTBitcoin / TetherUS4 Jan 2021 – 31 Dec 2024',
       'Decision: threshold 0.05 · long only · stop 7 %',
       "Execution: Next candle's openfees 0.1 % · slippage 0.02 % · vs buy and hold",
     ]);
+    expect(
+      screen.getByText('Data', { selector: 'dt' }).nextElementSibling?.querySelector('img')?.getAttribute('src'),
+    ).toBe('/api/v1/data/instruments/crypto%3ABTCUSDT/icon');
     await user.click(screen.getByRole('button', { name: 'Edit decision' }));
     expect(step()).toBe('Decision');
     await user.click(screen.getByRole('button', { name: 'Run' }));

@@ -328,6 +328,25 @@ delete modals):
 - A model deleted meanwhile (404) closes its Rename or Delete dialog, and its page says it is not
   found.
 
+## Lists of backtests
+
+The Backtests page (`src/features/backtests/BacktestsTable.tsx`, #315) follows the approved
+table design: the star and the number, the instruments, the model, the status, Return, Sharpe, Max
+drawdown and When. The layout is fixed (`table-fixed`): every column but the model has the width
+of `src/features/backtests/widths.ts`, room for its longest value and its header with the sort
+arrow, so no number is cut; the model takes the rest. Its name is 12 px (one step under the
+row's 13 px), ends in an ellipsis when it does not fit, shows in full in its title and links to
+the model while it exists. Return has room for "+9,999.9 %", When for "28 May 2025 11:58 AM",
+the longest of every date and time format. Trades is left out: with it the model would keep under
+100 px. From which width down a column hides, so the table never scrolls sideways: Max drawdown
+at 1150 px, When at 800, Model at 620, Status at 500 (Return then shows the badge), Sharpe at 420.
+
+The dashboard's Last backtests (fixed too; When hides in a card under 520 px), Best backtests and
+a model's backtests give their columns the same widths. Every list names its instruments with
+`BacktestInstruments`: up to as many as it has room for, else one less and "+N" with all of them
+in the title, each symbol cut with an ellipsis where its column is narrower (one and "+N" on the
+Backtests page, two elsewhere).
+
 ## Backtest builder
 
 `/backtests/new` (#270, `src/pages/NewBacktestPage.tsx`, the parts in
@@ -348,7 +367,8 @@ adds `?model=<id>`.
   `UploadDialog`, which comes back with the new model chosen. Without a choice, the first model
   that can run is chosen.
 - Data: one instrument of the model's market (a `24/7` session is crypto, `regular` stocks) from
-  the instrument search, the most traded first until one is chosen; the timeframe from the model;
+  the instrument search, the most traded first until one is chosen, named with its icon, symbol and
+  name on the button (24 px icon) and in the list (20 px); the timeframe from the model;
   the period as in Settings with Last 12 months, the last whole year and All data. A period that
   starts before the instrument's first candle and the model's warm-up after it (for stocks an
   estimate with room for weekends and holidays), ends before it starts or after today is marked
@@ -360,7 +380,7 @@ adds `?model=<id>`.
 - Execution: honest fill (the next candle's open, on by default, with what it means behind the
   i), fees and slippage in percent, and the benchmark: buy and hold of the instrument, the index
   funds of Settings shown as coming soon (`BacktestIn` takes buy and hold only).
-- Run: the four steps in a line each with Edit, a warning when filling at the signal's close, and
+- Run: the four steps in a line each with Edit (the instrument with its icon and name), a warning when filling at the signal's close, and
   Run backtest, which sends the setup groups (`POST /api/v1/backtests`, `BacktestIn`: the days
   as `[first day, the day after the last)` in UTC, ending now at the latest, percent as basis
   points) and opens the new backtest's page. A refusal goes back to the step it is about and says
@@ -383,7 +403,8 @@ so its back link returns there (else "← Backtests").
   `backtestQueryOptions` under `['account', 'backtest', <id>]`). A running backtest is asked for
   again every 2 s; a finished or failed one is never asked for again while it is in the cache. When
   a run the page watched ends, the lists, the dashboard and the models are asked for again.
-- The header: "Backtest #N" with its status, then the symbol, the model (a link while it exists),
+- The header: "Backtest #N" with its status, then the instrument (icon and symbol), the model (a
+  link while it exists),
   the period's first and last UTC day, when it ran and how long. A finished one has
   `[Download JSON | ?]` (the download is `GET /api/v1/backtests/{id}/download`, which the browser
   saves as `candlestack-backtest-<N>.json`; `?` opens https://candlestack.tech/docs/backtest-json)
@@ -404,18 +425,26 @@ so its back link returns there (else "← Backtests").
   long-only run has Bought and Sold; one that also goes short Side, Opened and Closed. The box
   drops the candles and why it closed below 720 px of its own width, the prices below 560 px.
 - The setup in the builder's steps: the model with its manifest in short ("Candles · 30m · 25 ×
-  5"), the data, the decision's rule and steps, the execution with its stops and costs.
+  5"), the data (the instrument's icon, symbol and name), the decision's rule and steps, the
+  execution with its stops and costs. The price chart's box is named by the instrument with its
+  icon too.
 
 ## Instrument icons
 
 `src/components/InstrumentIcon.tsx` shows the icon of `GET /api/v1/data/instruments/{id}/icon`
-(the logo from logo.dev or the backend's fallback, `docs/data.md`) in three places:
+(the logo from logo.dev or the backend's fallback, `docs/data.md`). In the signed-in app every
+place that names an instrument does it with `src/components/InstrumentSymbol.tsx` (#318): the
+icon, the symbol in mono and optionally the name, muted. Alone, the symbol ends in an ellipsis
+where it has no room; with the name, the name does; each shows in full in its title.
 
 | Place | Size | Corner radius | Row |
 | --- | --- | --- | --- |
 | Instrument list, before the symbol | 32 px | 3.2 px | 41 px (4 px padding), as high as without it |
 | Home page, the five most traded, before the symbol | 32 px | 3.2 px | as in the list |
 | Instrument page header, next to the name | 64 px | 6.4 px | - |
+| Lists of backtests (Backtests page and its search, dashboard, a model's page), a backtest's header and setup, the builder's instrument list and Run step | 20 px | 2 px | as high as without it |
+| The builder's instrument button | 24 px | 2.4 px | the 34 px button |
+| The dashboard's starred backtests, a backtest's price chart title | 16 px | 1.6 px | - |
 
 - The radius is 10 % of the size. The fallback SVG is square, so the frontend rounds it like a
   logo; a rounding of its own would show the white tile in its corners.

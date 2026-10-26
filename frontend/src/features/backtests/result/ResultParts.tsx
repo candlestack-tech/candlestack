@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 
 import type { BacktestDocument } from '@/api';
 import { HINT } from '@/components/Hint';
+import { InstrumentSymbol } from '@/components/InstrumentSymbol';
 import { useDateStyle } from '@/features/preferences';
 import { cn } from '@/lib/utils';
 
@@ -72,9 +73,10 @@ export function MetricList({ metrics }: { metrics: readonly Metric[] }) {
 }
 
 // The setup it ran with, step by step (.r3-setup): each step's name over what it was and its
-// details.
+// details. The data names its instrument with the icon, the symbol and the name.
 export function SetupBox({ doc }: { doc: BacktestDocument }) {
   const dateStyle = useDateStyle();
+  const { instrument } = doc.data;
   return (
     <ResultBox title="Setup">
       <div className="flex flex-col gap-3 text-[13px]">
@@ -83,7 +85,11 @@ export function SetupBox({ doc }: { doc: BacktestDocument }) {
             <span className="font-mono text-[10.5px]/4 font-medium tracking-[0.06em] text-muted-foreground uppercase">
               {step}
             </span>
-            <b className="font-medium [overflow-wrap:anywhere]">{main}</b>
+            {step === 'Data' ? (
+              <InstrumentSymbol id={instrument.id} symbol={instrument.symbol} name={instrument.name} size={20} />
+            ) : (
+              <b className="font-medium [overflow-wrap:anywhere]">{main}</b>
+            )}
             {detail && <span className="font-mono text-[12.5px] text-muted-foreground">{detail}</span>}
           </div>
         ))}

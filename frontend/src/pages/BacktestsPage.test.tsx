@@ -59,18 +59,69 @@ describe('the Backtests page', () => {
       'Backtest',
       'Instruments',
       'Model',
+      'Status',
       'Return',
       'Sharpe',
       'Max drawdown',
-      'Trades',
       'When',
     ]);
+    // A failed return is a dash, with the badge for phones, where the Status column is hidden.
     expect(rows().map(cells)).toEqual([
-      ['☆#12', 'AAPLMSFT', 'blesk-novol-8.keras', '+24.6 %', '0.79', '−19.7 %', '1,712', 'Today 10:05'],
-      ['☆#11', 'AAPLMSFT', 'blesk-novol-8.keras', 'Failed', '–', '–', '–', 'Yesterday 18:10'],
-      ['★#10', 'BTCUSDT+2', 'blesk-novol-8.keras', '−24.1 %', '−0.18', '−19.7 %', '1,712', '12 Oct 19:44'],
+      ['☆#12', 'AAPL+1', 'blesk-novol-8.keras', 'Finished', '+24.6 %', '0.79', '−19.7 %', 'Today 10:05'],
+      ['☆#11', 'AAPL+1', 'blesk-novol-8.keras', 'Failed', 'Failed–', '–', '–', 'Yesterday 18:10'],
+      ['★#10', 'BTCUSDT+2', 'blesk-novol-8.keras', 'Finished', '−24.1 %', '−0.18', '−19.7 %', '12 Oct 19:44'],
     ]);
     expect(within(rows()[0]!).getByRole('img', { name: 'Keras' })).toBeDefined();
+  });
+
+  // #318: the instruments of a row are named with their icons, the rest as +N with all of them in
+  // the title.
+  it('shows each instrument with its icon', async () => {
+    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
+    await renderApp('/backtests');
+    await screen.findByText('#12');
+    const icons = rows().map((row) => row.querySelector('td:nth-child(2) img')?.getAttribute('src'));
+    expect(icons).toEqual([
+      '/api/v1/data/instruments/stock%3AAAPL/icon',
+      '/api/v1/data/instruments/stock%3AAAPL/icon',
+      '/api/v1/data/instruments/crypto%3ABTCUSDT/icon',
+    ]);
+    expect(rows()[2]!.querySelector('td:nth-child(2) [title]')?.getAttribute('title')).toBe(
+      'BTCUSDT, ETHUSDT and SOLUSDT',
+    );
+  });
+
+  // #315: a long model name is cut inside its column, the numbers keep their widths and the status
+  // has its own column.
+  it('keeps a row with a long model name inside the table', async () => {
+    const name = `${'BLESK_ATR06_R8_OHLC_LAM08_EOD_SPLIT_ATR_NO-VOL_OPT1_8_M25x23_'.repeat(2)}`.slice(0, 84) + '.keras';
+    expect(name).toHaveLength(90);
+    const long = failedBacktest({ model: { id: 'mdl_7f3k2m9qx4', name, framework: 'keras' } });
+    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer({ ...PAGE, backtests: [long] }) });
+    await renderApp('/backtests');
+    await screen.findByText('#12');
+    expect(screen.getByRole('table').className.split(' ')).toContain('table-fixed');
+
+    // The full name on hover, still a link to the model.
+    const model = screen.getByTitle(name);
+    expect(model.tagName).toBe('A');
+    expect(model.getAttribute('href')).toBe('/models/mdl_7f3k2m9qx4');
+    expect(model.className.split(' ')).toEqual(expect.arrayContaining(['text-[12px]', 'max-w-full', 'min-w-0']));
+    expect(within(model).getByText(name).className.split(' ')).toEqual(expect.arrayContaining(['truncate', 'min-w-0']));
+
+    const width = (label: RegExp) =>
+      screen
+        .getByRole('columnheader', { name: label })
+        .className.split(' ')
+        .find((name) => name.startsWith('w-'));
+    expect(width(/^Model/)).toBeUndefined();
+    expect([/^Backtest/, /^Instruments/, /^Status/, /^Return/, /^Sharpe/, /^Max drawdown/, /^When/].map(width)).toEqual(
+      ['w-[84px]', 'w-[112px]', 'w-[88px]', 'w-[100px]', 'w-[76px]', 'w-[128px]', 'w-[160px]'],
+    );
+
+    const [, , , status, result] = within(rows()[0]!).getAllByRole('cell');
+    expect(status!.textContent).toBe('Failed');
+    expect(within(result!).getByText('–').parentElement!.className).toBe('max-[500px]:hidden');
   });
 
   it('says how many match a search, and one backtest in the singular', async () => {
@@ -274,7 +325,7 @@ describe('the Backtests page', () => {
       .getAllByRole('columnheader')
       .filter((head) => head.className.split(' ').includes('font-mono'))
       .map((head) => head.textContent);
-    expect(mono).toEqual(['Return', 'Sharpe', 'Max drawdown', 'Trades']);
+    expect(mono).toEqual(['Return', 'Sharpe', 'Max drawdown']);
   });
 
   it('opens a row from the keyboard, ringing the row while its link has the focus', async () => {

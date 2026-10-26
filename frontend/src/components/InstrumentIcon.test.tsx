@@ -31,6 +31,9 @@ describe('InstrumentIcon', () => {
 
   it('sits on a white tile rounded by a tenth of its size, in both themes', () => {
     for (const [size, box] of [
+      [16, 'size-4'],
+      [20, 'size-5'],
+      [24, 'size-6'],
       [32, 'size-8'],
       [64, 'size-16'],
     ] as const) {
