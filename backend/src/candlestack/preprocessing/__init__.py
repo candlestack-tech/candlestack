@@ -10,6 +10,7 @@ It imports no other module and no server library, like the backtest modules: the
 it without network. Other modules import only from here, never from the submodules.
 """
 
+from candlestack.preprocessing.blocks import Samples
 from candlestack.preprocessing.catalog import (
     CATALOG,
     Block,
@@ -45,6 +46,7 @@ __all__ = [
     "ManifestProblem",
     "ModelInput",
     "ParamOut",
+    "Samples",
     "Step",
     "WarmUp",
     "build_input",

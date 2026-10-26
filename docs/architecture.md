@@ -430,8 +430,14 @@ sequenceDiagram
   one. Starting the process and importing Keras takes 2 to 4 s (onnxruntime about 1 s: a
   `check` of the ONNX raw-candles test model takes 1.3 s in all); loading the raw-candles test
   model about 0.5 s, its predictions for 50000 candles about 0.3 s, the container about 300 MB
-  at its peak then. A 25 x 28 model runs on the 50000 candles a backtest may load within the
-  container's 1 GB, about 600 MB at its peak ([infra/README.md](../infra/README.md#memory)).
+  at its peak then. The process builds and predicts the model's input a part at a time
+  (`runner.PART_BYTES`, 32 MB: 11264 samples of 25 x 28), never all of it, which grows with
+  the period ([preprocessing.md](preprocessing.md#the-blocks)). A part is a whole number of
+  the model's batches (1024 samples, fewer when 1024 would take more than a part), so the
+  predictions are the same as on the whole input. A 25 x 28 model runs on the 50000 candles a
+  backtest may load with the process at about 500 MB at its peak, 300 MB of it its own memory
+  and the rest the libraries' pages, and finishes even in a container of 384 MB
+  ([infra/README.md](../infra/README.md#memory)).
 - **The queue's password**: the queue requires one (`requirepass`, `QUEUE_PASSWORD` of the
   deploy), which the backend and the loop find in `JOBS_REDIS_URL`
   (`redis://:<password>@queue:6379/0`; a `SecretStr`, never logged). The job's process must

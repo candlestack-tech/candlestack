@@ -243,8 +243,8 @@ services:
     labels:
       candlestack.version: ${APP_VERSION:?}
     # The loop (about 85 MB) and one job's process: Keras with JAX and the model, about 300 MB
-    # for 50000 candles of the raw-candles test model, 600 MB for 50000 candles of a 25 x 28
-    # model (infra/README.md, "Memory"). No swap: a model over the limit fails its job at once
+    # for 50000 candles of the raw-candles test model, 500 MB for 50000 candles of a 25 x 28
+    # model, which builds its input in parts (infra/README.md, "Memory"). No swap: a model over the limit fails its job at once
     # instead of slowing the VM down. One of the two vCPUs, so a model cannot starve the
     # backend. At most 512 processes and threads (a job's XLA thread pools grow with the CPUs:
     # 183 at its peak on 20), and an init that reaps what a job's process left.

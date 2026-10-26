@@ -28,6 +28,7 @@ from candlestack.preprocessing import (
     InvalidManifest,
     Manifest,
     ModelInput,
+    Samples,
     build_input,
     check_manifest,
     parse_manifest,
@@ -39,6 +40,11 @@ from candlestack.worker.samples import sample_candles
 # Samples per batch of a prediction: large batches are faster, and 1024 samples of 25 x 23
 # floats are 2.4 MB.
 BATCH = 1024
+# The most memory a part of the input takes: the samples are built and predicted a part at a
+# time, as all of them at once grow with the period (134 MB for 50000 samples of 25 x 28) and
+# a part does not. 32 MB are 11264 samples of 25 x 28 (11 batches): few calls of the model, and
+# far under the worker's limit beside Keras and JAX (docs/architecture.md, "Worker").
+PART_BYTES = 32 * 1024 * 1024
 # The largest file the process may write (Linux): the model's copy (a Keras file without its
 # compile config, of at most 50 MB unpacked to 100 MB of weights at most, or an ONNX file of at
 # most 50 MB) and the predictions.
@@ -155,7 +161,7 @@ def _run(request: Request, framework: Framework, timings: dict[str, float]) -> J
         candles = _candles(files, job.id)
         made = _input(candles, manifest, timings)
         with _timed(timings, "predict"):
-            scores = _predict(model, made.samples, manifest)
+            scores = _predict(model, made.windows, manifest)
         predictions = pl.DataFrame(
             {"ts": made.ts.cast(pl.Int64), "prediction": scores[:, 0].astype(np.float64)}
         )
@@ -170,13 +176,13 @@ def _run(request: Request, framework: Framework, timings: dict[str, float]) -> J
         )
     made = _input(sample_candles(manifest), manifest, timings)
     with _timed(timings, "predict"):
-        _predict(model, made.samples, manifest)
+        _predict(model, made.windows, manifest)
         difference = _example(model, manifest)
     return JobResult(
         id=job.id,
         kind=job.kind,
         status="done",
-        samples=len(made.samples),
+        samples=len(made.windows),
         dropped=made.dropped,
         verified=difference is not None,
         example_difference=difference,
@@ -244,7 +250,7 @@ def _input(candles: pl.DataFrame, manifest: Manifest, timings: dict[str, float])
             made = build_input(candles, manifest)
         except ValueError as error:
             raise JobFailed("candles", f"The model's input cannot be built. {error}.") from None
-    if not len(made.samples):
+    if not len(made.windows):
         needed = warm_up(manifest).candles + 1
         raise JobFailed(
             "candles",
@@ -254,10 +260,38 @@ def _input(candles: pl.DataFrame, manifest: Manifest, timings: dict[str, float])
     return made
 
 
-def _predict(model: Model, samples: np.ndarray, manifest: Manifest) -> np.ndarray:
-    """The model's output for ``samples``, checked to be one finite score per sample."""
+def _predict(model: Model, windows: Samples, manifest: Manifest) -> np.ndarray:
+    """The model's output for every sample, checked to be one finite score per sample.
+
+    The samples are built and predicted a part at a time (``part_sizes``), and the outputs
+    joined in order: the same as predicting all of them at once in the same batches.
+    """
+    per_part, batch = part_sizes(windows.sample_bytes)
+    output = np.concatenate(
+        [
+            _predict_part(model, windows.part(start, start + per_part), batch, manifest)
+            for start in range(0, len(windows), per_part)
+        ]
+    )
+    return _finite(output)
+
+
+def part_sizes(sample_bytes: int) -> tuple[int, int]:
+    """The samples of a part and of a batch of the model, for samples of ``sample_bytes``.
+
+    A part takes at most ``PART_BYTES`` (one sample at least) and is a whole number of
+    batches, so the model sees the same batches as on the whole input: a batch of ``BATCH``
+    samples, fewer when such a batch alone would take more than a part.
+    """
+    per_part = max(PART_BYTES // sample_bytes, 1)
+    batch = min(BATCH, per_part)
+    return per_part // batch * batch, batch
+
+
+def _predict_part(model: Model, samples: np.ndarray, batch: int, manifest: Manifest) -> np.ndarray:
+    """The model's output for ``samples``, checked to be of the manifest's shape."""
     try:
-        output = np.asarray(model.predict(samples, batch_size=BATCH, verbose=0))
+        output = np.asarray(model.predict(samples, batch_size=batch, verbose=0))
     except MemoryError:
         raise
     except Exception as error:  # noqa: BLE001 (any error of the model on its input)
@@ -273,6 +307,11 @@ def _predict(model: Model, samples: np.ndarray, manifest: Manifest) -> np.ndarra
             f"The model gave an output of shape {list(output.shape[1:])} per sample, the "
             f"manifest says {manifest.signature.output.shape}.",
         )
+    return output
+
+
+def _finite(output: np.ndarray) -> np.ndarray:
+    """``output``, checked to hold only finite numbers."""
     if bad := int(np.count_nonzero(~np.isfinite(output))):
         raise JobFailed(
             "output",
@@ -287,7 +326,8 @@ def _example(model: Model, manifest: Manifest) -> float | None:
     example = manifest.example
     if example is None:
         return None
-    output = _predict(model, np.asarray(example.input, dtype=np.float32), manifest)
+    samples = np.asarray(example.input, dtype=np.float32)
+    output = _finite(_predict_part(model, samples, BATCH, manifest))
     difference = float(np.max(np.abs(output - np.asarray(example.output, dtype=np.float64))))
     if difference > EXAMPLE_TOLERANCE:
         raise JobFailed(
