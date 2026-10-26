@@ -76,3 +76,17 @@ def test_an_estimated_warm_up_gets_twice_the_candles(
     monkeypatch.setattr(samples, "warm_up", lambda _: WarmUp(candles=30, kind="estimate"))
 
     assert sample_candles(parse_manifest(manifest)).height == 60 + SAMPLES
+
+
+def test_a_manifest_of_renko_triples_makes_samples(manifest: dict[str, Any]) -> None:
+    """The warm-up of Renko triples is an estimate: twice its candles leave samples."""
+    manifest["input"]["representation"] = {"id": "renko-triples@1"}
+    manifest["input"]["window"]["last"] = "current"
+    manifest["input"]["features"][-1] = {"name": "direction", "id": "renko-direction@1"}
+    parsed = parse_manifest(manifest)
+
+    made = build_input(sample_candles(parsed), parsed)
+
+    assert made.samples.shape[1:] == (25, 5)
+    assert len(made.samples) >= SAMPLES
+    assert set(made.samples[:, :, -1].ravel().tolist()) <= {-0.75, -0.25, 0.25, 0.75}

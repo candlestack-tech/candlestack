@@ -8,8 +8,8 @@ import polars as pl
 import pytest
 
 from candlestack.preprocessing import CATALOG
-from candlestack.preprocessing.blocks import NoParams, Samples
-from candlestack.preprocessing.manifest import Window
+from candlestack.preprocessing.blocks import ROW_ID, NoParams, Samples
+from candlestack.preprocessing.manifest import RESERVED_NAMES, Window
 
 NONE = NoParams()
 # Three 30-minute candles, labelled by their open time; volume as the data module gives it.
@@ -150,9 +150,64 @@ def test_a_hole_after_the_warm_up_is_an_error() -> None:
         window(frame, 2)
 
 
-def test_the_window_refuses_the_row_still_forming() -> None:
-    with pytest.raises(ValueError, match="last: current is not supported yet"):
+def forming(row_id: list[int], *features: list[float | None]) -> pl.DataFrame:
+    """Rows that span several candles: ``ts``, ``row_id`` and the features ``f0``, ..."""
+    frame = rows(*features) if features else rows([float(row) for row in range(len(row_id))])
+    return frame.insert_column(1, pl.Series(ROW_ID, row_id, dtype=pl.Int64))
+
+
+def test_the_current_window_is_the_last_finished_rows_and_the_row_still_forming() -> None:
+    # Rows 0 and 1 are one row at two candles, so row 0 is not finished; 1, 2 and 4 are.
+    frame = forming([0, 0, 1, 2, 2, 3])
+
+    made = window(frame, 3, "current")
+
+    # Row 3 is the first with two finished rows before it (1 and 2); row 4 is still the row of
+    # 3, so its sample replaces 3 by 4 on the same finished rows; row 5 has 4 finished too.
+    assert made.samples[:, :, 0].tolist() == [[1.0, 2.0, 3.0], [1.0, 2.0, 4.0], [2.0, 4.0, 5.0]]
+    assert made.ts.to_list() == [5400, 7200, 9000]
+    assert made.dropped == 3
+    assert made.samples.dtype == np.float32
+
+
+def test_a_current_window_of_one_row_is_every_row_as_it_stands() -> None:
+    made = window(forming([0, 0, 1], [1.0, 2.0, 3.0]), 1, "current")
+
+    assert made.samples.tolist() == [[[1.0]], [[2.0]], [[3.0]]]
+    assert made.dropped == 0
+
+
+def test_the_current_window_counts_finished_rows_from_the_first_complete_one() -> None:
+    frame = forming([0, 1, 2, 3, 3], [None, 1.0, 2.0, 3.0, 4.0])
+
+    made = window(frame, 2, "current")
+
+    # Row 0 is finished but incomplete; row 1 is the first finished row that counts.
+    assert made.samples[:, :, 0].tolist() == [[1.0, 2.0], [2.0, 3.0], [2.0, 4.0]]
+    assert made.dropped == 2
+
+
+def test_the_current_window_needs_as_many_finished_rows() -> None:
+    made = window(forming([0, 0, 0, 1]), 3, "current")
+
+    assert made.samples.shape == (0, 3, 1)
+    assert made.dropped == 4
+
+
+def test_the_current_window_never_reads_whether_its_own_row_is_finished() -> None:
+    """Whether a row is finished shows only on the next candle: a sample ending at a row is the
+    same whether the next row goes on with it or starts another."""
+    going_on = window(forming([0, 1, 2, 2]), 2, "current")
+    finished = window(forming([0, 1, 2, 3]), 2, "current")
+
+    assert going_on.samples[:2].tolist() == finished.samples[:2].tolist()
+
+
+def test_the_window_needs_the_rule_of_its_rows() -> None:
+    with pytest.raises(ValueError, match="last: current needs rows that span several candles"):
         window(rows([1.0]), 1, "current")
+    with pytest.raises(ValueError, match="last: closed needs rows finished at their own candle"):
+        window(forming([0]), 1, "closed")
 
 
 @pytest.mark.parametrize(("length", "rows_before"), [(1, 0), (25, 24)])
@@ -175,3 +230,7 @@ def test_the_window_needs_length_minus_one_earlier_rows(length: int, rows_before
 )
 def test_the_candle_blocks_need_no_earlier_candle(block: str) -> None:
     assert CATALOG[block].warm_up(NONE) == 0
+
+
+def test_no_feature_may_take_the_name_of_the_row_id() -> None:
+    assert ROW_ID in RESERVED_NAMES

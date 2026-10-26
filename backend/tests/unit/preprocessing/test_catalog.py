@@ -1,5 +1,6 @@
 """The catalog: what every block registers, and how the app reads it."""
 
+import math
 import re
 from typing import Literal
 
@@ -34,6 +35,7 @@ INDICATORS = {
 def test_the_blocks_are_registered() -> None:
     assert {block: CATALOG[block].step for block in CATALOG} == {
         "candles@1": "representation",
+        "renko-triples@1": "representation",
         "open@1": "feature",
         "high@1": "feature",
         "low@1": "feature",
@@ -41,6 +43,7 @@ def test_the_blocks_are_registered() -> None:
         "volume@1": "feature",
         "session-last-candle@1": "feature",
         **dict.fromkeys(INDICATORS, "feature"),
+        "renko-direction@1": "feature",
         "none@1": "normalization",
         "window@1": "window",
     }
@@ -68,6 +71,7 @@ def test_the_catalog_lists_the_blocks_by_step() -> None:
 
     assert [block.id for block in blocks] == [
         "candles@1",
+        "renko-triples@1",
         "open@1",
         "high@1",
         "low@1",
@@ -75,6 +79,7 @@ def test_the_catalog_lists_the_blocks_by_step() -> None:
         "volume@1",
         "session-last-candle@1",
         *INDICATORS,
+        "renko-direction@1",
         "none@1",
         "window@1",
     ]
@@ -101,6 +106,7 @@ def test_the_features_are_in_their_display_groups() -> None:
             ["open@1", "high@1", "low@1", "close@1", "volume@1", "session-last-candle@1"], "Candle"
         ),
         **INDICATORS,
+        "renko-direction@1": "Brick",
     }
 
 
@@ -136,19 +142,38 @@ def test_the_catalog_describes_an_indicator_with_its_defaults_and_warm_up() -> N
         ("adx@1", "20 * window"),
         ("ema@1", "7 * window"),
         ("macd-diff@1", "7 * (max(fast, slow) + signal)"),
+        ("renko-triples@1", "15 * atr_window - 1 + ceil(2 * (1 + 2 * atr_multiple))"),
     ],
 )
 def test_the_warm_up_rule_says_what_the_warm_up_counts(block: str, rule: str) -> None:
     """The rule the app shows, evaluated on the block's defaults, is the warm-up it counts."""
     params = CATALOG[block].params()
-    names = {"max": max, **params.model_dump()}
+    names = {"max": max, "ceil": math.ceil, **params.model_dump()}
 
     assert CATALOG[block].warm_up_rule == rule
     assert eval(rule, {"__builtins__": {}}, names) == CATALOG[block].warm_up(params)
 
 
 def test_only_a_representation_may_span_several_candles_a_row() -> None:
-    assert [block.id for block in CATALOG.values() if block.candles_per_row] == []
+    assert [block.id for block in CATALOG.values() if block.candles_per_row] == ["renko-triples@1"]
+
+
+def test_only_the_direction_of_a_triple_is_a_feature_of_the_rows() -> None:
+    assert {block.id: block.of_rows for block in CATALOG.values() if block.of_rows} == {
+        "renko-direction@1": "renko-triples@1"
+    }
+
+
+def test_the_catalog_describes_renko_triples_with_their_parameters() -> None:
+    triples = next(block for block in describe_catalog().blocks if block.id == "renko-triples@1")
+
+    assert (triples.step, triples.group) == ("representation", None)
+    assert [(p.name, p.type, p.default, p.options) for p in triples.params] == [
+        ("atr_multiple", "number", 0.6, None),
+        ("atr_window", "integer", 14, None),
+        ("atr_at", "string", "brick_start", ["brick_start"]),
+    ]
+    assert (triples.params[0].exclusive_minimum, triples.params[0].maximum) == (0, 10)
 
 
 def test_the_catalog_describes_the_window_and_its_parameters() -> None:

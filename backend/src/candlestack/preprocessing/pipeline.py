@@ -8,7 +8,7 @@ from typing import Literal
 import numpy as np
 import polars as pl
 
-from candlestack.preprocessing.blocks import CANDLE_COLUMNS, SESSION_LAST
+from candlestack.preprocessing.blocks import CANDLE_COLUMNS, ROW_ID, SESSION_LAST
 from candlestack.preprocessing.catalog import CATALOG, WINDOW
 from candlestack.preprocessing.checks import check_manifest
 from candlestack.preprocessing.manifest import Manifest
@@ -18,12 +18,15 @@ from candlestack.preprocessing.manifest import Manifest
 class ModelInput:
     """What the model gets, and what it was built from.
 
-    - ``rows``: ``ts`` and one Float64 column per feature, named as in the manifest and
-      normalized, one row per row of the representation;
+    - ``rows``: ``ts``, ``row_id`` for rows that span several candles (``blocks.window``),
+      and one Float64 column per feature, named as in the manifest and normalized, one row
+      per row of the representation;
     - ``samples``: float32 of shape ``(samples, window length, features)``;
     - ``ts``: Int64, one per sample, the candle at whose close it is known: its prediction goes
       to that candle (``signals.align`` joins on it as it is);
-    - ``dropped``: the rows at the start without a sample, the warm-up the report counts.
+    - ``dropped``: the candles at the start without a sample, the warm-up the report counts.
+      With rows that span several candles it is more than the window's dropped rows, as the
+      rows themselves start some candles in (Renko triples on the third brick).
     """
 
     rows: pl.DataFrame
@@ -86,12 +89,25 @@ def build_input(candles: pl.DataFrame, manifest: Manifest) -> ModelInput:
     frame = _checked(candles)
     spec = manifest.input
     rep = CATALOG[spec.representation.id]
-    rows: pl.DataFrame = rep.run(frame, rep.params.model_validate(spec.representation.params))
+    made_rows: pl.DataFrame = rep.run(frame, rep.params.model_validate(spec.representation.params))
+    keys = [name for name in ("ts", ROW_ID) if name in made_rows.columns]
+    # A feature of the candles is taken at each row's candle; a feature of the rows (the
+    # direction of a triple) comes from the rows themselves.
+    of_candles = [feature for feature in spec.features if CATALOG[feature.id].of_rows is None]
     values = frame.select(
         "ts",
-        *(_run(feature.id, frame, feature.params).alias(feature.name) for feature in spec.features),
+        *(_run(feature.id, frame, feature.params).alias(feature.name) for feature in of_candles),
     )
-    rows = rows.select("ts").join(values, on="ts", how="left", maintain_order="left")
+    joined = made_rows.select(keys).join(values, on="ts", how="left", maintain_order="left")
+    rows = joined.select(
+        *keys,
+        *(
+            joined[feature.name]
+            if CATALOG[feature.id].of_rows is None
+            else _run(feature.id, made_rows, feature.params).alias(feature.name)
+            for feature in spec.features
+        ),
+    )
     rows = rows.with_columns(
         _run(feature.norm.id, rows[feature.name], feature.norm.params)
         .cast(pl.Float64)
@@ -99,7 +115,8 @@ def build_input(candles: pl.DataFrame, manifest: Manifest) -> ModelInput:
         for feature in spec.features
     )
     made = CATALOG[WINDOW].run(rows, spec.window)
-    return ModelInput(rows=rows, samples=made.samples, ts=made.ts, dropped=made.dropped)
+    dropped = int(frame["ts"].search_sorted(made.ts[0])) if len(made.ts) else frame.height
+    return ModelInput(rows=rows, samples=made.samples, ts=made.ts, dropped=dropped)
 
 
 def _run(block_id: str, data: pl.DataFrame | pl.Series, params: dict[str, object]) -> pl.Series:

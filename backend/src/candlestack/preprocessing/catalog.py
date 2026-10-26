@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from candlestack.preprocessing import blocks
+from candlestack.preprocessing import blocks, renko
 from candlestack.preprocessing import indicators as ind
 from candlestack.preprocessing.manifest import Window
 
@@ -26,6 +26,7 @@ Group = Literal["Candle", "Bands", "Momentum", "Trend", "Volume", "Brick"]
 
 # The manifest's `input.window` holds the parameters of this block, the only window for now.
 WINDOW = "window@1"
+RENKO_TRIPLES = "renko-triples@1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +43,8 @@ class Block:
     - ``candles_per_row``: for a representation whose rows span several candles (Renko, Kagi),
       an estimate of the candles a row takes, from its parameters; None when every candle is a
       row, which makes the warm-up of a manifest exact;
+    - ``of_rows``: for a feature of the rows of a representation rather than of the candles
+      (the direction of a Renko triple), that representation: the feature takes its rows;
     - ``tunable``: the parameters a user may change on a trained model, for a later experiment
       mode (docs/preprocessing.md#what-the-user-chooses); none yet.
     """
@@ -56,6 +59,7 @@ class Block:
     group: Group | None = None
     needs_session: bool = False
     candles_per_row: Callable[[Any], float] | None = None
+    of_rows: str | None = None
     tunable: frozenset[str] = field(default_factory=frozenset)
 
 
@@ -236,6 +240,23 @@ CATALOG: Mapping[str, Block] = MappingProxyType(
                 description="Every candle a row",
                 run=blocks.candles,
             ),
+            Block(
+                id=RENKO_TRIPLES,
+                step="representation",
+                description=(
+                    "Rows of three Renko bricks on the close, each brick atr_multiple ATRs high "
+                    "at the candle that starts it: one row per candle from the third brick on"
+                ),
+                run=renko.renko_triples,
+                params=renko.RenkoTriples,
+                warm_up=renko.warm_up,
+                warm_up_rule=(
+                    f"{ind.WILDER_WINDOWS + 1} * atr_window - 1 + "
+                    f"ceil({renko.BRICKS_PER_ROW - 1} * ({renko.CANDLES_PER_BRICK:g} + "
+                    f"{renko.CANDLES_PER_BRICK_PER_ATR:g} * atr_multiple))"
+                ),
+                candles_per_row=renko.candles_per_row,
+            ),
             *(_candle_column(name) for name in blocks.CANDLE_COLUMNS),
             Block(
                 id="session-last-candle@1",
@@ -250,6 +271,17 @@ CATALOG: Mapping[str, Block] = MappingProxyType(
             ),
             *_INDICATORS,
             Block(
+                id="renko-direction@1",
+                step="feature",
+                description=(
+                    "The direction of a Renko triple: half the middle brick's direction plus a "
+                    "quarter of the current one's (-0.75, -0.25, 0.25 or 0.75)"
+                ),
+                run=renko.direction,
+                group="Brick",
+                of_rows=RENKO_TRIPLES,
+            ),
+            Block(
                 id="none@1",
                 step="normalization",
                 description="No normalization: the values as they are",
@@ -258,7 +290,10 @@ CATALOG: Mapping[str, Block] = MappingProxyType(
             Block(
                 id=WINDOW,
                 step="window",
-                description="The last rows up to each row make one sample",
+                description=(
+                    "The last rows up to each row make one sample; with last current, the "
+                    "last finished rows and the row still forming"
+                ),
                 run=blocks.window,
                 params=Window,
                 warm_up=blocks.window_warm_up,
@@ -322,7 +357,8 @@ _STEP_ORDER: tuple[Step, ...] = ("representation", "feature", "normalization", "
 
 def _param(name: str, schema: dict[str, Any], *, required: bool, tunable: bool) -> ParamOut:
     """A parameter as the app shows it, from the JSON Schema of its field."""
-    options = schema.get("enum")
+    # A choice of one value (a Literal of one) is a `const` in JSON Schema.
+    options = schema.get("enum", [schema["const"]] if "const" in schema else None)
     return ParamOut(
         name=name,
         type=schema.get("type", "string"),

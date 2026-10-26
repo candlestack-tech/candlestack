@@ -11,6 +11,7 @@ field is refused rather than ignored, since a manifest that says more than Candl
 would describe an input it does not build.
 """
 
+from types import MappingProxyType
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, FailFast, Field, field_validator
@@ -35,8 +36,11 @@ FEATURES_MAX = 256
 PARAMS_MAX = 32
 AXES_MAX = 8
 
-# The time of a row (``ts``) is a column of the rows next to the features.
-RESERVED_NAMES = frozenset({"ts"})
+# Columns of the rows next to the features, with what each holds: the time of a row, and for
+# rows that span several candles the id that tells which of them are finished.
+RESERVED_NAMES = MappingProxyType(
+    {"ts": "the time of each row", "row_id": "the id of each row still forming"}
+)
 
 NONE = "none@1"
 
