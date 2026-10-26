@@ -7,9 +7,10 @@ data) and run operators of other domains that a library registers (custom operat
 check refuses both and accepts only what the worker runs. Two checks, in order, as for Keras:
 
 - ``opens``: the file parses as an ONNX model with a graph, keeps every tensor inside the file
-  (no external data), uses operators of the standard domains only (``ai.onnx``, ``ai.onnx.ml``;
-  no custom domain, no local function of one), has one float32 input and one float32 output,
-  each with every axis but the first (the batch, which must be dynamic) of a fixed size, and
+  (no external data, in local functions too), uses operators of the standard domains only
+  (``ai.onnx``, ``ai.onnx.ml``; no custom domain, no local function of one, none imported),
+  has one float32 input and one float32 output, each with every axis but the first (the
+  batch, which must be dynamic) of a fixed size, and
   passes the ONNX checker (``onnx.checker``, without shape inference).
 - ``weights``: the graph holds weights (initializers or constant tensors), and no tensor
   declares more values than it stores.
@@ -110,11 +111,17 @@ def _weights(detail: str) -> CheckFailed:
 
 def _graphs(model: ModelProto) -> Iterator[GraphProto]:
     """The model's graph, every graph nested in one (the branches of ``If``, the bodies of
-    ``Loop`` and ``Scan``) and those of its training info. Walks them with a stack of its own,
+    ``Loop`` and ``Scan``), those of its training info and its local functions, each as a
+    graph of its nodes and the defaults of its attributes. Walks them with a stack of its own,
     as protobuf bounds how deep they nest."""
     stack = [model.graph]
     for info in model.training_info:
         stack += [info.initialization, info.algorithm]
+    # onnxruntime inlines a function: a Constant in it reads external data as one in the graph.
+    stack += [
+        GraphProto(node=[*function.node, NodeProto(attribute=function.attribute_proto)])
+        for function in model.functions
+    ]
     while stack:
         graph = stack.pop()
         yield graph
@@ -123,14 +130,6 @@ def _graphs(model: ModelProto) -> Iterator[GraphProto]:
                 if attribute.HasField("g"):
                     stack.append(attribute.g)
                 stack.extend(attribute.graphs)
-
-
-def _nodes(model: ModelProto, graphs: list[GraphProto]) -> Iterator[NodeProto]:
-    """Every node: of the graphs and of the model's local functions."""
-    for graph in graphs:
-        yield from graph.node
-    for function in model.functions:
-        yield from function.node
 
 
 def _tensors(graphs: list[GraphProto]) -> Iterator[TensorProto]:
@@ -164,11 +163,13 @@ def _check_domains(model: ModelProto, graphs: list[GraphProto]) -> None:
     """Fails unless the model imports and its nodes and functions use the standard domains
     only."""
     used = [entry.domain for entry in model.opset_import]
-    used += [function.domain for function in model.functions]
-    used += [node.domain for node in _nodes(model, graphs)]
+    for function in model.functions:
+        used += [function.domain, *(entry.domain for entry in function.opset_import)]
+    used += [node.domain for graph in graphs for node in graph.node]
     custom = next((domain for domain in used if domain not in DOMAINS), None)
     if custom is not None:
-        shown = _shown(custom) or "a domain without a name"
+        # protobuf gives a name that is not UTF-8 as bytes.
+        shown = (isinstance(custom, str) and _shown(custom)) or "a domain without a name"
         raise _opens(
             f'The model uses operators of the domain "{shown}" (custom operators), which '
             "CandleStack does not run. Export the model with the standard ONNX operators "

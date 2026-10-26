@@ -250,6 +250,91 @@ def test_a_local_function_fails_opens(tmp_path: Path) -> None:
     assert opens_fails(tmp_path, model).startswith('The model uses operators of the domain "local"')
 
 
+def scaled(function: onnx.FunctionProto) -> onnx.ModelProto:
+    """The small model with its MatMul replaced by `function`, a local function of the
+    standard domain named Scale."""
+    model = build(
+        nodes=[
+            helper.make_node("ReduceMean", ["candles"], ["means"], axes=[1], keepdims=0),
+            helper.make_node("Scale", ["means"], ["output"]),
+        ]
+    )
+    model.functions.append(function)
+    return model
+
+
+def test_external_data_in_a_local_function_fails_opens(tmp_path: Path) -> None:
+    # onnxruntime inlines the function and reads the file the Constant names.
+    function = helper.make_function(
+        "",
+        "Scale",
+        ["x"],
+        ["y"],
+        [
+            helper.make_node("Constant", [], ["factors"], value=external(weights())),
+            helper.make_node("MatMul", ["x", "factors"], ["y"]),
+        ],
+        [helper.make_opsetid("", 17)],
+    )
+
+    assert opens_fails(tmp_path, scaled(function)).startswith("The model keeps its weights in")
+
+
+def test_external_data_in_a_default_of_a_local_function_fails_opens(tmp_path: Path) -> None:
+    function = helper.make_function(
+        "",
+        "Scale",
+        ["x"],
+        ["y"],
+        [helper.make_node("MatMul", ["x", "x"], ["y"])],
+        [helper.make_opsetid("", 17)],
+    )
+    function.attribute_proto.append(helper.make_attribute("factors", external(weights())))
+
+    assert opens_fails(tmp_path, scaled(function)).startswith("The model keeps its weights in")
+
+
+def test_an_opset_a_local_function_imports_fails_opens(tmp_path: Path) -> None:
+    function = helper.make_function(
+        "",
+        "Scale",
+        ["x"],
+        ["y"],
+        [helper.make_node("MatMul", ["x", "x"], ["y"])],
+        [helper.make_opsetid("", 17), helper.make_opsetid("com.microsoft", 1)],
+    )
+
+    assert opens_fails(tmp_path, scaled(function)).startswith(
+        'The model uses operators of the domain "com.microsoft"'
+    )
+
+
+def test_weights_in_a_local_function_count(tmp_path: Path) -> None:
+    function = helper.make_function(
+        "",
+        "Scale",
+        ["x"],
+        ["y"],
+        [
+            helper.make_node("Constant", [], ["factors"], value=weights()),
+            helper.make_node("MatMul", ["x", "factors"], ["y"]),
+        ],
+        [helper.make_opsetid("", 17)],
+    )
+    model = scaled(function)
+    del model.graph.initializer[:]
+
+    assert inspect_onnx(save(tmp_path, model)).parameters == 5
+
+
+def test_a_domain_that_is_not_utf8_fails_opens(tmp_path: Path) -> None:
+    model = build()
+    model.graph.node[0].domain = "ZZZZ"
+    content = model.SerializeToString().replace(b"ZZZZ", b"\xff\xfe\xfd\xfc")
+
+    assert 'domain "a domain without a name"' in opens_fails(tmp_path, content)
+
+
 def test_an_imported_domain_without_a_name_is_shown_so(tmp_path: Path) -> None:
     model = build(opsets=[helper.make_opsetid("", 17), helper.make_opsetid("\u200b", 1)])
 

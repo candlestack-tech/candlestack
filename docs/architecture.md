@@ -258,9 +258,10 @@ flowchart LR
   of the domains a library registers, so the check accepts only what the worker runs as it is.
   `opens` fails for a file that does not parse as an ONNX model with a graph
   (`onnx.load(path, load_external_data=False)`), a tensor anywhere (initializers, sparse ones,
-  `Constant` and other attributes, the graphs of `If`, `Loop` and `Scan`, the training info)
-  that keeps its data in another file, an operator, an imported opset or a local function of
-  another domain than the standard `ai.onnx` (or `""`) and `ai.onnx.ml` (so no
+  `Constant` and other attributes, the graphs of `If`, `Loop` and `Scan`, the training info,
+  local functions, which onnxruntime inlines) that keeps its data in another file, an
+  operator, an opset the model or a local function imports, or a local function of another
+  domain than the standard `ai.onnx` (or `""`) and `ai.onnx.ml` (so no
   `com.microsoft` and no custom operators; the detail names the domain), not exactly one input
   (initializers listed among the inputs, as before IR version 4, are none) and one output, an
   input or output that is not a float32 tensor, says no shape, has fewer than 2 or more than 8
