@@ -22,7 +22,11 @@ CANDLES = pl.DataFrame(
         "volume": [100.0, 200.0, 300.0, 400.0, 500.0],
     }
 )
-INDICATORS = [block for block in CATALOG.values() if block.group not in ("Candle", None)]
+INDICATORS = [
+    block
+    for block in CATALOG.values()
+    if block.group not in ("Candle", None) and block.of_rows is None
+]
 
 
 def run(block: str, frame: pl.DataFrame = CANDLES, **params: Any) -> list[float | None]:

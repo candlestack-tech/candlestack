@@ -1,6 +1,7 @@
 """The checks of a manifest on upload (docs/preprocessing.md, checks 2 and 3): one problem in
 plain words per check that fails."""
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ from candlestack.preprocessing import (
 )
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "keras"
-BLESK_NO_VOL = {
+BLESK_NO_VOL: dict[str, Any] = {
     "version": 1,
     "input": {
         "timeframe": "30m",
@@ -55,22 +56,66 @@ def test_the_manifest_without_preprocessing_can_run(raw: dict[str, Any]) -> None
 def test_blocks_still_to_come_parse_but_cannot_run() -> None:
     manifest = parse_manifest(BLESK_NO_VOL)
 
-    assert unknown_blocks(manifest) == ["renko-triples@1", "blesk-norm@1"]
+    assert unknown_blocks(manifest) == ["blesk-norm@1"]
     assert check_manifest(manifest) == [
         ManifestProblem(
-            "catalog",
-            (
-                (
-                    "The catalog has no blocks renko-triples@1 and blesk-norm@1 yet, so it "
-                    "cannot run."
-                ),
-                (
-                    'The window option last "current" is not supported yet. It needs rows that '
-                    "span several candles, such as Renko bricks."
-                ),
-            ),
+            "catalog", ("The catalog has no block blesk-norm@1 yet, so it cannot run.",)
         )
     ]
+
+
+def blesk_without_normalization() -> dict[str, Any]:
+    document = copy.deepcopy(BLESK_NO_VOL)
+    for feature in document["input"]["features"]:
+        del feature["norm"]
+    return document
+
+
+def test_renko_triples_with_the_current_window_can_run() -> None:
+    document = blesk_without_normalization()
+    document["input"]["features"][2]["id"] = "renko-direction@1"
+
+    assert problems(document) == {}
+
+
+def test_the_current_window_needs_rows_that_span_several_candles(raw: dict[str, Any]) -> None:
+    raw["input"]["window"]["last"] = "current"
+
+    assert problems(raw) == {
+        "catalog": 'The window option last "current" needs rows that span several candles, such '
+        'as renko-triples@1, but each row of candles@1 is finished at its candle. Use "closed".'
+    }
+
+
+def test_renko_triples_need_the_current_window() -> None:
+    document = blesk_without_normalization()
+    document["input"]["window"]["last"] = "closed"
+
+    assert problems(document) == {
+        "catalog": "The rows of renko-triples@1 span several candles, so the window needs last "
+        '"current": the last finished rows and the row still forming. "closed" is not '
+        "supported with it."
+    }
+
+
+def test_the_direction_of_a_triple_needs_the_triples(raw: dict[str, Any]) -> None:
+    raw["input"]["features"][3] = {"name": "direction", "id": "renko-direction@1"}
+
+    assert problems(raw) == {
+        "catalog": "input.features[3] is renko-direction@1, a column of the rows of "
+        "renko-triples@1, but the representation is candles@1."
+    }
+
+
+def test_the_renko_parameters_are_checked() -> None:
+    document = blesk_without_normalization()
+    document["input"]["representation"]["params"] = {"atr_multiple": 0, "atr_at": "brick_end"}
+
+    assert problems(document) == {
+        "params": "input.representation.params.atr_multiple: Input should be greater than 0 "
+        "(renko-triples@1). input.representation.params.atr_at: Input should be 'brick_start' "
+        "(renko-triples@1)."
+    }
 
 
 def test_one_unknown_block(raw: dict[str, Any]) -> None:
@@ -126,11 +171,13 @@ def test_parameters_of_a_block_in_the_wrong_step_are_not_checked(raw: dict[str, 
 def test_duplicate_and_reserved_feature_names(raw: dict[str, Any]) -> None:
     for feature in raw["input"]["features"][1:3]:
         feature["name"] = "open"
+    raw["input"]["features"][3]["name"] = "row_id"
     raw["input"]["features"][4]["name"] = "ts"
 
     assert problems(raw) == {
         "names": "The feature name open is used 3 times. Each feature needs a name of its own. "
-        "The feature name ts is taken by the time of each row. Rename the feature."
+        "The feature name row_id is taken by the id of each row still forming. Rename the "
+        "feature. The feature name ts is taken by the time of each row. Rename the feature."
     }
 
 

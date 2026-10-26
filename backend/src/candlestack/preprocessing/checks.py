@@ -15,7 +15,7 @@ from typing import Any, Literal
 from pydantic import ValidationError
 from pydantic_core import ErrorDetails
 
-from candlestack.preprocessing.catalog import CATALOG, Step
+from candlestack.preprocessing.catalog import CATALOG, RENKO_TRIPLES, Step
 from candlestack.preprocessing.manifest import RESERVED_NAMES, VERSION, Manifest
 
 Check = Literal["schema", "catalog", "params", "names", "signature", "example", "model"]
@@ -184,11 +184,34 @@ def _catalog(manifest: Manifest) -> list[str]:
                 f"{step.where} is {step.id}, which marks the last candle of each trading "
                 f"session, but {session} candles have no sessions. Use it with the regular session."
             )
-    if manifest.input.window.last == "current":
+    rep = CATALOG.get(manifest.input.representation.id)
+    if rep is not None and rep.step == "representation":
+        found += _fits_representation(manifest, rep.id, forming=rep.candles_per_row is not None)
+    return found
+
+
+def _fits_representation(manifest: Manifest, rep: str, *, forming: bool) -> list[str]:
+    """The features of rows and the window rule against the rows the representation makes."""
+    found = []
+    for index, feature in enumerate(manifest.input.features):
+        block = CATALOG.get(feature.id)
+        if block is not None and block.of_rows is not None and block.of_rows != rep:
+            found.append(
+                f"input.features[{index}] is {feature.id}, a column of the rows of "
+                f"{block.of_rows}, but the representation is {rep}."
+            )
+    last = manifest.input.window.last
+    if last == "current" and not forming:
         found.append(
-            'The window option last "current" is not supported yet. It needs rows that span '
-            "several candles, such as Renko bricks."
+            f'The window option last "current" needs rows that span several candles, such as '
+            f'{RENKO_TRIPLES}, but each row of {rep} is finished at its candle. Use "closed".'
         )
+    if last == "closed" and forming:
+        found.append(
+            f'The rows of {rep} span several candles, so the window needs last "current": the '
+            'last finished rows and the row still forming. "closed" is not supported with it.'
+        )
+    return found
     return found
 
 
@@ -217,7 +240,7 @@ def _names(manifest: Manifest) -> list[str]:
         if count > 1
     ]
     found += [
-        f"The feature name {name} is taken by the time of each row. Rename the feature."
+        f"The feature name {name} is taken by {RESERVED_NAMES[name]}. Rename the feature."
         for name in counts
         if name in RESERVED_NAMES
     ]

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 from candlestack.preprocessing import (
     CATALOG,
     Block,
+    Manifest,
     WarmUp,
     build_input,
     checks,
@@ -151,11 +152,11 @@ def test_candles_without_session_marks_cannot_give_the_last_candle(raw: dict[str
 
 
 def test_a_manifest_that_cannot_run_is_refused(raw: dict[str, Any]) -> None:
-    raw["input"]["representation"]["id"] = "renko-triples@1"
+    raw["input"]["representation"]["id"] = "kagi@1"
 
     with pytest.raises(
         ValueError,
-        match=r"^The manifest cannot run: The catalog has no block renko-triples@1 yet",
+        match=r"^The manifest cannot run: The catalog has no block kagi@1 yet",
     ):
         build_input(candles(30), parse_manifest(raw))
 
@@ -232,6 +233,124 @@ def test_the_exact_warm_up_is_what_the_build_drops(raw: dict[str, Any]) -> None:
     manifest = parse_manifest(raw)
 
     assert build_input(candles(40), manifest).dropped == warm_up(manifest).candles
+
+
+# The BLESK NO-VOL input (docs/preprocessing.md) without what is still to come: its
+# normalization and the four rel_* columns.
+BLESK_FEATURES = [
+    ("bb_bbh", "bollinger-high@1", {"window": 20, "dev": 2.0}),
+    ("bb_bbl", "bollinger-low@1", {"window": 20, "dev": 2.0}),
+    ("kch_high", "keltner-high@1", {}),
+    ("kch_low", "keltner-low@1", {}),
+    ("squeeze", "squeeze@1", {}),
+    ("rsi", "rsi@1", {"window": 20}),
+    ("roc", "roc@1", {}),
+    ("tsi", "tsi@1", {}),
+    ("atr", "atr@1", {}),
+    ("adx", "adx@1", {}),
+    ("aroon_up", "aroon-up@1", {}),
+    ("aroon", "aroon@1", {}),
+    ("aroon_down", "aroon-down@1", {}),
+    ("sma", "sma@1", {}),
+    ("ema20", "ema@1", {"window": 20}),
+    ("ema50", "ema@1", {"window": 50}),
+    ("macd_diff", "macd-diff@1", {}),
+    ("direction", "renko-direction@1", {}),
+    ("is_last_bar", "session-last-candle@1", {}),
+]
+
+
+def renko(features: list[tuple[str, str, dict[str, Any]]], length: int = 25) -> Manifest:
+    return parse_manifest(
+        {
+            "version": 1,
+            "input": {
+                "timeframe": "30m",
+                "session": "regular",
+                "representation": {
+                    "id": "renko-triples@1",
+                    "params": {"atr_multiple": 0.6, "atr_window": 14, "atr_at": "brick_start"},
+                },
+                "features": [
+                    {"name": name, "id": block, "params": params}
+                    for name, block, params in features
+                ],
+                "window": {"length": length, "last": "current"},
+            },
+            "signature": {
+                "input": {"shape": [length, len(features)], "dtype": "float32"},
+                "output": {"shape": [1], "dtype": "float32", "meaning": "score"},
+            },
+        }
+    )
+
+
+def walk(count: int, seed: int = 0) -> pl.DataFrame:
+    """A random walk of 30-minute candles, every 13th the last of its session."""
+    rng = np.random.default_rng(seed)
+    close = 100 * np.exp(np.cumsum(rng.normal(0, 0.01, count)))
+    open_ = np.concatenate(([100.0], close[:-1]))
+    spread = np.abs(rng.normal(0, 0.004, count))
+    return pl.DataFrame(
+        {
+            "ts": np.arange(count, dtype=np.int64) * 1800,
+            "open": open_,
+            "high": np.maximum(open_, close) * (1 + spread),
+            "low": np.minimum(open_, close) * (1 - spread),
+            "close": close,
+            "volume": rng.uniform(1_000, 100_000, count),
+            "session_last": np.arange(count) % 13 == 12,
+        }
+    )
+
+
+def test_the_blesk_input_without_its_normalization_is_25_rows_of_triples() -> None:
+    manifest = renko(BLESK_FEATURES)
+    frame = walk(1000)
+
+    built = build_input(frame, manifest)
+
+    assert built.samples.shape[1:] == (25, 19)
+    assert len(built.samples) > 0
+    assert np.isfinite(built.samples).all()
+    assert built.rows.columns == ["ts", "row_id", *(name for name, _, _ in BLESK_FEATURES)]
+    assert warm_up(manifest) == WarmUp(candles=350 + 53, kind="estimate")
+    # The estimate is long enough: the first sample comes before it.
+    first = int(frame["ts"].search_sorted(built.ts[0]))
+    assert first <= warm_up(manifest).candles
+
+
+def test_a_triple_takes_the_candle_features_at_its_candle_and_its_own_direction() -> None:
+    frame = walk(400)
+    manifest = renko([("close", "close@1", {}), ("direction", "renko-direction@1", {})], 1)
+
+    built = build_input(frame, manifest)
+
+    triples = CATALOG["renko-triples@1"].run(frame, CATALOG["renko-triples@1"].params())
+    at_candle = triples.join(frame.select("ts", "close"), on="ts", how="left")
+    assert built.rows["ts"].equals(triples["ts"])
+    assert built.rows["row_id"].equals(triples["row_id"])
+    assert built.rows["close"].equals(at_candle["close"])
+    assert built.rows["direction"].equals(triples["direction"])
+    assert (
+        built.samples[:, 0, :].tolist()
+        == built.rows.select("close", "direction").to_numpy().astype(np.float32).tolist()
+    )
+
+
+def test_the_current_window_of_triples_ends_at_each_candle() -> None:
+    frame = walk(600)
+
+    built = build_input(frame, renko([("close", "close@1", {})], 3))
+
+    rows = built.rows.with_row_index()
+    finished = rows.filter(pl.col("row_id") != pl.col("row_id").shift(-1))["index"].to_list()
+    # Each sample is the two finished rows before its candle, then the row of its candle.
+    for sample, ts in zip(built.samples, built.ts, strict=True):
+        index = int(rows.filter(pl.col("ts") == ts)["index"][0])
+        earlier = [row for row in finished if row < index][-2:]
+        expected = rows["close"].gather([*earlier, index]).cast(pl.Float32).to_list()
+        assert sample[:, 0].tolist() == expected
 
 
 class Lag(BaseModel):

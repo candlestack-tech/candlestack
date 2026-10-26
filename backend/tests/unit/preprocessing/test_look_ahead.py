@@ -4,6 +4,7 @@ for whole manifests, as the engine's ``test_data_after_a_candle_changes_nothing_
 does for the loop. A block registered in the catalog is in these tests at once; the blocks
 made up at the end, which do look ahead, show that the tests can fail."""
 
+import itertools
 import random
 from collections.abc import Callable
 from typing import Any
@@ -21,17 +22,24 @@ from candlestack.preprocessing import (
     parse_manifest,
     pipeline,
 )
-from candlestack.preprocessing.blocks import NoParams
+from candlestack.preprocessing.blocks import ROW_ID, NoParams
 
-# Enough candles for the longest warm-up of the catalog's defaults (280, RSI and ADX) and a
-# window of 25 after it (test_the_candles_outlast_every_warm_up).
-ROWS = 400
+# Enough candles for the longest warm-up of the catalog's defaults (350, the EMA of 50) and a
+# window of 25 after it, of Renko triples too (test_the_candles_outlast_every_warm_up).
+ROWS = 500
 SEEDS = range(20)
 STEP = 1800
 # The parameters the blocks run with here. A block whose parameters have no defaults needs an
 # entry, or its test fails.
 PARAMS: dict[str, list[dict[str, Any]]] = {
-    "window@1": [{"length": 1}, {"length": 5}, {"length": 25}],
+    "window@1": [
+        {"length": 1},
+        {"length": 5},
+        {"length": 25},
+        {"length": 1, "last": "current"},
+        {"length": 5, "last": "current"},
+        {"length": 25, "last": "current"},
+    ],
 }
 # Leading rows still in their warm-up, per feature of the random rows: the same in every frame,
 # as a block's warm-up is.
@@ -82,6 +90,19 @@ def random_rows(rng: random.Random) -> pl.DataFrame:
     )
 
 
+def random_forming_rows(rng: random.Random) -> pl.DataFrame:
+    """Rows of the window that span several candles: a ``row_id`` that goes on or moves to
+    the next row at random."""
+    ids = list(itertools.accumulate(int(rng.random() < 0.5) for _ in range(ROWS)))
+    return random_rows(rng).insert_column(1, pl.Series(ROW_ID, ids, dtype=pl.Int64))
+
+
+def rows_of(representation: str) -> Make:
+    """The rows of a representation of random candles, which its features of the rows take."""
+    block = CATALOG[representation]
+    return lambda rng: block.run(random_candles(rng), block.params())
+
+
 def up_to_rows(frame: pl.DataFrame, row: int) -> pl.DataFrame:
     return frame.filter(pl.col("ts") <= row * STEP)
 
@@ -90,9 +111,13 @@ def up_to_values(values: pl.Series, row: int) -> pl.Series:
     return values.head(row + 1)
 
 
-def up_to_samples(made: Any, row: int) -> tuple[list[Any], list[int], int]:
+def up_to_samples(made: Any, row: int) -> tuple[list[Any], list[int], int | None]:
+    """The samples known by a row, and the rows dropped before them once there are any: with
+    rows that span several candles, where the first sample falls before it is known depends
+    on the later candles."""
     known = int((made.ts <= row * STEP).sum())
-    return made.samples[:known].tolist(), made.ts.head(known).to_list(), made.dropped
+    dropped = made.dropped if known else None
+    return made.samples[:known].tolist(), made.ts.head(known).to_list(), dropped
 
 
 def same(a: Any, b: Any) -> bool:
@@ -115,9 +140,13 @@ def params_of(block: Block) -> list[BaseModel]:
 def looks_ahead(block: Block, params: BaseModel, rng: random.Random) -> bool:
     """Whether replacing what comes after a row changes the block's output up to it."""
     make, up_to = STEPS[block.step]
+    if block.of_rows is not None:
+        make = rows_of(block.of_rows)
+    if getattr(params, "last", None) == "current":
+        make = random_forming_rows
     data = make(rng)
     full = block.run(data, params)
-    for row in rng.sample(range(ROWS - 1), 5):
+    for row in rng.sample(range(len(data) - 1), 5):
         changed = pl.concat([data.head(row + 1), make(rng).slice(row + 1)])
         if not same(up_to(block.run(changed, params), row), up_to(full, row)):
             return True
@@ -153,8 +182,8 @@ def manifest(
 
 
 def every_manifest() -> list[Manifest]:
-    """Manifests of every block of the catalog: each representation, with every feature under
-    every normalization, in every window."""
+    """Manifests of every block of the catalog: each representation, with every feature it
+    can have under every normalization, in every window that fits its rows."""
 
     def steps(step: str) -> list[dict[str, Any]]:
         return [
@@ -164,20 +193,37 @@ def every_manifest() -> list[Manifest]:
             for params in PARAMS.get(block.id, [{}])
         ]
 
-    features = [
-        {**feature, "name": f"{feature['id']} {norm['id']} {index}", "norm": norm}
-        for index, (feature, norm) in enumerate(
-            (feature, norm) for feature in steps("feature") for norm in steps("normalization")
-        )
-    ]
+    def features(representation: str) -> list[dict[str, Any]]:
+        fitting = [
+            feature
+            for feature in steps("feature")
+            if CATALOG[feature["id"]].of_rows in (None, representation)
+        ]
+        return [
+            {**feature, "name": f"{feature['id']} {norm['id']} {index}", "norm": norm}
+            for index, (feature, norm) in enumerate(
+                (feature, norm) for feature in fitting for norm in steps("normalization")
+            )
+        ]
+
+    def windows(representation: str) -> list[dict[str, Any]]:
+        last = "closed" if CATALOG[representation].candles_per_row is None else "current"
+        return [window for window in PARAMS["window@1"] if window.get("last", "closed") == last]
+
     return [
-        manifest(representation, features, window)
+        manifest(representation, features(representation["id"]), window)
         for representation in steps("representation")
-        for window in PARAMS["window@1"]
+        for window in windows(representation["id"])
     ]
 
 
 MANIFESTS = every_manifest()
+
+
+def test_every_manifest_makes_samples() -> None:
+    """A manifest whose candles end before its first sample would pass without a check."""
+    for manifest in MANIFESTS:
+        assert len(build_input(random_candles(random.Random(0)), manifest).samples) > 0
 
 
 def changes_up_to_a_row(manifest: Manifest, rng: random.Random) -> bool:
@@ -219,7 +265,11 @@ def test_the_manifests_cover_every_block() -> None:
 
 
 @pytest.mark.parametrize("seed", SEEDS)
-@pytest.mark.parametrize("manifest", MANIFESTS, ids=[str(m.input.window.length) for m in MANIFESTS])
+@pytest.mark.parametrize(
+    "manifest",
+    MANIFESTS,
+    ids=[f"{m.input.representation.id} {m.input.window.length}" for m in MANIFESTS],
+)
 def test_candles_after_a_row_change_nothing_of_the_input_up_to_it(
     manifest: Manifest, seed: int
 ) -> None:
@@ -265,6 +315,22 @@ LOOKING_AHEAD = [
 @pytest.mark.parametrize("block", LOOKING_AHEAD, ids=[block.id for block in LOOKING_AHEAD])
 def test_a_block_that_looks_ahead_is_caught(block: Block) -> None:
     assert looks_ahead(block, NoParams(), random.Random(0))
+
+
+def current_window_of_the_next_row_id(rows: pl.DataFrame, params: BaseModel) -> Any:
+    """A window that takes a row as finished when the row after the next one starts another:
+    it reads one candle too far."""
+    ahead = rows.with_columns(pl.col(ROW_ID).shift(-1).fill_null(pl.col(ROW_ID).max() + 1))
+    return CATALOG["window@1"].run(ahead, params)
+
+
+def test_a_current_window_that_reads_its_own_row_s_end_is_caught() -> None:
+    block = Block(
+        id="window@8", step="window", description="", run=current_window_of_the_next_row_id
+    )
+    params = CATALOG["window@1"].params.model_validate({"length": 5, "last": "current"})
+
+    assert looks_ahead(block, params, random.Random(0))
 
 
 def test_a_window_that_looks_ahead_is_caught() -> None:

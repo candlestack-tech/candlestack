@@ -8,8 +8,10 @@ prevents that: the **manifest** stored with every model, and the `preprocessing`
 turns candles into the model's input from it. It is the design agreed on 2026-10-18.
 
 Built so far: the `preprocessing` module (the manifest and its checks, the catalog and the
-first blocks: `candles@1`, `open@1` to `volume@1`, `session-last-candle@1`, the indicators of
-the BLESK models ([below](#the-indicators-of-the-blesk-models)), `none@1`, `window@1`), the
+first blocks: `candles@1`, `renko-triples@1` ([below](#renko-triples)), `open@1` to
+`volume@1`, `session-last-candle@1`, the indicators of the BLESK models
+([below](#the-indicators-of-the-blesk-models)), `renko-direction@1`, `none@1`, `window@1` with
+`last` `closed` and `current`), the
 catalog endpoint `GET /api/v1/preprocessing/catalog`, the manifest's JSON Schema,
 [manifest.schema.json](manifest.schema.json), the manifest stored with each model, and the
 worker that runs a model on its input with checks 4 and 5 below
@@ -64,8 +66,8 @@ is our own, and each manifest carries its version (`"version": 1`). It borrows f
 | `version` | `1`, the only version so far: a manifest of another version is refused, and one that still has the old field `"schema": "candlestack.manifest/1"` is told to replace it with `"version": 1` |
 | `input.timeframe`, `input.session` | the candles the model expects: a timeframe of the market data (`30m`), and `regular` (US trading hours) or `24/7` (around the clock, as crypto trades) |
 | `input.representation` | which rows the model sees: a catalog block and its parameters (`candles@1`, `renko@1`, ...) |
-| `input.features` | the columns in their exact order: each a name (not `ts`, the time of a row), a catalog block (`rsi@1`), its parameters and its normalization (`none@1` when left out) |
-| `input.window` | the parameters of `window@1`: `length`, how many rows make one sample (1 to 1000), and `last`, the rule for the last row (`closed`, the default, or `current`) |
+| `input.features` | the columns in their exact order: each a name (not `ts`, the time of a row, nor `row_id`, the id of a row still forming), a catalog block (`rsi@1`), its parameters and its normalization (`none@1` when left out) |
+| `input.window` | the parameters of `window@1`: `length`, how many rows make one sample (1 to 1000), and `last`, the rule for the last row (`closed`, the default, for rows finished at their candle such as `candles@1`; `current` for rows that span several candles such as `renko-triples@1`) |
 | `signature.input`, `signature.output` | shape without the batch axis, and dtype (`float32` only); must equal what the model file says |
 | `signature.output.meaning` | `score`: the sign is the direction, the size is compared with the threshold |
 | `example` | optional: samples of the model's input with the output the model must give for each ([below](#the-example-field)) |
@@ -125,11 +127,13 @@ features are the raw prices, nothing is normalized, a sample is the last 25 cand
 ### Example: the BLESK NO-VOL models (25 x 23)
 
 What the same schema says for the BLESK NO-VOL models, as far as research knows their pipeline
-([research #117]): indicators on the 30-minute candles, Renko bricks of 0.6 x ATR(14) of the
-brick's first candle, rows of three bricks taken at the candle where the third one ends, a
-window of the last 24 finished rows and the current one. It cannot run yet: the catalog has
-its indicators (`bollinger-high@1`, `rsi@1`, ...) but not `renko-triples@1`,
-`renko-direction@1` or `blesk-norm@1`, and the normalization formulas are not known.
+([research #117], [research #263]): indicators on the 30-minute candles, Renko bricks of
+0.6 x ATR(14) of the brick's first candle, rows of three bricks taken at the candle where the
+third one ends, a window of the last 24 finished rows and the current one. It cannot run yet:
+the catalog has its indicators (`bollinger-high@1`, `rsi@1`, ...), `renko-triples@1` and
+`renko-direction@1`, but not `blesk-norm@1` (its formulas are research #262's) nor the four
+`rel_*` columns. Without them, the manifest of the other 19 features (each with `none@1`)
+builds an input of `[25, 19]` already.
 
 The features are shortened to four here, so as written this manifest fails the signature
 check (4 features give `[25, 4]`, not `[25, 23]`). The full manifest has all 23, in this order
@@ -231,10 +235,10 @@ warm-up as a short expression of its parameters (`"0"`, `"length - 1"`) and its 
 
 | Step | In, out | Blocks, in the order they come |
 | --- | --- | --- |
-| representation | candles, rows: each row with `ts`, the candle at whose close it is known (labelled by its open time, [data.md](data.md#time)), and the row's own columns | `candles@1` (every candle a row); then `renko-triples@1`, `kagi@1`; later Heikin-Ashi, range bars, volume bars |
-| features | rows, the same rows with one column per feature, computed on the candles (later optionally on the bricks) | `open@1` ... `volume@1`; `session-last-candle@1` (1 on the last candle of its session, [below](#the-last-candle-of-a-session)); the indicators of the BLESK models ([below](#the-indicators-of-the-blesk-models)); then `renko-direction@1` |
+| representation | candles, rows: each row with `ts`, the candle at whose close it is known (labelled by its open time, [data.md](data.md#time)), and the row's own columns; rows that span several candles also give `row_id`, the same on the rows of one row still forming | `candles@1` (every candle a row); `renko-triples@1` (rows of three Renko bricks, one a candle, [below](#renko-triples)); then `kagi@1`; later Heikin-Ashi, range bars, volume bars |
+| features | rows, the same rows with one column per feature, computed on the candles and taken at each row's candle, or for a feature of the rows read from the rows | `open@1` ... `volume@1`; `session-last-candle@1` (1 on the last candle of its session, [below](#the-last-candle-of-a-session)); the indicators of the BLESK models ([below](#the-indicators-of-the-blesk-models)); `renko-direction@1`, a feature of the rows of `renko-triples@1` |
 | normalization | a column, the column scaled | `none@1`; then `blesk-norm@1`, a rolling z-score, price-relative; fitted numbers come only from the manifest, never from the backtest's own data |
-| window | rows, a `float32` array `(samples, length, features)` and the `ts` of each sample | `window@1`: the last `length` rows up to each row; `last: closed` (the default) ends a sample at the last finished row, `last: current` at the row still forming, which needs rows that span several candles, so it is refused until such a representation exists |
+| window | rows, a `float32` array `(samples, length, features)` and the `ts` of each sample | `window@1`: the last `length` rows up to each row. `last: closed` (the default) takes the `length` rows up to each row, each finished at its own candle, and needs rows that are (`candles@1`). `last: current` takes the `length - 1` most recent finished rows before each row and then the row, which may still be forming, and needs rows that span several candles (`renko-triples@1`); a manifest with the other rule is refused |
 
 - With `candles@1` every candle has a sample. With an event representation (Renko, Kagi) a
   candle without a new row repeats the last prediction: `signals.align(strict=False)` does
@@ -247,7 +251,8 @@ warm-up as a short expression of its parameters (`"0"`, `"length - 1"`) and its 
   it, its values do not depend on where the candles start. With `candles@1` the number is
   `exact`, and the build drops just that many rows. With rows that span several candles (Renko, Kagi) it is an `estimate` from
   the candles a row takes, so the run loads more and the report says how many the warm-up
-  used.
+  used. Renko bricks also depend on the candle they start on, which no warm-up removes
+  ([below](#renko-triples)).
 - A row with a missing, NaN or infinite feature at the start is warm-up: it is dropped and
   counted. One after a complete row is an error, so the model never gets a sample with a hole
   in it.
@@ -280,10 +285,10 @@ The recursive warm-ups come from the smoothing: after `7 * window` candles of an
 ADX smooths twice, and the TSI and the MACD chain two EMAs, so theirs are longer. With the
 defaults the longest is 280 candles (RSI and ADX), about 22 trading days of 30-minute candles.
 
-Not here: `direction` (`renko-direction@1`) comes with the Renko blocks. `rel_open`,
-`rel_high`, `rel_low` and `rel_close` exist only in the normalized data, and their formula is
-not known yet ([research #117]). `is_last_bar` is `session-last-candle@1`,
-[below](#the-last-candle-of-a-session).
+Not here: `direction` is `renko-direction@1`, the direction of a Renko triple
+([below](#renko-triples)). `rel_open`, `rel_high`, `rel_low` and `rel_close` exist only in
+the normalized data, and their formula is not known yet ([research #117]). `is_last_bar` is
+`session-last-candle@1`, [below](#the-last-candle-of-a-session).
 
 ### The last candle of a session
 
@@ -301,6 +306,73 @@ Crypto candles have no sessions, so the block needs `"session": "regular"`: a ma
 `24/7` candles that names it fails the `catalog` check ("candles have no sessions"), and
 candles without the marks make the build fail rather than give a column of zeros, which a
 model trained on stock sessions would read as "never the last candle".
+
+### Renko triples
+
+`renko-triples@1` makes the rows of the BLESK models: rows of three Renko bricks, one per
+candle. Its rules are research #263's ([research #263]), which rebuild the bricks and triples
+of the BLESK data on all 521 of its stocks (below).
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `atr_multiple` | 0.6 | the height of a brick in ATRs, above 0 and at most 10 |
+| `atr_window` | 14 | the candles of the ATR, `atr@1`'s window (2 to 1000) |
+| `atr_at` | `brick_start` | the candle whose ATR sizes a brick: the one that starts it, the only option |
+
+- **Bricks** are built on the close of each candle, in float64. A brick is `atr_multiple`
+  times the ATR (`atr@1`) of the candle that starts it high, and never changes afterwards.
+- **The first brick** lies on the first candle's mid price, `(high + low) / 2`, one height
+  high, without a direction.
+- **A new brick**: on each later candle the close is compared with the current brick
+  `[bottom, top]`. Inside it, edges included, nothing happens. Above `top` the new brick is the
+  cell that holds the close on a grid of the candle's brick height, anchored at `top`, and
+  the whole cells jumped over are counted as `skipped`; below `bottom` the same downwards. A
+  reversal needs no more than a continuation, one candle makes at most one brick however far
+  the close moved, and an overnight or weekend gap is a move like any other. A candle whose
+  ATR is 0 (candles that never moved) starts no brick.
+- **A row** is a triple: the two bricks before the current one and the current brick as it
+  stands at a candle's close, one row per candle from the third brick on, known at that
+  candle's close. Its columns: `ts`, `row_id` (the number of the current brick), `start` (the
+  `ts` of the first brick's first candle), `direction` (half the middle brick's direction plus
+  a quarter of the current one's: -0.75, -0.25, 0.25 or 0.75), and `bottom` and `top` (the
+  lowest bottom and the highest top of the three).
+- **Its features**: a feature of the candles takes its value at the row's candle (the
+  indicators, `session-last-candle@1`); `renko-direction@1` is the row's `direction`, and
+  needs `renko-triples@1`.
+- **Finished rows**: the rows of one `row_id` are one triple at successive candles, and the
+  last of them is finished: the next candle starts another brick. That is known only at the
+  next candle, so the rows carry no `finished` column. The window `last: current` tells a
+  finished row by the next row, and never reads whether its own last row is finished. A
+  sample is the 24 most recent finished rows before a candle's row and that row (research
+  #117), one sample per candle from the first with 24 finished rows after the warm-up.
+
+The **warm-up** is an `estimate`. The bricks start on the first candle whose ATR is out of its
+warm-up (`15 * atr_window - 1`, 209 candles for 14), so a brick's height is `atr_multiple`
+times the `atr` feature of its first candle whatever candle the load starts on. The first row
+waits for two more bricks, and a sample for 24 finished rows. A brick takes about
+`1 + 2 * atr_multiple` candles: on the 30-minute candles of the BLESK data a brick of 0.6 ATR
+takes 1.7 on average and under 1.8 on 95 % of the stocks, and the rule is above the 95 % of
+every multiple from 0.2 to 3, so the estimate is rather too long than too short. With the
+BLESK features the warm-up is 350 candles (the EMA of 50) and then 53 for the 24 rows: 403
+candles, about 31 trading days.
+
+**The bricks depend on the whole history** the build sees: each brick is anchored at the one
+before, back to the first brick on the first candle. The same candles always give the same
+bricks, but a backtest of another period loads candles from another first candle and gets
+other bricks, which mostly do not line up again: with our own ATR from the first candle of
+the BLESK data, the bricks of 170 of its 521 stocks line up with the BLESK bricks for good
+(12 of them from 2016, 35 only in 2026), and 351 never do. So the model sees bricks of the
+rules it was trained on, not the same bricks, and a backtest's samples depend a little on its
+start date; two runs of one period are the same.
+
+**Golden tests** (`tests/unit/preprocessing/test_supervisor_renko.py`, run where the BLESK
+data is): on all 521 stocks the brick loop with the BLESK ATR from the first candle of its
+indicators gives every row of its bricks (start, bottom, top, direction, skipped, finished),
+and the triples built from them every row of the structural columns of its triples (start,
+end, direction, finished, bottom, top and the OHLCV of both candles). Two kinds of exception,
+each handled narrowly: 187 closes on 136 stocks that lie on a line of the brick's grid within
+float rounding (at most 5 a stock), where the BLESK arithmetic picked the cell on the other
+side (research #263, R10); and 65 stocks whose bricks have no row for their first candle (R9).
 
 ## No look-ahead
 
@@ -370,17 +442,21 @@ Checks 1 to 3 read the files only and run on upload; 4 and 5 run the model in th
 - Golden tests on the supervisor's data, one per step so a failure points at it, run only where
   `CANDLESTACK_SUPERVISOR_DATA` names a local copy (as `test_supervisor.py`): candles to his
   `indicators` and the session marks to his `end_bar` (built:
-  `tests/unit/preprocessing/test_supervisor.py`), to `all_renkos`, to `all_triples`, to `normalized`, to the model input
+  `tests/unit/preprocessing/test_supervisor.py`), to `all_renkos` and to `all_triples`
+  (built: `tests/unit/preprocessing/test_supervisor_renko.py`), to `normalized`, to the model input
   `candles_x_values`, to his predictions. His data never goes into this repository.
 
 ## Open questions
 
 Kept for the supervisor until the pipeline is built, then asked together with what else is
 missing: his normalization formulas, the reward formula and `pocket_pivot`, the feature order
-of the 25 x 7 models, the window rule of the 25 x 28 and 25 x 7 models, whether Renko is built
-on the close or the high and low, and where his candles come from. Until then the research
+of the 25 x 7 models, the window rule of the 25 x 28 and 25 x 7 models, where his candles come
+from, and of the Renko bricks ([research #263]): how his ATR is started, why some stocks have
+no row for their first candle, whether a close exactly on a brick's edge stays in the brick
+(here it does), and the exact arithmetic of a close on a grid line. Until then the research
 tasks derive what they can from his data: normalization (#262), the Renko rules (#263), the
 reward and `pocket_pivot` (#264), and his predictions reproduced from raw candles (#265).
 
 [research #117]: https://github.com/candlestack-tech/research/blob/main/notes/117-supervisor-pipeline.md
 [research #118]: https://github.com/candlestack-tech/research/blob/main/notes/118-indicators.md
+[research #263]: https://github.com/candlestack-tech/research/blob/main/notes/263-renko-rules.md
