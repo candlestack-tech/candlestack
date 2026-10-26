@@ -5,6 +5,8 @@ manifest or its candles can be wrong, said in plain words."""
 import io
 import json
 import os
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -14,8 +16,10 @@ import polars as pl
 import pytest
 
 from candlestack.jobs import EXAMPLE_TOLERANCE, Job, JobFiles
+from candlestack.worker import model as keras_model
 from candlestack.worker import runner
 from candlestack.worker.model import load_keras
+from candlestack.worker.onnx_model import load_onnx
 from candlestack.worker.protocol import Outcome, Request
 from candlestack.worker.runner import FILE_MAX, INTERNAL, OUT_OF_MEMORY, main, run
 
@@ -258,7 +262,7 @@ class NotFinite:
 def test_numbers_that_are_not_finite_fail_the_job(
     make_job: Callable[..., Job], run_job: Callable[[Job], Outcome], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(runner, "load_keras", lambda *_: NotFinite())
+    monkeypatch.setattr(keras_model, "load_keras", lambda *_: NotFinite())
 
     result = run_job(make_job("check")).result
 
@@ -300,21 +304,22 @@ def raise_memory_error(*_: object) -> None:
 
 
 @pytest.mark.parametrize(
-    ("target", "replacement"),
+    ("module", "target", "replacement"),
     [
-        ("load_keras", raise_memory_error),
-        ("load_keras", lambda *_: TooLarge()),
-        ("build_input", raise_memory_error),
+        (keras_model, "load_keras", raise_memory_error),
+        (keras_model, "load_keras", lambda *_: TooLarge()),
+        (runner, "build_input", raise_memory_error),
     ],
 )
 def test_a_model_that_needs_more_memory_than_there_is_is_no_bug(
     make_job: Callable[..., Job],
     run_job: Callable[[Job], Outcome],
     monkeypatch: pytest.MonkeyPatch,
+    module: object,
     target: str,
     replacement: Callable[..., object],
 ) -> None:
-    monkeypatch.setattr(runner, target, replacement)
+    monkeypatch.setattr(module, target, replacement)
 
     outcome = run_job(make_job("check"))
 
@@ -360,3 +365,100 @@ def test_the_jobs_process_limits_itself_on_linux(
 
     assert limits == [("core", (0, 0)), ("fsize", (FILE_MAX, FILE_MAX))]
     assert oom_score_adj.read_text() == "1000"
+
+
+def test_an_onnx_model_predicts_with_onnxruntime(
+    make_job: Callable[..., Job],
+    make_candles: Callable[[int], pl.DataFrame],
+    run_job: Callable[[Job], Outcome],
+    files_dir: Path,
+    models: Path,
+) -> None:
+    job = make_job(suffix=".onnx")
+    candles = make_candles(100)
+    JobFiles(files_dir).write_candles(job.id, candles)
+
+    result = run_job(job).result
+
+    assert (result.status, result.samples, result.dropped) == ("done", 76, 24), result.error
+    assert result.runner is not None
+    assert (result.runner.keras, result.runner.backend) == (None, "onnxruntime")
+    predictions = JobFiles(files_dir).read_predictions(job.id)
+    assert predictions["ts"].to_list() == candles["ts"][24:].to_list()
+    # The same model, run here alone on the windows of the candles.
+    columns = candles.select("open", "high", "low", "close", "volume").to_numpy()
+    windows = np.stack([columns[end - 25 : end] for end in range(25, 101)]).astype(np.float32)
+    model = load_onnx(models / USER / "raw_candles.onnx", models.parent)
+    expected = model.predict(windows, batch_size=1024)[:, 0]
+    np.testing.assert_allclose(predictions["prediction"].to_numpy(), expected, atol=1e-6)
+
+
+def test_an_onnx_model_with_its_example_is_verified(
+    make_job: Callable[..., Job],
+    run_job: Callable[[Job], Outcome],
+    models: Path,
+    manifest: dict[str, Any],
+) -> None:
+    inputs = np.stack([np.full((25, 5), 101.0), np.linspace(95, 110, 125).reshape(25, 5)])
+    model = load_onnx(models / USER / "raw_candles.onnx", models.parent)
+    output = model.predict(inputs, batch_size=2)
+    document = {**manifest, "example": {"input": inputs.tolist(), "output": output.tolist()}}
+
+    result = run_job(make_job("check", manifest=document, suffix=".onnx")).result
+
+    assert (result.status, result.samples, result.verified) == ("done", 64, True)
+    assert result.example_difference is not None
+    assert result.example_difference <= EXAMPLE_TOLERANCE
+
+
+def test_an_onnx_file_onnxruntime_refuses_fails_the_job(
+    make_job: Callable[..., Job], run_job: Callable[[Job], Outcome], models: Path
+) -> None:
+    (models / USER / "broken.onnx").write_bytes(b"no model")
+
+    result = run_job(make_job("check", name="broken", suffix=".onnx")).result
+
+    assert result.reason == "load"
+    assert result.error is not None
+    assert result.error.startswith("onnxruntime could not load the model (")
+    assert result.error.endswith("Export the model to ONNX again and upload that file.")
+    assert result.runner is not None
+    assert result.runner.backend == "onnxruntime"
+
+
+def test_a_failure_before_the_framework_is_known_names_no_runner(
+    make_job: Callable[..., Job], run_job: Callable[[Job], Outcome], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(_model: str) -> None:
+        raise RuntimeError("a bug")
+
+    monkeypatch.setattr(runner, "framework_of", broken)
+
+    outcome = run_job(make_job("check"))
+
+    assert (outcome.result.reason, outcome.result.runner) == ("internal", None)
+
+
+def test_the_job_of_an_onnx_model_does_not_import_keras(
+    make_job: Callable[..., Job], models: Path, files_dir: Path
+) -> None:
+    request = Request(job=make_job("check", suffix=".onnx"), models_dir=models, files_dir=files_dir)
+    code = (
+        "import io, sys\n"
+        "from candlestack.worker import runner\n"
+        "out = io.StringIO()\n"
+        "runner.main(sys.stdin.buffer, out, limits=False)\n"
+        "print(out.getvalue())\n"
+        "print(sorted({'keras', 'jax', 'onnxruntime'} & set(sys.modules)))\n"
+    )
+
+    done = subprocess.run(
+        [sys.executable, "-c", code],
+        input=request.model_dump_json().encode(),
+        capture_output=True,
+        check=True,
+    )
+
+    outcome, imported = done.stdout.decode().strip().splitlines()
+    assert Outcome.model_validate_json(outcome).result.status == "done"
+    assert imported == "['onnxruntime']"

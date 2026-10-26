@@ -283,10 +283,11 @@ delete modals):
   Add manifest sit above it. Sizes are binary MB like the API's limits. The day goes through
   `src/lib/dates.ts` in the account's zone and date format.
 - Add a model (`UploadDialog`, exported for the dashboard): three steps, all in view
-  (`UploadParts.tsx`). 1, the model: a Keras file goes to `POST /api/v1/models?name=…` as the raw
-  body; an ONNX file says ONNX is coming soon, a PyTorch, TensorFlow or scikit-learn file says to
-  export it to ONNX, and any other file that it is not supported, all without a request (as does
-  a file over the limit). 2, the manifest: the file is read as JSON and sent to
+  (`UploadParts.tsx`). 1, the model: a Keras or ONNX file goes to `POST /api/v1/models?name=…` as
+  the raw body; a PyTorch, TensorFlow or scikit-learn file says to export it to ONNX, and any
+  other file that it is not supported, both without a request (as does a file over the limit). A
+  failed check shows the API's sentence under "Does not open as a safe model" or "No trained
+  weights in the file". 2, the manifest: the file is read as JSON and sent to
   `PUT /api/v1/models/{id}/manifest`; a file that is no JSON or over 1 MB fails before it is sent,
   and a refused one shows the API's sentences (`problems`, then how many more) in the step with
   Choose another file. A kept manifest folds into a line of facts (input, output, what it reads,

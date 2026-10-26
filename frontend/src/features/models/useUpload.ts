@@ -9,14 +9,13 @@ import { useModels, useSetManifest, useUploadModel } from './useModels';
 // Why the API did not keep a file: one of its checks failed (`opens`, `weights`), it is too
 // large, the storage is full, another upload of the user's is still running (`busy`), the user
 // has as many models as allowed (`count`), the upload took too long (`timeout`), or something
-// else went wrong on the way. Before any of that, the app turns away what is no Keras file: an
-// ONNX model (`soon`), a model of a framework that exports to ONNX (`export`) or any other file
-// (`unsupported`).
+// else went wrong on the way. Before any of that, the app turns away what is no Keras or ONNX
+// file: a model of a framework that exports to ONNX (`export`) or any other file (`unsupported`).
 type DetailKind = 'opens' | 'weights' | 'large' | 'busy' | 'count' | 'timeout' | 'other';
 export type UploadFailure =
   | { kind: DetailKind; detail: string }
   | { kind: 'storage'; used: number; quota: number }
-  | { kind: 'soon' | 'unsupported' }
+  | { kind: 'unsupported' }
   | { kind: 'export'; framework: Framework };
 
 // Why a manifest was not kept: the file is no JSON, it is larger than the API takes, a check
@@ -111,12 +110,11 @@ export function manifestFailureOf(error: unknown): ManifestFailure {
 // The largest manifest the API keeps (binary, as its limit).
 const MANIFEST_MAX_BYTES = 1024 * 1024;
 
-// What the app takes as a model file: Keras now. ONNX comes later, the other frameworks export to
-// ONNX, and any other file is no model the app takes.
+// What the app takes as a model file: Keras and ONNX. The other frameworks export to ONNX, and any
+// other file is no model the app takes.
 function refusedFormat(file: File): UploadFailure | null {
   const framework = frameworkOfFile(file.name);
-  if (framework === 'Keras') return null;
-  if (framework === 'ONNX') return { kind: 'soon' };
+  if (framework === 'Keras' || framework === 'ONNX') return null;
   if (framework) return { kind: 'export', framework };
   return { kind: 'unsupported' };
 }

@@ -398,7 +398,7 @@ test as soon as it is registered.
 | Format | Status | How it runs |
 | --- | --- | --- |
 | Keras `.keras` | uploads now | Keras 3 in the worker; Keras files saved with the PyTorch or JAX backend load the same |
-| ONNX `.onnx` | next | onnxruntime; standard operator domains only, no external data |
+| ONNX `.onnx` | uploads now | onnxruntime on the CPU in the worker; standard operator domains only (`ai.onnx`, `ai.onnx.ml`), no external data, a dynamic batch axis |
 | PyTorch, TensorFlow, scikit-learn, XGBoost, LightGBM | through ONNX | the upload page shows the export (`torch.onnx.export`, `tf2onnx`, `skl2onnx`, `onnxmltools`) |
 | pickle files (`.pt`, `.pth`, `.pkl`, `.joblib`), TensorFlow SavedModel | never | loading them can run any code |
 
@@ -410,12 +410,18 @@ preprocessing stays the same.
 Checks 1 to 3 read the files only and run on upload; 4 and 5 run the model in the worker.
 
 1. **The model file.** The static check that runs now
-   ([architecture.md](architecture.md#models)): a real model of allowed layers, with trained
-   weights. Then its interface, from the file:
+   ([architecture.md](architecture.md#models)): a real model of allowed layers (for ONNX, the
+   standard operators only, every tensor inside the file), with trained weights. Then its
+   interface, from the file:
    - exactly one input and one output (a model with several inputs is refused for now);
    - the input is `[batch, rows, features]`: three axes, a fixed number of rows and of
      features, `float32`;
    - the output is `[batch, 1]`: one score per sample.
+
+   An ONNX file is refused at upload unless it has one float32 input and one float32 output,
+   each with a dynamic batch axis and every other axis of a fixed size; a Keras file whose
+   config does not say a shape plainly is kept with that shape unknown, and its manifest then
+   cannot be compared (check 3).
 2. **The manifest.** Valid against the JSON Schema, which also caps the window at 1000 rows
    (the run loads the window's warm-up before its first day; 1000 rows of 30-minute candles
    are about 77 trading days) and what a manifest lists, far above any real model's: 256

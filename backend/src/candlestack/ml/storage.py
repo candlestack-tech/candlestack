@@ -18,13 +18,20 @@ from typing import Protocol
 
 import anyio
 
+from candlestack.ml.schemas import SUFFIXES, Framework
+
 logger = logging.getLogger(__name__)
 
 # An incoming file older than this was left by an upload that crashed.
 STALE_INCOMING = timedelta(hours=1)
 SWEEP_EVERY = timedelta(minutes=10)
 _INCOMING = ".incoming"
-_SUFFIX = ".keras"
+
+
+def model_file(user_id: str, model_id: str, framework: str) -> str:
+    """The file of the user's model of the format `framework` (``keras``, ``onnx``) relative
+    to the storage's directory, as a job names it: ``<user_id>/<model_id>.keras``."""
+    return f"{user_id}/{model_id}{SUFFIXES[Framework(framework)]}"
 
 
 class ModelStorage(Protocol):
@@ -33,8 +40,9 @@ class ModelStorage(Protocol):
         check); the caller removes it with `discard`."""
         ...
 
-    async def save(self, incoming: Path, user_id: str, model_id: str) -> None:
-        """Moves the finished file `incoming` to the place of the user's model."""
+    async def save(self, incoming: Path, user_id: str, model_id: str, framework: Framework) -> None:
+        """Moves the finished file `incoming` to the place of the user's model of the format
+        `framework`."""
         ...
 
     async def delete(self, user_id: str, model_id: str) -> None:
@@ -59,22 +67,23 @@ class ModelStorage(Protocol):
 
 
 class LocalModelStorage:
-    """The files in a directory: ``<user_id>/<model_id>.keras``, and the uploads in progress
-    as ``.incoming/<random>.part``, on the same filesystem, so a move is an atomic rename."""
+    """The files in a directory: ``<user_id>/<model_id>.keras`` or ``.onnx`` (``model_file``),
+    and the uploads in progress as ``.incoming/<random>.part``, on the same filesystem, so a
+    move is an atomic rename."""
 
     def __init__(self, root: Path) -> None:
         self._root = root
         self._incoming = root / _INCOMING
 
-    def path(self, user_id: str, model_id: str) -> Path:
-        """Where the file of the user's model is."""
-        return self._root / user_id / f"{model_id}{_SUFFIX}"
+    def path(self, user_id: str, model_id: str, framework: Framework) -> Path:
+        """Where the file of the user's model of the format `framework` is."""
+        return self._root / model_file(user_id, model_id, framework)
 
     def incoming_path(self) -> Path:
         return self._incoming / f"{secrets.token_hex(16)}.part"
 
-    async def save(self, incoming: Path, user_id: str, model_id: str) -> None:
-        target = self.path(user_id, model_id)
+    async def save(self, incoming: Path, user_id: str, model_id: str, framework: Framework) -> None:
+        target = self.path(user_id, model_id, framework)
 
         def move() -> None:
             target.parent.mkdir(exist_ok=True)
@@ -83,9 +92,12 @@ class LocalModelStorage:
         await anyio.to_thread.run_sync(move)
 
     async def delete(self, user_id: str, model_id: str) -> None:
-        await anyio.to_thread.run_sync(
-            partial(self.path(user_id, model_id).unlink, missing_ok=True)
-        )
+        # The row that says the format may be gone already: the file goes in either format.
+        def remove() -> None:
+            for framework in Framework:
+                self.path(user_id, model_id, framework).unlink(missing_ok=True)
+
+        await anyio.to_thread.run_sync(remove)
 
     async def delete_user(self, user_id: str) -> None:
         def remove() -> None:

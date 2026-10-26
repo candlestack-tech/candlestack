@@ -5,24 +5,20 @@ import type { ManifestFailure, UploadFailure } from './useUpload';
 // the details, one per line.
 export type Problem = { title: string; lines: string[] };
 
-const KERAS_ONLY = 'For now CandleStack takes Keras models (.keras).';
+const TAKEN = 'CandleStack takes Keras (.keras) and ONNX (.onnx) models.';
 
 type Of<K extends UploadFailure['kind']> = Extract<UploadFailure, { kind: K }>;
 
 const detail = (title: string) => (failure: { detail: string }) => ({ title, lines: [failure.detail] });
 
 const MODEL_PROBLEMS: { [K in UploadFailure['kind']]: (failure: Of<K>) => Problem } = {
-  soon: () => ({ title: 'ONNX support is coming soon', lines: [KERAS_ONLY] }),
   export: (failure) => ({
     title: `${failure.framework} files are not supported`,
-    lines: [`Export the model to ONNX. ${KERAS_ONLY}`],
+    lines: [`Export the model to ONNX. ${TAKEN}`],
   }),
-  unsupported: () => ({ title: 'This file is not supported', lines: ['CandleStack takes Keras models (.keras).'] }),
-  opens: detail('Does not open as a safe Keras model'),
-  weights: () => ({
-    title: 'No trained weights in the file',
-    lines: ['It holds the layers only. Save the model after training and upload that file.'],
-  }),
+  unsupported: () => ({ title: 'This file is not supported', lines: [TAKEN] }),
+  opens: detail('Does not open as a safe model'),
+  weights: detail('No trained weights in the file'),
   large: detail('Larger than 50 MB'),
   storage: (failure) => ({
     title: 'Not enough storage',

@@ -471,11 +471,13 @@ export interface paths {
         put?: never;
         /**
          * Upload Model
-         * @description Uploads a model file: the body is the file, `name` its file name. The file is checked
-         *     before it is kept: `opens` (a real Keras model with no custom code inside, nothing from
-         *     the file is executed) and `weights` (it holds trained weights). A file with a name the user
-         *     already has gets a number, as `lstm (2).keras`. The model is `needs_setup` until its
-         *     manifest is added (`PUT /api/v1/models/{model_id}/manifest`).
+         * @description Uploads a model file, Keras (`.keras`) or ONNX (`.onnx`): the body is the file, `name`
+         *     its file name. The file is checked before it is kept: `opens` (a real model of its format
+         *     with no custom code inside, for ONNX the standard operators only, all in the one file, with
+         *     one float32 input and output; nothing from the file is executed) and `weights` (it holds
+         *     trained weights). A file with a name the user already has gets a number, as
+         *     `lstm (2).keras`. The model is `needs_setup` until its manifest is added
+         *     (`PUT /api/v1/models/{model_id}/manifest`).
          */
         post: operations["upload_model_api_v1_models_post"];
         delete?: never;
@@ -1588,10 +1590,10 @@ export interface components {
         };
         /**
          * Framework
-         * @description The framework a model file belongs to; only Keras is accepted for now.
+         * @description The format of a model file: Keras (`.keras`) or ONNX (`.onnx`).
          * @enum {string}
          */
-        Framework: "keras";
+        Framework: "keras" | "onnx";
         /** Health */
         Health: {
             /** Commit */
@@ -4106,7 +4108,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Not a format the app takes: Keras (`.keras`) now, ONNX (`.onnx`) later, never pickle-based files (`unsupported-model-format`). */
+            /** @description Not a format the app takes: Keras (`.keras`) and ONNX (`.onnx`), never pickle-based files (`unsupported-model-format`). */
             415: {
                 headers: {
                     [name: string]: unknown;

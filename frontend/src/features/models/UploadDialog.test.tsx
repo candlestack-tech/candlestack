@@ -83,15 +83,30 @@ describe('the upload, step 1: the model', () => {
     expect(fetch).toHaveBeenCalledWith('/api/v1/models?name=lstm-signals.keras', expect.anything());
   });
 
+  it('sends an ONNX model to the API', async () => {
+    const mixer = { ...LSTM, name: 'mixer.onnx', framework: 'onnx' as const };
+    const { dialog, fetch, choose } = await openUpload({
+      'POST /api/v1/models?name=mixer.onnx': { status: 201, body: mixer },
+    });
+    choose(file('mixer.onnx'));
+
+    expect(await dialog.findByRole('heading', { name: 'Done: Model uploaded' })).toBeDefined();
+    expect(fetch).toHaveBeenCalledWith('/api/v1/models?name=mixer.onnx', expect.anything());
+  });
+
   it.each([
-    ['an ONNX model', 'mixer.onnx', 'ONNX support is coming soon', 'For now CandleStack takes Keras models (.keras).'],
     [
       'a PyTorch model',
       'tcn.pt',
       'PyTorch files are not supported',
-      'Export the model to ONNX. For now CandleStack takes Keras models (.keras).',
+      'Export the model to ONNX. CandleStack takes Keras (.keras) and ONNX (.onnx) models.',
     ],
-    ['any other file', 'notes.png', 'This file is not supported', 'CandleStack takes Keras models (.keras).'],
+    [
+      'any other file',
+      'notes.png',
+      'This file is not supported',
+      'CandleStack takes Keras (.keras) and ONNX (.onnx) models.',
+    ],
   ])('turns away %s at once, without asking the API', async (_, name, title, line) => {
     const { dialog, fetch, choose } = await openUpload();
     const asked = fetch.mock.calls.length;
@@ -190,12 +205,12 @@ describe('a refused model', () => {
     [
       'without trained weights',
       problem(422, 'model-check-failed', 'No weights.', { check: 'weights' }),
-      'No trained weights in the fileIt holds the layers only. Save the model after training and upload that file.',
+      'No trained weights in the fileNo weights.',
     ],
     [
       'that does not open',
       problem(422, 'model-check-failed', 'The file holds custom code (a Lambda layer).', { check: 'opens' }),
-      'Does not open as a safe Keras modelThe file holds custom code (a Lambda layer).',
+      'Does not open as a safe modelThe file holds custom code (a Lambda layer).',
     ],
     ['too large', problem(413, 'model-too-large', 'The file is 61.2 MB.'), 'Larger than 50 MBThe file is 61.2 MB.'],
     [
@@ -219,7 +234,7 @@ describe('a refused model', () => {
     [
       'of a format the API does not take',
       problem(415, 'unsupported-model-format', 'Keras only.'),
-      'This file is not supportedCandleStack takes Keras models (.keras).',
+      'This file is not supportedCandleStack takes Keras (.keras) and ONNX (.onnx) models.',
     ],
     [
       'without an answer',

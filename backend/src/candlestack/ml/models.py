@@ -35,7 +35,7 @@ def new_model_id() -> str:
 
 class Model(Base):
     """An uploaded model: what its file holds, as the upload check read it. The file is at
-    ``<user_id>/<id>.keras`` in the model storage."""
+    ``<user_id>/<id>.keras`` (or ``.onnx``, by its framework) in the model storage."""
 
     __tablename__ = "models"
 
@@ -50,7 +50,8 @@ class Model(Base):
     parameters: Mapped[int] = mapped_column(BigInteger)
     input_shape: Mapped[list[int] | None] = mapped_column(JSONB)
     output_shape: Mapped[list[int] | None] = mapped_column(JSONB)
-    keras_version: Mapped[str] = mapped_column(String(32))
+    # The Keras release that saved a Keras file; null for an ONNX file.
+    keras_version: Mapped[str | None] = mapped_column(String(32))
     starred: Mapped[bool] = mapped_column(Boolean, server_default=false(), default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     # How to build the model's input (docs/preprocessing.md), as the user's manifest gave it;

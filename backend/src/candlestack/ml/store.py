@@ -71,17 +71,19 @@ class ModelStore:
         ).one_or_none()
         return None if row is None else (row[0],)
 
-    async def check_input(self, user_id: str, model_id: str) -> tuple[bytes, dict[str, Any]] | None:
-        """The SHA-256 of the user's model file and its manifest, what a check runs with; None
-        when the user has no model with the ID or it has no manifest."""
+    async def check_input(
+        self, user_id: str, model_id: str
+    ) -> tuple[bytes, dict[str, Any], str] | None:
+        """The SHA-256 of the user's model file, its manifest and its format, what a check
+        runs with; None when the user has no model with the ID or it has no manifest."""
         row = (
             await self._db.execute(
-                select(Model.sha256, Model.manifest).where(
+                select(Model.sha256, Model.manifest, Model.framework).where(
                     Model.id == model_id, Model.user_id == user_id
                 )
             )
         ).one_or_none()
-        return None if row is None or row[1] is None else (row[0], row[1])
+        return None if row is None or row[1] is None else (row[0], row[1], row[2])
 
     async def unchecked(self) -> list[tuple[str, str]]:
         """The user and model IDs of the models of every user whose manifest no check came to

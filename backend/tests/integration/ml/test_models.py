@@ -24,6 +24,11 @@ MB = 1024 * 1024
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "keras"
 
 
+ONNX_RAW_CANDLES = (
+    Path(__file__).parents[2] / "fixtures" / "onnx" / "raw_candles.onnx"
+).read_bytes()
+
+
 def keras_file(name: str) -> bytes:
     return (FIXTURES / f"{name}.keras").read_bytes()
 
@@ -110,6 +115,57 @@ def test_upload_without_a_content_length(ada, storage) -> None:
     assert response.status_code == 201
     assert response.json()["output_shape"] == [3]
     assert storage.file(ada.id, response.json()["id"]).exists()
+
+
+def test_an_onnx_upload(ada, sql, storage) -> None:
+    response = ada.upload(ONNX_RAW_CANDLES, name="raw candles.onnx")
+
+    assert response.status_code == 201
+    model = response.json()
+    assert (model["name"], model["framework"], model["size_bytes"]) == (
+        "raw candles.onnx",
+        "onnx",
+        len(ONNX_RAW_CANDLES),
+    )
+    assert (model["parameters"], model["input_shape"], model["output_shape"]) == (128, [25, 5], [1])
+    assert model["state"] == "needs_setup"
+    [row] = sql("SELECT framework, keras_version FROM models WHERE id = :id", id=model["id"])
+    assert row == ("onnx", None)
+    assert storage.file(ada.id, model["id"], ".onnx").read_bytes() == ONNX_RAW_CANDLES
+    assert not storage.file(ada.id, model["id"]).exists()
+    assert storage.incoming() == []
+
+
+def test_an_onnx_model_gets_its_manifest_a_name_and_goes(ada, storage) -> None:
+    model_id = ada.upload(ONNX_RAW_CANDLES, name="mixer.onnx").json()["id"]
+
+    manifest = ada.set_manifest(model_id, json.dumps(raw_manifest()))
+    renamed = ada.update(model_id, name="mixer v2")
+    second = ada.upload(ONNX_RAW_CANDLES, name="mixer v2.onnx")
+
+    assert (manifest.status_code, manifest.json()["state"]) == (200, "ready")
+    assert renamed.json()["name"] == "mixer v2.onnx"
+    assert second.json()["name"] == "mixer v2 (2).onnx"
+    assert ada.delete(model_id).status_code == 204
+    assert not storage.file(ada.id, model_id, ".onnx").exists()
+
+
+def test_a_failed_check_of_an_onnx_file_is_named(ada, sql, storage) -> None:
+    response = ada.upload(keras_file("functional"), name="functional.onnx")
+
+    assert response.status_code == 422
+    assert response.json()["check"] == "opens"
+    assert response.json()["detail"].startswith("The file is not a readable ONNX model.")
+    assert sql("SELECT id FROM models") == []
+    assert storage.files() == []
+
+
+def test_an_empty_onnx_file_names_its_extension(ada) -> None:
+    response = ada.upload(b"", name="mixer.onnx")
+
+    assert response.json()["detail"] == (
+        "The file is empty. Choose the model's .onnx file and upload it again."
+    )
 
 
 def test_the_list_and_the_storage_used(ada, bob) -> None:

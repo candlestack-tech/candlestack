@@ -37,3 +37,7 @@ GET /api/v1/me/preferences added the new `4h` enum value to the `backtest_defaul
 PUT /api/v1/me/preferences/backtest-defaults added the new `15m` enum value to the `timeframe` response property for the response status `200`
 PUT /api/v1/me/preferences/backtest-defaults added the new `1m` enum value to the `timeframe` response property for the response status `200`
 PUT /api/v1/me/preferences/backtest-defaults added the new `4h` enum value to the `timeframe` response property for the response status `200`
+GET /api/v1/models added the new `onnx` enum value to the `models/items/framework` response property for the response status `200`
+POST /api/v1/models added the new `onnx` enum value to the `framework` response property for the response status `201`
+PATCH /api/v1/models/{model_id} added the new `onnx` enum value to the `framework` response property for the response status `200`
+PUT /api/v1/models/{model_id}/manifest added the new `onnx` enum value to the `framework` response property for the response status `200`

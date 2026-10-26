@@ -326,14 +326,16 @@ class BacktestsUser:
         *,
         file: Path | None = None,
         name: str = "raw-candles.keras",
+        framework: str = "keras",
     ) -> str:
         """A model with a manifest (the raw-candles test model's unless given); with ``file``
-        also its file in the model storage, under the file's SHA-256."""
-        model_id = self.model(name)
+        also its file in the model storage (``.keras`` or ``.onnx``, by ``framework``), under
+        the file's SHA-256."""
+        model_id = self.model(name, framework)
         sha256 = b"\0" * 32
         if file is not None:
             sha256 = hashlib.sha256(file.read_bytes()).digest()
-            target = self.storage / self.id / f"{model_id}.keras"
+            target = self.storage / self.id / f"{model_id}.{framework}"
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(file, target)
         self.sql(

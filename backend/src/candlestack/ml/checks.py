@@ -31,6 +31,7 @@ from redis.exceptions import RedisError
 
 from candlestack.core import DATABASE_ERRORS, Database
 from candlestack.jobs import DEFAULT_WAIT, JobClient, JobResult, Reason, manifest_sha256
+from candlestack.ml.storage import model_file
 from candlestack.ml.store import ModelStore
 
 logger = logging.getLogger(__name__)
@@ -134,11 +135,11 @@ class ModelChecks:
             checked = await ModelStore(session).check_input(user_id, model_id)
         if checked is None:
             return True
-        sha256, manifest = checked
+        sha256, manifest, framework = checked
         try:
             result = await self._jobs.check(
                 # The file as the model storage keeps it (storage.LocalModelStorage).
-                model=f"{user_id}/{model_id}.keras",
+                model=model_file(user_id, model_id, framework),
                 sha256=sha256.hex(),
                 manifest=manifest,
                 wait=self._wait,

@@ -1978,9 +1978,10 @@
         "type": "object"
       },
       "Framework": {
-        "description": "The framework a model file belongs to; only Keras is accepted for now.",
+        "description": "The format of a model file: Keras (`.keras`) or ONNX (`.onnx`).",
         "enum": [
-          "keras"
+          "keras",
+          "onnx"
         ],
         "title": "Framework",
         "type": "string"
@@ -6276,7 +6277,7 @@
         ]
       },
       "post": {
-        "description": "Uploads a model file: the body is the file, `name` its file name. The file is checked\nbefore it is kept: `opens` (a real Keras model with no custom code inside, nothing from\nthe file is executed) and `weights` (it holds trained weights). A file with a name the user\nalready has gets a number, as `lstm (2).keras`. The model is `needs_setup` until its\nmanifest is added (`PUT /api/v1/models/{model_id}/manifest`).",
+        "description": "Uploads a model file, Keras (`.keras`) or ONNX (`.onnx`): the body is the file, `name`\nits file name. The file is checked before it is kept: `opens` (a real model of its format\nwith no custom code inside, for ONNX the standard operators only, all in the one file, with\none float32 input and output; nothing from the file is executed) and `weights` (it holds\ntrained weights). A file with a name the user already has gets a number, as\n`lstm (2).keras`. The model is `needs_setup` until its manifest is added\n(`PUT /api/v1/models/{model_id}/manifest`).",
         "operationId": "upload_model_api_v1_models_post",
         "parameters": [
           {
@@ -6377,7 +6378,7 @@
                 }
               }
             },
-            "description": "Not a format the app takes: Keras (`.keras`) now, ONNX (`.onnx`) later, never pickle-based files (`unsupported-model-format`)."
+            "description": "Not a format the app takes: Keras (`.keras`) and ONNX (`.onnx`), never pickle-based files (`unsupported-model-format`)."
           },
           "422": {
             "content": {

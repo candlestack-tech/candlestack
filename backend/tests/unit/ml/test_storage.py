@@ -10,7 +10,13 @@ from typing import cast
 import pytest
 
 from candlestack.ml import storage as storage_module
-from candlestack.ml.storage import LocalModelStorage, ModelStorage, keep_incoming_swept
+from candlestack.ml.schemas import Framework
+from candlestack.ml.storage import (
+    LocalModelStorage,
+    ModelStorage,
+    keep_incoming_swept,
+    model_file,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -49,37 +55,51 @@ async def test_save_moves_the_file_to_the_users_directory(
 ) -> None:
     path = await incoming(storage)
 
-    await storage.save(path, USER, "mdl_aaaaaaaaaa")
+    await storage.save(path, USER, "mdl_aaaaaaaaaa", Framework.keras)
 
     assert not path.exists()
     assert (tmp_path / "models" / USER / "mdl_aaaaaaaaaa.keras").read_bytes() == b"model"
-    assert (
-        storage.path(USER, "mdl_aaaaaaaaaa") == tmp_path / "models" / USER / "mdl_aaaaaaaaaa.keras"
+    assert storage.path(USER, "mdl_aaaaaaaaaa", Framework.keras) == (
+        tmp_path / "models" / USER / "mdl_aaaaaaaaaa.keras"
     )
 
 
+async def test_an_onnx_model_is_kept_as_an_onnx_file(
+    storage: LocalModelStorage, tmp_path: Path
+) -> None:
+    await storage.save(await incoming(storage), USER, "mdl_aaaaaaaaaa", Framework.onnx)
+
+    assert (tmp_path / "models" / USER / "mdl_aaaaaaaaaa.onnx").read_bytes() == b"model"
+    assert model_file(USER, "mdl_aaaaaaaaaa", "onnx") == f"{USER}/mdl_aaaaaaaaaa.onnx"
+    assert model_file(USER, "mdl_aaaaaaaaaa", "keras") == f"{USER}/mdl_aaaaaaaaaa.keras"
+
+    await storage.delete(USER, "mdl_aaaaaaaaaa")
+
+    assert not storage.path(USER, "mdl_aaaaaaaaaa", Framework.onnx).exists()
+
+
 async def test_delete_removes_one_file(storage: LocalModelStorage) -> None:
-    await storage.save(await incoming(storage), USER, "mdl_aaaaaaaaaa")
-    await storage.save(await incoming(storage), USER, "mdl_bbbbbbbbbb")
+    await storage.save(await incoming(storage), USER, "mdl_aaaaaaaaaa", Framework.keras)
+    await storage.save(await incoming(storage), USER, "mdl_bbbbbbbbbb", Framework.keras)
 
     await storage.delete(USER, "mdl_aaaaaaaaaa")
     await storage.delete(USER, "mdl_aaaaaaaaaa")  # gone already is fine
 
-    assert not storage.path(USER, "mdl_aaaaaaaaaa").exists()
-    assert storage.path(USER, "mdl_bbbbbbbbbb").exists()
+    assert not storage.path(USER, "mdl_aaaaaaaaaa", Framework.keras).exists()
+    assert storage.path(USER, "mdl_bbbbbbbbbb", Framework.keras).exists()
 
 
 async def test_delete_user_removes_the_users_directory(
     storage: LocalModelStorage, tmp_path: Path
 ) -> None:
-    await storage.save(await incoming(storage), USER, "mdl_aaaaaaaaaa")
-    await storage.save(await incoming(storage), "usr_other00000", "mdl_bbbbbbbbbb")
+    await storage.save(await incoming(storage), USER, "mdl_aaaaaaaaaa", Framework.keras)
+    await storage.save(await incoming(storage), "usr_other00000", "mdl_bbbbbbbbbb", Framework.keras)
 
     await storage.delete_user(USER)
     await storage.delete_user(USER)  # a user without files is fine
 
     assert not (tmp_path / "models" / USER).exists()
-    assert storage.path("usr_other00000", "mdl_bbbbbbbbbb").exists()
+    assert storage.path("usr_other00000", "mdl_bbbbbbbbbb", Framework.keras).exists()
 
 
 async def test_discard_removes_an_incoming_file(storage: LocalModelStorage) -> None:

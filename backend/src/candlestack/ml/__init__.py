@@ -1,8 +1,9 @@
 """ML: the models users upload, their files and the checks of an upload.
 
 Other modules import only from here (``from candlestack.ml import models_router``), never from
-the submodules. Nothing here imports Keras or TensorFlow: an upload is checked by reading the
-file (its ``config.json`` and weights), not by loading it.
+the submodules. Nothing here imports Keras, TensorFlow or onnxruntime: an upload is checked by
+reading the file (a Keras file's ``config.json`` and weights, an ONNX file's graph), not by
+running it.
 
 ``candlestack.main`` puts the ``ModelStorage`` on ``app.state.model_storage``, prepares it at
 startup, sweeps it while the app runs (``keep_incoming_swept``) and registers
@@ -18,7 +19,12 @@ from candlestack.ml.checks import ModelChecks
 from candlestack.ml.models import Model
 from candlestack.ml.schemas import ModelOut, ModelsOut
 from candlestack.ml.service import ModelsAccountDeletion
-from candlestack.ml.storage import LocalModelStorage, ModelStorage, keep_incoming_swept
+from candlestack.ml.storage import (
+    LocalModelStorage,
+    ModelStorage,
+    keep_incoming_swept,
+    model_file,
+)
 from candlestack.ml.usage import ModelUsage, ModelUsageStats, no_usage
 
 __all__ = [
@@ -32,6 +38,7 @@ __all__ = [
     "ModelsAccountDeletion",
     "ModelsOut",
     "keep_incoming_swept",
+    "model_file",
     "models_router",
     "no_usage",
     "preprocessing_router",

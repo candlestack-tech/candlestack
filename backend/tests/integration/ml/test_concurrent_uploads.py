@@ -16,7 +16,7 @@ from candlestack.core import Database, create_redis
 from candlestack.ml import LocalModelStorage
 from candlestack.ml import service as service_module
 from candlestack.ml.errors import AccountGone, StorageFull, UploadInProgress, UploadTimeout
-from candlestack.ml.schemas import QUOTA_BYTES, ModelOut
+from candlestack.ml.schemas import QUOTA_BYTES, Framework, ModelOut
 from candlestack.ml.service import ModelsAccountDeletion, ModelsService
 from candlestack.ml.store import ModelStore
 from candlestack.ml.uploads import RedisUploadLocks, UploadLocks
@@ -113,7 +113,7 @@ async def upload_together(
 
 
 def incoming(storage: LocalModelStorage) -> list[Path]:
-    return list((storage.path(USER, "x").parents[1] / ".incoming").iterdir())
+    return list((storage.path(USER, "x", Framework.keras).parents[1] / ".incoming").iterdir())
 
 
 async def test_only_one_of_two_uploads_fits(database: Database, storage: LocalModelStorage):
@@ -127,9 +127,9 @@ async def test_only_one_of_two_uploads_fits(database: Database, storage: LocalMo
     assert len(kept) == 1
     assert len(refused) == 1
     assert refused[0].used_bytes == QUOTA_BYTES - len(CONTENT) * 3 // 2 + len(CONTENT)
-    assert [path.name for path in (storage.path(USER, kept[0].id).parent).iterdir()] == [
-        f"{kept[0].id}.keras"
-    ]
+    assert [
+        path.name for path in (storage.path(USER, kept[0].id, Framework.keras).parent).iterdir()
+    ] == [f"{kept[0].id}.keras"]
     assert incoming(storage) == []
 
 
@@ -192,4 +192,4 @@ async def test_an_account_deleted_while_its_file_uploads(
             await service.upload(USER, "lstm.keras", len(CONTENT), body_then_deletion())
 
     assert incoming(storage) == []
-    assert not storage.path(USER, "x").parent.exists()
+    assert not storage.path(USER, "x", Framework.keras).parent.exists()

@@ -192,9 +192,10 @@ flowchart LR
 
 - **Upload**: `POST /api/v1/models?name=<file name>` with the file as the body, so the server
   streams it to disk instead of holding a multipart form in memory (the backend has 384 MB).
-  Only Keras files (`.keras`) for now: another extension is a 415 before anything is read,
-  whose detail says the file is not supported and what is: Keras now, ONNX later, PyTorch,
-  TensorFlow and scikit-learn models through ONNX, pickle-based files never. A
+  Keras (`.keras`) and ONNX (`.onnx`) files, told apart by the extension (in any case), which
+  says the model's `framework`: another extension is a 415 before anything is read, whose detail
+  says the file is not supported and what is: Keras and ONNX, PyTorch, TensorFlow and
+  scikit-learn models through ONNX, pickle-based files never. A
   `Content-Length` over 50 MB is a 413 at once. A user uploads one file at a time: a lock in
   Redis (`SET NX EX 300`, released when the upload ends) turns a second upload away with
   `409 upload-in-progress`, so nobody fills the disk with uploads side by side. While Redis
@@ -250,6 +251,31 @@ flowchart LR
   state. The input shape (one input) and the output shape (`Dense`, `Flatten` and layers that
   keep their input's shape) are read from the config when it says them plainly, else null.
   `tests/fixtures/keras/make_allowlist.py` regenerates the allowlist from a Keras release.
+- **The check of an ONNX file** (`ml/inspect_onnx.py`) reads the file with `onnx` (protobuf and
+  the ONNX checker), in the same child process with the same limits; nothing runs the model in
+  the API, whose image has no onnxruntime. Reading an `.onnx` file runs no code from it, but
+  onnxruntime would read the files a tensor names (external data, any path) and run operators
+  of the domains a library registers, so the check accepts only what the worker runs as it is.
+  `opens` fails for a file that does not parse as an ONNX model with a graph
+  (`onnx.load(path, load_external_data=False)`), a tensor anywhere (initializers, sparse ones,
+  `Constant` and other attributes, the graphs of `If`, `Loop` and `Scan`, the training info,
+  local functions, which onnxruntime inlines) that keeps its data in another file, an
+  operator, an opset the model or a local function imports, or a local function of another
+  domain than the standard `ai.onnx` (or `""`) and `ai.onnx.ml` (so no
+  `com.microsoft` and no custom operators; the detail names the domain), not exactly one input
+  (initializers listed among the inputs, as before IR version 4, are none) and one output, an
+  input or output that is not a float32 tensor, says no shape, has fewer than 2 or more than 8
+  axes, a fixed batch axis (the first, which must be dynamic: the worker runs 1024 samples at
+  once; the detail says to export with `dynamic_axes`) or another axis without a fixed size
+  from 1 to 2^31 - 1, and for a model `onnx.checker.check_model` refuses (without shape
+  inference). The checker reads the file itself after the parsed model is let go, so the model
+  is never held twice: a file of 49 MB peaks at about 136 MB and takes 0.8 s in the child,
+  within its 192 MB. `weights` fails when a tensor declares a negative size or more values than
+  it stores (at most two a byte), or the graph holds no weights; `parameters` counts the values
+  the tensors declare. The input and output shapes without the batch axis are what the
+  manifest is compared with, as for Keras, and the model has no Keras version (null). The
+  research spike on checking ONNX files (#256) was not done; these rules are the choice of
+  #276.
 - **Loading an accepted file** (the worker, `worker/model.py`): the check is static, so the
   worker is the second line. It loads with the Keras release the allowlist was generated from,
   pinned in the `worker` dependency group (3.15.1, which has the fixes of the advisories
@@ -262,6 +288,13 @@ flowchart LR
   access, in a process of its own with a time limit, in a container with a memory limit
   ([Worker](#worker)). It does not walk `config.json` against the allowlist a second time yet:
   the allowlist is `ml`'s, which the worker does not import.
+- **Running an accepted ONNX file** (the worker, `worker/onnx_model.py`): onnxruntime (pinned
+  in the `worker` dependency group) with its `CPUExecutionProvider` only and no library of
+  custom operators registered, one thread for the operators and one between them, run in
+  order (the container has one CPU). The file is copied alone into the job's scratch directory
+  and loaded from there, so a tensor that still named another file would find none. It runs
+  the samples 1024 at a time and gives `[batch, 1]` float32 like a Keras model; the same SHA-256
+  check, process, time limit, memory limit and lack of network as for Keras apply.
 - **Manifest** ([preprocessing.md](preprocessing.md#the-manifest)): a model is kept without
   one and gets it with its own request, `PUT /api/v1/models/{model_id}/manifest` with the
   manifest as the JSON body, which adds it or replaces the one the model had; `GET` on the same
@@ -295,7 +328,8 @@ flowchart LR
   `manifest - ARRAY['example', 'about']`, so a list of 100 models never reads their examples.
 - **Files**: `ModelStorage` (`ml/storage.py`) is what the service uses: save a finished incoming
   file, delete one, delete a user's, sweep what crashed uploads left. `LocalModelStorage` keeps
-  them in `MODEL_STORAGE_DIR` as `<user_id>/<model_id>.keras` and the uploads in progress as
+  them in `MODEL_STORAGE_DIR` as `<user_id>/<model_id>.keras` or `.onnx` (by the model's
+  `framework`; `ml.model_file` names it for the jobs) and the uploads in progress as
   `.incoming/<random>.part`, on one filesystem, so a move is an atomic rename. On the VM that is
   the volume `models`, archived every night ([infra/README.md](../infra/README.md#backups)). The
   files are served only through the API.
@@ -331,7 +365,7 @@ sequenceDiagram
     participant V as jobs volume
     participant Q as queue (Redis)
     participant W as worker loop
-    participant P as job process (Keras)
+    participant P as job process (Keras or onnxruntime)
     B->>V: <job_id>/candles.parquet (predict)
     B->>Q: SET jobs:job:<id>, RPUSH jobs:queue
     W->>Q: claim: LMOVE to jobs:running + lease
@@ -350,7 +384,8 @@ sequenceDiagram
   running list and gives it a lease in one Lua script, and publishing a result removes the job
   from the running list in another, only while it is still there.
 - **A job** (`jobs.Job`): `version` (1), `id` (32 hex), `kind` (`predict` or `check`), `model`
-  (the file in the model storage, `<user_id>/<model_id>.keras`: no absolute path, no `..`),
+  (the file in the model storage, `<user_id>/<model_id>.keras` or `.onnx`: no absolute path, no
+  `..`, no other extension; the extension says how the worker runs it),
   `sha256` (of the upload), `manifest` (the model's manifest, as data), `enqueued_at` and
   `deadline` (epoch seconds: when the backend stops waiting). The candles of a `predict` are
   `<job_id>/candles.parquet` in the jobs' volume (`ts`, open, high, low, close, volume, and
@@ -363,13 +398,15 @@ sequenceDiagram
   `error` of a failed one (a slug and plain sentences for the user), `samples` and `dropped`
   (the predictions made, the warm-up's candles), `verified` and `example_difference` of a
   `check` (the model gave the manifest's `example` within 1e-4, the largest difference), the
-  `runner` (the Keras release, its backend and the backend's release), the `timings` in
+  `runner` (the Keras release, its backend and the backend's release; for an ONNX model no
+  Keras release, `onnxruntime` and its release), the `timings` in
   milliseconds (`queued`, `start` of the process, `load`, `input`, `predict`, `total`) and
   `manifest_sha256`, the digest of the manifest the job ran with (`jobs.manifest_sha256`: the
   SHA-256 of its JSON with sorted keys and no spaces), which `JobClient` sets on every result.
 - **The reasons**: `model-missing`, `model-changed` (SHA-256), `manifest`, `candles` (they
-  break their rules or make no sample), `load` (Keras refused the file), `predict` (the model
-  failed on its input), `output` (not one finite score per sample), `example`, `time-limit`,
+  break their rules or make no sample), `load` (Keras or onnxruntime refused the file),
+  `predict` (the model failed on its input), `output` (not one finite score per sample),
+  `example`, `time-limit`,
   `stopped` (the job's process was killed, mostly at the memory limit, or an allocation
   larger than the memory failed), `worker-stopped`, `expired` (the backend no longer waits: a
   job past its deadline does not run, a running one stops at it, a job without an answer
@@ -386,10 +423,12 @@ sequenceDiagram
   (`worker/service.py`) starts with the job on stdin and stops at `JOB_TIME_LIMIT` (120 s) or
   at the job's deadline, whichever comes first. The process runs in a session of its own, and
   its whole process group is killed after the job, so nothing it started outlives it. It is
-  the only one that imports Keras; it gets no keys, no Redis URL (nor a way to read the
+  the only one that imports Keras or onnxruntime, and only the one its model needs (by the
+  file's extension); it gets no keys, no Redis URL (nor a way to read the
   queue's password, see below), no core dumps and no file over 512 MB, and it is the first the kernel stops when the container runs out of memory. A
   model that crashes, hangs or exhausts the memory fails its job, and the loop takes the next
-  one. Starting the process and importing Keras takes 2 to 4 s; loading the raw-candles test
+  one. Starting the process and importing Keras takes 2 to 4 s (onnxruntime about 1 s: a
+  `check` of the ONNX raw-candles test model takes 1.3 s in all); loading the raw-candles test
   model about 0.5 s, its predictions for 50000 candles about 0.3 s, the container about 300 MB
   at its peak then. A 25 x 28 model runs on the 50000 candles a backtest may load within the
   container's 1 GB, about 600 MB at its peak ([infra/README.md](../infra/README.md#memory)).
@@ -642,8 +681,8 @@ the ones whose folder exists while their code is being written.
 | Cache | Redis with `redis[hiredis]` asyncio | one store for cache blobs, locks and rate-limit counters |
 | Database | Postgres 18, SQLAlchemy 2 (asyncio) on asyncpg, Alembic migrations in `backend/migrations` | relational data with constraints; typed models; versioned schema changes that run before each deploy's backend starts |
 | Sign-in | Authlib (OAuth 2.0 messages, PKCE) over the app's httpx client | a maintained implementation of the protocol; the requests stay on the client the tests mock with respx |
-| Model files | h5py | reads the weights' metadata of an uploaded Keras file (the number of weights) without Keras, in the check's child process only |
-| Running models | Keras 3.15.1 on JAX (CPU), the `worker` dependency group | runs Keras files saved with any backend; JAX is the smallest backend on CPU, and the release is the one the upload's allowlist was generated from |
+| Model files | h5py, onnx | read the weights' metadata of an uploaded Keras file (the number of weights) without Keras, and an uploaded ONNX file's graph with the ONNX checker without onnxruntime, in the check's child process only |
+| Running models | Keras 3.15.1 on JAX (CPU) and onnxruntime (CPU), the `worker` dependency group | runs Keras files saved with any backend; JAX is the smallest backend on CPU, and the release is the one the upload's allowlist was generated from; onnxruntime runs the ONNX files that PyTorch, TensorFlow and scikit-learn models export to |
 | Job queue | a few Redis keys and Lua scripts of our own (`jobs`), a Redis of their own | one job at a time with leases needs no Celery or RQ and no new dependency; the worker sees none of the cache |
 | HTTP client | httpx (async), timeouts always set | async calls to the sources; mocked in tests with respx |
 | API docs | scalar-fastapi at `/api/v1/docs` | readable reference with request examples; Swagger and ReDoc disabled |
@@ -761,6 +800,7 @@ to check that an error reaches Sentry. The Sentry settings are recorded in
 | Preferences as one JSONB document per section of Settings, read through Pydantic models with defaults | a new setting needs no migration of the rows; the models validate both what is saved and what is read |
 | Account deletion through hooks that other modules register in `main.py` | `accounts` stays at the bottom of the import graph, yet the account's rows in other modules go with it in one transaction; data outside Postgres (model files) is the hook's to keep consistent with a rollback |
 | An upload is checked statically (the zip, its JSON and the HDF5 metadata) in a limited child process, never loaded; only what an allowlist generated from Keras names passes | loading a Keras file can run code from it (a `Lambda` layer is pickled Python, a `function` object any Keras function), and the API process must run no user's code and carry no framework; an allowlist fails closed on what a new Keras release or an attacker adds, where a list of what is known to be bad would not; the parsers of zip and HDF5 meet hostile files, so they run where a crash or a leak costs only a failed check |
+| An ONNX upload is checked statically too (`onnx.load` without external data, then `onnx.checker`), in the same child process; it is refused with external data, operators of other domains than `ai.onnx` and `ai.onnx.ml`, not one float32 input and output, or a fixed batch axis | onnxruntime would read any file an external tensor names and run the operators a library registers, and those are what a hostile ONNX file can misuse; refusing them leaves the standard operators, which onnxruntime implements itself; the shapes the manifest is compared with must be read from the file, so a model that does not fix them is refused at upload rather than kept unusable; the research spike #256 was not done, so this is #276's choice |
 | A backtest keeps its model's name and framework of when it ran next to a foreign key that a deleted model sets to null; it shows the model's current name while the model exists | a rename shows in the backtests that used the model, and deleting the model keeps its backtests with their results and a name to show |
 | Results in the API as fractions (0.246), the drawdown negative | the numbers `metrics` computes, unrounded; the app formats them for the reader |
 | The Dashboard in one request | one round trip and one loading state for the page's six panels; each is a small query on the user's index |

@@ -92,8 +92,8 @@ class Storage:
     def __init__(self, root: Path) -> None:
         self.root = root
 
-    def file(self, user_id: str, model_id: str) -> Path:
-        return self.root / user_id / f"{model_id}.keras"
+    def file(self, user_id: str, model_id: str, suffix: str = ".keras") -> Path:
+        return self.root / user_id / f"{model_id}{suffix}"
 
     def incoming(self) -> list[Path]:
         """What uploads left in the incoming directory."""

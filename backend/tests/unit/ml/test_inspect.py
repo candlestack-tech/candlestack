@@ -699,7 +699,10 @@ def test_too_many_objects_in_the_weights_fail_weights(
 
 def test_the_check_process_writes_the_facts(capsys: pytest.CaptureFixture[str], scratch: Path):
     assert (
-        inspect.main([str(fixture("functional")), str(scratch), str(FILE_MAX)], limits=False) == 0
+        inspect.main(
+            [str(fixture("functional")), str(scratch), str(FILE_MAX), "keras"], limits=False
+        )
+        == 0
     )
 
     assert json.loads(capsys.readouterr().out) == {
@@ -714,7 +717,10 @@ def test_the_check_process_writes_the_facts(capsys: pytest.CaptureFixture[str], 
 
 def test_the_check_process_writes_a_failed_check(capsys: pytest.CaptureFixture[str], scratch):
     assert (
-        inspect.main([str(fixture("no_weights")), str(scratch), str(FILE_MAX)], limits=False) == 0
+        inspect.main(
+            [str(fixture("no_weights")), str(scratch), str(FILE_MAX), "keras"], limits=False
+        )
+        == 0
     )
 
     failed = json.loads(capsys.readouterr().out)["failed"]
@@ -736,7 +742,7 @@ def test_the_check_process_limits_itself_on_linux(
     monkeypatch.setattr(inspect.sys, "platform", "linux")
     monkeypatch.setitem(sys.modules, "resource", FakeResource)
 
-    inspect.main([str(fixture("functional")), str(scratch), "1000"], limits=True)
+    inspect.main([str(fixture("functional")), str(scratch), "1000", "keras"], limits=True)
 
     assert limits == [
         ("data", (192 * 1024 * 1024, 192 * 1024 * 1024)),

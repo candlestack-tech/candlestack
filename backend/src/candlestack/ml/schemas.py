@@ -29,9 +29,15 @@ def without_invisible(text: str) -> str:
 
 
 class Framework(StrEnum):
-    """The framework a model file belongs to; only Keras is accepted for now."""
+    """The format of a model file: Keras (`.keras`) or ONNX (`.onnx`)."""
 
     keras = "keras"
+    onnx = "onnx"
+
+
+# The extension of each format's files, in lowercase: of the uploaded file and of the file the
+# model storage keeps.
+SUFFIXES = {Framework.keras: ".keras", Framework.onnx: ".onnx"}
 
 
 class ModelCheck(StrEnum):
