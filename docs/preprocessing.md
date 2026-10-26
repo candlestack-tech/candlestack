@@ -10,7 +10,8 @@ turns candles into the model's input from it. It is the design agreed on 2026-10
 Built so far: the `preprocessing` module (the manifest and its checks, the catalog and the
 first blocks: `candles@1`, `renko-triples@1` ([below](#renko-triples)), `open@1` to
 `volume@1`, `rel-open@1` to `rel-close@1` ([below](#the-relative-prices)), `session-last-candle@1`, the indicators of the BLESK models
-([below](#the-indicators-of-the-blesk-models)), `renko-direction@1`, `none@1`, `window@1` with
+([below](#the-indicators-of-the-blesk-models)), `renko-direction@1`, `none@1`, `blesk-norm@1`
+([below](#the-normalization-of-the-blesk-models)), `window@1` with
 `last` `closed` and `current`), the
 catalog endpoint `GET /api/v1/preprocessing/catalog`, the manifest's JSON Schema,
 [manifest.schema.json](manifest.schema.json), the manifest stored with each model, and the
@@ -129,18 +130,18 @@ features are the raw prices, nothing is normalized, a sample is the last 25 cand
 What the same schema says for the BLESK NO-VOL models, as far as research knows their pipeline
 ([research #117], [research #263]): indicators on the 30-minute candles, Renko bricks of
 0.6 x ATR(14) of the brick's first candle, rows of three bricks taken at the candle where the
-third one ends, a window of the last 24 finished rows and the current one. It cannot run yet:
-the catalog has its indicators (`bollinger-high@1`, `rsi@1`, ...), `renko-triples@1`,
-`renko-direction@1` and the four `rel_*` columns (`rel-open@1` to `rel-close@1`), but not
-`blesk-norm@1` (its formulas are research #262's). Without it, the manifest of the 23
-features (each with `none@1`) builds an input of the right shape, `[25, 23]`, whose
-indicators are not scaled as his were.
+third one ends, a window of the last 24 finished rows and the current one, each feature scaled
+by `blesk-norm@1` ([below](#the-normalization-of-the-blesk-models)). The catalog has every
+block of it, so the full manifest of the 23 features builds the `[25, 23]` input from raw
+candles: on the candles of the BLESK data it gives the normalized features of its triples
+([below](#the-normalization-of-the-blesk-models)).
 
 The features are shortened to four here, so as written this manifest fails the signature
 check (4 features give `[25, 4]`, not `[25, 23]`). The full manifest has all 23, in this order
 ([research #117]): `bb_bbh, bb_bbl, kch_high, kch_low, squeeze, rsi, roc, tsi, atr, adx,
 aroon_up, aroon, aroon_down, sma, ema20, ema50, macd_diff, direction, rel_open, rel_high,
-rel_low, rel_close, is_last_bar`.
+rel_low, rel_close, is_last_bar`. Here `direction` and `is_last_bar` keep the default
+`none@1`, which gives the same numbers: `blesk-norm@1` leaves them as they are.
 
 ```json
 {
@@ -238,7 +239,7 @@ warm-up as a short expression of its parameters (`"0"`, `"length - 1"`) and its 
 | --- | --- | --- |
 | representation | candles, rows: each row with `ts`, the candle at whose close it is known (labelled by its open time, [data.md](data.md#time)), and the row's own columns; rows that span several candles also give `row_id`, the same on the rows of one row still forming | `candles@1` (every candle a row); `renko-triples@1` (rows of three Renko bricks, one a candle, [below](#renko-triples)); then `kagi@1`; later Heikin-Ashi, range bars, volume bars |
 | features | rows, the same rows with one column per feature, computed on the candles and taken at each row's candle, or for a feature of the rows read from the rows | `open@1` ... `volume@1`; `rel-open@1` ... `rel-close@1` ([below](#the-relative-prices)); `session-last-candle@1` (1 on the last candle of its session, [below](#the-last-candle-of-a-session)); the indicators of the BLESK models ([below](#the-indicators-of-the-blesk-models)); `renko-direction@1`, a feature of the rows of `renko-triples@1` |
-| normalization | a column, the column scaled | `none@1`; then `blesk-norm@1`, a rolling z-score, price-relative; fitted numbers come only from the manifest, never from the backtest's own data |
+| normalization | a feature's column of the rows, the close of each row's candle (the candle its features are taken at) and the feature's block; the column scaled. The close goes to the normalization only, never into the rows, so it takes no feature's name and the window never sees it | `none@1`; `blesk-norm@1` (the BLESK models' scaling, a rule per feature, [below](#the-normalization-of-the-blesk-models)); then a rolling z-score, price-relative; fitted numbers come only from the manifest, never from the backtest's own data |
 | window | rows, a `float32` array `(samples, length, features)` and the `ts` of each sample | `window@1`: the last `length` rows up to each row. `last: closed` (the default) takes the `length` rows up to each row, each finished at its own candle, and needs rows that are (`candles@1`). `last: current` takes the `length - 1` most recent finished rows before each row and then the row, which may still be forming, and needs rows that span several candles (`renko-triples@1`); a manifest with the other rule is refused |
 
 - With `candles@1` every candle has a sample. With an event representation (Renko, Kagi) a
@@ -399,6 +400,39 @@ each handled narrowly: 187 closes on 136 stocks that lie on a line of the brick'
 float rounding (at most 5 a stock), where the BLESK arithmetic picked the cell on the other
 side (research #263, R10); and 65 stocks whose bricks have no row for their first candle (R9).
 
+### The normalization of the BLESK models
+
+`blesk-norm@1` scales each feature as the BLESK models were trained ([research #262]): by a
+rule of the feature's block, row by row, from the close of the row's candle (for a Renko
+triple, the candle where its last brick stands, the one its features are taken at). It has no
+parameters and no warm-up, and uses no statistic of a window or of the history, so it cannot
+look ahead and needs no fitted numbers.
+
+| Rule | Features (blocks) | Value |
+| --- | --- | --- |
+| a price level, in percent from the close | `bollinger-high@1`, `bollinger-low@1`, `keltner-high@1`, `keltner-low@1`, `sma@1`, `ema@1` | (x / close - 1) x 100 |
+| an oscillator, centered | `rsi@1`, `aroon-up@1`, `aroon-down@1`; `adx@1` | x - 50; x - 25 |
+| a range, in percent of the close | `atr@1` | x / close x 100 |
+| as it is | `squeeze@1`, `roc@1`, `tsi@1`, `aroon@1`, `macd-diff@1`, `renko-direction@1`, `session-last-candle@1`, `rel-open@1` ... `rel-close@1` | x |
+
+A feature whose block has no rule (`open@1` ... `volume@1`, or a block added later) cannot take
+it: the manifest fails the `catalog` check ("input.features[0].norm is blesk-norm@1, which has
+no rule for open@1"), before anything runs. The rules live in `blocks.BLESK_RULES`; changing
+one makes a new version (`blesk-norm@2`), as for every block.
+The BLESK data also has `obv`, `mfi`, `vwap` and `cmf`, scaled in their own ways, which the
+NO-VOL models do not take and the catalog does not have.
+
+The evidence: research #262 reproduces every column of the BLESK normalized data from its
+indicators with these rules on every row of four stocks, within 1.4e-14. The golden tests
+(`tests/unit/preprocessing/test_supervisor.py`) give the BLESK normalized data from its
+indicators on every row of AAPL and TSLA, and build the whole BLESK NO-VOL manifest above on
+the candles of all 521 stocks of the BLESK data: the 22 features of the candle equal the
+normalized features of its triples on every row after the warm-up (17.6 million rows), and the
+direction on the 4.1 million rows whose bricks line up with the BLESK bricks (our bricks start
+on our own ATR, [above](#renko-triples)). A price level is compared within 1e-4 percentage
+points, 1e-6 of the close as for the indicators, since on stretches of one unchanged close
+the BLESK Bollinger bands lie up to 2.1e-5 off it, float noise of their standard deviation.
+
 ## No look-ahead
 
 A block looks ahead when a row up to candle t depends on a candle after t. The rule: a block
@@ -452,7 +486,7 @@ Checks 1 to 3 read the files only and run on upload; 4 and 5 run the model in th
    are about 77 trading days) and what a manifest lists, far above any real model's: 256
    features, 32 parameters of a block, 8 axes of a shape, block ids of 64 characters; every
    block and version in the catalog and in its own step (and `session-last-candle@1` only with
-   the `regular` session),
+   the `regular` session, `blesk-norm@1` only on a feature it has a rule for),
    each parameter of the right type and in its range; the feature names unique and none
    named `ts`; `signature.input` equal to `[window.length, number of features]` and
    `signature.output` equal to `[1]`; the shapes of the `example`.
@@ -474,13 +508,14 @@ Checks 1 to 3 read the files only and run on upload; 4 and 5 run the model in th
   `CANDLESTACK_SUPERVISOR_DATA` names a local copy (as `test_supervisor.py`): candles to his
   `indicators` and the session marks to his `end_bar` (built:
   `tests/unit/preprocessing/test_supervisor.py`), to `all_renkos` and to `all_triples`
-  (built: `tests/unit/preprocessing/test_supervisor_renko.py`), to `normalized`, to the model input
-  `candles_x_values`, to his predictions. His data never goes into this repository.
+  (built: `tests/unit/preprocessing/test_supervisor_renko.py`), to `normalized` and to the
+  normalized features of `all_triples` (built: `tests/unit/preprocessing/test_supervisor.py`),
+  to the model input `candles_x_values`, to his predictions. His data never goes into this repository.
 
 ## Open questions
 
 Kept for the supervisor until the pipeline is built, then asked together with what else is
-missing: his normalization formulas, the reward formula and `pocket_pivot`, the feature order
+missing: the reward formula and `pocket_pivot`, the feature order
 of the 25 x 7 models, the window rule of the 25 x 28 and 25 x 7 models, where his candles come
 from, and of the Renko bricks ([research #263]): how his ATR is started, why some stocks have
 no row for their first candle, whether a close exactly on a brick's edge stays in the brick
@@ -490,4 +525,5 @@ reward and `pocket_pivot` (#264), and his predictions reproduced from raw candle
 
 [research #117]: https://github.com/candlestack-tech/research/blob/main/notes/117-supervisor-pipeline.md
 [research #118]: https://github.com/candlestack-tech/research/blob/main/notes/118-indicators.md
+[research #262]: https://github.com/candlestack-tech/research/blob/main/notes/262-normalization.md
 [research #263]: https://github.com/candlestack-tech/research/blob/main/notes/263-renko-rules.md

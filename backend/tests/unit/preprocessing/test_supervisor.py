@@ -12,7 +12,11 @@ Never commit that data. Without the variable the tests are skipped, as in CI. Fr
     CANDLESTACK_SUPERVISOR_DATA=/data uv run pytest tests/unit/preprocessing/test_supervisor.py -v
 
 His ``rel_*`` columns are in his ``normalized.parquet``, which a stock folder may also have
-(``<CANDLESTACK_SUPERVISOR_DATA>/AAPL/normalized.parquet``); they are checked where it is.
+(``<CANDLESTACK_SUPERVISOR_DATA>/AAPL/normalized.parquet``); they are checked where it is, and
+so is ``blesk-norm@1`` on his indicators. Where a folder has his ``all_triples.parquet``, the
+whole BLESK NO-VOL manifest is built on his candles and its 23 normalized features compared
+with his triples (``test_the_blesk_input_is_his_normalized_triples``; read the counts with
+``-rP``).
 
 Every stock folder with both files is checked, each of his columns a test of its own. His rows
 are labelled by the candle's close in ``unix`` seconds, and his volume is ``volume_base``. A
@@ -45,7 +49,7 @@ import polars as pl
 import pytest
 
 from candlestack.data import Timeframe, parse_calendar, session_last
-from candlestack.preprocessing import CATALOG
+from candlestack.preprocessing import CATALOG, build_input, parse_manifest
 
 DATA = os.environ.get("CANDLESTACK_SUPERVISOR_DATA", "")
 ROOT = Path(DATA)
@@ -251,3 +255,155 @@ def test_the_last_candle_of_each_session_is_his_end_bar(stock: str) -> None:
     differ = int((ours != his).sum())
     assert differ == 0, f"{stock}: {differ} of {frame.height} candles differ in end_bar"
     assert ours.sum() == frame["day"].n_unique(), f"{stock}: not one last candle a day"
+
+
+# blesk-norm@1 (research #262): his normalized columns from his indicators and his close. The
+# rel_* columns are features already (above), which blesk-norm@1 keeps as they are.
+NORMALIZED = {column: block for column, (block, _) in COLUMNS.items()}
+
+
+@pytest.mark.parametrize("column", list(NORMALIZED))
+@pytest.mark.parametrize("stock", STOCKS)
+def test_blesk_norm_gives_his_normalized_column(stock: str, column: str) -> None:
+    normalized = ROOT / stock / "normalized.parquet"
+    if not normalized.is_file():
+        pytest.skip(f"{stock} has no normalized.parquet")
+    block = CATALOG["blesk-norm@1"]
+    given = pl.read_parquet(ROOT / stock / "indicators.parquet", columns=["unix", "close", column])
+    ours = given.select(
+        "unix", ours=block.run(given[column], given["close"], NORMALIZED[column], block.params())
+    )
+    rows = ours.join(
+        pl.read_parquet(normalized, columns=["unix", column]).rename({column: "his"}),
+        on="unix",
+        how="inner",
+    )
+    assert rows.height == given.height, f"{stock} {column}: rows of his not in both files"
+    a, b = rows["ours"].to_numpy(), rows["his"].to_numpy()
+
+    within = np.isclose(a, b, rtol=1e-6, atol=1e-8)
+    # Aggregates only, never his values.
+    assert within.all(), (
+        f"{stock} {column}: {int((~within).sum())} of {rows.height} rows differ, "
+        f"max |diff| {float(np.nanmax(np.abs(a - b))):.3g}"
+    )
+
+
+# The BLESK NO-VOL input (docs/preprocessing.md): his 23 features in their order, each block
+# with his parameters (the defaults but the EMAs') and blesk-norm@1.
+BLESK_FEATURES: dict[str, tuple[str, dict[str, Any]]] = {
+    **{column: COLUMNS[column] for column in list(COLUMNS)[:-1]},
+    "direction": ("renko-direction@1", {}),
+    **{column: (block, {}) for column, block in RELATIVE.items()},
+    "is_last_bar": COLUMNS["is_last_bar"],
+}
+# His bricks: 0.6 x the ATR of 14 candles at the candle that starts each brick.
+RENKO = {"atr_multiple": 0.6, "atr_window": 14, "atr_at": "brick_start"}
+BLESK_NO_VOL: dict[str, Any] = {
+    "version": 1,
+    "input": {
+        "timeframe": "30m",
+        "session": "regular",
+        "representation": {"id": "renko-triples@1", "params": RENKO},
+        "features": [
+            {"name": name, "id": block, "params": params, "norm": {"id": "blesk-norm@1"}}
+            for name, (block, params) in BLESK_FEATURES.items()
+        ],
+        "window": {"length": 25, "last": "current"},
+    },
+    "signature": {
+        "input": {"shape": [25, 23], "dtype": "float32"},
+        "output": {"shape": [1], "dtype": "float32", "meaning": "score"},
+    },
+}
+# blesk-norm@1 turns a price level into percent of the close, so the indicator tests' rtol
+# 1e-6 of a price level is 1e-4 there. Seen: on stretches of one close (a stock not yet listed,
+# or suspended) his Bollinger bands lie up to 2.1e-5 off the close, the float noise of his
+# standard deviation, where ours are on it.
+PERCENT = {"bb_bbh", "bb_bbl", "kch_high", "kch_low", "sma", "ema20", "ema50", "atr"}
+PERCENT_ATOL = 1e-4
+# The first rows of a recursive indicator after the warm-up differ from his by up to 2e-5 of its
+# value (above): on the first EARLY_TRIPLES rows they are compared within EARLY_ATOL. The
+# difference fades as the EMA of 50 does, by 1 - 2 / 51 a row, from 1e-4 to 1e-8 in about 240
+# rows (seen: up to 1.4e-5, within the first 160 rows).
+EARLY_TRIPLES = 256
+EARLY_ATOL = 1e-4
+
+
+def his_bricks(bricks: pl.DataFrame, his_rows: pl.DataFrame) -> pl.DataFrame:
+    """Whether the three bricks of each of our triples are his: its first candle, bottom and top
+    are his, and so are those of every triple since the candle its first brick starts. One row
+    alone could match by chance where the bricks are not his (seen once, on SHY)."""
+    rows = bricks.join(his_rows, on="ts", how="left")
+    same = (
+        (rows["start"] == rows["his_start"]).fill_null(value=False).to_numpy()
+        & np.isclose(rows["bottom"].to_numpy(), rows["his_bottom"].to_numpy(), rtol=1e-6, atol=0)
+        & np.isclose(rows["top"].to_numpy(), rows["his_top"].to_numpy(), rtol=1e-6, atol=0)
+    )
+    differ = np.concatenate([[0], np.cumsum(~same)])
+    since = np.searchsorted(rows["ts"].to_numpy(), rows["start"].to_numpy(), side="left")
+    return rows.select("ts", his_bricks=pl.Series(differ[1:] - differ[since] == 0))
+
+
+@pytest.mark.parametrize("stock", STOCKS)
+def test_the_blesk_input_is_his_normalized_triples(stock: str) -> None:
+    """The whole BLESK NO-VOL manifest on his candles gives the 23 normalized features of his
+    triples at each candle after the warm-up: the 22 of the candle on every row, the direction
+    on the rows whose three bricks are his. Our bricks start on our own ATR, not his, so on
+    many stocks they part from his for a while or for good (test_supervisor_renko.py)."""
+    triples = ROOT / stock / "all_triples.parquet"
+    if not triples.is_file():
+        pytest.skip(f"{stock} has no all_triples.parquet")
+    frame = candles(stock)
+    built = build_input(frame, parse_manifest(BLESK_NO_VOL))
+    names = list(BLESK_FEATURES)
+    ours = built.rows.filter(pl.all_horizontal(pl.col(names).is_finite()))
+    renko = CATALOG["renko-triples@1"]
+    bricks = renko.run(frame, renko.params.model_validate(RENKO))
+    his_rows = pl.read_parquet(triples).select(
+        ts=pl.col("end_unix").cast(pl.Int64) - HALF_HOUR,
+        his_start=pl.col("start_unix").cast(pl.Int64) - HALF_HOUR,
+        his_bottom=pl.col("bottom").cast(pl.Float64),
+        his_top=pl.col("top").cast(pl.Float64),
+        **{f"his_{name}": pl.col(name).cast(pl.Float64) for name in names},
+    )
+    rows = (
+        ours.join(his_rows, on="ts", how="inner")
+        .join(
+            his_bricks(bricks, his_rows.select("ts", "his_start", "his_bottom", "his_top")),
+            on="ts",
+            how="left",
+        )
+        .with_columns(tie=pl.col("ts").is_in(frame.filter(squeeze_tie())["ts"].implode()))
+    )
+    assert rows.height == ours.height, f"{stock}: {ours.height - rows.height} rows not his"
+    wrong = {
+        name: int((~within).sum())
+        for name in BLESK_FEATURES
+        if not (within := as_his(rows, name)).all()
+    }
+
+    # Aggregates only, never his values.
+    print(  # noqa: T201
+        f"{stock}: {rows.height} rows, the direction on the {int(rows['his_bricks'].sum())} "
+        "whose bricks are his"
+    )
+    assert not wrong, f"{stock}: rows that differ, of {rows.height}: {wrong}"
+
+
+def as_his(rows: pl.DataFrame, name: str) -> np.ndarray:
+    """Where our feature ``name`` is his on the rows, within its tolerance (above); the
+    direction counts only on the rows whose bricks are his."""
+    a, b = rows[name].to_numpy(), rows[f"his_{name}"].to_numpy()
+    if name == "squeeze":
+        within = (a == b) | rows["tie"].to_numpy()
+    elif name in EXACT:
+        within = a == b
+    else:
+        within = np.isclose(a, b, rtol=1e-6, atol=PERCENT_ATOL if name in PERCENT else 1e-8)
+    if name in RECURSIVE:
+        early = slice(0, EARLY_TRIPLES)
+        within[early] |= np.isclose(a[early], b[early], rtol=1e-6, atol=EARLY_ATOL)
+    if name == "direction":
+        within |= ~rows["his_bricks"].to_numpy()
+    return within

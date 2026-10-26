@@ -69,10 +69,15 @@ def random_candles(rng: random.Random) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=schema, orient="row")
 
 
-def random_column(rng: random.Random) -> pl.Series:
-    """A column of the rows, still in its warm-up for the first rows."""
-    return pl.Series(
-        "feature", [None] * WARM_UP[0] + [rng.gauss(0, 1) for _ in range(ROWS - WARM_UP[0])]
+def random_column(rng: random.Random) -> pl.DataFrame:
+    """A column of the rows, still in its warm-up for the first rows, and the close of each
+    row's candle, which a normalization takes with it."""
+    return pl.DataFrame(
+        {
+            "feature": [None] * WARM_UP[0] + [rng.gauss(0, 1) for _ in range(ROWS - WARM_UP[0])],
+            "close": random_candles(rng)["close"],
+        },
+        schema_overrides={"feature": pl.Float64},
     )
 
 
@@ -137,7 +142,23 @@ def params_of(block: Block) -> list[BaseModel]:
     return [block.params.model_validate(params) for params in PARAMS.get(block.id, [{}])]
 
 
-def looks_ahead(block: Block, params: BaseModel, rng: random.Random) -> bool:
+def features_of(block: Block) -> list[str]:
+    """The features a normalization runs for here: each it has a rule for, or one when it
+    takes any. The other steps take no feature."""
+    if block.step != "normalization":
+        return [""]
+    return sorted(block.normalizes) if block.normalizes is not None else ["close@1"]
+
+
+def run(block: Block, data: Any, params: BaseModel, feature: str) -> Any:
+    """The block on ``data`` in the form of its step: a normalization takes the column, the
+    close of each row's candle and the feature."""
+    if block.step == "normalization":
+        return block.run(data["feature"], data["close"], feature, params)
+    return block.run(data, params)
+
+
+def looks_ahead(block: Block, params: BaseModel, rng: random.Random, feature: str = "") -> bool:
     """Whether replacing what comes after a row changes the block's output up to it."""
     make, up_to = STEPS[block.step]
     if block.of_rows is not None:
@@ -145,10 +166,10 @@ def looks_ahead(block: Block, params: BaseModel, rng: random.Random) -> bool:
     if getattr(params, "last", None) == "current":
         make = random_forming_rows
     data = make(rng)
-    full = block.run(data, params)
+    full = run(block, data, params, feature)
     for row in rng.sample(range(len(data) - 1), 5):
         changed = pl.concat([data.head(row + 1), make(rng).slice(row + 1)])
-        if not same(up_to(block.run(changed, params), row), up_to(full, row)):
+        if not same(up_to(run(block, changed, params, feature), row), up_to(full, row)):
             return True
     return False
 
@@ -157,7 +178,12 @@ def looks_ahead(block: Block, params: BaseModel, rng: random.Random) -> bool:
 @pytest.mark.parametrize("block", list(CATALOG.values()), ids=list(CATALOG))
 def test_data_after_a_row_changes_nothing_of_a_block_up_to_it(block: Block, seed: int) -> None:
     for params in params_of(block):
-        assert not looks_ahead(block, params, random.Random(seed)), (block.id, params)
+        for feature in features_of(block):
+            assert not looks_ahead(block, params, random.Random(seed), feature), (
+                block.id,
+                params,
+                feature,
+            )
 
 
 def manifest(
@@ -181,6 +207,12 @@ def manifest(
     )
 
 
+def takes(norm: str, feature: str) -> bool:
+    """Whether the normalization ``norm`` can scale the feature block ``feature``."""
+    rules = CATALOG[norm].normalizes
+    return rules is None or feature in rules
+
+
 def every_manifest() -> list[Manifest]:
     """Manifests of every block of the catalog: each representation, with every feature it
     can have under every normalization, in every window that fits its rows."""
@@ -199,11 +231,16 @@ def every_manifest() -> list[Manifest]:
             for feature in steps("feature")
             if CATALOG[feature["id"]].of_rows in (None, representation)
         ]
+        # A normalization with rules of its own scales only the features it has a rule for.
+        pairs = [
+            (feature, norm)
+            for feature in fitting
+            for norm in steps("normalization")
+            if takes(norm["id"], feature["id"])
+        ]
         return [
             {**feature, "name": f"{feature['id']} {norm['id']} {index}", "norm": norm}
-            for index, (feature, norm) in enumerate(
-                (feature, norm) for feature in fitting for norm in steps("normalization")
-            )
+            for index, (feature, norm) in enumerate(pairs)
         ]
 
     def windows(representation: str) -> list[dict[str, Any]]:
@@ -296,9 +333,16 @@ def next_candle(frame: pl.DataFrame, _params: NoParams) -> pl.DataFrame:
     return frame.with_columns(pl.exclude("ts", "session_last").shift(-1).fill_null(0.0))
 
 
-def centered(column: pl.Series, _params: NoParams) -> pl.Series:
+def centered(column: pl.Series, _close: pl.Series, _feature: str, _params: NoParams) -> pl.Series:
     """Scaled by the mean of the whole series, later rows included."""
     return column - column.mean()
+
+
+def by_next_close(
+    column: pl.Series, close: pl.Series, _feature: str, _params: NoParams
+) -> pl.Series:
+    """Over the close of the next row's candle; the last row keeps its own."""
+    return column / close.shift(-1).fill_null(close)
 
 
 def window_of_the_next_row(rows: pl.DataFrame, params: BaseModel) -> Any:
@@ -308,6 +352,7 @@ def window_of_the_next_row(rows: pl.DataFrame, params: BaseModel) -> Any:
 LOOKING_AHEAD = [
     Block(id="next-close@1", step="feature", description="", run=next_close),
     Block(id="centered@1", step="normalization", description="", run=centered),
+    Block(id="by-next-close@1", step="normalization", description="", run=by_next_close),
     Block(id="next-candle@1", step="representation", description="", run=next_candle),
 ]
 
@@ -348,5 +393,16 @@ def test_a_manifest_with_a_block_that_looks_ahead_is_caught(
     monkeypatch.setattr(pipeline, "CATALOG", catalog)
     monkeypatch.setattr(checks, "CATALOG", catalog)
     raw["input"]["features"][3]["id"] = "next-close@1"
+
+    assert changes_up_to_a_row(parse_manifest(raw), random.Random(0))
+
+
+def test_a_manifest_with_a_normalization_that_looks_ahead_is_caught(
+    raw: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalog = {**CATALOG, "by-next-close@1": LOOKING_AHEAD[2]}
+    monkeypatch.setattr(pipeline, "CATALOG", catalog)
+    monkeypatch.setattr(checks, "CATALOG", catalog)
+    raw["input"]["features"][3]["norm"]["id"] = "by-next-close@1"
 
     assert changes_up_to_a_row(parse_manifest(raw), random.Random(0))

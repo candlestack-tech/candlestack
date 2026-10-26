@@ -9,15 +9,17 @@ Each step has its own form, which the catalog calls it by:
 - a feature takes the candles and gives one Float64 value per candle, known at its close; each
   row takes the value of its candle. A feature of the rows (``Block.of_rows``) takes the rows
   of its representation instead and gives one value per row;
-- a normalization takes a column of the rows and gives it scaled;
+- a normalization takes a feature's column of the rows, the close of each row's candle and the
+  feature's block id, and gives the column scaled;
 - the window takes the rows and gives the samples.
 
 A block sees only the candles up to the one it computes: no centered windows, no ``shift(-n)``,
 no statistics over the whole series (tests/unit/preprocessing/test_look_ahead.py).
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 import numpy as np
 import polars as pl
@@ -138,9 +140,81 @@ def session_last(frame: pl.DataFrame, _params: NoParams) -> pl.Series:
     return frame[SESSION_LAST].cast(pl.Float64)
 
 
-def none(column: pl.Series, _params: NoParams) -> pl.Series:
+def none(column: pl.Series, _close: pl.Series, _feature: str, _params: NoParams) -> pl.Series:
     """``none@1``: the column as it is."""
     return column
+
+
+# A rule of blesk-norm@1: the feature's column and the close of each row's candle to the column
+# scaled, one row at a time.
+Rule = Callable[[pl.Series, pl.Series], pl.Series]
+
+
+def _percent_from_close(column: pl.Series, close: pl.Series) -> pl.Series:
+    return (column / close - 1) * 100
+
+
+def _percent_of_close(column: pl.Series, close: pl.Series) -> pl.Series:
+    return column / close * 100
+
+
+def _minus(offset: float) -> Rule:
+    def rule(column: pl.Series, _close: pl.Series) -> pl.Series:
+        return column - offset
+
+    return rule
+
+
+def _unchanged(column: pl.Series, _close: pl.Series) -> pl.Series:
+    return column
+
+
+# How the BLESK models scaled each feature, by its block (research #262, checked on every row
+# of the BLESK data): per row, from the row's candle only, no statistic of a window or of the
+# history. A feature not here has no rule, and a manifest that gives it blesk-norm@1 is refused.
+BLESK_RULES: Mapping[str, Rule] = MappingProxyType(
+    {
+        # A price level: its distance from the close, in percent.
+        "bollinger-high@1": _percent_from_close,
+        "bollinger-low@1": _percent_from_close,
+        "keltner-high@1": _percent_from_close,
+        "keltner-low@1": _percent_from_close,
+        "sma@1": _percent_from_close,
+        "ema@1": _percent_from_close,
+        # An oscillator from 0 to 100: centered on 50, the ADX on 25.
+        "rsi@1": _minus(50),
+        "aroon-up@1": _minus(50),
+        "aroon-down@1": _minus(50),
+        "adx@1": _minus(25),
+        # A range in price: a percent of the close.
+        "atr@1": _percent_of_close,
+        # Already free of the price level: as it is.
+        "squeeze@1": _unchanged,
+        "roc@1": _unchanged,
+        "tsi@1": _unchanged,
+        "aroon@1": _unchanged,
+        "macd-diff@1": _unchanged,
+        "renko-direction@1": _unchanged,
+        "session-last-candle@1": _unchanged,
+        "rel-open@1": _unchanged,
+        "rel-high@1": _unchanged,
+        "rel-low@1": _unchanged,
+        "rel-close@1": _unchanged,
+    }
+)
+
+
+def blesk_norm(column: pl.Series, close: pl.Series, feature: str, _params: NoParams) -> pl.Series:
+    """``blesk-norm@1``: the feature scaled as the BLESK models were trained, by the rule of its
+    block (``BLESK_RULES``) from the close of each row's candle.
+
+    Raises:
+        ValueError: The feature's block has no rule (``check_manifest`` says so first).
+    """
+    rule = BLESK_RULES.get(feature)
+    if rule is None:
+        raise ValueError(f"blesk-norm@1 has no rule for {feature}")
+    return rule(column, close)
 
 
 def window(rows: pl.DataFrame, params: Window) -> Samples:

@@ -45,6 +45,8 @@ class Block:
       row, which makes the warm-up of a manifest exact;
     - ``of_rows``: for a feature of the rows of a representation rather than of the candles
       (the direction of a Renko triple), that representation: the feature takes its rows;
+    - ``normalizes``: for a normalization that scales each feature by a rule of its own
+      (``blesk-norm@1``), the feature blocks it has a rule for; None when it takes any feature;
     - ``tunable``: the parameters a user may change on a trained model, for a later experiment
       mode (docs/preprocessing.md#what-the-user-chooses); none yet.
     """
@@ -60,6 +62,7 @@ class Block:
     needs_session: bool = False
     candles_per_row: Callable[[Any], float] | None = None
     of_rows: str | None = None
+    normalizes: frozenset[str] | None = None
     tunable: frozenset[str] = field(default_factory=frozenset)
 
 
@@ -311,6 +314,17 @@ CATALOG: Mapping[str, Block] = MappingProxyType(
                 step="normalization",
                 description="No normalization: the values as they are",
                 run=blocks.none,
+            ),
+            Block(
+                id="blesk-norm@1",
+                step="normalization",
+                description=(
+                    "As the BLESK models were trained: price levels in percent from the close, "
+                    "oscillators centered on 50 (ADX on 25), ATR in percent of the close, the "
+                    "rest as it is"
+                ),
+                run=blocks.blesk_norm,
+                normalizes=frozenset(blocks.BLESK_RULES),
             ),
             Block(
                 id=WINDOW,

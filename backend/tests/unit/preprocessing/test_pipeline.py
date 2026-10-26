@@ -235,8 +235,7 @@ def test_the_exact_warm_up_is_what_the_build_drops(raw: dict[str, Any]) -> None:
     assert build_input(candles(40), manifest).dropped == warm_up(manifest).candles
 
 
-# The BLESK NO-VOL input (docs/preprocessing.md) without what is still to come: its
-# normalization.
+# The BLESK NO-VOL input (docs/preprocessing.md), each feature normalized by blesk-norm@1.
 BLESK_FEATURES = [
     ("bb_bbh", "bollinger-high@1", {"window": 20, "dev": 2.0}),
     ("bb_bbl", "bollinger-low@1", {"window": 20, "dev": 2.0}),
@@ -264,7 +263,9 @@ BLESK_FEATURES = [
 ]
 
 
-def renko(features: list[tuple[str, str, dict[str, Any]]], length: int = 25) -> Manifest:
+def renko(
+    features: list[tuple[str, str, dict[str, Any]]], length: int = 25, norm: str = "none@1"
+) -> Manifest:
     return parse_manifest(
         {
             "version": 1,
@@ -276,7 +277,7 @@ def renko(features: list[tuple[str, str, dict[str, Any]]], length: int = 25) -> 
                     "params": {"atr_multiple": 0.6, "atr_window": 14, "atr_at": "brick_start"},
                 },
                 "features": [
-                    {"name": name, "id": block, "params": params}
+                    {"name": name, "id": block, "params": params, "norm": {"id": norm}}
                     for name, block, params in features
                 ],
                 "window": {"length": length, "last": "current"},
@@ -308,8 +309,8 @@ def walk(count: int, seed: int = 0) -> pl.DataFrame:
     )
 
 
-def test_the_blesk_input_without_its_normalization_is_25_rows_of_triples() -> None:
-    manifest = renko(BLESK_FEATURES)
+def test_the_blesk_input_is_25_rows_of_triples() -> None:
+    manifest = renko(BLESK_FEATURES, norm="blesk-norm@1")
     frame = walk(1000)
 
     built = build_input(frame, manifest)
@@ -321,6 +322,65 @@ def test_the_blesk_input_without_its_normalization_is_25_rows_of_triples() -> No
     assert warm_up(manifest) == WarmUp(candles=350 + 53, kind="estimate")
     # The estimate is long enough: the first sample comes before it.
     assert built.dropped <= warm_up(manifest).candles
+
+
+def by_hand(rows: pl.DataFrame, close: pl.Expr) -> list[pl.Expr]:
+    """The BLESK features of ``rows`` normalized by blesk-norm@1's rules, written out."""
+    from_close = ["bb_bbh", "bb_bbl", "kch_high", "kch_low", "sma", "ema20", "ema50"]
+    offset = {"rsi": 50, "aroon_up": 50, "aroon_down": 50, "adx": 25}
+    return [
+        (pl.col(name) / close - 1) * 100
+        if name in from_close
+        else pl.col(name) - offset[name]
+        if name in offset
+        else pl.col(name) / close * 100
+        if name == "atr"
+        else pl.col(name)
+        for name in rows.columns
+        if name not in ("ts", "row_id")
+    ]
+
+
+@pytest.mark.parametrize("length", [1, 25])
+def test_blesk_norm_scales_each_triple_by_the_close_of_its_candle(length: int) -> None:
+    frame = walk(1000)
+
+    raw = build_input(frame, renko(BLESK_FEATURES, length)).rows
+    built = build_input(frame, renko(BLESK_FEATURES, length, norm="blesk-norm@1"))
+
+    # The close at a row is the close of the candle its features are taken at, its ts.
+    close = raw.join(frame.select("ts", candle_close="close"), on="ts", how="left")
+    expected = close.select("ts", "row_id", *by_hand(raw, pl.col("candle_close")))
+    assert built.rows.columns == raw.columns
+    assert built.rows.equals(expected)
+    assert np.isfinite(built.samples).all()
+
+
+def test_blesk_norm_on_candles_and_a_feature_named_close(raw: dict[str, Any]) -> None:
+    raw["input"]["features"] = [
+        {"name": "close", "id": "sma@1", "params": {"window": 3}, "norm": {"id": "blesk-norm@1"}},
+        {"name": "rsi", "id": "rsi@1", "params": {"window": 2}, "norm": {"id": "blesk-norm@1"}},
+        {"name": "atr", "id": "atr@1", "params": {"window": 2}, "norm": {"id": "blesk-norm@1"}},
+        {"name": "roc", "id": "roc@1", "params": {"window": 2}, "norm": {"id": "blesk-norm@1"}},
+    ]
+    manifest = parse_manifest(with_window(raw, 2))
+    frame = walk(60)
+
+    built = build_input(frame, manifest)
+
+    sma = CATALOG["sma@1"].run(frame, CATALOG["sma@1"].params.model_validate({"window": 3}))
+    rsi = CATALOG["rsi@1"].run(frame, CATALOG["rsi@1"].params.model_validate({"window": 2}))
+    atr = CATALOG["atr@1"].run(frame, CATALOG["atr@1"].params.model_validate({"window": 2}))
+    roc = CATALOG["roc@1"].run(frame, CATALOG["roc@1"].params.model_validate({"window": 2}))
+    close = frame["close"]
+    # The candle's close scales the features and stays out of the rows, whatever their names.
+    assert built.rows.columns == ["ts", "close", "rsi", "atr", "roc"]
+    assert built.rows["close"].equals((sma / close - 1) * 100, check_names=False)
+    assert built.rows["rsi"].equals(rsi - 50, check_names=False)
+    assert built.rows["atr"].equals(atr / close * 100, check_names=False)
+    assert built.rows["roc"].equals(roc, check_names=False)
+    # The longest warm-up is the ATR's, 15 * 2 - 1; blesk-norm@1 adds none.
+    assert warm_up(manifest) == WarmUp(candles=29 + 1, kind="exact")
 
 
 def test_the_build_drops_the_candles_before_the_first_sample_not_the_rows() -> None:

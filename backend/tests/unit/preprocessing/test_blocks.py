@@ -8,7 +8,7 @@ import polars as pl
 import pytest
 
 from candlestack.preprocessing import CATALOG
-from candlestack.preprocessing.blocks import ROW_ID, NoParams, Samples
+from candlestack.preprocessing.blocks import BLESK_RULES, ROW_ID, NoParams, Samples
 from candlestack.preprocessing.manifest import RESERVED_NAMES, Window
 
 NONE = NoParams()
@@ -105,8 +105,71 @@ def test_the_last_candle_of_a_session_needs_the_marks() -> None:
 
 def test_none_gives_the_column_as_it_is() -> None:
     column = pl.Series("close", [1.5, None, -2.0])
+    close = pl.Series([10.0, 20.0, 40.0])
 
-    assert CATALOG["none@1"].run(column, NONE).equals(column)
+    assert CATALOG["none@1"].run(column, close, "close@1", NONE).equals(column)
+
+
+def blesk_norm(feature: str, column: list[float | None]) -> list[float | None]:
+    """``blesk-norm@1`` on ``column`` of ``feature``, the closes of the rows' candles 10, 20, 40."""
+    close = pl.Series([10.0, 20.0, 40.0])
+    return CATALOG["blesk-norm@1"].run(pl.Series(column), close, feature, NONE).to_list()
+
+
+@pytest.mark.parametrize(
+    "feature",
+    ["bollinger-high@1", "bollinger-low@1", "keltner-high@1", "keltner-low@1", "sma@1", "ema@1"],
+)
+def test_blesk_norm_takes_a_price_level_in_percent_from_the_close(feature: str) -> None:
+    assert blesk_norm(feature, [11.0, 19.0, None]) == pytest.approx([10.0, -5.0, None])
+
+
+@pytest.mark.parametrize(
+    ("feature", "expected"),
+    [
+        ("rsi@1", [20.0, -50.0, 50.0]),
+        ("aroon-up@1", [20.0, -50.0, 50.0]),
+        ("aroon-down@1", [20.0, -50.0, 50.0]),
+        ("adx@1", [45.0, -25.0, 75.0]),
+    ],
+)
+def test_blesk_norm_centers_an_oscillator(feature: str, expected: list[float]) -> None:
+    assert blesk_norm(feature, [70.0, 0.0, 100.0]) == expected
+
+
+def test_blesk_norm_takes_the_atr_in_percent_of_the_close() -> None:
+    assert blesk_norm("atr@1", [0.5, 1.0, 1.0]) == pytest.approx([5.0, 5.0, 2.5])
+
+
+@pytest.mark.parametrize(
+    "feature",
+    [
+        "squeeze@1",
+        "roc@1",
+        "tsi@1",
+        "aroon@1",
+        "macd-diff@1",
+        "renko-direction@1",
+        "session-last-candle@1",
+        "rel-open@1",
+        "rel-high@1",
+        "rel-low@1",
+        "rel-close@1",
+    ],
+)
+def test_blesk_norm_keeps_a_feature_free_of_the_price_level(feature: str) -> None:
+    assert blesk_norm(feature, [0.75, None, -0.25]) == [0.75, None, -0.25]
+
+
+def test_blesk_norm_has_a_rule_for_each_feature_it_names() -> None:
+    assert CATALOG["blesk-norm@1"].normalizes == frozenset(BLESK_RULES)
+    assert all(CATALOG[feature].step == "feature" for feature in BLESK_RULES)
+
+
+@pytest.mark.parametrize("feature", ["open@1", "close@1", "volume@1", "macd-signal@1"])
+def test_blesk_norm_refuses_a_feature_without_a_rule(feature: str) -> None:
+    with pytest.raises(ValueError, match=f"blesk-norm@1 has no rule for {feature}"):
+        blesk_norm(feature, [1.0, 2.0, 3.0])
 
 
 def test_the_window_gives_the_last_rows_up_to_each_row() -> None:
@@ -290,6 +353,7 @@ def test_the_window_needs_length_minus_one_earlier_rows(length: int, rows_before
         "rel-low@1",
         "session-last-candle@1",
         "none@1",
+        "blesk-norm@1",
     ],
 )
 def test_the_candle_blocks_need_no_earlier_candle(block: str) -> None:
