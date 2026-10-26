@@ -63,10 +63,12 @@ function Look({ shown }: { shown: Shown }) {
 
 // At the right of a card's title: Saving…, Saved with a check, Not saved in amber while a field
 // holds a value to fix (the field says what), Couldn't save with Retry. Read out as it changes.
+// Centred on the title row: the row lines up its parts on their text, and with none the indicator
+// would sit lower and the card would move each time it shows or hides.
 export function SaveIndicator({ state }: { state: SaveState }) {
   const shown = useShown(state);
   return (
-    <div className="flex h-6 items-center gap-2 text-[13px]">
+    <div className="flex h-6 items-center gap-2 self-center text-[13px]">
       <output>
         <Look shown={shown} />
       </output>

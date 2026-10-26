@@ -60,4 +60,11 @@ describe('the save indicator', () => {
     act(() => screen.getByRole('button', { name: 'Retry' }).click());
     expect(retry).toHaveBeenCalledOnce();
   });
+
+  it('sits centred on the title row, so the card does not move as it shows and hides', () => {
+    // The card's title row lines its parts up on their text (DashboardCard); with nothing to say,
+    // the indicator has no text and would sit lower, making the row 6.5 px taller until it speaks.
+    render(<SaveIndicator state={state('idle')} />);
+    expect(screen.getByRole('status').parentElement?.className).toMatch(/(^| )self-center( |$)/);
+  });
 });
