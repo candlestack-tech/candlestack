@@ -427,6 +427,8 @@ def test_the_blesk_input_is_his_normalized_triples(stock: str) -> None:
         f"{stock}: {rows.height} of his {his_rows.height} rows, the direction on the "
         f"{int(rows['his_bricks'].sum())} whose bricks are his"
     )
+    assert rows.height == his_rows.height, f"{stock}: {his_rows.height - rows.height} rows missing"
+    assert early <= 1, f"{stock}: {early} rows before his first"
     assert rows.height + early == ours.height, f"{stock}: {ours.height - rows.height} rows not his"
     assert not wrong, f"{stock}: rows that differ, of {rows.height}: {wrong}"
 

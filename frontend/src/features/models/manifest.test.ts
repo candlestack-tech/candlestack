@@ -19,6 +19,7 @@ describe('representationName', () => {
     expect(representationName('candles@1')).toBe('Candles');
     expect(representationName('renko-triples@1')).toBe('Renko');
     expect(representationName('renko-triples@1', true)).toBe('Renko bricks');
+    expect(representationName('renko-triples@2')).toBe('Renko');
     expect(representationName('heikin-ashi@1')).toBe('heikin-ashi@1');
   });
 });
