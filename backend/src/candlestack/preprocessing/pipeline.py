@@ -24,7 +24,9 @@ class ModelInput:
     - ``samples``: float32 of shape ``(samples, window length, features)``;
     - ``ts``: Int64, one per sample, the candle at whose close it is known: its prediction goes
       to that candle (``signals.align`` joins on it as it is);
-    - ``dropped``: the rows at the start without a sample, the warm-up the report counts.
+    - ``dropped``: the candles at the start without a sample, the warm-up the report counts.
+      With rows that span several candles it is more than the window's dropped rows, as the
+      rows themselves start some candles in (Renko triples on the third brick).
     """
 
     rows: pl.DataFrame
@@ -113,7 +115,8 @@ def build_input(candles: pl.DataFrame, manifest: Manifest) -> ModelInput:
         for feature in spec.features
     )
     made = CATALOG[WINDOW].run(rows, spec.window)
-    return ModelInput(rows=rows, samples=made.samples, ts=made.ts, dropped=made.dropped)
+    dropped = int(frame["ts"].search_sorted(made.ts[0])) if len(made.ts) else frame.height
+    return ModelInput(rows=rows, samples=made.samples, ts=made.ts, dropped=dropped)
 
 
 def _run(block_id: str, data: pl.DataFrame | pl.Series, params: dict[str, object]) -> pl.Series:

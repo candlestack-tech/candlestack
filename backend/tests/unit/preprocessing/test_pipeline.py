@@ -316,8 +316,28 @@ def test_the_blesk_input_without_its_normalization_is_25_rows_of_triples() -> No
     assert built.rows.columns == ["ts", "row_id", *(name for name, _, _ in BLESK_FEATURES)]
     assert warm_up(manifest) == WarmUp(candles=350 + 53, kind="estimate")
     # The estimate is long enough: the first sample comes before it.
+    assert built.dropped <= warm_up(manifest).candles
+
+
+def test_the_build_drops_the_candles_before_the_first_sample_not_the_rows() -> None:
+    """Triples start on the third brick after the ATR's warm-up: the candles before the
+    first sample are many more than the rows the window drops."""
+    frame = walk(600)
+
+    built = build_input(frame, renko([("close", "close@1", {})], 3))
+
     first = int(frame["ts"].search_sorted(built.ts[0]))
-    assert first <= warm_up(manifest).candles
+    assert built.dropped == first == frame.height - len(built.samples)
+    assert built.dropped > built.rows.height - len(built.samples)
+
+
+def test_a_build_without_samples_drops_every_candle() -> None:
+    frame = walk(230)
+
+    built = build_input(frame, renko([("close", "close@1", {})], 25))
+
+    assert len(built.samples) == 0
+    assert built.dropped == frame.height
 
 
 def test_a_triple_takes_the_candle_features_at_its_candle_and_its_own_direction() -> None:

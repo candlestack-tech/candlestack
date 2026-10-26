@@ -212,7 +212,6 @@ def _fits_representation(manifest: Manifest, rep: str, *, forming: bool) -> list
             'last finished rows and the row still forming. "closed" is not supported with it.'
         )
     return found
-    return found
 
 
 def _params(manifest: Manifest) -> list[str]:
