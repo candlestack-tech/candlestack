@@ -323,11 +323,12 @@ drawdown and When. The layout is fixed (`table-fixed`): every column but the mod
 of `src/features/backtests/widths.ts`, room for its longest value and its header with the sort
 arrow, so no number is cut; the model takes the rest. Its name is 12 px (one step under the
 row's 13 px), ends in an ellipsis when it does not fit, shows in full in its title and links to
-the model while it exists. Trades is left out: with it the model would keep 134 px at most. From
-which width down a column hides, so the table never scrolls sideways: Max drawdown at 1140 px,
-When at 760, Model at 600, Status at 480 (Return then shows the badge), Sharpe at 420.
+the model while it exists. Return has room for "+9,999.9 %", When for "28 May 2025 11:58 AM",
+the longest of every date and time format. Trades is left out: with it the model would keep under
+100 px. From which width down a column hides, so the table never scrolls sideways: Max drawdown
+at 1150 px, When at 800, Model at 620, Status at 500 (Return then shows the badge), Sharpe at 420.
 
-The dashboard's Last backtests (fixed too; When hides in a card under 500 px), Best backtests and
+The dashboard's Last backtests (fixed too; When hides in a card under 520 px), Best backtests and
 a model's backtests give their columns the same widths. Every list names its instruments with
 `BacktestInstruments`: up to as many as it has room for, else one less and "+N" with all of them
 in the title, each symbol cut with an ellipsis where its column is narrower (one and "+N" on the

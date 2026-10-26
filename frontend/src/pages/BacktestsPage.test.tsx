@@ -116,12 +116,12 @@ describe('the Backtests page', () => {
         .find((name) => name.startsWith('w-'));
     expect(width(/^Model/)).toBeUndefined();
     expect([/^Backtest/, /^Instruments/, /^Status/, /^Return/, /^Sharpe/, /^Max drawdown/, /^When/].map(width)).toEqual(
-      ['w-[84px]', 'w-[112px]', 'w-[88px]', 'w-[84px]', 'w-[76px]', 'w-[128px]', 'w-[144px]'],
+      ['w-[84px]', 'w-[112px]', 'w-[88px]', 'w-[100px]', 'w-[76px]', 'w-[128px]', 'w-[160px]'],
     );
 
     const [, , , status, result] = within(rows()[0]!).getAllByRole('cell');
     expect(status!.textContent).toBe('Failed');
-    expect(within(result!).getByText('–').parentElement!.className).toBe('max-[480px]:hidden');
+    expect(within(result!).getByText('–').parentElement!.className).toBe('max-[500px]:hidden');
   });
 
   it('says how many match a search, and one backtest in the singular', async () => {

@@ -19,9 +19,9 @@ import { cn } from '@/lib/utils';
 
 import { Widget, WidgetLink } from './widgets';
 
-// When hides in a card under 500 px (the dashboard at 1024 px), so the instruments keep 100 px
+// When hides in a card under 520 px (the dashboard at 1024 px), so the instruments keep 100 px
 // or more and nothing is cut.
-const WHEN = '@max-[500px]:hidden';
+const WHEN = '@max-[520px]:hidden';
 
 // With the widths every table of backtests gives them; the instruments take the rest.
 const COLUMNS: readonly { label: string; number: boolean; width?: string; hide?: string }[] = [

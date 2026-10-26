@@ -10,24 +10,24 @@ import { WIDTH } from './widths';
 
 // The columns of the approved design (#315) with their fixed widths, and from which width down each
 // one hides, so the table never scrolls sideways and the model keeps about 120 px or more: Max
-// drawdown at 1140 px, When at 760, Model at 600, Status at 480 (Return then shows the badge),
-// Sharpe at 420. The trades are left out: with them the model would get 134 px at most, as the page
+// drawdown at 1150 px, When at 800, Model at 620, Status at 500 (Return then shows the badge),
+// Sharpe at 420. The trades are left out: with them the model would get under 100 px, as the page
 // stops growing at 1215 px. Instruments and Status do not sort.
 const COLUMNS: readonly { label: string; sort?: BacktestsColumn; width?: string; hide?: string; number?: boolean }[] = [
   { label: 'Backtest', sort: 'number', width: WIDTH.backtest },
   { label: 'Instruments', width: WIDTH.instruments },
-  { label: 'Model', sort: 'model', hide: 'max-[600px]:hidden' },
-  { label: 'Status', width: WIDTH.status, hide: 'max-[480px]:hidden' },
+  { label: 'Model', sort: 'model', hide: 'max-[620px]:hidden' },
+  { label: 'Status', width: WIDTH.status, hide: 'max-[500px]:hidden' },
   { label: 'Return', sort: 'return', width: WIDTH.return, number: true },
   { label: 'Sharpe', sort: 'sharpe', width: WIDTH.sharpe, hide: 'max-[420px]:hidden', number: true },
   {
     label: 'Max drawdown',
     sort: 'max_drawdown',
     width: WIDTH.maxDrawdown,
-    hide: 'max-[1140px]:hidden',
+    hide: 'max-[1150px]:hidden',
     number: true,
   },
-  { label: 'When', sort: 'when', width: WIDTH.when, hide: 'max-[760px]:hidden' },
+  { label: 'When', sort: 'when', width: WIDTH.when, hide: 'max-[800px]:hidden' },
 ];
 const hideOf = (label: string) => COLUMNS.find((column) => column.label === label)?.hide;
 
@@ -72,10 +72,10 @@ function ReturnCell({ backtest }: { backtest: Backtest }) {
   if (hasResults(backtest)) return <BacktestReturn backtest={backtest} />;
   return (
     <>
-      <span className="min-[480px]:hidden">
+      <span className="min-[500px]:hidden">
         <StatusBadge status={backtest.status} />
       </span>
-      <span className="max-[480px]:hidden">
+      <span className="max-[500px]:hidden">
         <Missing />
       </span>
     </>
