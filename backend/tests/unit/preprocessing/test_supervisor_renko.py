@@ -17,7 +17,8 @@ His rows are labelled by the candle's close in ``unix`` seconds, ours by its ope
 hour before. Every stock folder with the four files is checked:
 
 - **The rules** (``test_the_bricks_are_his`` and ``test_the_triples_are_his``): the brick loop
-  on his candles with his ATR (``indicators.atr``) from his first ``indicators`` candle gives
+  on his candles from his first ``indicators`` candle, with his ATR (``indicators.atr``) and
+  with ours, ``atr@2`` of his candles from their first one (TA-Lib's, research #265), gives
   his ``all_renkos`` (start, bottom, top, direction, skipped, finished) and, from those
   bricks, the structural columns of his ``all_triples`` (start, end, direction, finished,
   bottom, top and the OHLCV of the start and end candles); his 28 normalized features are
@@ -33,11 +34,12 @@ hour before. Every stock folder with the four files is checked:
     row for his first candle, though the next rows name it as their brick's start. Only that
     one row may be missing.
 
-- **Our own ATR** (``test_how_many_stocks_line_up_with_our_own_atr``): the block as a backtest
-  runs it, on his candles from their first one with ``atr@1``, against his triples. Bricks
-  depend on the whole history and the two ATRs differ in their warm-up, so this is a report,
-  not a check: how many stocks line up with his for good, and from which year. Read it with
-  ``-rP``.
+- **The blocks** (``test_how_many_stocks_line_up_with_the_block``): ``renko-triples@1`` and
+  ``renko-triples@2`` as a backtest runs them, on his candles from their first one, against
+  his triples. Bricks depend on the whole history: ``@1`` starts on its own ATR and candle,
+  ``@2`` on his (TA-Lib's ATR, the first brick on the candle 49), where only a close on a grid
+  line parts them. So this is a report, not a check: how many stocks are his on every row,
+  and how many line up with his for good, from which year. Read it with ``-rP``.
 
 Only counts are reported, never his values.
 """
@@ -64,6 +66,8 @@ MULTIPLE = 0.6  # his bricks: 0.6 x ATR(14)
 ON_THE_LINE = 1e-6
 RTOL = 1e-6
 OHLCV = {"open": "open", "high": "high", "low": "low", "close": "close", "volume": "volume_base"}
+# The ATR the bricks take: his, or ours started as TA-Lib does.
+ATRS = ("his", "atr@2")
 
 pytestmark = pytest.mark.skipif(
     not DATA, reason="CANDLESTACK_SUPERVISOR_DATA does not name the supervisor's data"
@@ -89,9 +93,18 @@ def his(stock: str, name: str, columns: list[str] | None = None) -> pl.DataFrame
     return pl.read_parquet(ROOT / stock / f"{name}.parquet", columns=columns)
 
 
-def his_candles(stock: str) -> pl.DataFrame:
-    """His candles with his ATR, from his first ``indicators`` candle."""
-    return his(stock, "indicators", ["unix", *OHLCV.values(), "atr"]).sort("unix")
+def his_candles(stock: str, atr: str = "his") -> pl.DataFrame:
+    """His candles from his first ``indicators`` candle, with his ATR or the block ``atr`` of
+    his candles from their first one."""
+    candles = his(stock, "indicators", ["unix", *OHLCV.values(), "atr"]).sort("unix")
+    if atr == "his":
+        return candles
+    block = CATALOG[atr]
+    raw = his(stock, "candles", ["unix", "high", "low", "close"]).sort("unix")
+    ours = raw.select("unix", atr=block.run(raw, block.params()))
+    candles = candles.drop("atr").join(ours, on="unix", how="left")
+    assert candles["atr"].is_not_null().all(), f"{stock}: {atr} has no value on his first rows"
+    return candles
 
 
 def on_the_line(close: float, before: Brick, size: float) -> bool:
@@ -162,14 +175,14 @@ def stitched(made: Bricks, row: int, brick: Brick, rest: Bricks, start: int) -> 
     )
 
 
-def rebuilt(stock: str) -> tuple[pl.DataFrame, Bricks, int]:
-    """His candles, our bricks of them with his ATR, and on how many closes on a grid line
-    the bricks took his choice.
+def rebuilt(stock: str, atr: str) -> tuple[pl.DataFrame, Bricks, int]:
+    """His candles, our bricks of them with the ATR ``atr`` (``ATRS``), and on how many closes
+    on a grid line the bricks took his choice.
 
     His ``all_renkos`` is checked on the way: it has a row for every candle but at most the
     first, and our bricks differ from his only from a close on a grid line on.
     """
-    candles = his_candles(stock)
+    candles = his_candles(stock, atr)
     unix = candles["unix"].cast(pl.Int64).to_numpy()
     close, high, low = (candles[name].to_numpy() for name in ("close", "high", "low"))
     size = MULTIPLE * candles["atr"].to_numpy()
@@ -208,17 +221,21 @@ def test_some_stock_has_his_bricks_and_triples() -> None:
     assert STOCKS, f"No folder in {ROOT} has {', '.join(f'{name}.parquet' for name in FILES)}"
 
 
+@pytest.mark.parametrize("atr", ATRS)
 @pytest.mark.parametrize("stock", STOCKS)
-def test_the_bricks_are_his(stock: str) -> None:
-    _, made, choices = rebuilt(stock)
+def test_the_bricks_are_his(stock: str, atr: str) -> None:
+    _, made, choices = rebuilt(stock, atr)
 
     # Aggregates only, never his values.
-    print(f"{stock}: {made.start.size} candles, {choices} closes on a grid line")  # noqa: T201
+    print(  # noqa: T201
+        f"{stock}, {atr} ATR: {made.start.size} candles, {choices} closes on a grid line"
+    )
 
 
+@pytest.mark.parametrize("atr", ATRS)
 @pytest.mark.parametrize("stock", STOCKS)
-def test_the_triples_are_his(stock: str) -> None:
-    candles, made, _ = rebuilt(stock)
+def test_the_triples_are_his(stock: str, atr: str) -> None:
+    candles, made, _ = rebuilt(stock, atr)
     unix = candles["unix"].cast(pl.Int64).to_numpy()
     ours = triples(unix, made).rename({"ts": "end_unix", "start": "start_unix"})
     ours = ours.with_columns(
@@ -252,43 +269,48 @@ def test_the_triples_are_his(stock: str) -> None:
     assert same.all(), f"{stock}: {int((~same).sum())} of {ours.height} rows differ"
 
 
-def test_how_many_stocks_line_up_with_our_own_atr() -> None:
-    """The block on his candles from their first one, its ATR ``atr@1``: from which year each
-    stock's triples are his for good. A report, which never fails on the numbers."""
-    block = CATALOG["renko-triples@1"]
-    params = block.params()
-    since: collections.Counter[str] = collections.Counter()
-    for stock in STOCKS:
-        frame = his(stock, "candles", ["unix", "date", *OHLCV.values()]).sort("unix")
-        frame = frame.with_columns(ts=pl.col("unix").cast(pl.Int64) - HALF_HOUR)
-        ours = block.run(frame, params)
-        theirs = his(stock, "all_triples", ["start_unix", "end_unix", "direction", "bottom", "top"])
-        theirs = theirs.select(
-            ts=pl.col("end_unix").cast(pl.Int64) - HALF_HOUR,
-            his_start=pl.col("start_unix").cast(pl.Int64) - HALF_HOUR,
-            his_direction=pl.col("direction").cast(pl.Float64),
-            his_bottom=pl.col("bottom").cast(pl.Float64),
-            his_top=pl.col("top").cast(pl.Float64),
-        )
-        rows = ours.join(theirs, on="ts", how="inner").sort("ts")
-        same = (
-            (rows["start"] == rows["his_start"]).to_numpy()
-            & (rows["direction"] == rows["his_direction"]).to_numpy()
-            & np.isclose(
-                rows["bottom"].to_numpy(), rows["his_bottom"].to_numpy(), rtol=RTOL, atol=0
-            )
-            & np.isclose(rows["top"].to_numpy(), rows["his_top"].to_numpy(), rtol=RTOL, atol=0)
-        )
-        if not same.size or not same[-1]:
-            since["never"] += 1
-            continue
-        first = int(same.size - np.argmin(same[::-1])) if not same.all() else 0
-        day = frame.filter(pl.col("ts") == rows["ts"][first])["date"][0]
-        since[str(day.year)] += 1
+def lines_up(stock: str, block_id: str) -> str:
+    """How the block's triples on his candles from their first one meet his: ``every`` row of
+    his, his for good from a year on, or ``never``."""
+    block = CATALOG[block_id]
+    frame = his(stock, "candles", ["unix", "date", *OHLCV.values()]).sort("unix")
+    frame = frame.with_columns(ts=pl.col("unix").cast(pl.Int64) - HALF_HOUR)
+    ours = block.run(frame, block.params())
+    theirs = his(stock, "all_triples", ["start_unix", "end_unix", "direction", "bottom", "top"])
+    theirs = theirs.select(
+        ts=pl.col("end_unix").cast(pl.Int64) - HALF_HOUR,
+        his_start=pl.col("start_unix").cast(pl.Int64) - HALF_HOUR,
+        his_direction=pl.col("direction").cast(pl.Float64),
+        his_bottom=pl.col("bottom").cast(pl.Float64),
+        his_top=pl.col("top").cast(pl.Float64),
+    )
+    rows = ours.join(theirs, on="ts", how="inner").sort("ts")
+    same = (
+        (rows["start"] == rows["his_start"]).to_numpy()
+        & (rows["direction"] == rows["his_direction"]).to_numpy()
+        & np.isclose(rows["bottom"].to_numpy(), rows["his_bottom"].to_numpy(), rtol=RTOL, atol=0)
+        & np.isclose(rows["top"].to_numpy(), rows["his_top"].to_numpy(), rtol=RTOL, atol=0)
+    )
+    if not same.size or not same[-1]:
+        return "never"
+    if same.all() and rows.height == theirs.height:
+        return "every"
+    first = int(same.size - np.argmin(same[::-1])) if not same.all() else 0
+    return str(frame.filter(pl.col("ts") == rows["ts"][first])["date"][0].year)
+
+
+@pytest.mark.parametrize("block_id", ["renko-triples@1", "renko-triples@2"])
+def test_how_many_stocks_line_up_with_the_block(block_id: str) -> None:
+    """The block with its defaults (his parameters) on his candles from their first one: on how
+    many stocks its triples are his on every row of his, and from which year the others are
+    his for good. A report, which never fails on the numbers."""
+    since = collections.Counter(lines_up(stock, block_id) for stock in STOCKS)
+    years = sorted(year for year in since if year not in ("every", "never"))
 
     # Aggregates only, never his values.
     print(  # noqa: T201
-        f"Our own ATR: of {len(STOCKS)} stocks, the triples line up with his for good from "
-        + ", ".join(f"{year}: {count}" for year, count in sorted(since.items()) if year != "never")
+        f"{block_id}: of {len(STOCKS)} stocks, the triples are his on every row on "
+        f"{since['every']}; the others line up with his for good from "
+        + ", ".join(f"{year}: {since[year]}" for year in years)
         + f"; never: {since['never']}"
     )

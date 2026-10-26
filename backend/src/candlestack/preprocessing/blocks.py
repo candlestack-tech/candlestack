@@ -172,6 +172,7 @@ def _unchanged(column: pl.Series, _close: pl.Series) -> pl.Series:
 # How the BLESK models scaled each feature, by its block (research #262, checked on every row
 # of the BLESK data): per row, from the row's candle only, no statistic of a window or of the
 # history. A feature not here has no rule, and a manifest that gives it blesk-norm@1 is refused.
+# The @2 versions of the recursive indicators, started as TA-Lib does, take the rules of @1.
 BLESK_RULES: Mapping[str, Rule] = MappingProxyType(
     {
         # A price level: its distance from the close, in percent.
@@ -181,19 +182,25 @@ BLESK_RULES: Mapping[str, Rule] = MappingProxyType(
         "keltner-low@1": _percent_from_close,
         "sma@1": _percent_from_close,
         "ema@1": _percent_from_close,
+        "ema@2": _percent_from_close,
         # An oscillator from 0 to 100: centered on 50, the ADX on 25.
         "rsi@1": _minus(50),
+        "rsi@2": _minus(50),
         "aroon-up@1": _minus(50),
         "aroon-down@1": _minus(50),
         "adx@1": _minus(25),
+        "adx@2": _minus(25),
         # A range in price: a percent of the close.
         "atr@1": _percent_of_close,
+        "atr@2": _percent_of_close,
         # Already free of the price level: as it is.
         "squeeze@1": _unchanged,
         "roc@1": _unchanged,
         "tsi@1": _unchanged,
+        "tsi@2": _unchanged,
         "aroon@1": _unchanged,
         "macd-diff@1": _unchanged,
+        "macd-diff@2": _unchanged,
         "renko-direction@1": _unchanged,
         "session-last-candle@1": _unchanged,
         "rel-open@1": _unchanged,

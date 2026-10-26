@@ -214,10 +214,10 @@ def _fits_representation(manifest: Manifest, rep: str, *, forming: bool) -> list
     found = []
     for index, feature in enumerate(manifest.input.features):
         block = CATALOG.get(feature.id)
-        if block is not None and block.of_rows is not None and block.of_rows != rep:
+        if block is not None and block.of_rows is not None and rep not in block.of_rows:
             found.append(
                 f"input.features[{index}] is {feature.id}, a column of the rows of "
-                f"{block.of_rows}, but the representation is {rep}."
+                f"{' or '.join(block.of_rows)}, but the representation is {rep}."
             )
     last = manifest.input.window.last
     if last == "current" and not forming:

@@ -118,7 +118,15 @@ def blesk_norm(feature: str, column: list[float | None]) -> list[float | None]:
 
 @pytest.mark.parametrize(
     "feature",
-    ["bollinger-high@1", "bollinger-low@1", "keltner-high@1", "keltner-low@1", "sma@1", "ema@1"],
+    [
+        "bollinger-high@1",
+        "bollinger-low@1",
+        "keltner-high@1",
+        "keltner-low@1",
+        "sma@1",
+        "ema@1",
+        "ema@2",
+    ],
 )
 def test_blesk_norm_takes_a_price_level_in_percent_from_the_close(feature: str) -> None:
     assert blesk_norm(feature, [11.0, 19.0, None]) == pytest.approx([10.0, -5.0, None])
@@ -128,17 +136,20 @@ def test_blesk_norm_takes_a_price_level_in_percent_from_the_close(feature: str) 
     ("feature", "expected"),
     [
         ("rsi@1", [20.0, -50.0, 50.0]),
+        ("rsi@2", [20.0, -50.0, 50.0]),
         ("aroon-up@1", [20.0, -50.0, 50.0]),
         ("aroon-down@1", [20.0, -50.0, 50.0]),
         ("adx@1", [45.0, -25.0, 75.0]),
+        ("adx@2", [45.0, -25.0, 75.0]),
     ],
 )
 def test_blesk_norm_centers_an_oscillator(feature: str, expected: list[float]) -> None:
     assert blesk_norm(feature, [70.0, 0.0, 100.0]) == expected
 
 
-def test_blesk_norm_takes_the_atr_in_percent_of_the_close() -> None:
-    assert blesk_norm("atr@1", [0.5, 1.0, 1.0]) == pytest.approx([5.0, 5.0, 2.5])
+@pytest.mark.parametrize("feature", ["atr@1", "atr@2"])
+def test_blesk_norm_takes_the_atr_in_percent_of_the_close(feature: str) -> None:
+    assert blesk_norm(feature, [0.5, 1.0, 1.0]) == pytest.approx([5.0, 5.0, 2.5])
 
 
 @pytest.mark.parametrize(
@@ -147,8 +158,10 @@ def test_blesk_norm_takes_the_atr_in_percent_of_the_close() -> None:
         "squeeze@1",
         "roc@1",
         "tsi@1",
+        "tsi@2",
         "aroon@1",
         "macd-diff@1",
+        "macd-diff@2",
         "renko-direction@1",
         "session-last-candle@1",
         "rel-open@1",

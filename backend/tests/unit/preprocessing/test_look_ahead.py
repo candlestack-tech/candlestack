@@ -162,7 +162,7 @@ def looks_ahead(block: Block, params: BaseModel, rng: random.Random, feature: st
     """Whether replacing what comes after a row changes the block's output up to it."""
     make, up_to = STEPS[block.step]
     if block.of_rows is not None:
-        make = rows_of(block.of_rows)
+        make = rows_of(block.of_rows[0])
     if getattr(params, "last", None) == "current":
         make = random_forming_rows
     data = make(rng)
@@ -229,7 +229,7 @@ def every_manifest() -> list[Manifest]:
         fitting = [
             feature
             for feature in steps("feature")
-            if CATALOG[feature["id"]].of_rows in (None, representation)
+            if representation in (CATALOG[feature["id"]].of_rows or (representation,))
         ]
         # A normalization with rules of its own scales only the features it has a rule for.
         pairs = [

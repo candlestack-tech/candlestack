@@ -20,6 +20,7 @@ export const STATE_WHY: Record<ModelState, string> = {
 const REPRESENTATIONS: Record<string, { short: string; long: string }> = {
   'candles@1': { short: 'Candles', long: 'Candles' },
   'renko-triples@1': { short: 'Renko', long: 'Renko bricks' },
+  'renko-triples@2': { short: 'Renko', long: 'Renko bricks' },
   'kagi@1': { short: 'Kagi', long: 'Kagi lines' },
 };
 

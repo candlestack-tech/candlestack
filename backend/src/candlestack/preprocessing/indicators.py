@@ -11,6 +11,13 @@ first candles whose value would change if the candles started earlier. A block o
 candles weigh less than 1e-6 in a value, (1 - alpha) ** k < e ** -14, so its values do not
 depend on where the candles start. The run loads that many candles before the period, so the
 first value of the period is the same as on a longer history.
+
+The BLESK data took its recursive indicators from TA-Lib instead (research #265), which starts
+each smoothing from the mean of its first window: the EMA from the mean of its first ``window``
+values, Wilder's smoothing of the RSI and the ATR from the mean of the ``window`` values after
+the first candle, which has no close before it. The ``@2`` blocks start that way. Their
+warm-up is TA-Lib's: the candles before the first value, which therefore depends on where the
+candles start, as TA-Lib's does. After the ``@1`` warm-up the two agree within 1e-6.
 """
 
 from collections.abc import Callable
@@ -119,14 +126,26 @@ def _true_range() -> pl.Expr:
     return pl.max_horizontal(HIGH - LOW, (HIGH - before).abs(), (LOW - before).abs())
 
 
-def _wilder(values: pl.Expr, window: int, seed_at: int) -> pl.Expr:
-    """Wilder's smoothing as ``ta`` does it: the mean of the ``window`` values up to the row
-    ``seed_at``, then ``(previous * (window - 1) + value) / window`` on each later row."""
+def _from_mean(values: pl.Expr, window: int, seed_at: int, alpha: float) -> pl.Expr:
+    """An exponential smoothing started from the mean of the ``window`` values up to the row
+    ``seed_at``, then ``previous + alpha * (value - previous)`` on each later row."""
     row = pl.int_range(pl.len())
     seeded = (
         pl.when(row == seed_at).then(values.rolling_mean(window)).when(row > seed_at).then(values)
     )
-    return seeded.ewm_mean(alpha=1 / window, adjust=False)
+    return seeded.ewm_mean(alpha=alpha, adjust=False)
+
+
+def _wilder(values: pl.Expr, window: int, seed_at: int) -> pl.Expr:
+    """Wilder's smoothing: the mean of the ``window`` values up to the row ``seed_at``, then
+    ``(previous * (window - 1) + value) / window`` on each later row."""
+    return _from_mean(values, window, seed_at, 1 / window)
+
+
+def _talib_ema(values: pl.Expr, window: int, seed_at: int) -> pl.Expr:
+    """TA-Lib's EMA: the mean of the ``window`` values up to the row ``seed_at``, then
+    ``alpha = 2 / (window + 1)``."""
+    return _from_mean(values, window, seed_at, 2 / (window + 1))
 
 
 def _ema(values: pl.Expr, window: int) -> pl.Expr:
@@ -313,3 +332,129 @@ def macd_diff(frame: pl.DataFrame, params: Macd) -> pl.Series:
     EMA, the MACD histogram."""
     line = _ema(CLOSE, params.fast) - _ema(CLOSE, params.slow)
     return _values(frame, line - _ema(line, params.signal), macd_warm_up(params))
+
+
+# The @2 blocks: the recursive indicators started as TA-Lib starts them (research #265). Each
+# warm-up is TA-Lib's lookback, the candles before its first value.
+# TA-Lib's ADX counts a smoothed true range or a sum of the directional indicators under this
+# as 0 (its TA_IS_ZERO): the index of that candle is left out.
+TALIB_ZERO = 1e-14
+
+
+def talib_rsi_warm_up(params: Rsi) -> int:
+    return params.window
+
+
+def talib_rsi(frame: pl.DataFrame, params: Rsi) -> pl.Series:
+    """``rsi@2``: TA-Lib's relative strength index, ``100 * rise / (rise + fall)`` of the mean
+    rise and fall by Wilder's smoothing, started from the means of the ``window`` changes after
+    the first candle; 0 once the closes stayed flat so long that the two add up to less than
+    ``RSI_FLAT``, as in the BLESK data."""
+    change = CLOSE.diff()
+    window = params.window
+    up = _wilder(pl.when(change > 0).then(change).otherwise(0.0), window, window)
+    down = _wilder(pl.when(change < 0).then(-change).otherwise(0.0), window, window)
+    value = pl.when(up + down < RSI_FLAT).then(0.0).otherwise(100 * up / (up + down))
+    return _values(frame, value, talib_rsi_warm_up(params))
+
+
+def talib_tsi_warm_up(params: Tsi) -> int:
+    return params.slow + params.fast - 1
+
+
+def talib_tsi(frame: pl.DataFrame, params: Tsi) -> pl.Series:
+    """``tsi@2``: the true strength index of two TA-Lib EMAs: the close's change from the
+    second candle on, smoothed by an EMA of ``slow`` and then of ``fast`` candles, each started
+    from the mean of its first window, over its absolute value smoothed the same way."""
+    change = CLOSE.diff()
+    slow, fast = params.slow, params.fast
+
+    def smoothed(values: pl.Expr) -> pl.Expr:
+        return _talib_ema(_talib_ema(values, slow, slow), fast, slow + fast - 1)
+
+    value = smoothed(change) / smoothed(change.abs()) * 100
+    return _values(frame, value, talib_tsi_warm_up(params))
+
+
+def talib_atr_warm_up(params: Atr) -> int:
+    return params.window
+
+
+def talib_atr(frame: pl.DataFrame, params: Atr) -> pl.Series:
+    """``atr@2``: TA-Lib's average true range, Wilder's smoothing of the true range started
+    from the mean of the ``window`` true ranges after the first candle (candles 1 to
+    ``window``)."""
+    value = _wilder(_true_range(), params.window, params.window)
+    return _values(frame, value, talib_atr_warm_up(params))
+
+
+def talib_adx_warm_up(params: Adx) -> int:
+    return 2 * params.window - 1
+
+
+def talib_adx(frame: pl.DataFrame, params: Adx) -> pl.Series:
+    """``adx@2``: TA-Lib's average directional index. The true range and the directional
+    movements are summed from the second candle to the candle ``window - 1``, then smoothed by
+    Wilder on each later candle; the directional index from the candle ``window`` on is
+    averaged over its first ``window`` candles, then smoothed by Wilder. Where the smoothed
+    true range or the sum of the directional indicators is 0, the index counts 0 in the first
+    average and leaves the ADX as it was afterwards, as TA-Lib does."""
+    window = params.window
+    before = CLOSE.shift(1)
+    known = before.is_not_null()
+    true_range = pl.max_horizontal(HIGH, before) - pl.min_horizontal(LOW, before)
+    rise, fall = HIGH.diff(), -LOW.diff()
+    plus = pl.when((rise > fall) & (rise > 0)).then(rise).otherwise(0.0)
+    minus = pl.when((fall > rise) & (fall > 0)).then(fall).otherwise(0.0)
+    # TA-Lib's sums of `window - 1` values are `window` times a mean of `window` values with
+    # the first candle's as 0; Wilder's smoothing of those means keeps every ratio of TA-Lib's.
+    smoothed_range, smoothed_plus, smoothed_minus = (
+        _wilder(pl.when(known).then(values).otherwise(0.0), window, window - 1)
+        for values in (true_range, plus, minus)
+    )
+    plus_di = 100 * smoothed_plus / smoothed_range
+    minus_di = 100 * smoothed_minus / smoothed_range
+    total = plus_di + minus_di
+    index = (
+        pl.when((window * smoothed_range).abs() < TALIB_ZERO)
+        .then(None)
+        .when(total.abs() < TALIB_ZERO)
+        .then(None)
+        .otherwise(100 * (plus_di - minus_di).abs() / total)
+    )
+    row, seed_at = pl.int_range(pl.len()), 2 * window - 1
+    seeded = (
+        pl.when(row == seed_at)
+        .then(index.fill_null(0.0).rolling_mean(window))
+        .when(row > seed_at)
+        .then(index)
+    )
+    # A candle without an index leaves the ADX as it was.
+    value = seeded.ewm_mean(alpha=1 / window, adjust=False, ignore_nulls=True).forward_fill()
+    return _values(frame, value, talib_adx_warm_up(params))
+
+
+def talib_ema_warm_up(params: Ema) -> int:
+    return params.window - 1
+
+
+def talib_ema(frame: pl.DataFrame, params: Ema) -> pl.Series:
+    """``ema@2``: TA-Lib's EMA of the close, started from the mean of the first ``window``
+    closes."""
+    window = params.window
+    return _values(frame, _talib_ema(CLOSE, window, window - 1), talib_ema_warm_up(params))
+
+
+def talib_macd_warm_up(params: Macd) -> int:
+    return max(params.fast, params.slow) + params.signal - 2
+
+
+def talib_macd_diff(frame: pl.DataFrame, params: Macd) -> pl.Series:
+    """``macd-diff@2``: TA-Lib's MACD histogram. The fast and the slow EMA of the close both
+    start at the candle ``slow - 1``, each from the mean of its own window up to it; the MACD,
+    their difference, minus its signal EMA, which starts from the mean of the first ``signal``
+    MACDs. As in TA-Lib, the shorter of ``fast`` and ``slow`` is the fast EMA."""
+    fast, slow = sorted((params.fast, params.slow))
+    line = _talib_ema(CLOSE, fast, slow - 1) - _talib_ema(CLOSE, slow, slow - 1)
+    signal = _talib_ema(line, params.signal, slow + params.signal - 2)
+    return _values(frame, line - signal, talib_macd_warm_up(params))

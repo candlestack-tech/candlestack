@@ -21,6 +21,10 @@ so the window can tell which rows are finished without looking at a later candle
 The bricks depend on every candle since the first one the block gets: each is anchored at the
 one before. The same candles always give the same bricks, but candles that start elsewhere
 (a backtest of another period) give other bricks, which do not line up again for years.
+
+``renko-triples@2`` makes the same rows with the bricks of the BLESK data: each brick
+``atr_multiple`` times TA-Lib's ATR (``atr@2``), the first brick on the candle ``first_brick``,
+the first candle where every indicator of the BLESK data has a value (research #265).
 """
 
 import math
@@ -55,6 +59,20 @@ class RenkoTriples(BaseModel):
     atr_at: Literal["brick_start"] = Field(
         default="brick_start",
         description="The candle whose ATR sizes a brick: the one that starts it",
+    )
+
+
+class TaLibRenkoTriples(RenkoTriples):
+    # 49 as the BLESK data: its bricks start on its first candle where every indicator has a
+    # value, the first of the EMA of 50 closes.
+    first_brick: int = Field(
+        default=49,
+        ge=0,
+        le=1000,
+        description=(
+            "The candle of the first brick, counted from 0, never before the ATR's first value "
+            "(candle atr_window)"
+        ),
     )
 
 
@@ -208,8 +226,24 @@ def renko_triples(frame: pl.DataFrame, params: RenkoTriples) -> pl.DataFrame:
     return renko_rows(frame.slice(first), params.atr_multiple * atr)
 
 
+def talib_first_brick(params: TaLibRenkoTriples) -> int:
+    """The candle of the first brick of ``renko-triples@2``: ``first_brick``, or the ATR's
+    first value when that comes later."""
+    return max(params.first_brick, ind.talib_atr_warm_up(ind.Atr(window=params.atr_window)))
+
+
+def talib_renko_triples(frame: pl.DataFrame, params: TaLibRenkoTriples) -> pl.DataFrame:
+    """``renko-triples@2``: the rows of ``renko-triples@1``, each brick ``atr_multiple``
+    TA-Lib ATRs high (``atr@2`` of ``atr_window`` candles, from the frame's first candle) at
+    the candle that starts it, the first brick on the candle ``talib_first_brick``."""
+    first = talib_first_brick(params)
+    atr = ind.talib_atr(frame, ind.Atr(window=params.atr_window)).slice(first).to_numpy()
+    return renko_rows(frame.slice(first), params.atr_multiple * atr)
+
+
 def direction(rows: pl.DataFrame, _params: BaseModel) -> pl.Series:
-    """``renko-direction@1``: the direction of each row's triple (``triples``)."""
+    """``renko-direction@1``: the direction of each row's triple (``triples``), of
+    ``renko-triples@1`` or ``@2``."""
     return rows["direction"]
 
 
@@ -222,3 +256,9 @@ def warm_up(params: RenkoTriples) -> int:
     """The candles before the first row: the ATR's warm-up, then the first two bricks."""
     first = ind.atr_warm_up(ind.Atr(window=params.atr_window))
     return first + math.ceil((BRICKS_PER_ROW - 1) * candles_per_row(params))
+
+
+def talib_warm_up(params: TaLibRenkoTriples) -> int:
+    """The candles before the first row of ``renko-triples@2``: those before the first brick,
+    then the first two bricks."""
+    return talib_first_brick(params) + math.ceil((BRICKS_PER_ROW - 1) * candles_per_row(params))

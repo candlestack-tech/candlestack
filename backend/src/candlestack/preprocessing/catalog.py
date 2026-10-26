@@ -27,6 +27,8 @@ Group = Literal["Candle", "Bands", "Momentum", "Trend", "Volume", "Brick"]
 # The manifest's `input.window` holds the parameters of this block, the only window for now.
 WINDOW = "window@1"
 RENKO_TRIPLES = "renko-triples@1"
+# The same rows with the bricks sized by TA-Lib's ATR (atr@2), as the BLESK data has them.
+TALIB_RENKO_TRIPLES = "renko-triples@2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +46,7 @@ class Block:
       an estimate of the candles a row takes, from its parameters; None when every candle is a
       row, which makes the warm-up of a manifest exact;
     - ``of_rows``: for a feature of the rows of a representation rather than of the candles
-      (the direction of a Renko triple), that representation: the feature takes its rows;
+      (the direction of a Renko triple), the representations it fits: it takes their rows;
     - ``normalizes``: for a normalization that scales each feature by a rule of its own
       (``blesk-norm@1``), the feature blocks it has a rule for; None when it takes any feature;
     - ``tunable``: the parameters a user may change on a trained model, for a later experiment
@@ -61,7 +63,7 @@ class Block:
     group: Group | None = None
     needs_session: bool = False
     candles_per_row: Callable[[Any], float] | None = None
-    of_rows: str | None = None
+    of_rows: tuple[str, ...] | None = None
     normalizes: frozenset[str] | None = None
     tunable: frozenset[str] = field(default_factory=frozenset)
 
@@ -92,7 +94,8 @@ def _feature(
 
 
 # The indicators of the BLESK models, in the order of their 25 x 23 input. A recursive one
-# (an EMA, Wilder's smoothing) waits until its first candles weigh under 1e-6 (indicators).
+# (an EMA, Wilder's smoothing) waits until its first candles weigh under 1e-6 (indicators); its
+# @2 version starts as TA-Lib does and waits for TA-Lib's first value only.
 _INDICATORS = (
     _feature(
         "bollinger-high@1",
@@ -145,6 +148,14 @@ _INDICATORS = (
         ),
     ),
     _feature(
+        "rsi@2",
+        "Momentum",
+        "Relative strength index with Wilder's smoothing, started as TA-Lib starts it",
+        ind.talib_rsi,
+        ind.Rsi,
+        warm_up=(ind.talib_rsi_warm_up, "window"),
+    ),
+    _feature(
         "roc@1",
         "Momentum",
         "Rate of change: the close against the close window candles before, in percent",
@@ -161,6 +172,14 @@ _INDICATORS = (
         warm_up=(ind.tsi_warm_up, f"{ind.EMA_WINDOWS} * (slow + fast)"),
     ),
     _feature(
+        "tsi@2",
+        "Momentum",
+        "True strength index: the close's change smoothed by two TA-Lib EMAs, in percent",
+        ind.talib_tsi,
+        ind.Tsi,
+        warm_up=(ind.talib_tsi_warm_up, "slow + fast - 1"),
+    ),
+    _feature(
         "atr@1",
         "Bands",
         "Average true range with Wilder's smoothing",
@@ -169,12 +188,28 @@ _INDICATORS = (
         warm_up=(ind.atr_warm_up, f"{ind.WILDER_WINDOWS + 1} * window - 1"),
     ),
     _feature(
+        "atr@2",
+        "Bands",
+        "Average true range with Wilder's smoothing, started as TA-Lib starts it",
+        ind.talib_atr,
+        ind.Atr,
+        warm_up=(ind.talib_atr_warm_up, "window"),
+    ),
+    _feature(
         "adx@1",
         "Trend",
         "Average directional index: how strong the trend is, with Wilder's smoothing",
         ind.adx,
         ind.Adx,
         warm_up=(ind.adx_warm_up, f"{ind.ADX_WINDOWS} * window"),
+    ),
+    _feature(
+        "adx@2",
+        "Trend",
+        "Average directional index: how strong the trend is, as TA-Lib computes it",
+        ind.talib_adx,
+        ind.Adx,
+        warm_up=(ind.talib_adx_warm_up, "2 * window - 1"),
     ),
     _feature(
         "aroon-up@1",
@@ -213,12 +248,27 @@ _INDICATORS = (
         warm_up=(ind.ema_warm_up, f"{ind.EMA_WINDOWS} * window"),
     ),
     _feature(
+        "ema@2",
+        "Trend",
+        "Exponential moving average of the close, started as TA-Lib starts it",
+        ind.talib_ema,
+        ind.Ema,
+    ),
+    _feature(
         "macd-diff@1",
         "Trend",
         "MACD histogram: the fast EMA minus the slow EMA of the close, minus its signal EMA",
         ind.macd_diff,
         ind.Macd,
         warm_up=(ind.macd_warm_up, f"{ind.EMA_WINDOWS} * (max(fast, slow) + signal)"),
+    ),
+    _feature(
+        "macd-diff@2",
+        "Trend",
+        "MACD histogram as TA-Lib computes it: the fast minus the slow EMA, minus its signal EMA",
+        ind.talib_macd_diff,
+        ind.Macd,
+        warm_up=(ind.talib_macd_warm_up, "max(fast, slow) + signal - 2"),
     ),
 )
 
@@ -284,6 +334,24 @@ CATALOG: Mapping[str, Block] = MappingProxyType(
                 ),
                 candles_per_row=renko.candles_per_row,
             ),
+            Block(
+                id=TALIB_RENKO_TRIPLES,
+                step="representation",
+                description=(
+                    "Rows of three Renko bricks on the close, each brick atr_multiple TA-Lib ATRs "
+                    "high at the candle that starts it, the first on the candle first_brick: one "
+                    "row per candle from the third brick on"
+                ),
+                run=renko.talib_renko_triples,
+                params=renko.TaLibRenkoTriples,
+                warm_up=renko.talib_warm_up,
+                warm_up_rule=(
+                    "max(first_brick, atr_window) + "
+                    f"ceil({renko.BRICKS_PER_ROW - 1} * ({renko.CANDLES_PER_BRICK:g} + "
+                    f"{renko.CANDLES_PER_BRICK_PER_ATR:g} * atr_multiple))"
+                ),
+                candles_per_row=renko.candles_per_row,
+            ),
             *(_candle_column(name) for name in blocks.CANDLE_COLUMNS),
             *_RELATIVE,
             Block(
@@ -307,7 +375,7 @@ CATALOG: Mapping[str, Block] = MappingProxyType(
                 ),
                 run=renko.direction,
                 group="Brick",
-                of_rows=RENKO_TRIPLES,
+                of_rows=(RENKO_TRIPLES, TALIB_RENKO_TRIPLES),
             ),
             Block(
                 id="none@1",
