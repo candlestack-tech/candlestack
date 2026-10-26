@@ -236,7 +236,7 @@ def test_the_exact_warm_up_is_what_the_build_drops(raw: dict[str, Any]) -> None:
 
 
 # The BLESK NO-VOL input (docs/preprocessing.md) without what is still to come: its
-# normalization and the four rel_* columns.
+# normalization.
 BLESK_FEATURES = [
     ("bb_bbh", "bollinger-high@1", {"window": 20, "dev": 2.0}),
     ("bb_bbl", "bollinger-low@1", {"window": 20, "dev": 2.0}),
@@ -256,6 +256,10 @@ BLESK_FEATURES = [
     ("ema50", "ema@1", {"window": 50}),
     ("macd_diff", "macd-diff@1", {}),
     ("direction", "renko-direction@1", {}),
+    ("rel_open", "rel-open@1", {}),
+    ("rel_high", "rel-high@1", {}),
+    ("rel_low", "rel-low@1", {}),
+    ("rel_close", "rel-close@1", {}),
     ("is_last_bar", "session-last-candle@1", {}),
 ]
 
@@ -310,7 +314,7 @@ def test_the_blesk_input_without_its_normalization_is_25_rows_of_triples() -> No
 
     built = build_input(frame, manifest)
 
-    assert built.samples.shape[1:] == (25, 19)
+    assert built.samples.shape[1:] == (25, 23)
     assert len(built.samples) > 0
     assert np.isfinite(built.samples).all()
     assert built.rows.columns == ["ts", "row_id", *(name for name, _, _ in BLESK_FEATURES)]

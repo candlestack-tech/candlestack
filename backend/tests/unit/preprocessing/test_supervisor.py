@@ -11,6 +11,9 @@ Never commit that data. Without the variable the tests are skipped, as in CI. Fr
 
     CANDLESTACK_SUPERVISOR_DATA=/data uv run pytest tests/unit/preprocessing/test_supervisor.py -v
 
+His ``rel_*`` columns are in his ``normalized.parquet``, which a stock folder may also have
+(``<CANDLESTACK_SUPERVISOR_DATA>/AAPL/normalized.parquet``); they are checked where it is.
+
 Every stock folder with both files is checked, each of his columns a test of its own. His rows
 are labelled by the candle's close in ``unix`` seconds, and his volume is ``volume_base``. A
 column is compared on every row after the block's warm-up (his first rows differ for the
@@ -69,6 +72,14 @@ COLUMNS: dict[str, tuple[str, dict[str, Any]]] = {
     "ema50": ("ema@1", {"window": 50}),
     "macd_diff": ("macd-diff@1", {}),
     "is_last_bar": ("session-last-candle@1", {}),
+}
+# His price-independent prices, in his normalized.parquet (research #117): plain features of
+# the candle, not normalized any further.
+RELATIVE = {
+    "rel_open": "rel-open@1",
+    "rel_high": "rel-high@1",
+    "rel_low": "rel-low@1",
+    "rel_close": "rel-close@1",
 }
 EXACT = {"squeeze", "is_last_bar"}
 RECURSIVE = {"rsi", "tsi", "atr", "adx", "ema20", "ema50", "macd_diff"}
@@ -193,6 +204,34 @@ def test_the_block_gives_his_column(stock: str, column: str) -> None:
     if column in RECURSIVE:
         early = np.isclose(a[:EARLY_ROWS], b[:EARLY_ROWS], rtol=1e-4, atol=1e-6)
         within[:EARLY_ROWS] |= early
+    # Aggregates only, never his values.
+    assert within.all(), (
+        f"{stock} {column}: {int((~within).sum())} of {rows.height} rows differ, "
+        f"max |diff| {float(np.nanmax(np.abs(a - b))):.3g}"
+    )
+
+
+@pytest.mark.parametrize("column", list(RELATIVE))
+@pytest.mark.parametrize("stock", STOCKS)
+def test_the_block_gives_his_relative_price(stock: str, column: str) -> None:
+    normalized = ROOT / stock / "normalized.parquet"
+    if not normalized.is_file():
+        pytest.skip(f"{stock} has no normalized.parquet")
+    block = CATALOG[RELATIVE[column]]
+    frame = candles(stock)
+    ours = frame.select("unix", ours=block.run(frame, block.params()))
+    rows = ours.slice(block.warm_up(block.params())).join(
+        pl.read_parquet(normalized, columns=["unix", column]).rename({column: "his"}),
+        on="unix",
+        how="inner",
+    )
+    if column == "rel_close":
+        # His first row has no previous close in his normalized data and holds 1 instead.
+        rows = rows.slice(1)
+    assert rows.height > 0, f"{stock} has no row of {column} after the warm-up"
+    a, b = rows["ours"].to_numpy(), rows["his"].to_numpy()
+
+    within = np.isclose(a, b, rtol=1e-6, atol=1e-8)
     # Aggregates only, never his values.
     assert within.all(), (
         f"{stock} {column}: {int((~within).sum())} of {rows.height} rows differ, "
