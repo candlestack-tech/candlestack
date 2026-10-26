@@ -109,7 +109,7 @@ describe('the Backtests page', () => {
     expect(model.className.split(' ')).toEqual(expect.arrayContaining(['text-[12px]', 'max-w-full', 'min-w-0']));
     // Up to two lines, broken anywhere (file names have no spaces), then an ellipsis.
     expect(within(model).getByText(name).className.split(' ')).toEqual(
-      expect.arrayContaining(['line-clamp-2', '[overflow-wrap:anywhere]', 'min-w-0']),
+      expect.arrayContaining(['line-clamp-2', 'whitespace-normal', '[overflow-wrap:anywhere]', 'min-w-0']),
     );
 
     const width = (label: RegExp) =>

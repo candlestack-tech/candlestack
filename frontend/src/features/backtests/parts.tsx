@@ -80,7 +80,7 @@ export function ModelName({ name, framework, wrap = false }: { name: string; fra
   return (
     <span className={cn('inline-flex max-w-full gap-[7px]', wrap ? 'items-start' : 'items-center')}>
       {mark && <FrameworkMini framework={mark} />}
-      <span className={cn('min-w-0', wrap ? 'line-clamp-2 [overflow-wrap:anywhere]' : 'truncate')}>{name}</span>
+      <span className={cn('min-w-0', wrap ? 'line-clamp-2 whitespace-normal [overflow-wrap:anywhere]' : 'truncate')}>{name}</span>
     </span>
   );
 }
