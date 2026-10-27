@@ -668,21 +668,19 @@ async def test_alpaca_base_timeframes(
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize(
-    ("timeframe", "labels"),
-    [
-        (Timeframe.M1, ["2024-05", "2024-06-01..2024-06-03", "2024-06-03-live"]),
-        (Timeframe.M5, ["2024-05", "2024-06-01..2024-06-03", "2024-06-03-live"]),
-        (Timeframe.M15, ["2024-01-01..2024-06-03", "2024-06-03-live"]),
-        (Timeframe.M30, ["2024-01-01..2024-06-03", "2024-06-03-live"]),
-    ],
-)
-async def test_alpaca_chunks_are_months_of_1min_and_5min_bars_and_years_of_longer_ones(
-    alpaca: AlpacaSource, timeframe: Timeframe, labels: list[str]
+@pytest.mark.parametrize("timeframe", [Timeframe.M1, Timeframe.M5, Timeframe.M15, Timeframe.M30])
+async def test_alpaca_chunks_of_intraday_bars_are_months(
+    alpaca: AlpacaSource, timeframe: Timeframe
 ) -> None:
+    # Alpaca pages intraday bars by time (about 17 days a page), so a year would be as many
+    # requests as its months and only wait longer.
     plan = alpaca_plan(alpaca, timeframe, "2024-05-31", "2024-06-03T15:00")
 
-    assert [label for _, label, _, _ in plan] == labels
+    assert [label for _, label, _, _ in plan] == [
+        "2024-05",
+        "2024-06-01..2024-06-03",
+        "2024-06-03-live",
+    ]
 
 
 @pytest.mark.anyio

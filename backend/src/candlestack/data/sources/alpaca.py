@@ -94,7 +94,8 @@ BARS_LIMIT = 10_000
 # The bars each timeframe is built from. Alpaca's 5Min, 15Min and 30Min bars start on the clock's
 # quarter and half hours, as the sessions' 09:30 open does, so they are our session bins (checked
 # equal to resampled 1m bars, docs/data.md); 1Hour bars start on the clock hour (09:00 holds
-# 09:30-09:59), so 1h and 4h are built from 30Min bars.
+# 09:30-09:59), so 1h and 4h are built from 30Min bars. They cut the bars fetched, parsed and
+# cached (up to 30 times fewer than 1Min), not the requests: Alpaca pages them by time.
 BASE_TIMEFRAMES = {
     Timeframe.M1: Timeframe.M1,
     Timeframe.M5: Timeframe.M5,
@@ -111,11 +112,11 @@ _ALPACA_TIMEFRAMES = {
     Timeframe.M30: "30Min",
     Timeframe.D1: "1Day",
 }
-# Base timeframes fetched in yearly chunks, the others in monthly ones, so that a chunk is one to
-# three requests of 10000 bars with extended hours (04:00-20:00 New York): a month of 1Min bars
-# is about 20000, of 5Min about 4000; a year of 15Min bars is about 16000, of 30Min about 8000,
-# of 1Day about 250.
-_YEARLY = frozenset({Timeframe.M15, Timeframe.M30, Timeframe.D1})
+# Base timeframes fetched in yearly chunks (a year of 1Day bars is about 250, one request), the
+# others in monthly ones. Alpaca pages intraday bars by time, about 17 days a page whatever the
+# timeframe and ``limit`` (measured on stage, docs/data.md): a month is about 2 requests and a
+# year about 21-24, so a yearly chunk of them would save no request and only wait longer.
+_YEARLY = frozenset({Timeframe.D1})
 # Snapshots: symbols per request (about 27 requests for the whole catalog, each URL under
 # 4 KB), and the share of our budget per minute they may take, so that chart requests keep the
 # rest (prod and stage 180: 20).
@@ -525,10 +526,9 @@ class AlpacaSource:
         return BASE_TIMEFRAMES[timeframe]
 
     def periods(self, timeframe: Timeframe, start: int, end: int, now: int) -> list[Period]:
-        # A request returns up to 10000 bars: whole months or years (``_YEARLY``) keep the number
-        # of requests (our budget) small. The chunks are planned as of SIP_DELAY ago: the live
-        # one ends there (and is complete until then), and a day joins a cached chunk only once
-        # its bars are that old.
+        # Whole months, or years of 1Day bars (``_YEARLY``), keep the number of requests (our
+        # budget) small. The chunks are planned as of SIP_DELAY ago: the live one ends there (and
+        # is complete until then), and a day joins a cached chunk only once its bars are that old.
         periods = plan_periods(
             start,
             end,
