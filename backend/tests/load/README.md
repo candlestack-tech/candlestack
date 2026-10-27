@@ -23,11 +23,14 @@ detail requests without a pause until it gets 429, and then `/api/health` must s
 
 ## Run it
 
-From the repository root, start the local stack and wait until the catalog is loaded:
+The market data is for signed-in accounts, so the script signs in with the dev sign-in, which
+only `APP_ENV` `local` (the default of `.env.example`) and `test` have. From the repository
+root, start the local stack and wait until the catalog is loaded:
 
 ```sh
 docker compose up -d
-curl -s 'http://127.0.0.1:8000/api/v1/data/instruments?market=crypto&limit=1'
+curl -s -c /tmp/candlestack.cookies -H 'Sec-Fetch-Site: same-origin' -X POST http://127.0.0.1:8000/api/v1/auth/dev
+curl -s -b /tmp/candlestack.cookies 'http://127.0.0.1:8000/api/v1/data/instruments?market=crypto&limit=1'
 ```
 
 Then from `backend/`:

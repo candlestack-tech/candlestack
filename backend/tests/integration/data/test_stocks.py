@@ -12,6 +12,8 @@ import respx
 from redis.asyncio import Redis
 
 import candlestack.core.ratelimit as ratelimit_module
+from candlestack.accounts import User
+from candlestack.accounts.dependencies import current_user
 from candlestack.core import RateLimiter, Settings
 from candlestack.data import (
     DataIntegrityError,
@@ -33,6 +35,9 @@ from candlestack.main import create_app
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
+# The market data is for signed-in accounts only (candlestack.main); who it is does not matter.
+SIGNED_IN = User(id="usr_7f3k2m9qx4")
+
 AAPL = InstrumentId.parse("stock:AAPL")
 HOUR = 3600
 # 2024-06-03 is a normal day (13:30-20:00 UTC); 2024-11-29 closes early (14:30-18:00 UTC).
@@ -53,6 +58,7 @@ async def get_api(service: DataService, redis: Redis, path: str) -> httpx.Respon
     app = create_app(Settings(app_env="test"))
     app.state.data_service = service
     app.state.rate_limiter = RateLimiter(redis)
+    app.dependency_overrides[current_user] = lambda: SIGNED_IN
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://api.test") as client:
         return await client.get(path)

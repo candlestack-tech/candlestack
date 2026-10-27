@@ -6,6 +6,8 @@ import polars as pl
 import pytest
 from fastapi.testclient import TestClient
 
+from candlestack.accounts import User
+from candlestack.accounts.dependencies import current_user
 from candlestack.core import Settings
 from candlestack.data import CANDLE_SCHEMA, CandleSet, InstrumentId, Timeframe
 from candlestack.data.api import get_data_service
@@ -16,6 +18,8 @@ pytestmark = pytest.mark.integration
 CANDLES = "/api/v1/data/instruments/crypto:BTCUSDT/candles?timeframe=1h&start=1717372800"
 # 30.5 s into a UTC minute: all requests fall into one window, which resets 30 s later.
 NOW = 1790000010
+# The market data is for signed-in accounts only (candlestack.main); who it is does not matter.
+SIGNED_IN = User(id="usr_7f3k2m9qx4")
 
 
 class NoCandles:
@@ -49,6 +53,7 @@ def test_client_rate_limit(monkeypatch: pytest.MonkeyPatch, redis_url: str) -> N
     )
     app = create_app(settings)
     app.dependency_overrides[get_data_service] = NoCandles
+    app.dependency_overrides[current_user] = lambda: SIGNED_IN
     # New /64 networks for every run: the counters of an earlier run are still in Redis.
     network = f"2001:db8:{uuid.uuid4().hex[:4]}"
     one, same_network, other = (

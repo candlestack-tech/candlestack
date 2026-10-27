@@ -11,6 +11,8 @@ import respx
 from redis.asyncio import Redis
 
 import candlestack.data.firsts as firsts_module
+from candlestack.accounts import User
+from candlestack.accounts.dependencies import current_user
 from candlestack.core import RateLimiter, Settings, create_redis, ratelimit
 from candlestack.data import (
     DataService,
@@ -23,6 +25,9 @@ from candlestack.data import (
 from candlestack.main import create_app
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
+
+# The market data is for signed-in accounts only (candlestack.main); who it is does not matter.
+SIGNED_IN = User(id="usr_7f3k2m9qx4")
 
 BTC = InstrumentId.parse("crypto:BTCUSDT")
 MINUTE_MS = 60_000
@@ -297,6 +302,7 @@ async def test_the_list_answers_with_the_first_candles(
     app = create_app(Settings(app_env="test"))
     app.state.data_service = service
     app.state.rate_limiter = RateLimiter(redis)
+    app.dependency_overrides[current_user] = lambda: SIGNED_IN
     transport = httpx.ASGITransport(app=app)
 
     params = {"q": "btcusdt", "market": "crypto"}

@@ -1,15 +1,18 @@
-"""The data API over HTTP with a fake DataService: parameters, response shapes, error mapping
-and the client rate limit."""
+"""The data API over HTTP with a fake DataService: parameters, response shapes, error mapping,
+the client rate limit and who may call it. The client is signed in unless a test signs out."""
 
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from typing import Any
 
 import orjson
 import polars as pl
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.testclient import TestClient
 
+from candlestack.accounts import User
+from candlestack.accounts.dependencies import current_user
 from candlestack.core import Settings
 from candlestack.core.ratelimit import get_rate_limiter
 from candlestack.data import (
@@ -59,6 +62,13 @@ BTCUSDT_FIRST = 1502942400  # 2017-08-17T04:00Z; AAPL's is not known yet
 AAPL_LOGO = Icon(b"\x89PNG\r\n\x1a\n-aapl", "image/png", 86400)
 # 2024-06-03T00:00:00Z and 2024-06-04T00:00:00Z
 DAY_START, DAY_END = 1717372800, 1717459200
+USER = User(
+    id="usr_7f3k2m9qx4",
+    display_name="Ada",
+    email="ada@example.com",
+    created_at=datetime(2026, 10, 1, tzinfo=UTC),
+    last_sign_in_at=datetime(2026, 10, 1, tzinfo=UTC),
+)
 
 
 def candle_set(
@@ -192,6 +202,13 @@ def limiter() -> FakeLimiter:
 def app(app: FastAPI, service: FakeDataService, limiter: FakeLimiter) -> FastAPI:
     app.dependency_overrides[get_data_service] = lambda: service
     app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    app.dependency_overrides[current_user] = lambda: USER
+    return app
+
+
+@pytest.fixture
+def signed_out(app: FastAPI) -> FastAPI:
+    del app.dependency_overrides[current_user]
     return app
 
 
@@ -202,6 +219,52 @@ def problem(response: Any, status: int, slug: str) -> dict[str, Any]:
     assert body["type"] == PROBLEMS + slug
     assert body["status"] == status
     return body
+
+
+# --- who may call it -------------------------------------------------------------------------
+
+MARKET_DATA = [
+    "/api/v1/data/instruments",
+    "/api/v1/data/instruments?q=btc",
+    "/api/v1/data/instruments/stock:AAPL",
+    "/api/v1/data/instruments/crypto:BTCUSDT/candles?timeframe=1h&start=2024-06-03",
+]
+
+
+@pytest.mark.usefixtures("signed_out")
+@pytest.mark.parametrize("path", MARKET_DATA)
+def test_market_data_needs_a_session(
+    client: TestClient, service: FakeDataService, limiter: FakeLimiter, path: str
+) -> None:
+    response = client.get(path)
+
+    problem(response, 401, "not-signed-in")
+    assert service.calls == []
+    assert limiter.calls == []
+
+
+@pytest.mark.parametrize("path", MARKET_DATA)
+def test_market_data_answers_a_signed_in_account(client: TestClient, path: str) -> None:
+    assert client.get(path).status_code == 200
+
+
+@pytest.mark.usefixtures("signed_out")
+def test_the_icon_and_the_sources_health_need_no_session(client: TestClient) -> None:
+    assert client.get("/api/v1/data/instruments/stock:AAPL/icon").status_code == 200
+    assert client.get("/api/health/sources").status_code == 200
+
+
+def test_candles_slide_the_session_on(app: FastAPI, client: TestClient) -> None:
+    def renewed(response: Response) -> User:
+        response.set_cookie("session", "token", max_age=2592000)
+        return USER
+
+    app.dependency_overrides[current_user] = renewed
+
+    response = client.get(CANDLES)
+
+    assert response.status_code == 200
+    assert "Max-Age=2592000" in response.headers["set-cookie"]
 
 
 # --- search ---------------------------------------------------------------------------------
@@ -1022,12 +1085,18 @@ def test_openapi_documents_the_data_api(client: TestClient) -> None:
     assert candles["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/CandlesOut"
     }
-    assert set(candles["responses"]) == {"200", "404", "422", "429", "502", "503"}
-    for status in ("404", "422", "429", "502", "503"):
+    assert set(candles["responses"]) == {"200", "401", "404", "422", "429", "502", "503"}
+    for status in ("401", "404", "422", "429", "502", "503"):
         assert list(candles["responses"][status]["content"]) == [PROBLEM]
     assert "too-many-candles" in candles["responses"]["422"]["description"]
     detail = paths["/api/v1/data/instruments/{instrument_id}"]["get"]
-    assert set(detail["responses"]) == {"200", "404", "422", "429", "502", "503"}
+    assert set(detail["responses"]) == {"200", "401", "404", "422", "429", "502", "503"}
+    search = paths["/api/v1/data/instruments"]["get"]
+    for operation in (search, detail, candles):
+        assert "not-signed-in" in operation["responses"]["401"]["description"]
+        assert "Needs a signed-in account." in operation["description"]
+    icon = paths["/api/v1/data/instruments/{instrument_id}/icon"]["get"]
+    assert "401" not in icon["responses"]
     assert set(paths) >= {
         "/api/v1/data/instruments",
         "/api/v1/data/instruments/{instrument_id}",

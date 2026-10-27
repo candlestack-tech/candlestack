@@ -4,6 +4,7 @@ Other modules import only from here (``from candlestack.data import InstrumentId
 the submodules. The contract is docs/data.md.
 """
 
+from candlestack.data.api import market as market_data_router
 from candlestack.data.api import problems as data_problems
 from candlestack.data.api import router as data_router
 from candlestack.data.candles import (
@@ -97,6 +98,7 @@ __all__ = [
     "find_gaps",
     "fingerprint",
     "first_of_last",
+    "market_data_router",
     "normalise",
     "normalise_query",
     "parse_calendar",

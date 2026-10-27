@@ -5,6 +5,12 @@ stocks from Alpaca. Nothing is stored: data is fetched from the source on reques
 cached in Redis and returned. This document is the contract for the `/api/v1/data` endpoints
 and for the code behind them. Architecture and configuration: [architecture.md](architecture.md).
 
+The market data is for signed-in accounts only: the instrument list, an instrument and its
+candles answer 401 `not-signed-in` without a session, as the routes of the signed-in user do
+(an account exists only for someone on the beta list). Alpaca's terms let us use its data for
+ourselves; showing it to anyone on the internet would need their notice and consent. The icons
+and `/api/health/sources` stay public: a logo is not market data.
+
 ## Sources
 
 | Market | Source | Feed | Instruments | Candles | Auth |
@@ -232,7 +238,7 @@ last daily close is refreshed at once, on the next check:
 
 `GET /api/v1/data/instruments/{id}/icon` always answers with an image for an instrument of the
 catalog (404 `instrument-not-found` otherwise, 422 for a malformed id), so it can go straight
-into an `<img>`; the browser never calls logo.dev itself.
+into an `<img>`; the browser never calls logo.dev itself. It needs no session.
 
 | Instrument | Image | `Cache-Control` |
 | --- | --- | --- |
@@ -420,6 +426,7 @@ Requests are checked in this order; the first failure is the answer.
 
 | Check | Error |
 | --- | --- |
+| a signed-in account (not for the icon) | 401 `not-signed-in` |
 | client rate limit | 429 `rate-limited` |
 | parameters present and well-formed: instrument id, timeframe from the list, `start` (or `limit`) and `end` as epoch seconds or ISO 8601, `limit` 1 to 5000 and not together with `start`, `start < end` | 422 `validation` |
 | instrument in the catalog | 404 `instrument-not-found` |
@@ -636,10 +643,10 @@ session candles before the open on Monday 2024-06-03; the ones before it are Fri
 the weekend has no sessions. A `limit` above `CANDLES_MAX` is refused with 422
 `too-many-candles` ("Use a limit of N or less.").
 
-Processing: rate limit, validation, catalog lookup, period and count checks, then each chunk
-of the period from the cache or the source (single-flight; up to 16 at once for crypto, 4 for
-stocks), resampled (stocks) 12 chunks at a time so that years of 1m bars are never held at
-once, concatenated, closed candles only, sliced to `[start, end)`, gaps found, fingerprint
+Processing: session, rate limit, validation, catalog lookup, period and count checks, then
+each chunk of the period from the cache or the source (single-flight; up to 16 at once for
+crypto, 4 for stocks), resampled (stocks) 12 chunks at a time so that years of 1m bars are never
+held at once, concatenated, closed candles only, sliced to `[start, end)`, gaps found, fingerprint
 computed.
 
 Response (columnar arrays; index `i` of every array is one candle):
@@ -701,6 +708,7 @@ RFC 9457 `application/problem+json`, `type` `https://candlestack.tech/problems/<
 
 | Status | Slug | When | Extensions |
 | --- | --- | --- | --- |
+| 401 | `not-signed-in` | no session came with the request, or it ended (not for the icon) | |
 | 404 | `instrument-not-found` | the id is not in the catalog | `instrument` |
 | 422 | `validation` | missing or malformed parameters | `errors`: one `{loc, msg, type}` per bad parameter |
 | 422 | `period-out-of-range` | `start` before `available_from`, or `end` in the future | `instrument`, `timeframe`, `available_from`, `available_to` |

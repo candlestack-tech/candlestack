@@ -370,10 +370,8 @@ only warns when it fails):
 | `frontend` | the page at `/` |
 | `access` | stage only: `/api/health` without the Access token gets Access (a redirect to its login, or 401/403), not the app |
 | `sources` | `/api/health/sources`: Binance and Alpaca reachable |
-| `search` | `btc` finds `crypto:BTCUSDT` and `apple` finds `stock:AAPL` first, with both markets loaded |
-| `instruments` | the detail of both, with `available_from` |
-| `crypto_candles`, `stock_candles` | the 24 BTCUSDT and the 7 AAPL 1h candles of 2024-06-03 |
-| `timings` | a year of BTCUSDT 1h candles twice; prints both times and warns (without failing) when the app takes over 3 s the first time or over 300 ms from the cache |
+| `search`, `instruments`, `candles` | the instrument list (with and without `q`), the detail of `crypto:BTCUSDT` and `stock:AAPL` and their 1h candles of 2024-06-03 answer 401 `not-signed-in`: the market data is for signed-in accounts only, and the smoke test has no session |
+| `icon` | the icon of `stock:AAPL` answers 200 with an image without a session |
 
 The stage deployment also reloads the edge Caddy, which serves prod too, so right after that it
 checks that https://app.candlestack.tech/api/health reports `ok` and the page at `/` answers

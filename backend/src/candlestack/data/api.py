@@ -1,7 +1,9 @@
 """HTTP API of the data module: ``/api/v1/data/...`` and ``/api/health/sources``.
 
 The routes validate parameters, ask the ``DataService`` and turn its errors into problem
-details (docs/data.md, "Errors"). The service lives on ``app.state.data_service``.
+details (docs/data.md, "Errors"). The service lives on ``app.state.data_service``. The market
+data itself (``market``: the list, an instrument, its candles) is for signed-in accounts only:
+``candlestack.main`` adds that check, as data does not know accounts.
 """
 
 import logging
@@ -43,6 +45,9 @@ from candlestack.data.service import DataService
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+# Alpaca's terms do not let us show its data to anyone on the internet: candlestack.main lets
+# only signed-in accounts call these. The icons stay public (logos, not market data).
+market = APIRouter(prefix="/api/v1/data", tags=["data"])
 data = APIRouter(prefix="/api/v1/data", tags=["data"])
 health = APIRouter(tags=["health"])
 
@@ -239,7 +244,7 @@ _RATE_LIMITED = (
 )
 
 
-@data.get(
+@market.get(
     "/instruments",
     summary="Search instruments",
     responses=_errors({422: "Invalid parameters (`validation`).", **_SOURCE_ERRORS}),
@@ -296,6 +301,8 @@ async def search_instruments(  # noqa: PLR0913 (a query parameter each, and the 
 
     When the instrument list of one market cannot be loaded, the other market is still
     searched and `unavailable` names the missing one; 503 when no market can be searched.
+
+    Needs a signed-in account.
     """
     with problems():
         found = await service.search(q, market, limit, offset, exchange=exchange, sort=sort)
@@ -313,7 +320,7 @@ async def search_instruments(  # noqa: PLR0913 (a query parameter each, and the 
     )
 
 
-@data.get(
+@market.get(
     "/instruments/{instrument_id}",
     summary="Instrument detail",
     dependencies=[Depends(client_rate_limit)],
@@ -335,13 +342,13 @@ async def instrument_detail(
 ) -> InstrumentDetailOut:
     """An instrument with its timeframes, available period and the candle limit: what a valid
     candle request can ask for. Counts against the per-minute limit of requests per client
-    address, like candle requests."""
+    address, like candle requests. Needs a signed-in account."""
     with problems():
         info = await service.instrument(InstrumentId.parse(instrument_id))
     return InstrumentDetailOut.of_info(info)
 
 
-@data.get(
+@market.get(
     "/instruments/{instrument_id}/candles",
     summary="Candles",
     response_model=CandlesOut,
@@ -356,9 +363,10 @@ async def instrument_detail(
         }
     ),
 )
-async def candles(  # noqa: PLR0913 (a query parameter each, and the settings)
+async def candles(  # noqa: PLR0913 (a query parameter each, the settings and the response)
     service: DataServiceDep,
     settings: SettingsDep,
+    response: Response,
     instrument_id: Annotated[
         InstrumentParam,
         Path(description="Instrument id, `<market>:<symbol>`.", examples=["crypto:BTCUSDT"]),
@@ -403,7 +411,7 @@ async def candles(  # noqa: PLR0913 (a query parameter each, and the settings)
     Stocks have regular-session candles only (09:30-16:00 New York), aligned to the session
     open. Missing candles are never filled; `meta.gaps` reports them. Limits: `max_candles`
     expected candles per request (see the instrument detail) and a per-minute number of
-    candle and instrument requests per client address.
+    candle and instrument requests per client address. Needs a signed-in account.
     """
     if start is not None and limit is not None:
         raise RequestValidationError(
@@ -441,7 +449,12 @@ async def candles(  # noqa: PLR0913 (a query parameter each, and the settings)
             )
         else:
             found = await service.candles(InstrumentId.parse(instrument_id), timeframe, start, end)
-    return Response(candles_json(found), media_type="application/json")
+    sent = Response(candles_json(found), media_type="application/json")
+    # The session cookie the sign-in check renewed on `response`, which FastAPI drops from a
+    # returned response.
+    for cookie in response.headers.getlist("set-cookie"):
+        sent.headers.append("set-cookie", cookie)
+    return sent
 
 
 _IMAGE = {"schema": {"type": "string", "format": "binary"}}
@@ -482,7 +495,7 @@ async def instrument_icon(
     Logos are fetched once and kept for days: `Cache-Control` lets a browser keep a logo a day,
     the fallback an hour (a minute when logo.dev could not be asked, so a logo shows up as soon
     as it answers again). Not counted against the per-minute limit of candle and instrument
-    requests: a page of the list asks for one icon per row.
+    requests: a page of the list asks for one icon per row. Public: logos are not market data.
     """
     with problems():
         icon = await service.icon(InstrumentId.parse(instrument_id))

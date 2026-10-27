@@ -14,6 +14,8 @@ from redis.asyncio import Redis
 
 import candlestack.data.service as service_module
 import candlestack.data.sources.binance as binance_module
+from candlestack.accounts import User
+from candlestack.accounts.dependencies import current_user
 from candlestack.core import RateLimiter, Settings, create_redis
 from candlestack.data import (
     DataIntegrityError,
@@ -36,6 +38,9 @@ from candlestack.data.sources.binance import IP_WEIGHT_CEILING, parse_archive
 from candlestack.main import create_app
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
+
+# The market data is for signed-in accounts only (candlestack.main); who it is does not matter.
+SIGNED_IN = User(id="usr_7f3k2m9qx4")
 
 BTC = InstrumentId.parse("crypto:BTCUSDT")
 ETH = InstrumentId.parse("crypto:ETHUSDT")
@@ -64,6 +69,7 @@ async def get_api(service: DataService, redis: Redis, path: str) -> httpx.Respon
     app = create_app(Settings(app_env="test"))
     app.state.data_service = service
     app.state.rate_limiter = RateLimiter(redis)
+    app.dependency_overrides[current_user] = lambda: SIGNED_IN
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://api.test") as client:
         return await client.get(path)
