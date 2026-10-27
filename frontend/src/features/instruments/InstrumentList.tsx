@@ -14,6 +14,7 @@ import { Pager } from '@/components/Pager';
 import { Button } from '@/components/ui/button';
 
 import type { ListSort } from '@/routes/instrumentsSearch';
+import { cn } from '@/lib/utils';
 
 import { mismatchOf, withExchange } from './filterRules';
 import { InstrumentTable } from './InstrumentTable';
@@ -155,7 +156,7 @@ export function InstrumentList(props: Props) {
       {unavailable && <p className="mb-3 rounded-md border bg-background px-3 py-2 text-sm text-warn">{unavailable}</p>}
       {/* Solid under the rows, also while they fade for the next page: no grid shows through. */}
       <div className="rounded-lg bg-background">
-        <div className={result.isPlaceholderData ? 'rounded-lg border opacity-60' : 'rounded-lg border'}>
+        <div className={cn('overflow-hidden rounded-lg border', result.isPlaceholderData && 'opacity-60')}>
           <ListBody
             items={data.items}
             sort={shown}
