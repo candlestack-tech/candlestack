@@ -66,6 +66,8 @@ describe('the signed-in pages', () => {
     expect(heading()).toBe('Could not load this page');
     expect(screen.getByText('Down for a minute.')).toBeDefined();
     expect(screen.getByRole('navigation', { name: 'Main' })).toBeDefined();
+    expect(screen.getByRole('link', { name: 'Back to home' }).getAttribute('href')).toBe('/');
+    expect(screen.queryByRole('link', { name: /instruments/i })).toBeNull();
   });
 
   it('show the app shell to a signed-in user: header, sidebar, title, footer', async () => {
