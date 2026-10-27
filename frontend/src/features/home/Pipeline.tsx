@@ -48,23 +48,28 @@ function PipelineStep({ step }: { step: Step }) {
 
 // The wire between two steps, level with their boxes. A short dash runs along it, each wire 0.6 s
 // after the one before, so the dashes travel the pipeline in turn; still in the middle of the wire
-// when the user asks for less motion.
+// when the user asks for less motion. On a phone, a short still line down between the stacked
+// steps.
 function Wire({ delay }: { delay: number }) {
   return (
-    <div aria-hidden className="relative mt-[45px] h-0.5 flex-[0_0_44px] overflow-hidden bg-border">
+    <div
+      aria-hidden
+      className="relative mt-[45px] h-0.5 flex-[0_0_44px] overflow-hidden bg-border max-sm:my-2 max-sm:ml-4 max-sm:h-auto max-sm:w-0.5 max-sm:flex-[0_0_20px]"
+    >
       <span
-        className="absolute -top-0.5 -left-1.5 size-1.5 animate-pipeline-flow rounded-full bg-primary motion-reduce:left-1/2 motion-reduce:animate-none"
+        className="absolute -top-0.5 -left-1.5 size-1.5 animate-pipeline-flow rounded-full bg-primary motion-reduce:left-1/2 motion-reduce:animate-none max-sm:hidden"
         style={{ animationDelay: `${delay}ms` }}
       />
     </div>
   );
 }
 
-// The five steps side by side; narrower screens scroll them inside the card, not the page.
+// The five steps side by side; narrower screens scroll them inside the card, not the page, and a
+// phone stacks them.
 export function Pipeline() {
   return (
     <div className="overflow-x-auto rounded-lg border bg-card p-[22px]">
-      <div className="flex min-w-[880px] items-start">
+      <div className="flex min-w-[880px] items-start max-sm:min-w-0 max-sm:flex-col max-sm:items-stretch">
         {STEPS.map((step, index) => (
           <Fragment key={step.name}>
             {index > 0 && <Wire delay={(index - 1) * 600} />}

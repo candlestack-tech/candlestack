@@ -52,6 +52,7 @@ describe('the candle chart', () => {
         bars={BARS}
         market="stock"
         dateStyle={{ timeZone, dateFormat, timeFormat }}
+        daily={false}
         onNearLeftEdge={() => undefined}
       />
     );
@@ -65,12 +66,17 @@ describe('the candle chart', () => {
     expect(crosshairText()).toBe('2024-06-03, 3:30 PM');
   });
 
+  it('gives a chart of days the date alone under the crosshair', () => {
+    render(<CandleChart bars={BARS} market="stock" dateStyle={STYLE} daily onNearLeftEdge={() => undefined} />);
+    expect(crosshairText()).toBe('3 Jun 2024');
+  });
+
   it('opens on the newest 120 candles, as the mockup does', () => {
     const DAY = 86_400;
     const days = (count: number) =>
       Array.from({ length: count }, (_, i) => ({ time: i * DAY, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 }));
     const chart = (bars: ReturnType<typeof days>) => (
-      <CandleChart bars={bars} market="crypto" dateStyle={STYLE} onNearLeftEdge={() => undefined} />
+      <CandleChart bars={bars} market="crypto" dateStyle={STYLE} daily onNearLeftEdge={() => undefined} />
     );
 
     const { rerender } = render(chart(days(500)));

@@ -22,7 +22,7 @@ import { useTheme } from '@/theme';
 import type { Bar } from './bars';
 import { ChartLegend } from './ChartLegend';
 import { legendFor } from './legend';
-import { crosshairFormatter, tickFormatter } from './time';
+import { crosshairFormatter, dayFormatter, tickFormatter } from './time';
 
 // Start loading the older page this many bars before the left edge, so it is there in time.
 const PRELOAD_BARS = 30;
@@ -91,10 +91,11 @@ function setBars(series: Series, bars: readonly Bar[], colors: { up: string; dow
   );
 }
 
-// The axis and the crosshair write dates and times as the user does, in the style's zone.
-function applyTimeFormats(chart: IChartApi, style: DateStyle) {
+// The axis and the crosshair write dates and times as the user does, in the style's zone; a chart
+// of days shows no time of day under the crosshair.
+function applyTimeFormats(chart: IChartApi, style: DateStyle, daily: boolean) {
   const ticks = tickFormatter(style);
-  const crosshair = crosshairFormatter(style);
+  const crosshair = daily ? dayFormatter(style) : crosshairFormatter(style);
   chart.applyOptions({
     localization: { timeFormatter: (time: Time) => crosshair(time as number) },
     timeScale: { tickMarkFormatter: (time: Time, tick: number) => ticks(time as number, tick) },
@@ -131,21 +132,24 @@ function showBars(instance: Instance, bars: readonly Bar[], firstTime: number | 
   return bars[0]?.time;
 }
 
+// How the chart writes time: the user's zone and formats, and whether its candles are days.
+type TimeStyle = { dateStyle: DateStyle; daily: boolean };
+
 // The axis and the crosshair follow the user's zone and formats once the chart is there (a new one
 // for each market), and on a change.
 function useTimeFormats(
   chart: RefObject<Instance | null>,
   market: Market,
-  { timeZone, dateFormat, timeFormat }: DateStyle,
+  { dateStyle: { timeZone, dateFormat, timeFormat }, daily }: TimeStyle,
 ) {
   useEffect(() => {
-    if (chart.current) applyTimeFormats(chart.current.chart, { timeZone, dateFormat, timeFormat });
-  }, [chart, market, timeZone, dateFormat, timeFormat]);
+    if (chart.current) applyTimeFormats(chart.current.chart, { timeZone, dateFormat, timeFormat }, daily);
+  }, [chart, market, timeZone, dateFormat, timeFormat, daily]);
 }
 
 // Creates the chart and follows it: loads older pages near the left edge, tracks the candle under
 // the cursor for the legend, and whether the newest candle is out of view.
-function useCandleChart(market: Market, dateStyle: DateStyle, bars: readonly Bar[], onNearLeftEdge: () => void) {
+function useCandleChart(market: Market, time: TimeStyle, bars: readonly Bar[], onNearLeftEdge: () => void) {
   const container = useRef<HTMLDivElement>(null);
   const chart = useRef<Instance | null>(null);
   const lastIndex = useRef(-1);
@@ -182,7 +186,7 @@ function useCandleChart(market: Market, dateStyle: DateStyle, bars: readonly Bar
     };
   }, [market]);
 
-  useTimeFormats(chart, market, dateStyle);
+  useTimeFormats(chart, market, time);
 
   useEffect(() => {
     if (!chart.current) return;
@@ -194,12 +198,19 @@ function useCandleChart(market: Market, dateStyle: DateStyle, bars: readonly Bar
   return { container, hovered, awayFromLatest, scrollToLatest };
 }
 
-type Props = { bars: readonly Bar[]; market: Market; dateStyle: DateStyle; onNearLeftEdge: () => void };
+type Props = {
+  bars: readonly Bar[];
+  market: Market;
+  dateStyle: DateStyle;
+  // Daily candles: the crosshair shows the date alone.
+  daily: boolean;
+  onNearLeftEdge: () => void;
+};
 
-export function CandleChart({ bars, market, dateStyle, onNearLeftEdge }: Props) {
+export function CandleChart({ bars, market, dateStyle, daily, onNearLeftEdge }: Props) {
   const { container, hovered, awayFromLatest, scrollToLatest } = useCandleChart(
     market,
-    dateStyle,
+    { dateStyle, daily },
     bars,
     onNearLeftEdge,
   );

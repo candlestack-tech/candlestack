@@ -20,7 +20,7 @@ export function StarButton({ starred, label, onToggle, className }: Props) {
       aria-pressed={starred}
       onClick={onToggle}
       className={cn(
-        '-mx-0.5 -my-1 inline-grid size-7 flex-none cursor-pointer place-items-center rounded-md text-[19px] leading-none text-[color-mix(in_srgb,var(--muted)_55%,var(--bg))] transition-[background-color,color,scale] duration-150 outline-none hover:scale-112 hover:bg-muted hover:text-warn focus-visible:ring-[3px] focus-visible:ring-ring/50 active:scale-92 aria-pressed:text-warn aria-pressed:hover:text-[color-mix(in_srgb,var(--warn)_45%,var(--bg))] motion-reduce:transition-none',
+        '-mx-0.5 -my-1 inline-grid size-7 flex-none cursor-pointer place-items-center rounded-md text-[19px] leading-none text-control-off transition-[background-color,color,scale] duration-150 outline-none hover:scale-112 hover:bg-muted hover:text-warn focus-visible:ring-[3px] focus-visible:ring-ring/50 active:scale-92 aria-pressed:text-warn aria-pressed:hover:text-[color-mix(in_srgb,var(--warn)_45%,var(--bg))] motion-reduce:transition-none',
         className,
       )}
     >

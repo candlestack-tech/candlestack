@@ -83,9 +83,13 @@
 :root {
   --surface: color-mix(in srgb, var(--ink) 5%, var(--bg));
   /* The app design's tints: a stronger surface (the active sidebar entry, tracks, tags), and the
-     accent and the falling red washed into the background (icon tiles, the chosen card). */
-  --surface-2: color-mix(in srgb, var(--ink) 9%, var(--bg));
-  --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--bg));
+     accent and the falling red washed into the background (icon tiles, the chosen card). Muted
+     text on the surface and the accent on its tint read at 4.5:1 in both themes
+     (src/candleColors.test.ts). */
+  --surface-2: color-mix(in srgb, var(--ink) 7%, var(--bg));
+  --accent-soft: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  /* A control that is off: the empty star, the track of a switch. 3:1 on the background. */
+  --control-off: color-mix(in srgb, var(--muted) 80%, var(--bg));
   --down-soft: color-mix(in srgb, var(--down) 12%, var(--bg));
   --background: var(--bg);
   --foreground: var(--ink);
@@ -127,6 +131,7 @@
   --color-surface-2: var(--surface-2);
   --color-accent-soft: var(--accent-soft);
   --color-down-soft: var(--down-soft);
+  --color-control-off: var(--control-off);
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--hover);
   --color-accent-foreground: var(--hover-foreground);
