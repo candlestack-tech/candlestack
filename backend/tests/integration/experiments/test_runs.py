@@ -23,6 +23,8 @@ from candlestack.data import (
     WarmUpOutOfRange,
 )
 from candlestack.engine import ENGINE_VERSION
+from candlestack.experiments import runner as runner_module
+from candlestack.experiments.assembly import NothingToTest
 from candlestack.jobs import JobClient, JobFiles, JobQueue
 from candlestack.main import create_app
 
@@ -56,6 +58,17 @@ def soon(condition: Callable[[], object], timeout: float = 10) -> None:
         time.sleep(0.02)
 
 
+def states(document: dict[str, Any]) -> list[str]:
+    """The states of the backtest's steps, in their order."""
+    steps = document["backtest"]["steps"]
+    assert [step["id"] for step in steps] == ["candles", "queue", "model", "trades"]
+    return [step["state"] for step in steps]
+
+
+def step(document: dict[str, Any], step_id: str) -> dict[str, Any]:
+    return next(step for step in document["backtest"]["steps"] if step["id"] == step_id)
+
+
 def manifest(**inputs: Any) -> dict[str, Any]:
     """The raw-candles test model's manifest with other ``input`` fields."""
     changed = json.loads((KERAS / "raw_candles.manifest.json").read_text())
@@ -81,10 +94,18 @@ def test_a_backtest_runs_and_its_document_has_the_results(ada, market, worker) -
     assert running["results"] is None
     assert running["data"]["loaded"] is None
     assert running["data"]["warm_up"] == {"candles": 24, "kind": "exact", "dropped": None}
+    assert states(running) == ["pending"] * 4
 
     document = ada.ended(backtest_id)
 
     assert document["backtest"]["status"] == "finished", document["backtest"]["error"]
+    assert states(document) == ["done"] * 4
+    for done in document["backtest"]["steps"]:
+        assert done["started_at"] is not None, done["id"]
+        assert done["duration_s"] >= 0, done["id"]
+    assert step(document, "candles")["candles"] == 24 + 240
+    model = step(document, "model")
+    assert (model["load_s"], model["input_s"], model["predict_s"]) == (1.2, 0.1, 0.5)
     assert document["version"] == 1
     assert document["software"] == {
         "engine_version": ENGINE_VERSION,
@@ -253,6 +274,47 @@ def test_a_run_of_an_onnx_model_with_the_real_worker(ada) -> None:
     assert document["data"]["predictions"]["count"] == 240
 
 
+@pytest.mark.usefixtures("worker")
+def test_the_steps_show_how_far_the_candles_loaded(ada, market) -> None:
+    market.chunks = 4
+    market.load_gate.clear()  # the load waits for the source after half its chunks
+    backtest_id = ada.start(body(ada.runnable_model())).json()["backtest"]["id"]
+
+    def waiting() -> bool:
+        return step(ada.document(backtest_id).json(), "candles")["waiting_until"] is not None
+
+    soon(waiting)
+    loading = ada.document(backtest_id).json()
+    market.load_gate.set()
+    document = ada.ended(backtest_id)
+
+    assert states(loading) == ["running", "pending", "pending", "pending"]
+    candles = step(loading, "candles")
+    assert (candles["loaded"], candles["total"], candles["cached"]) == (2, 4, 2)
+    assert candles["loaded_until"] is not None
+    assert candles["duration_s"] is None
+    goes_on = datetime.fromisoformat(candles["waiting_until"])
+    assert 0 < (goes_on - datetime.now(UTC)).total_seconds() <= 60
+    candles = step(document, "candles")
+    assert (candles["loaded"], candles["total"], candles["cached"]) == (4, 4, 2)
+    assert candles["loaded_until"] == "2024-01-15"  # the period's last day
+    assert (candles["from_cache"], candles["waiting_until"]) == (False, None)
+
+
+@pytest.mark.usefixtures("worker")
+def test_a_run_from_before_the_steps_shows_them_from_its_timings(ada) -> None:
+    backtest_id = ada.start(body(ada.runnable_model())).json()["backtest"]["id"]
+    ada.ended(backtest_id)
+    ada.sql("UPDATE backtests SET steps = NULL WHERE id = :id", id=backtest_id)
+
+    document = ada.document(backtest_id).json()
+
+    assert states(document) == ["done"] * 4
+    assert all(done["started_at"] is None for done in document["backtest"]["steps"])
+    assert step(document, "model")["load_s"] == 1.2
+    assert step(document, "queue")["duration_s"] is not None
+
+
 # --- What fails a run -----------------------------------------------------------------------
 
 
@@ -267,6 +329,9 @@ def test_a_failed_job_fails_the_backtest_with_its_error(ada, worker) -> None:
 
     assert document["backtest"]["status"] == "failed"
     assert document["backtest"]["error"] == "Keras could not load the model file."
+    # The worker took the job: the model's step failed, and the trades were not simulated.
+    assert states(document) == ["done", "done", "failed", "pending"]
+    assert step(document, "model")["duration_s"] is not None
     assert document["backtest"]["finished_at"] is not None
     assert document["results"] is None
     assert download.status_code == 409
@@ -289,6 +354,8 @@ def test_candles_the_source_refuses_fail_the_backtest_with_its_detail(ada, marke
         "The market data source (Alpaca) is unavailable, so the candles could not be loaded. "
         "Alpaca failed with HTTP 503. Try again in a minute."
     )
+    assert states(document) == ["failed", "pending", "pending", "pending"]
+    assert step(document, "candles")["duration_s"] >= 0
 
 
 @pytest.mark.usefixtures("worker")
@@ -311,6 +378,8 @@ def test_a_worker_that_does_not_answer_fails_the_backtest(ada, app) -> None:
 
     assert document["backtest"]["status"] == "failed"
     assert "did not answer in time" in document["backtest"]["error"]
+    # No worker took the job.
+    assert states(document) == ["done", "failed", "pending", "pending"]
 
 
 @pytest.mark.usefixtures("market")
@@ -326,6 +395,7 @@ def test_a_worker_out_of_reach_fails_the_backtest(ada, app, monkeypatch) -> None
 
     assert document["backtest"]["status"] == "failed"
     assert "cannot be reached" in document["backtest"]["error"]
+    assert states(document) == ["done", "failed", "pending", "pending"]
 
 
 def test_a_model_deleted_while_it_runs_fails_the_backtest_with_why(ada, worker) -> None:
@@ -346,6 +416,22 @@ def test_a_model_deleted_while_it_runs_fails_the_backtest_with_why(ada, worker) 
         "The model was deleted before the backtest could run it."
     )
     assert document["model"]["id"] is None
+    assert states(document) == ["done", "done", "failed", "pending"]
+
+
+@pytest.mark.usefixtures("worker")
+def test_a_run_without_predictions_in_its_period_fails_simulating_the_trades(
+    ada, monkeypatch
+) -> None:
+    def nothing(*_args: Any, **_kwargs: Any) -> Any:
+        raise NothingToTest("No candle of the period has a prediction.")
+
+    monkeypatch.setattr(runner_module, "run", nothing)
+
+    document = ada.ended(ada.start(body(ada.runnable_model())).json()["backtest"]["id"])
+
+    assert document["backtest"]["error"] == "No candle of the period has a prediction."
+    assert states(document) == ["done", "done", "done", "failed"]
 
 
 @pytest.mark.usefixtures("market")
@@ -355,6 +441,7 @@ def test_a_run_the_server_stopped_fails_and_a_new_start_fails_those_left(
     model_id = ada.runnable_model()
     backtest_id = ada.start(body(model_id)).json()["backtest"]["id"]  # no worker answers
 
+    soon(lambda: states(ada.document(backtest_id).json())[1] == "running")
     client.portal.call(app.state.backtest_runner.close)
     stopped = ada.document(backtest_id).json()["backtest"]
     ada.sql("UPDATE backtests SET status = 'running', error = NULL WHERE id = :id", id=backtest_id)
@@ -364,8 +451,25 @@ def test_a_run_the_server_stopped_fails_and_a_new_start_fails_those_left(
 
     assert stopped["status"] == "failed"
     assert "restarted" in stopped["error"]
+    assert [s["state"] for s in stopped["steps"]] == ["done", "failed", "pending", "pending"]
     assert recovered["status"] == "failed"
     assert "restarted" in recovered["error"]
+
+
+def test_a_start_of_the_server_fails_the_step_a_run_was_at(ada, worker, settings) -> None:
+    worker.gate.clear()  # the worker takes the job and holds it
+    backtest_id = ada.start(body(ada.runnable_model())).json()["backtest"]["id"]
+    soon(lambda: states(ada.document(backtest_id).json())[2] == "running")
+
+    with TestClient(create_app(settings)):  # the start of another process
+        pass
+    recovered = ada.document(backtest_id).json()
+    worker.gate.set()
+
+    assert recovered["backtest"]["status"] == "failed"
+    assert "restarted" in recovered["backtest"]["error"]
+    assert states(recovered) == ["done", "done", "failed", "pending"]
+    assert step(recovered, "model")["duration_s"] >= 0
 
 
 # --- What starting one checks -----------------------------------------------------------------

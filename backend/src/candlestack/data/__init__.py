@@ -52,6 +52,7 @@ from candlestack.data.models import (
     Timeframe,
     empty_candles,
 )
+from candlestack.data.progress import LoadProgress, LoadWatcher, watch_load
 from candlestack.data.service import DataService, build_data_service
 from candlestack.data.sessions import Session, parse_calendar, session_bins, sessions_between
 
@@ -73,6 +74,8 @@ __all__ = [
     "InstrumentSort",
     "InstrumentStats",
     "InvalidRequest",
+    "LoadProgress",
+    "LoadWatcher",
     "Market",
     "PeriodOutOfRange",
     "SearchResult",
@@ -106,4 +109,5 @@ __all__ = [
     "slice_range",
     "suggest",
     "validate",
+    "watch_load",
 ]

@@ -7,6 +7,7 @@ them. The job's files go once the result is read, whatever it is.
 
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import anyio
@@ -45,16 +46,18 @@ class JobClient:
         manifest: dict[str, Any],
         candles: pl.DataFrame,
         wait: float = DEFAULT_WAIT,
+        claimed: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[JobResult, pl.DataFrame | None]:
         """Runs the model (``<user_id>/<model_id>.keras`` or ``.onnx`` in the model storage,
         with the SHA-256 it was uploaded with) on ``candles`` (``ts``, open, high, low, close,
         volume, and for stocks ``session_last``), its input built from ``manifest``. Returns
         the result and, when it is done, the predictions: ``ts`` and ``prediction``, one row
-        per sample."""
+        per sample. ``claimed`` is awaited once when a worker is seen to have taken the job
+        before its result came (``JobQueue.result``)."""
         job = _job("predict", model, sha256, manifest, wait)
         try:
             await anyio.to_thread.run_sync(self._files.write_candles, job.id, candles)
-            result = await self._run(job, wait)
+            result = await self._run(job, wait, claimed)
             predictions = None
             if result.status == "done":
                 predictions = await anyio.to_thread.run_sync(self._files.read_predictions, job.id)
@@ -70,9 +73,11 @@ class JobClient:
         manifest has an ``example``, its comparison (docs/preprocessing.md, checks 4 and 5)."""
         return await self._run(_job("check", model, sha256, manifest, wait), wait)
 
-    async def _run(self, job: Job, wait: float) -> JobResult:
+    async def _run(
+        self, job: Job, wait: float, claimed: Callable[[], Awaitable[None]] | None = None
+    ) -> JobResult:
         await self._queue.submit(job)
-        result = await self._queue.result(job.id, wait)
+        result = await self._queue.result(job.id, wait, claimed=claimed)
         if result is None:
             result = JobResult.failed(job.id, job.kind, "expired", NO_ANSWER)
         elif result.reason == "internal":

@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
 import { backtestDocument, manifest } from '@/test/api';
+import { step } from '@/test/steps';
 
-import { allMetrics, basicMetrics, durationText, manifestText, periodText, setupOf } from './format';
+import {
+  allMetrics,
+  basicMetrics,
+  candlesText,
+  durationText,
+  loadedText,
+  manifestText,
+  modelText,
+  periodText,
+  setupOf,
+  stepTime,
+} from './format';
 
 const DOC = backtestDocument();
 const STATS = DOC.results!.stats;
@@ -111,5 +123,35 @@ describe('the setup', () => {
       main: "signal candle's close",
       detail: 'drawdown stop 20 % · fees 0.025 % · slippage 0.01 % · no benchmark',
     });
+  });
+});
+
+describe('the steps of a run', () => {
+  it('writes how long a step took in tenths under a minute, then in minutes', () => {
+    expect(stepTime(0.04)).toBe('0 s');
+    expect(stepTime(0.31)).toBe('0.3 s');
+    expect(stepTime(10.34)).toBe('10.3 s');
+    expect(stepTime(59.96)).toBe('1 min 0 s');
+    expect(stepTime(192.4)).toBe('3 min 12 s');
+    expect(stepTime(null)).toBe('–');
+  });
+
+  it("writes the months loaded from the period's first, none while it loads the warm-up", () => {
+    const start = Date.UTC(2016, 0, 4) / 1000;
+    expect(loadedText('2019-01-31', start)).toBe('Loaded Jan 2016 – Jan 2019');
+    expect(loadedText('2016-01-04', start)).toBe('Loaded Jan 2016 – Jan 2016');
+    expect(loadedText('2016-01-03', start)).toBe('');
+    expect(loadedText(null, start)).toBe('');
+  });
+
+  it('writes what the candles and the model did', () => {
+    expect(candlesText(step('candles', { candles: 35912, from_cache: false }))).toBe('35,912 candles');
+    expect(candlesText(step('candles', { candles: 412, from_cache: true }))).toBe('412 candles · from the cache');
+    expect(candlesText(step('candles'))).toBe('');
+    expect(modelText(step('model', { load_s: 1.4, input_s: 2.1, predict_s: 6.8 }))).toBe(
+      'load 1.4 s · input 2.1 s · predict 6.8 s',
+    );
+    expect(modelText(step('model', { load_s: 1.4 }))).toBe('load 1.4 s');
+    expect(modelText(step('model'))).toBe('');
   });
 });

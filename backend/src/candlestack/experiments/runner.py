@@ -4,10 +4,11 @@ started it, so it outlives the request (docs/architecture.md, "Backtests").
 A run loads the candles with the model's warm-up from the data module, has the worker predict
 on them through the job queue (``jobs.JobClient``), aligns the predictions with the candles,
 applies the decision's steps, runs the engine and the statistics (``assembly.run``) and stores
-the result. Whatever fails marks the backtest failed with a plain error for the user; a bug of
-ours is logged as an error (a Sentry issue) and the user is told so. A run cannot hold a
-database connection while the worker runs: it reads the backtest, lets the session go, and
-writes the result in another.
+the result. It records its steps as it goes (``steps.py``), so the backtest's page shows where
+it is. Whatever fails marks the backtest failed with a plain error for the user, and the step
+it was at failed; a bug of ours is logged as an error (a Sentry issue) and the user is told so.
+A run cannot hold a database connection while the worker runs: it reads the backtest, lets the
+session go, and writes the result in another.
 
 The API runs in one process (granian with one worker), so a backtest still ``running`` when the
 process starts was left by one that stopped: ``recover`` marks those failed, and ``close`` on
@@ -47,6 +48,7 @@ from candlestack.experiments.document import Loaded, PredictionsOut, RunnerOut
 from candlestack.experiments.models import Backtest
 from candlestack.experiments.schemas import EQUITY_POINTS, BacktestStatus
 from candlestack.experiments.spec import RunReport, RunSpec
+from candlestack.experiments.steps import StepRecorder, Steps
 from candlestack.experiments.store import BacktestStore
 from candlestack.jobs import DEFAULT_WAIT, JobClient, JobResult
 from candlestack.ml import model_file
@@ -148,14 +150,18 @@ class BacktestRunner:
         spec = RunSpec.model_validate(backtest.spec)
         if backtest.model_id is None:
             raise RunFailed("model-deleted", MODEL_GONE)
+        steps = StepRecorder(partial(self._save_steps, backtest_id), spec.data.period.end)
         timings: dict[str, float | None] = {}
         clock = time.monotonic()
-        candles = await self._candles(spec)
+        candles = await self._candles(spec, steps)
         timings["candles"] = _ms(clock)
         # The file as the model storage keeps it (ml.LocalModelStorage).
         model = model_file(backtest.user_id, backtest.model_id, spec.model.framework)
-        result, predictions = await self._predict(backtest_id, model, spec, candles.marked_frame())
+        result, predictions = await self._predict(
+            backtest_id, model, spec, candles.marked_frame(), steps
+        )
         timings.update({f"job_{name}": value for name, value in result.timings})
+        await steps.start("trades")
         clock = time.monotonic()
         period = spec.data.period
         stored = predictions.filter(pl.col("ts").is_between(period.start, period.end - 1))
@@ -177,29 +183,52 @@ class BacktestRunner:
             runner=_runner(spec, result),
             timings=timings,
         )
-        await self._finish(backtest_id, done, report, blob)
+        await self._finish(backtest_id, done, report, blob, steps)
 
-    async def _candles(self, spec: RunSpec) -> CandleSet:
+    async def _save_steps(self, backtest_id: str, steps: Steps) -> None:
+        """Stores the run's steps; Postgres out of reach is a warning, as the run goes on."""
+        try:
+            async with self._db.sessions() as session:
+                store = BacktestStore(session)
+                await store.set_steps(backtest_id, steps)
+                await store.commit()
+        except DATABASE_ERRORS as error:
+            logger.warning(
+                "The steps of backtest %s were not saved (%s)", backtest_id, type(error).__name__
+            )
+
+    async def _candles(self, spec: RunSpec, steps: StepRecorder) -> CandleSet:
         """The candles with the warm-up, loaded in the background: a cold load of years of
         stock candles waits for the source's request budget, minutes if need be."""
         data = spec.data
+        await steps.start("candles")
         try:
-            return await self._data.candles(
-                InstrumentId.parse(data.instrument.id),
-                Timeframe(data.timeframe),
-                data.load_start,
-                data.period.end,
-                background=True,
-            )
+            async with steps.loading():
+                candles = await self._data.candles(
+                    InstrumentId.parse(data.instrument.id),
+                    Timeframe(data.timeframe),
+                    data.load_start,
+                    data.period.end,
+                    background=True,
+                )
         except SourceUnavailable as error:
             raise RunFailed("candles", _source_unavailable(error)) from error
         except DataError as error:
             raise RunFailed("candles", error.detail) from error
+        await steps.loaded(candles.frame.height)
+        return candles
 
     async def _predict(
-        self, backtest_id: str, model: str, spec: RunSpec, candles: pl.DataFrame
+        self,
+        backtest_id: str,
+        model: str,
+        spec: RunSpec,
+        candles: pl.DataFrame,
+        steps: StepRecorder,
     ) -> tuple[JobResult, pl.DataFrame]:
-        """The worker's predictions on the candles of the model's file ``model``."""
+        """The worker's predictions on the candles of the model's file ``model``: the queue's
+        step until a worker takes the job, then the model's."""
+        await steps.start("queue")
         try:
             result, predictions = await self._jobs.predict(
                 model=model,
@@ -207,25 +236,30 @@ class BacktestRunner:
                 manifest=spec.model.manifest,
                 candles=candles,
                 wait=self._wait,
+                claimed=steps.claimed,
             )
         except (RedisError, OSError) as error:
             logger.warning("A backtest could not reach the worker (%s)", type(error).__name__)
             raise RunFailed("worker-unreachable", UNREACHABLE) from error
+        await steps.answered(result.timings)
         if result.status != "done" or predictions is None:
             # A model deleted while the run went on takes its file along: the worker cannot
             # find it, and the user should read why.
             if await self._model_gone(backtest_id):
                 raise RunFailed("model-deleted", MODEL_GONE)
             raise RunFailed(f"job {result.reason}", result.error or JOB_FAILED)
+        await steps.ran(result.timings)
         return result, predictions
 
     async def _model_gone(self, backtest_id: str) -> bool:
         async with self._db.sessions() as session:
             return await BacktestStore(session).model_of(backtest_id) is None
 
-    async def _finish(self, backtest_id: str, done: Run, report: RunReport, blob: bytes) -> None:
-        """Stores the results while the backtest is still running and there (its account may
-        have been deleted meanwhile)."""
+    async def _finish(
+        self, backtest_id: str, done: Run, report: RunReport, blob: bytes, steps: StepRecorder
+    ) -> None:
+        """Stores the results, and the steps all done, while the backtest is still running and
+        there (its account may have been deleted meanwhile)."""
         now = _now()
         async with self._db.sessions() as session:
             backtest = await session.get(Backtest, backtest_id, with_for_update=True)
@@ -248,10 +282,12 @@ class BacktestRunner:
             backtest.engine_version = done.result.engine_version
             backtest.finished_at = now
             backtest.duration_s = (now - backtest.created_at).total_seconds()
+            backtest.steps = steps.finished()
             await session.commit()
         logger.info("Backtest %s finished in %.1f s", backtest_id, backtest.duration_s)
 
     async def _fail(self, backtest_id: str, error: str) -> None:
+        """Marks the backtest failed, and the step it was at as stored (``store.fail``)."""
         try:
             async with self._db.sessions() as session:
                 store = BacktestStore(session)

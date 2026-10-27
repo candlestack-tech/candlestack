@@ -1,12 +1,11 @@
 import type { ReactNode } from 'react';
 
 import type { BacktestDocument } from '@/api';
-import { HINT } from '@/components/Hint';
 import { InstrumentSymbol } from '@/components/InstrumentSymbol';
 import { useDateStyle } from '@/features/preferences';
 import { cn } from '@/lib/utils';
 
-import { setupOf, TONE, type Metric } from './format';
+import { durationText, setupOf, STEP_NAMES, stepTime, TONE, type Metric } from './format';
 
 // The boxes of a backtest's page (mockups/app, .r7-box and the parts in them).
 
@@ -72,19 +71,39 @@ export function MetricList({ metrics }: { metrics: readonly Metric[] }) {
   );
 }
 
+const LABEL = 'font-mono text-[10.5px]/4 font-medium tracking-[0.06em] text-muted-foreground uppercase';
+
+// How long a finished run took (#316): in total, then each of its steps.
+function RunTimes({ backtest }: { backtest: BacktestDocument['backtest'] }) {
+  return (
+    <div className="flex flex-col gap-1.5 border-t pt-3">
+      <span className={LABEL}>Run</span>
+      {backtest.duration_s !== null && <b className="font-medium">{durationText(backtest.duration_s)} in total</b>}
+      <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-[3px] text-[12.5px] text-muted-foreground">
+        {backtest.steps.map((step) => (
+          <div key={step.id} className="contents">
+            <dt>{STEP_NAMES[step.id]}</dt>
+            <dd className="text-right font-mono">{stepTime(step.duration_s)}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
 // The setup it ran with, step by step (.r3-setup): each step's name over what it was and its
-// details. The data names its instrument with the icon, the symbol and the name.
+// details. The data names its instrument with the icon, the symbol and the name. A finished run
+// adds how long it took.
 export function SetupBox({ doc }: { doc: BacktestDocument }) {
   const dateStyle = useDateStyle();
   const { instrument } = doc.data;
+  const { backtest } = doc;
   return (
     <ResultBox title="Setup">
       <div className="flex flex-col gap-3 text-[13px]">
         {setupOf(doc, dateStyle).map(({ step, main, detail }) => (
           <div key={step} className="flex min-w-0 flex-col gap-[3px]">
-            <span className="font-mono text-[10.5px]/4 font-medium tracking-[0.06em] text-muted-foreground uppercase">
-              {step}
-            </span>
+            <span className={LABEL}>{step}</span>
             {step === 'Data' ? (
               <InstrumentSymbol id={instrument.id} symbol={instrument.symbol} name={instrument.name} size={20} />
             ) : (
@@ -93,25 +112,14 @@ export function SetupBox({ doc }: { doc: BacktestDocument }) {
             {detail && <span className="font-mono text-[12.5px] text-muted-foreground">{detail}</span>}
           </div>
         ))}
+        {backtest.status === 'finished' && backtest.steps.length > 0 && <RunTimes backtest={backtest} />}
       </div>
     </ResultBox>
   );
 }
 
-// While it runs: a bar that moves, as the API gives no progress.
-export function RunningBox() {
-  return (
-    <section className="flex flex-col gap-3 rounded-lg border bg-card p-4">
-      <b className="font-medium">Running</b>
-      <span className="block h-1.5 overflow-hidden rounded-[3px] bg-surface-2">
-        <i className="block h-full w-1/3 animate-result-run rounded-[3px] bg-primary motion-reduce:w-full motion-reduce:animate-none" />
-      </span>
-      <p className={HINT}>You can close the page. The backtest keeps going.</p>
-    </section>
-  );
-}
-
-// Why it failed (.err): a red dot and the error as the API wrote it.
+// Why it failed when it has no steps (it failed before they were recorded, .err): a red dot and
+// the error as the API wrote it.
 export function FailedNote({ error }: { error: string }) {
   return (
     <div

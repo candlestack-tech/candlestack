@@ -508,7 +508,9 @@ requested timeframe.
   budget, as long as that takes, and when Alpaca answers 429 it waits for its `Retry-After`
   (the next minute without one) and asks again, as long as Alpaca keeps answering 429. Each of
   these waits ends up to 3 s late at random, so the waiting loads do not all ask at the second
-  a minute begins. Several backtests at once share the one share.
+  a minute begins. Several backtests at once share the one share. A backtest shows these waits
+  and its chunks loaded so far in its steps: the caller watches a load with `data.watch_load`
+  ([architecture.md](architecture.md#backtests)).
 - The share is half the budget. Of the other half the stats take up to 20 a minute, the mini
   charts 5 and the list's first-candle lookups 6, so everything else keeps at least 59 a
   minute (90 while no refresh runs): chart and instrument requests, the catalogs (one request a

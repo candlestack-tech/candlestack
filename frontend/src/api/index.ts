@@ -24,6 +24,7 @@ export {
   type BacktestDocument,
   type BacktestIn,
   type BacktestStatus,
+  type BacktestStep,
   type BacktestsPage,
   type BacktestsParams,
   type BestMetric,

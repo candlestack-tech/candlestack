@@ -781,6 +781,11 @@ export interface components {
              */
             number: number;
             status: components["schemas"]["BacktestStatus"];
+            /**
+             * Steps
+             * @description The steps of the run in their order, while it runs and after: the failed one of a failed backtest is `failed` and its error is `error`. Empty for a backtest that failed before steps were recorded
+             */
+            steps: components["schemas"]["BacktestStep"][];
         };
         /**
          * BacktestIn
@@ -1017,6 +1022,94 @@ export interface components {
          * @enum {string}
          */
         BacktestStatus: "running" | "finished" | "failed";
+        /**
+         * BacktestStep
+         * @description A step of the run. `candles` loads the candles with the warm-up, `queue` hands the job
+         *     to the worker until a worker takes it, `model` is the worker's job (it loads the model,
+         *     builds its input and predicts), `trades` runs the engine and the statistics and stores the
+         *     result. The fields after `duration_s` belong to one step each and are null for the others.
+         */
+        BacktestStep: {
+            /**
+             * Cached
+             * @description `candles`: of the chunks loaded, those that came from the cache
+             * @example 3
+             */
+            cached: number | null;
+            /**
+             * Candles
+             * @description `candles`, once done: the candles loaded
+             * @example 35912
+             */
+            candles: number | null;
+            /**
+             * Duration S
+             * @description Seconds it took, once done or failed; null while it runs, or when it is not known
+             * @example 192.4
+             */
+            duration_s: number | null;
+            /**
+             * From Cache
+             * @description `candles`, once done: every chunk came from the cache
+             */
+            from_cache: boolean | null;
+            /**
+             * Id
+             * @enum {string}
+             */
+            id: "candles" | "queue" | "model" | "trades";
+            /**
+             * Input S
+             * @description `model`, once done: seconds to build the model's input
+             * @example 0.4
+             */
+            input_s: number | null;
+            /**
+             * Load S
+             * @description `model`, once done: seconds to load the model
+             * @example 1.2
+             */
+            load_s: number | null;
+            /**
+             * Loaded
+             * @description `candles`: the chunks loaded so far (closed months or years, then days, as the source splits the period); null until the load has planned them
+             * @example 37
+             */
+            loaded: number | null;
+            /**
+             * Loaded Until
+             * @description `candles`: the last day of the candles loaded so far from the start of the load on (UTC)
+             */
+            loaded_until: string | null;
+            /**
+             * Predict S
+             * @description `model`, once done: seconds to predict
+             * @example 6.1
+             */
+            predict_s: number | null;
+            /**
+             * Started At
+             * @description When it began (UTC); null while pending or when unknown
+             */
+            started_at: string | null;
+            /**
+             * State
+             * @description `pending` until it begins (a step after a failed one stays `pending`), `running`, `done` or `failed`
+             * @enum {string}
+             */
+            state: "pending" | "running" | "done" | "failed";
+            /**
+             * Total
+             * @description `candles`: the chunks of the load
+             * @example 128
+             */
+            total: number | null;
+            /**
+             * Waiting Until
+             * @description `candles`: while the load waits for the market data source's request limit, when it goes on (UTC); else null
+             */
+            waiting_until: string | null;
+        };
         /**
          * BacktestTimeframe
          * @description Timeframes a new backtest can start with (Settings, Backtest defaults): those of the data.

@@ -382,7 +382,10 @@ sequenceDiagram
   `jobs:lease:<id>` (the worker that runs it, 30 s, renewed every 10 s) and `jobs:result:<id>`
   (a list of one result, which the backend pops; 10 minutes). Taking a job moves its ID to the
   running list and gives it a lease in one Lua script, and publishing a result removes the job
-  from the running list in another, only while it is still there.
+  from the running list in another, only while it is still there. While the backend waits for
+  a result it can be told when a worker took the job (`JobQueue.result`'s `claimed`): after
+  each second of its wait without a result it looks for the job's lease (`EXISTS`), which a
+  worker holds from its claim to its result. A backtest's steps use it to end the queue's step.
 - **A job** (`jobs.Job`): `version` (1), `id` (32 hex), `kind` (`predict` or `check`), `model`
   (the file in the model storage, `<user_id>/<model_id>.keras` or `.onnx`: no absolute path, no
   `..`, no other extension; the extension says how the worker runs it),
@@ -527,8 +530,9 @@ checked at the next start.
   runner's versions and the timings of the steps in milliseconds), `stats` (JSONB: the 12
   statistics, `max_drawdown` negative) and `predictions` (bytea: `ts` and `prediction` as zstd
   Parquet, about 140 KB for 10 years of 30-minute stock candles; in Postgres, so they are in its
-  backups and go with the account's cascade, and no other volume is needed). The seed
-  command's backtests have none of them, and no result document.
+  backups and go with the account's cascade, and no other volume is needed), and `steps`
+  (JSONB: the steps of the run, below). The seed command's backtests have none of them, and no
+  result document.
 - **The equity series** (`equity`: `{strategy, benchmark}`, JSONB) draws the small lines of the
   Dashboard's starred backtests: the cumulative return of the strategy and of buy and hold as
   fractions (0 at the start), at most 60 points each, at the same evenly spaced times over the
@@ -598,6 +602,30 @@ checked at the next start.
   reported. The API runs in one process, so on its start the backtests still `running` were
   left by a process that stopped and fail ("The server restarted..."), and on shutdown the
   runs it stops fail the same way.
+- **The steps of a run** (`experiments/steps.py`, `backtest.steps` of the result document,
+  which the backtest's page asks for every 2 seconds while it runs) are four, in this order:
+  `candles` (`DataService.candles` of the period with the warm-up), `queue` (from handing the
+  job to the worker, its candles written to the jobs' volume, until a worker takes it), `model`
+  (the worker's job: it loads the model, builds its input and predicts, until the backend has
+  the predictions) and `trades` (the engine, the statistics and storing the result). Each has
+  a `state` (`pending`, `running`, `done` or `failed`), `started_at` and `duration_s` (once
+  done or failed). While the candles load, `loaded` and `total` count the load's chunks
+  (closed months or years, then days), `cached` those from the cache, `loaded_until` is the
+  last day loaded from the start on and `waiting_until` when a load that waits for the Alpaca
+  budget or its 429 goes on; once done, `candles` and `from_cache` (every chunk from the
+  cache). A done `model` has the worker's `load_s`, `input_s` and `predict_s`. The run stores
+  them in `backtests.steps` at each change of step, and the progress of the candles at most
+  once a second (the data module reports it through `data.watch_load`, a context variable, so
+  no signature carries it); a save that fails is a warning and the run goes on. The `queue`
+  step ends when the backend sees the job's lease ([Worker](#worker)), at most a second late;
+  the result's `timings.queued` (the worker's own measure from the job's making to its claim)
+  then replaces that time, and a job that ran within that second gets its times from it too.
+  A failure marks the step that was running `failed`, whatever failed the run (the run's own
+  error, a bug, a stop or start of the server), and its error is the backtest's `error`; the
+  steps after it stay `pending`. A job no worker took fails the `queue` step. A backtest
+  started before the steps were recorded has none when it failed, and when it finished shows
+  them from its report's timings, all done and without `started_at` (`queue` from
+  `job_queued`, `model` from `job_total`, the time from the claim to the result).
 - **The result document** (`GET /api/v1/backtests/{backtest_id}`, and `/download`) is built
   on request ([engine.md](engine.md#the-result-document)): the stored predictions, the
   candles of the stored range from the cache and the engine, in a thread; `data.changed` is

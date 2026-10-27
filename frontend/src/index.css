@@ -181,25 +181,14 @@
 }
 
 /* The dashes that run along the home page's pipeline (src/features/home/Pipeline.tsx), and how
-   the app's panels pop open from their button (mockups/app, fx-pop: the backtests' Filters), and
-   the bar of a running backtest, which goes back and forth as the API gives no progress. */
+   the app's panels pop open from their button (mockups/app, fx-pop: the backtests' Filters). */
 @theme {
   --animate-pipeline-flow: pipeline-flow 2.4s linear infinite;
   --animate-fx-pop: fx-pop 0.14s ease-out;
-  --animate-result-run: result-run 1.6s ease-in-out infinite alternate;
 
   @keyframes pipeline-flow {
     to {
       left: 100%;
-    }
-  }
-
-  @keyframes result-run {
-    from {
-      translate: 0;
-    }
-    to {
-      translate: 200%;
     }
   }
 

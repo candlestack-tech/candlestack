@@ -12,6 +12,7 @@ import json
 import logging
 import math
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -111,8 +112,16 @@ class JobQueue:
             pipe.rpush(QUEUE, job.id)
             await pipe.execute()
 
-    async def result(self, job_id: str, wait: float) -> JobResult | None:
-        """The job's result, waiting up to ``wait`` seconds for it; None when none came."""
+    async def result(
+        self,
+        job_id: str,
+        wait: float,
+        *,
+        claimed: Callable[[], Awaitable[None]] | None = None,
+    ) -> JobResult | None:
+        """The job's result, waiting up to ``wait`` seconds for it; None when none came.
+        ``claimed`` is awaited once, at most ``_WAIT_STEP`` after a worker took the job (it
+        holds its lease), when that is seen before the result."""
         deadline = time.monotonic() + wait
         while (left := deadline - time.monotonic()) > 0:
             popped = await self._redis.blpop(
@@ -120,7 +129,15 @@ class JobQueue:
             )
             if popped is not None:
                 return JobResult.model_validate_json(popped[1])
+            if claimed is not None and await self.taken(job_id):
+                await claimed()
+                claimed = None
         return None
+
+    async def taken(self, job_id: str) -> bool:
+        """Whether a worker runs the job: it holds the job's lease from its claim until it
+        publishes the result."""
+        return bool(await self._redis.exists(LEASE_PREFIX + job_id))
 
     async def claim(self, worker: str, lease: int) -> Claimed | None:
         """The oldest job in the queue, now running under ``worker``'s lease of ``lease``

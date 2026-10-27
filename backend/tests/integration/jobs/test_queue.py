@@ -65,6 +65,38 @@ async def test_a_job_goes_from_the_backend_to_a_worker_and_back(
     assert await redis.lrange("jobs:queue", 0, -1) == [second.id.encode()]
 
 
+async def test_the_backend_sees_when_a_worker_takes_its_job(queue: JobQueue) -> None:
+    submitted = job()
+    await queue.submit(submitted)
+    claims: list[bool] = []
+
+    async def claimed() -> None:
+        claims.append(await queue.taken(submitted.id))
+        await queue.finish(JobResult(id=submitted.id, kind="predict", status="done"))
+
+    assert not await queue.taken(submitted.id)
+    await queue.claim("worker-1", 30)
+    result = await queue.result(submitted.id, 5, claimed=claimed)
+
+    # Told once, within a step of the wait, while the worker holds the lease.
+    assert claims == [True]
+    assert result is not None
+    assert result.status == "done"
+    assert not await queue.taken(submitted.id)  # the lease goes with the result
+
+
+async def test_a_job_still_queued_is_not_claimed(queue: JobQueue) -> None:
+    submitted = job()
+    await queue.submit(submitted)
+    claims: list[bool] = []
+
+    async def claimed() -> None:
+        claims.append(True)
+
+    assert await queue.result(submitted.id, 1.5, claimed=claimed) is None
+    assert claims == []
+
+
 async def test_an_empty_queue_has_nothing_to_claim(queue: JobQueue) -> None:
     assert await queue.claim("worker-1", 30) is None
 

@@ -239,7 +239,7 @@ describe('the backtest builder', () => {
     await vi.waitFor(() => expect(router.state.location.pathname).toBe('/backtests/bt_n3w8a9c4k2'));
     // The answer is on the backtest's page at once, running.
     expect((await screen.findByRole('heading', { level: 1, name: 'Backtest #13' })).textContent).toBe('Backtest #13');
-    expect(screen.getByText('Running', { selector: 'span' })).toBeDefined();
+    expect(screen.getByText(/^Running · /, { selector: 'span' })).toBeDefined();
     expect(sentBody(fetch, RUN)).toEqual({
       model: { id: CRYPTO.id },
       data: {

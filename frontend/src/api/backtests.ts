@@ -15,6 +15,8 @@ export type Dashboard = components['schemas']['DashboardOut'];
 // One backtest as its page shows it: the result document (docs/engine.md) in the light view.
 export type BacktestDocument = components['schemas']['BacktestDocument'];
 export type BacktestStatus = components['schemas']['BacktestStatus'];
+// A step of a backtest's run (candles, queue, model, trades) and how far it got.
+export type BacktestStep = components['schemas']['BacktestStep'];
 // What a new backtest is made of: the setup groups of the result document.
 export type BacktestIn = components['schemas']['BacktestIn'];
 // The results Best backtests ranks by.

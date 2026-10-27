@@ -21,6 +21,7 @@ from candlestack.data import (
     InstrumentId,
     InstrumentNotFound,
     InvalidRequest,
+    LoadProgress,
     PeriodOutOfRange,
     SourceUnavailable,
     Timeframe,
@@ -28,6 +29,7 @@ from candlestack.data import (
     WarmUpOutOfRange,
     build_data_service,
     normalise,
+    watch_load,
 )
 from candlestack.data.cache import encode_chunk
 from candlestack.data.sources.binance import IP_WEIGHT_CEILING, parse_archive
@@ -72,8 +74,13 @@ async def test_closed_month_from_its_archive_then_from_the_cache(service: DataSe
     first = upstream.first_kline(LISTED_MS)
     archive, _ = upstream.fixture_archive("monthly", "BTCUSDT-1h-2024-01.zip")
 
-    candles = await service.candles(BTC, Timeframe.H1, utc("2024-01-01"), utc("2024-02-01"))
-    again = await service.candles(BTC, Timeframe.H1, utc("2024-01-10"), utc("2024-01-11"))
+    fetched: list[LoadProgress] = []
+    cached: list[LoadProgress] = []
+
+    with watch_load(fetched.append):
+        candles = await service.candles(BTC, Timeframe.H1, utc("2024-01-01"), utc("2024-02-01"))
+    with watch_load(cached.append):
+        again = await service.candles(BTC, Timeframe.H1, utc("2024-01-10"), utc("2024-01-11"))
 
     assert candles.frame.height == 744
     assert candles.frame.row(0) == (
@@ -89,6 +96,12 @@ async def test_closed_month_from_its_archive_then_from_the_cache(service: DataSe
     assert candles.fingerprint.startswith("sha256:")
     assert again.frame["ts"].to_list() == list(range(utc("2024-01-10"), utc("2024-01-11"), HOUR))
     assert (catalog.call_count, first.call_count, archive.call_count) == (1, 1, 1)
+    # A watched load reports its chunks, and which came from the cache.
+    assert fetched == [
+        LoadProgress(total=1),
+        LoadProgress(total=1, loaded=1, cached=0, until=utc("2024-02-01")),
+    ]
+    assert cached[-1] == LoadProgress(total=1, loaded=1, cached=1, until=utc("2024-02-01"))
 
 
 async def test_30m_candles_open_on_the_utc_half_hours(service: DataService, upstream):

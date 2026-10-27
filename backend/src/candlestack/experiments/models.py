@@ -96,6 +96,11 @@ class Backtest(Base):
     predictions: Mapped[bytes | None] = mapped_column(
         LargeBinary, deferred=True, deferred_raiseload=True
     )
+    # The steps of the run (document.BacktestStep, in their order), written as it goes, so its
+    # page shows where it is: null for a backtest stored before they were recorded.
+    steps: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSONB, deferred=True, deferred_raiseload=True
+    )
     starred: Mapped[bool] = mapped_column(Boolean, server_default=false(), default=False)
     # Made by the seed command (test data on stage and local), which replaces only these.
     seeded: Mapped[bool] = mapped_column(Boolean, server_default=false(), default=False)
