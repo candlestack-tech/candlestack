@@ -68,7 +68,7 @@ describe('the chart height chain', () => {
   it('lets the chart fill its section, never under 16rem, 20rem from sm up', () => {
     const bars = [{ time: 3600, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 }];
     const html = renderToStaticMarkup(
-      <CandleChart bars={bars} market="crypto" dateStyle={STYLE} onNearLeftEdge={() => undefined} />,
+      <CandleChart bars={bars} market="crypto" dateStyle={STYLE} daily={false} onNearLeftEdge={() => undefined} />,
     );
     expect(classes(html, /<div [^>]*>/)).toEqual(
       expect.arrayContaining(['relative', 'flex-1', 'min-h-64', 'sm:min-h-80']),

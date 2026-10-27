@@ -182,9 +182,10 @@ export function InputMatrix({ manifest, hint }: Props) {
   return (
     <>
       <div className="overflow-x-auto p-0.5">
+        {/* At least 12 px a column, 8 px on a phone, so the prediction still fits beside them. */}
         <div
-          className="grid gap-x-2.5 gap-y-1.5"
-          style={{ gridTemplateColumns: `minmax(46px, auto) minmax(${columns.length * 12}px, 1fr) auto` }}
+          className="grid grid-cols-[minmax(46px,auto)_minmax(calc(var(--columns)*12px),1fr)_auto] gap-x-2.5 gap-y-1.5 max-sm:grid-cols-[minmax(46px,auto)_minmax(calc(var(--columns)*8px),1fr)_auto]"
+          style={{ '--columns': columns.length } as CSSProperties}
         >
           <Groups columns={columns} />
           <RowAxis length={manifest.input.window.length} />

@@ -42,6 +42,20 @@ function contrast(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+// A tint of the shared names, "--surface-2: color-mix(in srgb, var(--ink) 7%, var(--bg))", worked
+// out with the theme's colors as the browser mixes them.
+function tint(block: string, name: string): string {
+  const match = new RegExp(
+    `--${name}:\\s*color-mix\\(in srgb, var\\(--([\\w-]+)\\) (\\d+)%, var\\(--([\\w-]+)\\)\\)`,
+  ).exec(css);
+  if (!match) throw new Error(`--${name} is not a color-mix`);
+  const [, first = '', percent = '', second = ''] = match;
+  const share = Number(percent) / 100;
+  const [a, b] = [channels(variable(block, first)), channels(variable(block, second))];
+  const mixed = a.map((c, i) => Math.round(c * share + (b[i] ?? 0) * (1 - share)));
+  return `#${mixed.map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+}
+
 const light = css.slice(css.indexOf(':root {'), css.indexOf(":root[data-theme='dark']"));
 const dark = css.slice(css.indexOf(":root[data-theme='dark']"));
 
@@ -60,7 +74,8 @@ describe.each([
   });
 });
 
-// #184: the 24 h change of the instrument list is text, so it needs 4.5:1.
+// #184: the 24 h change of the instrument list is text, so it needs 4.5:1; so does the readout over
+// the instrument chart, which uses them too.
 describe.each([
   ['light', light],
   ['dark', dark],
@@ -69,5 +84,24 @@ describe.each([
     const bg = variable(block, 'bg');
     expect(contrast(variable(block, 'up'), bg)).toBeGreaterThanOrEqual(4.5);
     expect(contrast(variable(block, 'down'), bg)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+// #246: text on the app's tints needs 4.5:1, a control that is off 3:1.
+describe.each([
+  ['light', light],
+  ['dark', dark],
+])('tints in the %s theme', (_, block) => {
+  it('keep muted text on the stronger surface at 4.5:1 or more (the active sidebar entry, steps to come)', () => {
+    expect(contrast(variable(block, 'muted'), tint(block, 'surface-2'))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('keep the accent on its tint at 4.5:1 or more (the avatar, the pipeline layers)', () => {
+    expect(contrast(variable(block, 'accent'), tint(block, 'accent-soft'))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('show a control that is off at 3:1 on the background and under the knob of a switch', () => {
+    const off = tint(block, 'control-off');
+    expect(contrast(off, variable(block, 'bg'))).toBeGreaterThanOrEqual(3);
   });
 });

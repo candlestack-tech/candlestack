@@ -69,6 +69,7 @@ export function InstrumentCandles({ instrument, timeframe, dateStyle }: Props) {
             bars={history.bars}
             market={instrument.market}
             dateStyle={dateStyle}
+            daily={timeframe === '1d'}
             onNearLeftEdge={history.loadOlder}
           />
           <Status timeZone={dateStyle.timeZone} history={history} />
