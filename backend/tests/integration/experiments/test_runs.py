@@ -16,7 +16,12 @@ from fastapi.testclient import TestClient
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from candlestack.core import create_redis
-from candlestack.data import PeriodOutOfRange, SourceUnavailable, WarmUpOutOfRange
+from candlestack.data import (
+    DataIntegrityError,
+    PeriodOutOfRange,
+    SourceUnavailable,
+    WarmUpOutOfRange,
+)
 from candlestack.engine import ENGINE_VERSION
 from candlestack.jobs import JobClient, JobFiles, JobQueue
 from candlestack.main import create_app
@@ -128,6 +133,9 @@ def test_a_backtest_runs_and_its_document_has_the_results(ada, market, worker) -
     assert results["trades"]["complete"] is True
     # The worker gets the stock candles with the mark of each session's last candle.
     assert worker.columns == [["ts", "open", "high", "low", "close", "volume", "session_last"]]
+    # The run loads them in the background, waiting for the source's budget; the document's
+    # load of the same candles is a page's, which does not wait.
+    assert market.background == [True, False]
 
 
 @pytest.mark.usefixtures("worker")
@@ -269,13 +277,29 @@ def test_a_failed_job_fails_the_backtest_with_its_error(ada, worker) -> None:
 
 @pytest.mark.usefixtures("worker")
 def test_candles_the_source_refuses_fail_the_backtest_with_its_detail(ada, market) -> None:
-    market.refuse_candles = SourceUnavailable("alpaca", "Alpaca is not answering. Try later.")
+    market.refuse_candles = SourceUnavailable(
+        "alpaca", "Alpaca failed with HTTP 503. Try again in a minute."
+    )
     model_id = ada.runnable_model()
 
     document = ada.ended(ada.start(body(model_id)).json()["backtest"]["id"])
 
     assert document["backtest"]["status"] == "failed"
-    assert document["backtest"]["error"] == "Alpaca is not answering. Try later."
+    assert document["backtest"]["error"] == (
+        "The market data source (Alpaca) is unavailable, so the candles could not be loaded. "
+        "Alpaca failed with HTTP 503. Try again in a minute."
+    )
+
+
+@pytest.mark.usefixtures("worker")
+def test_candles_that_fail_their_checks_fail_the_backtest_with_their_detail(ada, market) -> None:
+    market.refuse_candles = DataIntegrityError("Alpaca bars cannot be read: bad", source="alpaca")
+    model_id = ada.runnable_model()
+
+    document = ada.ended(ada.start(body(model_id)).json()["backtest"]["id"])
+
+    assert document["backtest"]["status"] == "failed"
+    assert document["backtest"]["error"] == "Alpaca bars cannot be read: bad"
 
 
 @pytest.mark.usefixtures("market")

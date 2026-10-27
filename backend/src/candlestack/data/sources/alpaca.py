@@ -7,7 +7,8 @@ close, extended-hours volume), relabelled from 00:00 New York to the session ope
 come from ``GET /v2/calendar``. Every request spends our budget (``ALPACA_RATE_LIMIT``); Alpaca
 allows 200 per minute per key. The 24 h stats come from ``GET /v2/stocks/snapshots`` of the SIP
 feed delayed by 15 minutes and the daily candles of the mini charts from the 1Day bars, many
-symbols per request, paced to a share of the budget.
+symbols per request, paced to a share of the budget. The candles of a backtest wait for a share
+of their own instead of failing when the budget is spent.
 """
 
 import bisect
@@ -89,16 +90,23 @@ HISTORY_START = 2016
 BARS_LIMIT = 10_000
 # Snapshots: symbols per request (about 27 requests for the whole catalog, each URL under
 # 4 KB), and the share of our budget per minute they may take, so that chart requests keep the
-# rest (prod 150: 20, stage 100: 20).
+# rest (prod and stage 180: 20).
 SNAPSHOT_SYMBOLS = 500
 STATS_RATE_KEY = "data:rl:alpaca-stats"
 STATS_SHARE_MAX = 20
 STATS_SHARE_DIVISOR = 5
 # The daily bars of the mini charts (about 27 requests once a day after the close) have their own,
-# smaller share, so they do not slow the stats refresh (prod 150: 5, stage 100: 5).
+# smaller share, so they do not slow the stats refresh (prod and stage 180: 5).
 SPARK_RATE_KEY = "data:rl:alpaca-spark"
 SPARK_SHARE_MAX = 5
 SPARK_SHARE_DIVISOR = 20
+# Background loads (a backtest's candles: years of 1m bars, hundreds of requests) wait for their
+# own share instead of failing, all of them together, and then for room in the whole budget.
+# Half of it, so requests keep the other half minus the stats' and mini charts' shares
+# (prod and stage 180: 90, requests keep 65 or more, 90 while no refresh runs).
+BACKGROUND_RATE_KEY = "data:rl:alpaca-background"
+BACKGROUND_SHARE_MAX = 90
+BACKGROUND_SHARE_DIVISOR = 2
 # A daily bar older than this is from a stock that has not traded on any exchange lately (halted,
 # suspended): it has no 24 h change and no 24 h volume (0) rather than those of an old session.
 # Covers a long weekend.
@@ -447,6 +455,9 @@ class AlpacaSource:
         self._limit = settings.alpaca_rate_limit
         self._stats_limit = max(1, min(STATS_SHARE_MAX, self._limit // STATS_SHARE_DIVISOR))
         self._spark_limit = max(1, min(SPARK_SHARE_MAX, self._limit // SPARK_SHARE_DIVISOR))
+        self._background_limit = max(
+            1, min(BACKGROUND_SHARE_MAX, self._limit // BACKGROUND_SHARE_DIVISOR)
+        )
         self._cache = cache
         self._sessions: list[Session] = []
         self._sessions_until = 0.0
@@ -506,8 +517,10 @@ class AlpacaSource:
             for period in periods
         ]
 
-    async def fetch_period(self, symbol: str, timeframe: Timeframe, period: Period) -> pl.DataFrame:
-        frame = await self._bars(symbol, timeframe, period.start, period.end)
+    async def fetch_period(
+        self, symbol: str, timeframe: Timeframe, period: Period, *, background: bool = False
+    ) -> pl.DataFrame:
+        frame = await self._bars(symbol, timeframe, period.start, period.end, background=background)
         sessions = await self.sessions()
         return await to_thread.run_sync(regular_candles, frame, timeframe, period, sessions)
 
@@ -657,16 +670,22 @@ class AlpacaSource:
         await to_thread.run_sync(_parse_calendar, blob)  # never cache a calendar that fails
         return blob, CALENDAR_TTL
 
-    async def _bars(self, symbol: str, timeframe: Timeframe, start: int, end: int) -> pl.DataFrame:
+    async def _bars(
+        self, symbol: str, timeframe: Timeframe, start: int, end: int, *, background: bool = False
+    ) -> pl.DataFrame:
         """Every bar of ``[start, end)`` (``parse_bars``), following ``next_page_token``. Each
-        page is parsed as it arrives, so the JSON objects of only one page are held at a time."""
+        page is parsed as it arrives, so the JSON objects of only one page are held at a time.
+        ``background`` pages wait for the budget (``_request``)."""
         if start >= end:
             return parse_bars([])  # the live chunk in the second its day begins
         params: dict[str, str | int] = {**_span(start, end), "limit": BARS_LIMIT}
         pages = []
         while True:
             body = await self._bars_page(
-                symbol, "1Day" if timeframe is Timeframe.D1 else "1Min", params
+                symbol,
+                "1Day" if timeframe is Timeframe.D1 else "1Min",
+                params,
+                background=background,
             )
             pages.append(await to_thread.run_sync(parse_bars, _symbol_bars(body, symbol)))
             token = body.get("next_page_token")
@@ -675,7 +694,7 @@ class AlpacaSource:
             params["page_token"] = token
 
     async def _bars_page(
-        self, symbol: str, timeframe: str, params: dict[str, str | int]
+        self, symbol: str, timeframe: str, params: dict[str, str | int], *, background: bool = False
     ) -> dict[str, Any]:
         response = await self._request(
             f"{self._data}/v2/stocks/bars",
@@ -687,28 +706,46 @@ class AlpacaSource:
                 "adjustment": "all",
                 "sort": "asc",
             },
+            background=background,
         )
         body = json_body(response, NAME, TITLE)
         if not isinstance(body, dict):
             raise DataIntegrityError("Alpaca bars response is not an object.", source=NAME)
         return body
 
-    async def _request(self, url: str, params: dict[str, str | int]) -> httpx.Response:
-        """A request within our budget; 401/403 and other failures become ``SourceUnavailable``
-        (error bodies are not trusted to be JSON: Alpaca answers 401 in HTML)."""
+    async def _background_turn(self) -> None:
+        """Waits until the background loads' share of this minute and then our whole budget
+        have room for one more request, as long as that takes: the share is taken again in the
+        minute the whole budget had no room."""
+        while True:
+            await self._turn(BACKGROUND_RATE_KEY, self._background_limit)
+            wait = await self._limiter.hit(RATE_KEY, self._limit)
+            if wait <= 0:
+                return
+            await pause(wait)
+
+    async def _request(
+        self, url: str, params: dict[str, str | int], *, background: bool = False
+    ) -> httpx.Response:
+        """A request within our budget (a ``background`` one waits for it, others fail when it
+        is spent, ``spend``); 401/403 and other failures become ``SourceUnavailable`` (error
+        bodies are not trusted to be JSON: Alpaca answers 401 in HTML)."""
         if self._headers is None:
             raise SourceUnavailable(
                 NAME,
                 "Stock data is not available: the Alpaca keys (ALPACA_KEY_ID, "
                 "ALPACA_SECRET_KEY) are not configured on this server.",
             )
-        await spend(
-            self._limiter,
-            NAME,
-            f"Alpaca request budget ({self._limit} per minute)",
-            RATE_KEY,
-            self._limit,
-        )
+        if background:
+            await self._background_turn()
+        else:
+            await spend(
+                self._limiter,
+                NAME,
+                f"Alpaca request budget ({self._limit} per minute)",
+                RATE_KEY,
+                self._limit,
+            )
         response = await get(self._http, NAME, TITLE, url, params=params, headers=self._headers)
         if 400 <= response.status_code < 500 and b"subscription" in response.content:
             # The data plan does not cover the request (recent SIP data, a feed of a paid plan):

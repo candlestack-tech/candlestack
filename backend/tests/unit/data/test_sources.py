@@ -608,6 +608,18 @@ async def test_malformed_bars_response_is_a_data_integrity_error(
     assert info.value.source == "alpaca"
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize(("budget", "share"), [(200, 90), (180, 90), (100, 50), (60, 30), (1, 1)])
+async def test_background_loads_get_half_the_alpaca_budget_up_to_90(
+    budget: int, share: int
+) -> None:
+    settings = Settings(app_env="test", alpaca_rate_limit=budget)
+    async with httpx.AsyncClient() as http:
+        source = AlpacaSource(settings, http, Unlimited(), NoCache())
+
+    assert source._background_limit == share
+
+
 # --- SIP delay --------------------------------------------------------------------------------
 
 

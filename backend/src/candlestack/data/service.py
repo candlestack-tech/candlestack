@@ -270,9 +270,17 @@ class DataService:
         return await self._icons.icon(instrument)
 
     async def candles(
-        self, instrument_id: InstrumentId, timeframe: Timeframe, start: int, end: int
+        self,
+        instrument_id: InstrumentId,
+        timeframe: Timeframe,
+        start: int,
+        end: int,
+        *,
+        background: bool = False,
     ) -> CandleSet:
-        """Closed candles of ``[start, end)`` with their gaps and fingerprint.
+        """Closed candles of ``[start, end)`` with their gaps and fingerprint. A
+        ``background`` load (a backtest's, which nobody waits for on a page) waits for the
+        source's request budget instead of failing when it is spent, so it may take minutes.
 
         Raises ``InvalidRequest``, ``InstrumentNotFound``, ``PeriodOutOfRange``,
         ``TooManyCandles``, ``SourceUnavailable`` and ``DataIntegrityError``.
@@ -288,7 +296,7 @@ class DataService:
         if requested > self._candles_max:
             hint = suggest(start, end, timeframe, self._candles_max, lookup.sessions)
             raise TooManyCandles(requested, self._candles_max, hint)
-        return await self._load(lookup, start, end)
+        return await self._load(lookup, start, end, background=background)
 
     async def warm_up_start(
         self, instrument_id: InstrumentId, timeframe: Timeframe, start: int, end: int, candles: int
@@ -406,7 +414,13 @@ class DataService:
         )
 
     async def _load(
-        self, lookup: _Lookup, start: int, end: int, known: Mapping[str, bytes] | None = None
+        self,
+        lookup: _Lookup,
+        start: int,
+        end: int,
+        known: Mapping[str, bytes] | None = None,
+        *,
+        background: bool = False,
     ) -> CandleSet:
         """The candles of a checked period ``[start, end)`` (its size is checked by the caller);
         ``known`` holds chunks already read, by label."""
@@ -415,7 +429,9 @@ class DataService:
         periods = (
             [] if lookup.available_from is None else source.periods(base, start, end, lookup.now)
         )
-        blobs = await self._chunks(source, lookup.instrument, base, periods, known or {})
+        blobs = await self._chunks(
+            source, lookup.instrument, base, periods, known or {}, background=background
+        )
         return await to_thread.run_sync(
             partial(
                 assemble,
@@ -448,11 +464,15 @@ class DataService:
         timeframe: Timeframe,
         periods: Sequence[Period],
         known: Mapping[str, bytes] = {},
+        *,
+        background: bool = False,
     ) -> list[bytes]:
         limit = asyncio.Semaphore(source.chunk_concurrency)
 
         async def fetch(period: Period) -> tuple[bytes, int]:
-            frame = await source.fetch_period(instrument.symbol, timeframe, period)
+            frame = await source.fetch_period(
+                instrument.symbol, timeframe, period, background=background
+            )
             blob = await to_thread.run_sync(encode_chunk, frame, period.end)
             return blob, period.ttl
 

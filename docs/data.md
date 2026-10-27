@@ -467,9 +467,10 @@ requested timeframe.
 | Limit | Counted per | Default | When spent |
 | --- | --- | --- | --- |
 | Clients: `CLIENT_RATE_LIMIT` | client IP (`CF-Connecting-IP`, else the peer address; an IPv6 address counts as its /64 network); every candle and instrument-detail request, cached or not | 60 per minute, `0` disables | 429 `rate-limited` with `Retry-After` |
-| Alpaca: `ALPACA_RATE_LIMIT` | environment; each Alpaca request | prod 150, stage 100, else 60 | 503 `source-unavailable` with `Retry-After` |
+| Alpaca: `ALPACA_RATE_LIMIT` | environment; each Alpaca request | prod and stage 180, else 60 | 503 `source-unavailable` with `Retry-After` |
 | Alpaca, stats refresh | environment; each snapshots request, on top of the above | a fifth of `ALPACA_RATE_LIMIT`, at most 20 | the refresh waits for the next minute |
 | Alpaca, daily candles refresh | environment; each daily bars request, on top of the above | a twentieth of `ALPACA_RATE_LIMIT`, at most 5 | the refresh waits for the next minute |
+| Alpaca, background loads (the candles of backtests, all together) | environment; each bars request of a background load, on top of the above | half of `ALPACA_RATE_LIMIT`, at most 90 | the load waits for the next minute |
 | Binance REST: `BINANCE_WEIGHT_LIMIT` | environment; request weight of each REST call | 1000 | 503 `source-unavailable` with `Retry-After` |
 | Binance, daily candles refresh | environment; weight of each klines request, on top of the above | a third of `BINANCE_WEIGHT_LIMIT`, at most 300 | the refresh waits for the next minute |
 | logo.dev: `LOGO_DEV_RATE_LIMIT` | environment; each logo.dev request | prod 50, else 20 | the fallback icon, no waiting |
@@ -477,11 +478,31 @@ requested timeframe.
 
 - When our budget at a source is spent, a request waits for the next window if it begins
   within 5 s; otherwise it gets 503 `source-unavailable` with `Retry-After`.
-- Alpaca allows 200 requests per minute per key. Prod and stage have one each.
+- Alpaca allows 200 requests per minute per key. Prod and stage have one each; our 180 leaves
+  about a tenth for retries and the skew between our minute and Alpaca's.
 - Intraday stock candles need two or three Alpaca requests per month of 1m bars (SIP has
-  extended hours), so a cold request for years of them can need more than a minute's budget.
-  It then gets 503 with `Retry-After`; the months fetched so far stay cached and the retry
-  continues from there.
+  extended hours), so a cold load of years of them needs more than a minute's budget: ten years
+  are about 390 requests. A chart request then gets 503 with `Retry-After`; the months fetched
+  so far stay cached (each month is a chunk of its own) and the retry continues from there.
+- The candles of a backtest are a background load (#317): each of its bars requests waits for
+  room in the background loads' share (`data:rl:alpaca-background`) and then in the whole
+  budget, as long as that takes, instead of failing. Ten cold years of 1m bars take about
+  5 minutes at 90 a minute. The share is half the budget, so chart requests keep the other half
+  minus the stats' share (20) and the mini charts' (5): 65 a minute or more, 90 while no refresh
+  runs. Several backtests at once share the one share. Only Alpaca really failing (down,
+  timing out, rejecting us) still fails a backtest, with a message that names the market data
+  source and says to try again later.
+- A chunk of a background load can take longer than its single-flight lock (30 s) while it
+  waits for the budget; a request for the same chunk then fetches it too. That costs a few
+  requests twice, never a failure.
+- Not done for #317, to weigh later:
+  - Asking Alpaca for `5Min`, `15Min` or `30Min` bars directly: a month of them fits one
+    request, about 3 times fewer requests (more with chunks longer than a month). Not measured
+    yet: whether those bars equal our resampled regular-session candles (early closes
+    included). `1Hour` bars start on the clock hour (09:00 holds 09:30-09:59), not at the
+    session open, so 1h and 4h cannot use them. It would also end the sharing of the cached
+    1m chunks between timeframes: each timeframe would be fetched and cached on its own.
+  - Loading in chunks so a failed load resumes is already how it works (above).
 - Binance limits request weight to 6000 per minute per IP, and all environments on the VM
   share one IP. When `X-MBX-USED-WEIGHT-1M` reaches 5000, REST calls pause until the minute
   ends. Weights: `exchangeInfo` 20, `ticker/24hr` of every pair 80, `klines` 2 (any `limit`),
@@ -508,7 +529,7 @@ again. Keys:
 | `data:v1:icon:ticker/<symbol>`, `data:v1:icon:crypto/<base asset>` | the logo (`<media type>` + newline + image), `none` or `failed` | 30 days; `none` 7 days; `failed` 60 s |
 | `data:lock:vN:<key without data:vN:>` | single-flight lock for a key being fetched, with the key's version (`data:lock:v2:catalog:crypto`) | 30 s; 2 minutes for a stats or daily candles refresh, renewed every 40 s while it runs |
 | `data:fail:vN:<key without data:vN:>` | the error of a failed fetch of that key (source unavailable or invalid data) | 10 s, or the error's `Retry-After` when shorter |
-| `data:rl:client:<ip>:<minute>`, `data:rl:alpaca:<minute>`, `data:rl:alpaca-stats:<minute>` (the stats' share), `data:rl:binance:<minute>`, `data:rl:alpaca-spark:<minute>`, `data:rl:binance-spark:<minute>` (the daily candles' shares), `data:rl:first-warm:<market>:<minute>` (the list's first-candle lookups), `data:rl:logodev:<minute>` | fixed-window counters; `<ip>` is an IPv4 address or an IPv6 /64 network, `<minute>` is Unix time // 60 | 61 s |
+| `data:rl:client:<ip>:<minute>`, `data:rl:alpaca:<minute>`, `data:rl:alpaca-stats:<minute>` (the stats' share), `data:rl:binance:<minute>`, `data:rl:alpaca-spark:<minute>`, `data:rl:binance-spark:<minute>` (the daily candles' shares), `data:rl:alpaca-background:<minute>` (the background loads' share), `data:rl:first-warm:<market>:<minute>` (the list's first-candle lookups), `data:rl:logodev:<minute>` | fixed-window counters; `<ip>` is an IPv4 address or an IPv6 /64 network, `<minute>` is Unix time // 60 | 61 s |
 
 | Chunk | `<chunk>` | Crypto | Stock |
 | --- | --- | --- | --- |
@@ -837,6 +858,7 @@ recorded responses the tests use are in `backend/tests/fixtures/` (see its READM
 | Binance timestamps | Unit per value (`>= 10^15` is microseconds), label = open time, `close_time` ignored except for the still-open REST row. |
 | Binance current period | Closed month: monthly archive, else daily archives. Current month: daily archive per complete day, REST on 404; REST for today. |
 | End of range | Both sources treat `end` as inclusive; the adapters send end minus one unit. |
+| Long stock loads | A backtest's candles wait for their share of the Alpaca budget instead of failing (#317, see [Limits](#limits)); chart requests still fail fast. |
 | Stock cache | Closed stock chunks live 1 day (history is rewritten after corporate actions; 30 days for crypto). Stocks are fetched in whole months (1m) or years (1Day) because one request returns them and Alpaca requests are budgeted; per-day chunks would multiply the requests. |
 | Unknown instruments | Recognised by the catalog: Alpaca answers 200 with no bars. Error bodies are never assumed to be JSON. |
 | Gaps | Minutes without trades are gaps like any other, reported as capped ranges and a total. |

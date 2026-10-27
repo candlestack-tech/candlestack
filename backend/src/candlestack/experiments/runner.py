@@ -25,7 +25,14 @@ import polars as pl
 from redis.exceptions import RedisError
 
 from candlestack.core import DATABASE_ERRORS, Database
-from candlestack.data import CandleSet, DataError, DataService, InstrumentId, Timeframe
+from candlestack.data import (
+    CandleSet,
+    DataError,
+    DataService,
+    InstrumentId,
+    SourceUnavailable,
+    Timeframe,
+)
 from candlestack.experiments.assembly import (
     NothingToTest,
     Run,
@@ -173,6 +180,8 @@ class BacktestRunner:
         await self._finish(backtest_id, done, report, blob)
 
     async def _candles(self, spec: RunSpec) -> CandleSet:
+        """The candles with the warm-up, loaded in the background: a cold load of years of
+        stock candles waits for the source's request budget, minutes if need be."""
         data = spec.data
         try:
             return await self._data.candles(
@@ -180,7 +189,10 @@ class BacktestRunner:
                 Timeframe(data.timeframe),
                 data.load_start,
                 data.period.end,
+                background=True,
             )
+        except SourceUnavailable as error:
+            raise RunFailed("candles", _source_unavailable(error)) from error
         except DataError as error:
             raise RunFailed("candles", error.detail) from error
 
@@ -268,6 +280,15 @@ async def _backtest(spec: RunSpec, candles: pl.DataFrame, predictions: pl.DataFr
         )
     except NothingToTest as error:
         raise RunFailed("no-predictions", str(error)) from error
+
+
+def _source_unavailable(error: SourceUnavailable) -> str:
+    """The message of a load the source failed: which source, then its own detail, which says
+    what happened and when to try again."""
+    return (
+        f"The market data source ({error.source.capitalize()}) is unavailable, so the candles "
+        f"could not be loaded. {error.detail}"
+    )
 
 
 def _runner(spec: RunSpec, result: JobResult) -> RunnerOut | None:

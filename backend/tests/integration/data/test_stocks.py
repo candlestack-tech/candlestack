@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import httpx
 import polars as pl
 import pytest
+import respx
 from redis.asyncio import Redis
 
 import candlestack.core.ratelimit as ratelimit_module
@@ -23,6 +24,7 @@ from candlestack.data import (
 )
 from candlestack.data import service as service_module
 from candlestack.data.sources import alpaca as alpaca_module
+from candlestack.data.sources import base as base_module
 from candlestack.main import create_app
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
@@ -518,3 +520,119 @@ async def test_the_warm_up_counts_session_candles_only(service: DataService):
 
     # Friday, then Wednesday: Thanksgiving and the weekend have no session.
     assert first == utc("2024-11-27T14:30")
+
+
+# Background loads (a backtest's candles) wait for their share of the Alpaca budget.
+
+FIRST_DAYS_2024 = {"01": "02", "02": "01", "03": "01", "04": "01", "05": "01", "06": "03"}
+
+
+def paged_bars(upstream, minutes: list[int]) -> respx.Route:
+    """1m bars of AAPL in two pages for any month of the first half of 2024: a bar at 15:00 UTC
+    of the month's first session, then one at 15:01; ``minutes`` gets the minute of our budget
+    (``ratelimit._time() // 60``) each page was asked in."""
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        minutes.append(int(ratelimit_module._time() // 60))
+        month = request.url.params["start"][5:7]
+        second = "page_token" in request.url.params
+        bar = {
+            "t": f"2024-{month}-{FIRST_DAYS_2024[month]}T15:0{int(second)}:00Z",
+            "o": 100.0,
+            "h": 101.0,
+            "l": 99.0,
+            "c": 100.5,
+            "v": 1000,
+        }
+        return httpx.Response(
+            200, json={"bars": {"AAPL": [bar]}, "next_page_token": None if second else "next"}
+        )
+
+    return upstream.router.get(
+        f"{upstream.ALPACA_DATA}/v2/stocks/bars", params={"timeframe": "1Min"}
+    ).mock(side_effect=answer)
+
+
+@pytest.fixture
+def budget_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """The clock of our budget's minutes, 59 s before a minute ends, moved by every budget wait
+    instead of sleeping; ``budget_clock[1:]`` are the waits."""
+    clock = [1_800_000_001.0]
+    monkeypatch.setattr(ratelimit_module, "_time", lambda: clock[0])
+    return clock
+
+
+@pytest.mark.usefixtures("stocks")
+async def test_a_background_load_waits_for_its_share_and_requests_are_served_meanwhile(
+    settings: Settings,
+    redis: Redis,
+    http: httpx.AsyncClient,
+    upstream,
+    monkeypatch: pytest.MonkeyPatch,
+    budget_clock: list[float],
+):
+    # A budget of 10 a minute: the background loads' share is 5.
+    service = build_data_service(settings.model_copy(update={"alpaca_rate_limit": 10}), redis, http)
+    service._sources[Market.STOCK].chunk_concurrency = 1  # one page after another
+    november = upstream.bars("1Min", "2024-11-01T00:00:00Z", "bars-AAPL-1Min-2024-11-29.json")
+    minutes: list[int] = []
+    pages = paged_bars(upstream, minutes)
+    served = []
+
+    async def sleep(delay: float) -> None:
+        if not served:
+            # A chart while the load waits: the 3 requests of the lookup and the 5 of the share
+            # leave it room in the budget.
+            served.append(await service.candles(AAPL, Timeframe.H1, *period(NOVEMBER_29)))
+        budget_clock[0] += delay
+
+    monkeypatch.setattr(base_module, "_sleep", sleep)
+
+    # Six months of two pages each: 12 requests, more than one minute's share.
+    halves = await service.candles(
+        AAPL, Timeframe.M30, utc("2024-01-02T14:30"), utc("2024-07-01"), background=True
+    )
+
+    assert halves.frame.height == 6
+    assert pages.call_count == 12
+    first = minutes[0]
+    assert [minutes.count(first + n) for n in range(3)] == [5, 5, 2]
+    assert november.call_count == 1
+    assert served[0].frame.height == 4
+
+
+@pytest.mark.usefixtures("stocks")
+async def test_a_background_load_waits_for_room_in_the_whole_budget(
+    settings: Settings,
+    redis: Redis,
+    http: httpx.AsyncClient,
+    upstream,
+    monkeypatch: pytest.MonkeyPatch,
+    budget_clock: list[float],
+):
+    service = build_data_service(settings.model_copy(update={"alpaca_rate_limit": 10}), redis, http)
+    upstream.bars("1Min", "2024-11-01T00:00:00Z", "bars-AAPL-1Min-2024-11-29.json")
+    minutes: list[int] = []
+    paged_bars(upstream, minutes)
+    waits: list[float] = []
+
+    async def sleep(delay: float) -> None:
+        waits.append(delay)
+        budget_clock[0] += delay
+
+    monkeypatch.setattr(base_module, "_sleep", sleep)
+    await service.candles(AAPL, Timeframe.H1, *period(NOVEMBER_29))  # the lookup, cached
+    minute = int(budget_clock[0] // 60)
+    # Requests spent the rest of this minute's budget: the share has room, the budget none.
+    await redis.set(f"data:rl:alpaca:{minute}", 10)
+
+    halves = await service.candles(
+        AAPL, Timeframe.M30, utc("2024-01-02T14:30"), utc("2024-02-01"), background=True
+    )
+
+    assert halves.frame.height == 1
+    assert waits == [59.0]
+    assert minutes == [minute + 1, minute + 1]
+    # The share is taken again in the minute the request is sent.
+    assert await redis.get(f"data:rl:alpaca-background:{minute}") == b"1"
+    assert await redis.get(f"data:rl:alpaca-background:{minute + 1}") == b"2"
