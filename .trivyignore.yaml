@@ -1,69 +1,19 @@
 # Findings the image scan in CI accepts for a while, each with the date to look again: after it
 # the scan fails on the finding. The weekly scan (security-scan.yml) reports them anyway.
 vulnerabilities:
-  # The Caddy binary of the frontend image. The newest official caddy:2 image (2.11.4) is built
-  # with Go 1.26.3 and older golang.org/x and gRPC modules; a Caddy release built with newer ones
-  # fixes them, and frontend/Dockerfile follows caddy:2. The frontend only serves static files
-  # behind the edge.
-  - id: CVE-2026-27145
-    paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
-  - id: CVE-2026-33818
-    paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
-  - id: CVE-2026-39821
-    paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
-  - id: CVE-2026-39822
-    paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
-  - id: CVE-2026-42504
-    paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
-  - id: CVE-2026-46600
-    paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
-  - id: CVE-2026-56852
-    paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
-  - id: CVE-2026-56853
-    paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
-  - id: CVE-2026-56854
-    paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
-  - id: CVE-2026-56858
-    paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
-  - id: CVE-2026-56859
-    paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
-  - id: CVE-2026-56860
-    paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
-  - id: CVE-2026-56862
-    paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
-  - id: CVE-2026-84304
-    paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
-  - id: CVE-2026-84445
-    paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
-  - id: GHSA-hrxh-6v49-42gf
-    paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
+  # The Caddy binary of the frontend image. The newest official caddy:2 image (2.11.7) is built
+  # with Go 1.26.8 and golang.org/x/net 0.59.0; a Caddy release built with Go 1.26.10 and x/net
+  # 0.60.0 fixes these, and frontend/Dockerfile follows caddy:2. The frontend only serves static
+  # files behind the edge.
   - id: CVE-2026-78667
     paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
+    expired_at: 2026-11-10
   - id: CVE-2026-78669
     paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
+    expired_at: 2026-11-10
   - id: CVE-2026-97031
     paths: [usr/bin/caddy]
-    expired_at: 2026-10-27
-  # Go stdlib in the same binary: the newest official caddy image (2.11.7) is still built with
-  # Go 1.26.8, the fix is in Go 1.26.10.
+    expired_at: 2026-11-10
   - id: CVE-2026-111943
     paths: [usr/bin/caddy]
-    expired_at: 2026-10-31
+    expired_at: 2026-11-10
