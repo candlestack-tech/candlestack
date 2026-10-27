@@ -14,9 +14,11 @@ function Path({ framework }: { framework: Framework }) {
   return <path d={FRAMEWORK_MARKS[framework].path} />;
 }
 
-// The mark on a square tinted with its colour (fwIcon): 28 px in lists and the upload dialog,
-// 36 px on a model's tile, 40 px in the header of its page.
+// The mark on a square tinted with its colour (fwIcon): 20 px next to the model in a backtest's
+// header, 28 px in lists and the upload dialog, 36 px on a model's tile, 40 px in the header of
+// its page.
 const TILE_SIZES = {
+  sm: { tile: 'size-5 rounded-[5px]', mark: 'size-[11px]' },
   default: { tile: 'size-7 rounded-[7px]', mark: 'size-[15px]' },
   lg: { tile: 'size-9 rounded-[9px]', mark: 'size-[19px]' },
   xl: { tile: 'size-10 rounded-[10px]', mark: 'size-5' },

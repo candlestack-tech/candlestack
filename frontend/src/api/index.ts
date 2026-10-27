@@ -32,7 +32,7 @@ export {
   type Representation,
   type SortOrder,
 } from './backtests';
-export { candleBridgeQueryOptions, candlePageQueryOptions, type Candles } from './candles';
+export { candleBridgeQueryOptions, candlePageQueryOptions, candleSpanQueryOptions, type Candles } from './candles';
 export { ApiError, errorMessage } from './client';
 export { EXCHANGES, exchangeLabel, exchangeMarket, type Exchange } from './exchanges';
 export {

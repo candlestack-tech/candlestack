@@ -14,43 +14,18 @@ import {
   stubApi,
 } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
+import { candles } from '@/test/candles';
+import { charts } from '@/test/lightweightCharts';
 import { step } from '@/test/steps';
 
-// The charts draw on a canvas, which jsdom has not: a stand-in keeps what they were given.
-const charts = vi.hoisted(() => ({
-  made: 0,
-  series: [] as { options: { title?: string }; data: unknown[] }[],
-  markers: [] as unknown[][],
-  options: [] as { handleScroll?: boolean; handleScale?: boolean }[],
-}));
-
-vi.mock('lightweight-charts', () => ({
-  AreaSeries: 'Area',
-  BaselineSeries: 'Baseline',
-  LineSeries: 'Line',
-  ColorType: { Solid: 'solid' },
-  CrosshairMode: { Magnet: 1 },
-  LineStyle: { Dashed: 2 },
-  createChart: (_box: HTMLElement, options: (typeof charts.options)[number]) => {
-    charts.made += 1;
-    charts.options.push(options);
-    return {
-      applyOptions: vi.fn(),
-      addSeries: (_type: string, options: { title?: string }) => {
-        const series = { options, data: [] as unknown[] };
-        charts.series.push(series);
-        return { setData: (data: unknown[]) => (series.data = data) };
-      },
-      timeScale: () => ({ fitContent: vi.fn() }),
-      remove: vi.fn(),
-    };
-  },
-  createSeriesMarkers: (_series: unknown, markers: unknown[]) => charts.markers.push(markers),
-}));
+vi.mock('lightweight-charts', () => import('@/test/lightweightCharts'));
 
 const ID = 'bt_7f3k2m9qx4';
 const PAGE = `/backtests/${ID}`;
 const DOCUMENT = `GET /api/v1/backtests/${ID}`;
+// The run's 30-minute candles of AAPL, the whole test period in one request.
+const CANDLES = 'GET /api/v1/data/instruments/stock%3AAAPL/candles?timeframe=30m&start=1717372800&end=1717459200';
+const TIMES = backtestDocument().results!.series.columns.ts;
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -65,17 +40,26 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  Object.assign(charts, { made: 0, series: [], markers: [], options: [] });
+  charts.reset();
 });
 
 type Answers = Parameters<typeof stubApi>[0];
 
 async function openPage(answer: Answers[string], answers: Answers = {}) {
-  const all = { ...sessionWithPreferences(ARSEN), [DOCUMENT]: answer, ...answers };
+  const all = {
+    ...sessionWithPreferences(ARSEN),
+    [DOCUMENT]: answer,
+    [CANDLES]: { status: 200, body: candles(TIMES) },
+    ...answers,
+  };
   const fetch = stubApi(all);
   const app = await renderApp(PAGE);
   return { ...app, fetch, all };
 }
+
+// How many candle requests the page sent.
+const fetchedCandles = (fetch: ReturnType<typeof stubApi>) =>
+  fetch.mock.calls.filter(([path]) => String(path).includes('/candles')).length;
 
 const box = (name: string) => within(screen.getByRole('heading', { level: 2, name }).closest('section')!);
 
@@ -93,8 +77,8 @@ describe("a finished backtest's page", () => {
     expect(screen.queryByRole('navigation', { name: 'Workspace' })).toBeNull();
   });
 
-  // #318: the instrument with its icon in the header, the Setup and the price chart's title.
-  it('names its instrument with the icon in the header, the setup and the price chart', async () => {
+  // #318: the instrument with its icon in the header and the Setup, the model with its mark.
+  it('names its instrument with the icon in the header and the setup, and the model with its mark', async () => {
     await openPage({ status: 200, body: backtestDocument() });
     const title = await screen.findByRole('heading', { level: 1 });
     const icon = '/api/v1/data/instruments/stock%3AAAPL/icon';
@@ -105,9 +89,9 @@ describe("a finished backtest's page", () => {
     const data = within(setup).getByText('Data').parentElement!;
     expect(data.querySelector('img')?.getAttribute('src')).toBe(icon);
     expect(within(data).getByText('Apple Inc.').getAttribute('title')).toBe('Apple Inc.');
-    expect(screen.getByRole('heading', { level: 2, name: 'AAPL' }).querySelector('img')?.getAttribute('src')).toBe(
-      icon,
-    );
+    const model = screen.getByRole('link', { name: 'raw-candles.keras' }).parentElement!;
+    expect(model.querySelector('[title="Keras"]')).not.toBeNull();
+    expect(within(setup).getByText('Model').parentElement!.querySelector('[title="Keras"]')).not.toBeNull();
   });
 
   it('downloads the whole document, links its format and shows Compare', async () => {
@@ -138,32 +122,6 @@ describe("a finished backtest's page", () => {
     expect(box('All metrics').getByText('Time in market').nextElementSibling?.textContent).toBe('20.0 %');
   });
 
-  it('draws read-only charts: the equity against buy and hold, the drawdown and the price with its trades', async () => {
-    await openPage({ status: 200, body: backtestDocument() });
-    await screen.findByRole('heading', { level: 1 });
-    await vi.waitFor(() => expect(charts.made).toBe(3));
-    expect(charts.options.every((options) => !options.handleScroll && !options.handleScale)).toBe(true);
-    expect(charts.series.map((series) => series.options.title)).toEqual([
-      'Strategy',
-      'Buy and hold',
-      'Drawdown',
-      undefined,
-    ]);
-    expect(charts.series[0]?.data).toHaveLength(5);
-    expect(charts.markers[0]).toEqual([
-      expect.objectContaining({ time: 1717425000, shape: 'arrowUp', position: 'belowBar' }),
-      expect.objectContaining({ time: 1717426800, shape: 'arrowDown', position: 'aboveBar' }),
-    ]);
-    expect(box('Equity').getByText('Buy and hold')).toBeDefined();
-    expect(box('AAPL').getByText('Buy')).toBeDefined();
-  });
-
-  it('leaves buy and hold out without a benchmark', async () => {
-    await openPage({ status: 200, body: backtestDocument({ benchmarks: [] }) });
-    await screen.findByRole('heading', { level: 1 });
-    expect(box('Equity').queryByText('Buy and hold')).toBeNull();
-  });
-
   it('lists the trades with the setup and the manifest it ran with', async () => {
     await openPage({ status: 200, body: backtestDocument() });
     await screen.findByRole('heading', { level: 1 });
@@ -181,31 +139,58 @@ describe("a finished backtest's page", () => {
     ).toEqual(['Long', '3 Jun 202410:30', '102.00', '3 Jun 202411:00', '96.90', '−5.2 %', '1', 'stop']);
     expect(trades.queryByRole('button', { name: 'Show all' })).toBeNull();
     const setup = box('Setup');
-    expect(setup.getByText('Candles · 30m · 25 × 5')).toBeDefined();
-    expect(setup.getByText('threshold 0.05 · long and short')).toBeDefined();
+    const rows = setup
+      .getAllByRole('term')
+      .map((term) => `${term.textContent} ${term.nextElementSibling?.textContent}`);
+    expect(rows.slice(0, 13)).toEqual([
+      'Reads Candles',
+      'Timeframe 30m',
+      'Input 25 × 5',
+      'From 3 Jun 2024',
+      'To 3 Jun 2024',
+      'Candles 5',
+      'Threshold 0.05',
+      'Positions Long and short',
+      "Fills at Next candle's open",
+      'Stop loss 5 %',
+      'Fees 0.1 %',
+      'Slippage 0 %',
+      'Benchmark Buy and hold',
+    ]);
+    expect(setup.getAllByText(/^(Model|Data|Decision|Execution|Run)$/).map((label) => label.textContent)).toEqual([
+      'Model',
+      'Data',
+      'Decision',
+      'Execution',
+      'Run',
+    ]);
   });
 
   it('shows the newest six trades of a long-only run, then all of them', async () => {
     const doc = backtestDocument({ decision: { ...backtestDocument().decision, long_only: true } });
     const count = 8;
     const ts = Array.from({ length: count }, (_, index) => 1717425000 + index * 1800);
-    doc.results!.trades = {
-      count,
-      total: 12,
-      complete: false,
-      columns: {
-        signal_ts: ts,
-        open_ts: ts,
-        close_ts: ts,
-        side: ts.map(() => 1),
-        open_price: ts.map((_, index) => 100 + index),
-        close_price: ts.map(() => 100),
-        stop_price: ts.map(() => null),
-        exit_reason: ts.map(() => 'signal'),
-        return: ts.map(() => 0.01),
-        fees: ts.map(() => 0),
-        slippage_cost: ts.map(() => 0),
-        candles_held: ts.map(() => 1),
+    // A copy: the fixture's results are shared by every test.
+    doc.results = {
+      ...doc.results!,
+      trades: {
+        count,
+        total: 12,
+        complete: false,
+        columns: {
+          signal_ts: ts,
+          open_ts: ts,
+          close_ts: ts,
+          side: ts.map(() => 1),
+          open_price: ts.map((_, index) => 100 + index),
+          close_price: ts.map(() => 100),
+          stop_price: ts.map(() => null),
+          exit_reason: ts.map(() => 'signal'),
+          return: ts.map(() => 0.01),
+          fees: ts.map(() => 0),
+          slippage_cost: ts.map(() => 0),
+          candles_held: ts.map(() => 1),
+        },
       },
     };
     await openPage({ status: 200, body: doc });
@@ -242,7 +227,7 @@ describe("a finished backtest's page", () => {
 
 describe("a backtest's page before it finished", () => {
   it('shows a running backtest with its steps and setup, asks again until it ends, then refreshes the lists', async () => {
-    const { all, queryClient } = await openPage({ status: 200, body: runningDocument() });
+    const { all, queryClient, fetch } = await openPage({ status: 200, body: runningDocument() });
     const steps = await screen.findByRole('region', { name: 'Steps' });
     expect(
       within(steps)
@@ -259,6 +244,7 @@ describe("a backtest's page before it finished", () => {
     expect(box('Setup').queryByText('Run')).toBeNull();
     expect(screen.queryByRole('link', { name: 'Download JSON' })).toBeNull();
     expect(charts.made).toBe(0);
+    expect(fetchedCandles(fetch)).toBe(0);
 
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
     all[DOCUMENT] = { status: 200, body: backtestDocument() };

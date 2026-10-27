@@ -42,6 +42,9 @@
      src/candleColors.test.ts checks the distance. */
   --candle-up: #2e9e44;
   --candle-down: #f23645;
+  /* The price as a line on a backtest's chart (#309): blue, as the accent is the strategy's line
+     and the buys. */
+  --price-line: #2962ff;
 
   /* The hairline inside the white tile of an instrument icon (#179), and the dark grey of the
      backend's fallback icon (backend/src/candlestack/data/icons.py), the same in both themes. */
@@ -70,6 +73,7 @@
 
   --candle-up: #43b049;
   --candle-down: #f23645;
+  --price-line: #5b9cff;
 
   /* Solid: a translucent white would leave a light rim around the white tile. */
   --icon-ring: #33383d;
@@ -139,6 +143,7 @@
   --color-down: var(--down);
   --color-candle-up: var(--candle-up);
   --color-candle-down: var(--candle-down);
+  --color-price-line: var(--price-line);
   --color-icon-ring: var(--icon-ring);
   --color-icon-fallback: var(--icon-fallback);
 }

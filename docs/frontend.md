@@ -428,20 +428,48 @@ so its back link returns there (else "← Backtests").
   up to 980 px). Running: a moving bar and the setup. Failed: the error and the setup. A 404 says
   there is no such backtest; a test backtest of the seed command says it has no document (the
   API's `no-document`).
-- The charts are Lightweight Charts, read-only (no scroll or zoom, the whole period in view, also
-  after a resize) in the theme's colours, the times as the instrument chart writes them (a run of
-  days, or the light view's series of days, without the time of day): the strategy's return as a
-  baseline at 0 (green above, red below) with buy and hold dashed, the drawdown under it, and the
-  price with a buy and a sell arrow per trade (a long opens with a buy, a short with a sell; a
-  trade of a series of days on its day). Above 250 trades the arrows are left out, as they would
-  hide the price.
+- The header names the model with its framework's mark next to it.
+- "Price and trades" (#309, `TradesChart.tsx`) is one Lightweight Charts chart in the theme's
+  colours with two panes on one time axis and one crosshair: the price (candles or a line,
+  the volume at its bottom) and, 110 px under it, the strategy's return against buy and hold
+  (dashed) in percent. It zooms with the wheel and scrolls by dragging, and opens on the last
+  month. The candles come from the data API (`GET /api/v1/data/instruments/{id}/candles` with
+  `start` and `end`), not from the document: their size follows the zoom like TradingView's
+  Auto (`priceLevels.ts`): weeks (built from days) for the whole of a long run, then days,
+  4 hours (and hours for runs under 30 minutes) and the run's own candles, never finer, with
+  some room before it goes finer so it does not flip. The coarse size loads for the whole
+  period first, a finer one only around the view, in blocks of about 2000 candles (5000 days)
+  on a fixed grid that stay cached for the visit, and only once the chart stopped moving for
+  250 ms, so zooming stays far from the 60 requests a minute. The returns are the document's
+  series, laid on the candles (a series of days of a long run gives a finer candle a value
+  once a day).
+- The trades are Buy (accent, under the candle) and Sell (red, over it) arrows: a long opens
+  with a buy and closes with a sell, a short the other way round. Only the trades in view have
+  arrows: written out up to 14, full size up to 50, smaller up to 160, none above (the legend
+  then says to zoom in or pick 1M). Behind the candles, a tint while in a position, the accent
+  for a long and red for a short. The trade under the cursor gets bigger arrows, a dashed line
+  from its entry to its exit and a line in the legend (side, times, prices, return, candles,
+  why it closed); its row in the table is marked. A row clicked shows its trade on the chart
+  the same way, with room around it.
+- The legend at the top left follows the crosshair (the last candle off the chart): symbol,
+  candle size and exchange, open, high, low, close and the change in the candle's colour, the
+  volume, then the key and the trades in view. The pane under it has the strategy's and buy
+  and hold's return (each a button that hides its line) and the drawdown. The bar under the
+  chart: 1W, 1M, 3M, 1Y and All on the left; the candle size, Candles or Line and the Trades
+  switch, which hides the arrows and the tint, on the right. The price's line is
+  `--price-line`, blue in both themes, as the accent is the strategy's.
 - The trades, the newest six, all of them after Show all (in a box that scrolls from 480 px). A
   long-only run has Bought and Sold; one that also goes short Side, Opened and Closed. The box
   drops the candles and why it closed below 720 px of its own width, the prices below 560 px.
-- The setup in the builder's steps: the model with its manifest in short ("Candles · 30m · 25 ×
-  5"), the data (the instrument's icon, symbol and name), the decision's rule and steps, the
-  execution with its stops and costs. The price chart's box is named by the instrument with its
-  icon too.
+- The setup in the builder's steps, as groups between rules with one value per row: the model
+  (its framework's mark and name in two lines at most, what it reads, the timeframe, the
+  input), the data (the instrument's icon, symbol and name, the first and last day, the
+  candles), the decision (calibration and smoothing, the rule's settings, confirm and minimum
+  hold when on, the positions) and the execution (the fill, the stops, fees, slippage and the
+  benchmark), then how long the run took.
+- Limits: the returns are daily for runs of more than 10 000 rows (the light view), and the
+  candles carry the data API's adjustment of today (`adjustment=all`), so a stock's prices can
+  differ from those the run traded at after a later split or dividend.
 
 ## Instrument icons
 
@@ -456,7 +484,8 @@ where it has no room; with the name, the name does; each shows in full in its ti
 | Instrument list, before the symbol | 32 px | 3.2 px | 41 px (4 px padding), as high as without it |
 | Home page, the five most traded, before the symbol | 32 px | 3.2 px | as in the list |
 | Instrument page header, next to the name | 64 px | 6.4 px | - |
-| Lists of backtests (Backtests page and its search, dashboard, a model's page), a backtest's header and setup, the builder's instrument list and Run step | 20 px | 2 px | as high as without it |
+| Lists of backtests (Backtests page and its search, dashboard, a model's page), a backtest's header, the builder's instrument list and Run step | 20 px | 2 px | as high as without it |
+| A backtest's setup, next to the model's 28 px framework tile | 28 px | 2.8 px | - |
 | The builder's instrument button | 24 px | 2.4 px | the 34 px button |
 | The dashboard's starred backtests, a backtest's price chart title | 16 px | 1.6 px | - |
 

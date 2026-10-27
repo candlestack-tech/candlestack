@@ -3,19 +3,32 @@ import { describe, expect, it } from 'vitest';
 import { backtestDocument } from '@/test/api';
 
 import {
-  benchmarkPoints,
-  drawdownPoints,
-  equityPoints,
-  pricePoints,
-  showsMarkers,
-  snapTime,
-  tradeMarkers,
+  DENSE_MOST,
+  MARK_MOST,
+  TEXT_MOST,
+  candleAt,
+  chartTrades,
+  marksIn,
+  onCandles,
+  percentPoints,
+  positionBands,
+  returnsOn,
+  timeAtLogical,
+  tradeAt,
   tradeRows,
+  tradeView,
+  tradesIn,
+  valueAt,
+  type TradeRow,
   type Trades,
 } from './chartData';
 
 const { series, trades } = backtestDocument().results!;
 const TS = series.columns.ts;
+const HOUR = 3600;
+
+// Hourly candles from 0, ten of them.
+const CANDLES = { times: Array.from({ length: 10 }, (_, index) => index * HOUR), end: 10 * HOUR };
 
 // Two trades of a run that also goes short: a long, then a short.
 const BOTH: Trades = {
@@ -35,59 +48,172 @@ const BOTH: Trades = {
   },
 };
 
-describe('the series', () => {
-  it('draws the equity and buy and hold as returns in percent and the drawdown in percent', () => {
-    expect(equityPoints(series).map((point) => Number(point.value.toFixed(2)))).toEqual([0, 0, 0.88, -5.2, -5.2]);
-    expect(benchmarkPoints(series).map((point) => Number(point.value.toFixed(2)))).toEqual([0, 1, 3, -3, -2]);
-    expect(drawdownPoints(series).at(-1)).toEqual({ time: TS[4], value: -6.0224 });
-    expect(pricePoints(series)[0]).toEqual({ time: TS[0], value: 100 });
-  });
-
-  it('has no buy and hold without a benchmark', () => {
-    expect(benchmarkPoints({ ...series, benchmarks: {} })).toEqual([]);
-  });
-});
-
-describe('snapTime', () => {
-  it('finds the row at or after a time, else the last', () => {
-    expect(snapTime(TS, TS[2]!)).toBe(TS[2]);
-    expect(snapTime(TS, TS[2]! - 60)).toBe(TS[2]);
-    expect(snapTime(TS, 0)).toBe(TS[0]);
-    expect(snapTime(TS, TS[4]! + 3600)).toBe(TS[4]);
-    expect(snapTime([], 5)).toBeUndefined();
-  });
-});
+// `count` trades on the hourly candles: each opens on an hour and closes half an hour later,
+// longs and shorts in turn.
+function many(count: number, step = HOUR): TradeRow[] {
+  return Array.from({ length: count }, (_, index) => ({
+    index,
+    long: index % 2 === 0,
+    openTs: index * step,
+    openPrice: 100,
+    closeTs: index * step + step / 2,
+    closePrice: 101,
+    return: 0.01,
+    candles: 1,
+    reason: 'signal',
+  }));
+}
 
 describe('the trades', () => {
-  it('marks a long with a buy and a sell and a short the other way round, by time', () => {
-    expect(tradeMarkers(series, BOTH)).toEqual([
-      { time: TS[1], kind: 'buy' },
-      { time: TS[2], kind: 'sell' },
-      { time: TS[3], kind: 'sell' },
-      { time: TS[4], kind: 'buy' },
+  it('keeps them in order with their place, and lists them newest first', () => {
+    expect(chartTrades(BOTH).map((trade) => [trade.index, trade.long, trade.openPrice])).toEqual([
+      [0, true, 101],
+      [1, false, 97],
+    ]);
+    expect(tradeRows(BOTH).map((row) => [row.index, row.reason])).toEqual([
+      [1, 'end'],
+      [0, 'signal'],
     ]);
   });
 
-  it('marks a trade of a series of days on the row of its day', () => {
-    const days = {
-      ...series,
-      resolution: 'day',
-      columns: { ...series.columns, ts: [86_400 * 2 - 1800, 86_400 * 3 - 1800] },
-    };
-    const one = { ...trades, columns: { ...trades.columns, open_ts: [86_400 + 3600], close_ts: [86_400 * 2 + 3600] } };
-    expect(tradeMarkers(days, one).map((marker) => marker.time)).toEqual([86_400 * 2 - 1800, 86_400 * 3 - 1800]);
+  it('finds the candle a time falls in, none before the first or from the end', () => {
+    expect(candleAt(CANDLES, 0)).toBe(0);
+    expect(candleAt(CANDLES, 2 * HOUR + 59)).toBe(2);
+    expect(candleAt(CANDLES, 9 * HOUR + 1800)).toBe(9);
+    expect(candleAt(CANDLES, -1)).toBe(-1);
+    expect(candleAt(CANDLES, 10 * HOUR)).toBe(-1);
   });
 
-  it('lists the trades newest first', () => {
-    expect(tradeRows(BOTH).map((row) => [row.long, row.openPrice, row.reason])).toEqual([
-      [false, 97, 'end'],
-      [true, 101, 'signal'],
+  it('counts the trades in view, also one that opened before it and closes in it', () => {
+    const list = many(5);
+    expect(tradesIn(list, 0, 5 * HOUR)).toEqual({ first: 0, last: 5 });
+    // The second trade closes at 1:30, in view from 1:15.
+    expect(tradesIn(list, HOUR + 900, 3 * HOUR)).toEqual({ first: 1, last: 3 });
+    expect(tradesIn(list, 7 * HOUR, 8 * HOUR)).toEqual({ first: 5, last: 5 });
+  });
+
+  it('finds the trade open during a candle', () => {
+    const list = many(3, 2 * HOUR);
+    expect(tradeAt(list, 0, HOUR)?.index).toBe(0);
+    // 1:00 to 2:00: the first closed at 1:00, still in this candle.
+    expect(tradeAt(list, HOUR, 2 * HOUR)?.index).toBe(0);
+    expect(tradeAt(list, HOUR + 1, 2 * HOUR)).toBeNull();
+    expect(tradeAt(list, 4 * HOUR, 5 * HOUR)?.index).toBe(2);
+    expect(tradeAt([], 0, HOUR)).toBeNull();
+  });
+});
+
+describe('the arrows', () => {
+  it('marks a long with a buy and a sell and a short with a sell and a buy, written out while few', () => {
+    const { marks, inView } = marksIn(many(2), { from: 0, to: 2 * HOUR }, CANDLES, null);
+    expect(inView).toBe(2);
+    expect(marks).toEqual([
+      { time: 0, kind: 'buy', size: 1, text: 'Buy' },
+      { time: 0, kind: 'sell', size: 1, text: 'Sell' },
+      { time: HOUR, kind: 'sell', size: 1, text: 'Sell' },
+      { time: HOUR, kind: 'buy', size: 1, text: 'Buy' },
     ]);
   });
 
-  it('marks the trades on the price only while there are not hundreds', () => {
-    expect(showsMarkers(trades)).toBe(true);
-    expect(showsMarkers({ ...trades, count: 0 })).toBe(false);
-    expect(showsMarkers({ ...trades, count: 251 })).toBe(false);
+  it('puts an arrow on the candle its time falls in and leaves out a time off the candles', () => {
+    const late: TradeRow = { ...many(1)[0]!, openTs: 9 * HOUR + 600, closeTs: 11 * HOUR };
+    expect(marksIn([late], { from: 9 * HOUR, to: 12 * HOUR }, CANDLES, null).marks).toEqual([
+      { time: 9 * HOUR, kind: 'buy', size: 1, text: 'Buy' },
+    ]);
+  });
+
+  it('drops the words, then shrinks the arrows, then shows none as the trades in view grow', () => {
+    const view = (count: number) =>
+      marksIn(
+        many(count),
+        { from: 0, to: count * HOUR },
+        { times: many(count).map((t) => t.openTs), end: count * HOUR },
+        null,
+      );
+    expect(view(TEXT_MOST).marks[0]).toMatchObject({ size: 1, text: 'Buy' });
+    expect(view(TEXT_MOST + 1).marks[0]).toMatchObject({ size: 1, text: '' });
+    expect(view(MARK_MOST + 1).marks[0]).toMatchObject({ size: 0.6, text: '' });
+    expect(view(DENSE_MOST).marks).toHaveLength(2 * DENSE_MOST);
+    expect(view(DENSE_MOST + 1)).toEqual({ marks: [], inView: DENSE_MOST + 1 });
+  });
+
+  it('makes the highlighted trade bigger with its return on the exit, also among too many to show', () => {
+    const count = DENSE_MOST + 1;
+    const list = many(count);
+    const { marks } = marksIn(
+      list,
+      { from: 0, to: count * HOUR },
+      { times: list.map((t) => t.openTs), end: count * HOUR },
+      3,
+    );
+    expect(marks).toEqual([
+      { time: 3 * HOUR, kind: 'sell', size: 1.6, text: 'Sell' },
+      { time: 3 * HOUR, kind: 'buy', size: 1.6, text: 'Buy +1.0 %' },
+    ]);
+  });
+
+  it('shows a trade picked outside the view too', () => {
+    const { marks, inView } = marksIn(many(5), { from: 0, to: HOUR }, CANDLES, 4);
+    expect(inView).toBe(1);
+    expect(marks.filter((mark) => mark.size === 1.6)).toHaveLength(2);
+  });
+});
+
+describe('in a position', () => {
+  it('shades the candles of a long and of a short, from the candle it opens in to the one it closes in', () => {
+    const list: TradeRow[] = [
+      { ...many(1)[0]!, long: true, openTs: HOUR + 600, closeTs: 3 * HOUR + 600 },
+      { ...many(1)[0]!, index: 1, long: false, openTs: 5 * HOUR, closeTs: 5 * HOUR + 1800 },
+    ];
+    const bands = positionBands(CANDLES, list);
+    expect(bands.map((band) => band.long)).toEqual([0, 1, 1, 1, 0, 0, 0, 0, 0, 0]);
+    expect(bands.map((band) => band.short)).toEqual([0, 0, 0, 0, 0, 1, 0, 0, 0, 0]);
+    expect(bands[0]?.time).toBe(0);
+  });
+});
+
+describe('the returns', () => {
+  it('takes the last row of each candle, the lowest for the drawdown, and none for a candle without rows', () => {
+    const candles = { times: [0, 2 * HOUR], end: 4 * HOUR };
+    const ts = [0, HOUR, 2 * HOUR];
+    expect(onCandles(candles, ts, [1, 3, 2])).toEqual([3, 2]);
+    expect(onCandles(candles, ts, [-0.1, -0.3, 0], 'min')).toEqual([-0.3, 0]);
+    expect(onCandles({ times: [0, HOUR, 5 * HOUR], end: 6 * HOUR }, [HOUR], [7])).toEqual([undefined, 7, undefined]);
+  });
+
+  it('reads the strategy, buy and hold and the drawdown of the series as fractions on the candles', () => {
+    const candles = { times: TS, end: TS.at(-1)! + 1800 };
+    const returns = returnsOn(candles, series);
+    expect(returns.strategy.map((value) => Number(value?.toFixed(4)))).toEqual([0, 0, 0.0088, -0.052, -0.052]);
+    expect(returns.benchmark?.map((value) => Number(value?.toFixed(2)))).toEqual([0, 0.01, 0.03, -0.03, -0.02]);
+    expect(returns.drawdown.at(-1)).toBe(-0.060224);
+    expect(returnsOn(candles, { ...series, benchmarks: {} }).benchmark).toBeNull();
+  });
+
+  it('draws the candles with a row in percent and carries the last value for the legend', () => {
+    expect(percentPoints([0, HOUR, 2 * HOUR], [0.1, undefined, -0.05])).toEqual([
+      { time: 0, value: 10 },
+      { time: 2 * HOUR, value: -5 },
+    ]);
+    expect(valueAt([0.1, undefined, undefined], 2)).toBe(0.1);
+    expect(valueAt([undefined, 0.2], 0)).toBeUndefined();
+  });
+});
+
+describe('the view', () => {
+  it('goes to a picked trade with room on both sides, within the period', () => {
+    const trade = { ...many(1)[0]!, openTs: 100 * HOUR, closeTs: 110 * HOUR };
+    expect(tradeView(trade, HOUR, { start: 0, end: 1000 * HOUR })).toEqual({ from: 80 * HOUR, to: 131 * HOUR });
+    expect(tradeView({ ...trade, openTs: HOUR, closeTs: HOUR }, HOUR, { start: 0, end: 2 * HOUR })).toEqual({
+      from: 0,
+      to: 2 * HOUR,
+    });
+  });
+
+  it('turns a logical position into a time, past the candles a candle at a time', () => {
+    expect(timeAtLogical(CANDLES.times, 3.4, HOUR)).toBe(3 * HOUR);
+    expect(timeAtLogical(CANDLES.times, -2, HOUR)).toBe(-2 * HOUR);
+    expect(timeAtLogical(CANDLES.times, 12, HOUR)).toBe(12 * HOUR);
+    expect(timeAtLogical([], 5, HOUR)).toBe(5 * HOUR);
   });
 });

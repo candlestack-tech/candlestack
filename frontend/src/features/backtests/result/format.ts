@@ -115,74 +115,114 @@ const percent = (fraction: number) => `${Number((fraction * 100).toFixed(4))} %`
 // Basis points as a percent: 10 → "0.1 %".
 const bps = (value: number) => percent(value / 10_000);
 
-// The manifest it ran with, in short: "Renko · 30m · 25 × 23". It is the copy stored with the run,
-// checked when it was given.
-export function manifestText(manifest: BacktestDocument['model']['manifest']): string {
-  const { input, signature } = manifest as unknown as Partial<Manifest>;
-  if (!input || !signature) return '';
-  return `${manifestRepresentation(input.representation.id)} · ${input.timeframe} · ${formatGrid(signature.input.shape)}`;
+// One line of the setup: what it is and its value.
+export type SetupRow = readonly [label: string, value: string];
+
+// The model's rows: what it reads, its candles and its input ("Candles", "30m", "25 × 23"), from
+// the manifest stored with the run, checked when it was given. The candles are the run's when the
+// manifest does not say.
+function modelRows(doc: BacktestDocument): SetupRow[] {
+  const { input, signature } = doc.model.manifest as unknown as Partial<Manifest>;
+  const rows: (SetupRow | undefined)[] = [
+    input && ['Reads', manifestRepresentation(input.representation.id)],
+    ['Timeframe', input?.timeframe ?? doc.data.timeframe],
+    signature && ['Input', formatGrid(signature.input.shape)],
+  ];
+  return rows.filter((row) => row !== undefined);
 }
 
 type Decision = BacktestDocument['decision'];
 
-// The rule that turns predictions into positions: "threshold 0.05", "hysteresis 0.3 / 0.1",
-// "k-means 5 · 500 · refit 50".
-function ruleText(rule: Decision['rule']): string {
+const candles = (count: number) => `${formatCount(count)} ${count === 1 ? 'candle' : 'candles'}`;
+
+// The rule that turns predictions into positions, with its settings in the builder's words.
+function ruleRows(rule: Decision['rule']): SetupRow[] {
   switch (rule.name) {
     case 'threshold':
-      return `threshold ${rule.limit}`;
+      return [['Threshold', String(rule.limit)]];
     case 'hysteresis':
-      return `hysteresis ${rule.enter} / ${rule.exit}`;
+      return [
+        ['Enter at', String(rule.enter)],
+        ['Leave at', String(rule.exit)],
+      ];
     case 'kmeans':
-      return `k-means ${rule.k} · ${rule.window} · refit ${rule.refit_every}`;
+      return [
+        ['K-means groups', String(rule.k)],
+        ['K-means window', formatCount(rule.window)],
+        ['Refit every', candles(rule.refit_every)],
+      ];
   }
 }
 
-// The steps before and after the rule, those that are on: "rank 500 · EMA 5 · confirm 2 · hold 3".
-function stepsText(decision: Decision): string {
-  const steps = [
-    decision.calibrate && `${decision.calibrate.name === 'zscore' ? 'z-score' : 'rank'} ${decision.calibrate.window}`,
-    decision.ema && `EMA ${decision.ema.span}`,
-    decision.confirm && `confirm ${decision.confirm.candles}`,
-    decision.min_hold && `hold ${decision.min_hold.candles}`,
-  ];
-  return steps.filter(Boolean).join(' · ');
+// The steps before the rule and those after it, the ones that are on.
+function stepRows(decision: Decision): { before: SetupRow[]; after: SetupRow[] } {
+  const { calibrate, ema, confirm, min_hold } = decision;
+  const on = (rows: (SetupRow | null | undefined)[]) => rows.filter((row) => row != null);
+  return {
+    before: on([
+      calibrate && [
+        'Calibration',
+        `${calibrate.name === 'zscore' ? 'Z-score' : 'Rank'} ${formatCount(calibrate.window)}`,
+      ],
+      ema && ['Smoothing', `EMA ${ema.span}`],
+    ]),
+    after: on([
+      confirm && ['Confirm', candles(confirm.candles)],
+      min_hold && ['Minimum hold', candles(min_hold.candles)],
+    ]),
+  };
 }
 
 const FILLS: Record<BacktestDocument['execution']['fill'], string> = {
-  next_open: "next candle's open",
-  signal_close: "signal candle's close",
+  next_open: "Next candle's open",
+  signal_close: "Signal candle's close",
 };
 
-// The costs and the stops, then what it is compared with: "stop loss 5 % · fees 0.1 % · slippage
-// 0.02 % · vs buy and hold".
-function costsText(doc: BacktestDocument): string {
-  const { stop_loss, drawdown_stop, fee_bps, slippage_bps } = doc.execution;
-  return [
-    stop_loss != null && `stop loss ${percent(stop_loss)}`,
-    drawdown_stop != null && `drawdown stop ${percent(drawdown_stop)}`,
-    `fees ${bps(fee_bps)}`,
-    `slippage ${bps(slippage_bps)}`,
-    doc.benchmarks.length > 0 ? 'vs buy and hold' : 'no benchmark',
-  ]
-    .filter(Boolean)
-    .join(' · ');
+const BENCHMARKS: Record<string, string> = { buy_and_hold: 'Buy and hold' };
+
+// The fill, the stops and the costs, then what it is compared with.
+function executionRows(doc: BacktestDocument): SetupRow[] {
+  const { fill, stop_loss, drawdown_stop, fee_bps, slippage_bps } = doc.execution;
+  const rows: (SetupRow | false)[] = [
+    ['Fills at', FILLS[fill]],
+    stop_loss != null && ['Stop loss', percent(stop_loss)],
+    drawdown_stop != null && ['Drawdown stop', percent(drawdown_stop)],
+    ['Fees', bps(fee_bps)],
+    ['Slippage', bps(slippage_bps)],
+    ...doc.benchmarks.map((benchmark): SetupRow => ['Benchmark', BENCHMARKS[benchmark.kind] ?? benchmark.kind]),
+  ];
+  return rows.filter((row) => row !== false);
 }
 
-// A step of the setup: its name over what it was and the details.
-export type SetupStep = { step: string; main: string; detail: string };
+// A group of the setup (Model, Data, Decision, Execution) with one value per row. The box puts
+// the model's and the instrument's names above their rows.
+export type SetupGroup = { name: 'Model' | 'Data' | 'Decision' | 'Execution'; rows: SetupRow[] };
 
-// The setup it ran with, in the builder's steps.
-export function setupOf(doc: BacktestDocument, style: Pick<DateStyle, 'dateFormat'>): SetupStep[] {
+// The setup it ran with, in the builder's steps. The period's days are UTC, as in the header.
+export function setupOf(doc: BacktestDocument, style: Pick<DateStyle, 'dateFormat'>): SetupGroup[] {
   const { data, decision } = doc;
+  const day = (seconds: number) =>
+    formatDate(new Date(seconds * 1000), { timeZone: 'UTC', dateFormat: style.dateFormat });
+  const steps = stepRows(decision);
   return [
-    { step: 'Model', main: doc.model.name, detail: manifestText(doc.model.manifest) },
-    { step: 'Data', main: data.instrument.symbol, detail: `${data.timeframe} · ${periodText(data.period, style)}` },
+    { name: 'Model', rows: modelRows(doc) },
     {
-      step: 'Decision',
-      main: `${ruleText(decision.rule)} · ${decision.long_only ? 'long only' : 'long and short'}`,
-      detail: stepsText(decision),
+      name: 'Data',
+      rows: [
+        ['From', day(data.period.start)],
+        ['To', day(data.period.end - 1)],
+        ...(data.rows ? [['Candles', formatCount(data.rows.count)] as const] : []),
+      ],
     },
-    { step: 'Execution', main: FILLS[doc.execution.fill], detail: costsText(doc) },
+    {
+      name: 'Decision',
+      rows: [
+        ...steps.before,
+        ...ruleRows(decision.rule),
+        ...steps.after,
+        ['Positions', decision.long_only ? 'Long only' : 'Long and short'],
+      ],
+    },
+    { name: 'Execution', rows: executionRows(doc) },
   ];
 }
