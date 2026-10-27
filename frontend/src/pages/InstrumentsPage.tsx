@@ -8,7 +8,7 @@ import { usePageTitle } from '@/lib/usePageTitle';
 // Every stock and crypto pair, searchable, the most traded first.
 // /instruments?q=apple&market=stock&exchange=NASDAQ&sort=gainers&page=2
 export function InstrumentsPage() {
-  const search = useSearch({ from: '/_public/instruments' });
+  const search = useSearch({ from: '/_app/instruments' });
   const { q = '', market, exchange, sort, page = 1 } = search;
   const navigate = useNavigate({ from: '/instruments' });
   // "Instruments" on an instrument page comes back to this search.

@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { LayoutGrid } from 'lucide-react';
 
 import { HINT } from '@/components/Hint';
-import { BacktestsIcon, ModelsIcon, SettingsIcon } from '@/components/icons';
+import { BacktestsIcon, InstrumentsIcon, ModelsIcon, SettingsIcon } from '@/components/icons';
 import { useDashboard } from '@/features/backtests';
 import { SidebarStorage, useModels } from '@/features/models';
 
@@ -10,6 +10,7 @@ const SECTIONS = [
   { to: '/dashboard', label: 'Dashboard', Icon: LayoutGrid },
   { to: '/backtests', label: 'Backtests', Icon: BacktestsIcon },
   { to: '/models', label: 'Models', Icon: ModelsIcon },
+  { to: '/instruments', label: 'Instruments', Icon: InstrumentsIcon },
   { to: '/settings', label: 'Settings', Icon: SettingsIcon },
 ] as const;
 

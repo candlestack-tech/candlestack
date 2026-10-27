@@ -14,8 +14,8 @@ export function viewerIn(zone: string) {
   vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({ ...resolved, timeZone: zone });
 }
 
-// Radix measures and captures the pointer, and the router restores the scroll position, through
-// browser APIs jsdom lacks.
+// Radix measures and captures the pointer, the router restores the scroll position and the
+// instrument list's filters ask a media query, through browser APIs jsdom lacks.
 function polyfillDom() {
   globalThis.ResizeObserver ??= class {
     observe() {}
@@ -28,6 +28,8 @@ function polyfillDom() {
     scrollIntoView: () => undefined,
   });
   window.scrollTo = () => undefined;
+  window.matchMedia ??= (query: string) =>
+    ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList;
 }
 
 // The whole app on `url` in jsdom, with a fresh query client that never retries: the routes, their

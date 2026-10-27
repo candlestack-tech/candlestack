@@ -44,15 +44,23 @@ const navItem = (html: string, name: string) => classes(html, new RegExp(`<a [^>
 const isOn = (html: string, name: string) => navItem(html, name).includes('font-medium');
 
 describe('Header', () => {
-  it('marks Product on the home page', async () => {
+  it('links only Product and the API docs for a visitor: the instruments are for signed-in accounts', async () => {
     const html = await render('/');
+    const nav = /<nav [^>]*aria-label="Main"[^>]*>.*?<\/nav>/.exec(html)?.[0] ?? '';
+    expect([...nav.matchAll(/<a [^>]*>([^<]*)<\/a>/g)].map((match) => match[1])).toEqual(['Product', 'API']);
+    expect(html).not.toContain('href="/instruments"');
+  });
+
+  it('marks Product on the home page', async () => {
+    const html = await render('/', ARSEN);
     expect(isOn(html, 'Product')).toBe(true);
     expect(isOn(html, 'Instruments')).toBe(false);
   });
 
-  it('marks Instruments on the list and on an instrument', async () => {
+  it('links Instruments into the app for a signed-in user, marked on the list and on an instrument', async () => {
+    expect(await render('/', ARSEN)).toMatch(/<a [^>]*href="\/instruments"[^>]*>Instruments<\/a>/);
     for (const url of ['/instruments?q=btc', '/instrument/crypto:BTCUSDT']) {
-      const html = await render(url);
+      const html = await render(url, ARSEN);
       expect(isOn(html, 'Instruments')).toBe(true);
       expect(isOn(html, 'Product')).toBe(false);
     }

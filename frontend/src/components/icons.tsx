@@ -47,6 +47,17 @@ export function ModelsIcon(props: IconProps) {
   );
 }
 
+// Instruments: two candles on their wicks, one filled and one hollow.
+export function InstrumentsIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M7 3v4M7 17v4M17 3v3M17 14v7" />
+      <rect x="4.5" y="7" width="5" height="10" rx="1" fill="currentColor" />
+      <rect x="14.5" y="6" width="5" height="8" rx="1" />
+    </Icon>
+  );
+}
+
 // Settings, in the sidebar and the account menu: a ring with eight spokes.
 export function SettingsIcon(props: IconProps) {
   return (

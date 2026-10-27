@@ -8,14 +8,15 @@ import { useDateStyle } from '@/features/preferences';
 import { marketTimeZone } from '@/lib/dates';
 import { usePageTitle } from '@/lib/usePageTitle';
 
-// /instrument/crypto:BTCUSDT?tf=1h. The route loader has already fetched the instrument.
+// /instrument/crypto:BTCUSDT?tf=1h, in the app without the sidebar. The route loader has already
+// fetched the instrument.
 export function InstrumentPage() {
-  const { id } = useParams({ from: '/_public/instrument/$id' });
-  const search = useSearch({ from: '/_public/instrument/$id' });
+  const { id } = useParams({ from: '/_app/instrument/$id' });
+  const search = useSearch({ from: '/_app/instrument/$id' });
   const { data: instrument } = useSuspenseQuery(instrumentQueryOptions(id));
   // Only a timeframe the instrument has; otherwise its first one.
   const tf = instrumentTimeframe(search.tf, instrument.timeframes);
-  // Signed in, the zone is the user's setting; a visitor sees the market's own.
+  // The zone is the user's setting; until it has loaded, the market's own.
   const dateStyle = useDateStyle(marketTimeZone(instrument.market));
   usePageTitle(`${instrument.symbol} ${tf}`);
 

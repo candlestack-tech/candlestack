@@ -111,31 +111,39 @@ minute.
   screen readers (it ends the id above the name) and narrows the gaps of the facts and the
   timeframe switch, so each fits one line.
 - **Chart height.** The layout is at least as tall as the visible screen (`100dvh`, `100vh`
-  without dvh) and the page is a flex column (`Layout.tsx`). The candles section, also while it
+  without dvh) and the page is a flex column (`Layout.tsx`; in the app the instrument route's
+  `staticData: { fill: true }` keeps the workspace's wrappers growing flex columns too,
+  `AppLayout.tsx`). The candles section, also while it
   loads or fails, and the chart in it are the part that grows: the chart takes the height the
   header, the instrument info, the switch, the status line and the footer leave, however many
   lines they take. At least 16rem on a phone and 20rem from `sm` up, below that the page
   scrolls; the section stops at 64rem (the chart at about 60rem), and on a taller screen the
-  space left stays below it. `chartHeight.test.tsx` checks every link of that chain.
+  space left stays below it. `chartHeight.test.tsx` and `routeTree.test.tsx` check every link of
+  that chain.
 
 ## Home page
 
 `/` is the public start page (#199), approved in the design repository (`mockups/home`).
 `src/pages/HomePage.tsx` puts together its parts from `src/features/home/`:
 
-- a headline with Try Backtest and Browse instruments over the pipeline of a run: market data,
-  the three layers (representation, model, decision) and the results;
+- a headline with Try Backtest over the pipeline of a run: market data, the three layers
+  (representation, model, decision) and the results;
 - the three layers you can swap, each with what it offers;
-- the markets with the five most traded instruments in the list's style (`TopInstruments.tsx`);
+- the markets with an example of the instrument list (`ExampleInstruments.tsx`): five rows of
+  sample figures written in the code, each with its real icon, in the list's style, nothing in
+  them a link, under an "EXAMPLE" line. Market data is for signed-in accounts only (#340), so
+  the home page asks the API for none. Sign in to browse leads to `/signin?next=/instruments`;
+  signed in, Browse instruments to the list;
 - compare and public experiments, both shown as "Coming soon".
 
-The instrument list is on `/instruments`: the title, four facts, then the search, the filters
-and the table ([Instrument list](#instrument-list)). An instrument opened from the home page
-gets `from: 'home'` in its history state (`router.tsx`), so its back link says "Home" and returns
-to `/`; otherwise it says "Instruments" and returns to the list's last search (`BackToList.tsx`).
+The instrument list (`/instruments`) and the instrument pages (`/instrument/$id`) are part of the
+signed-in app ([Sign-in](#sign-in)). The list sits beside the sidebar: the title, four facts,
+then the search, the filters and the table ([Instrument list](#instrument-list)). An instrument
+takes the whole width like a backtest, its back link "Instruments" returning to the list's last
+search (`BackToList.tsx`).
 
-The header links Product (`/`), Instruments and the API docs of the same host, so stage links
-to stage. Sign in and Try Backtest (also the hero's) lead to the sign-in page; signed in, the
+The header links Product (`/`), Instruments (signed in only) and the API docs of the same host,
+so stage links to stage. Sign in and Try Backtest (also the hero's) lead to the sign-in page; signed in, the
 header shows Dashboard and the avatar with its menu instead ([Sign-in](#sign-in)). Below `sm` the
 nav goes, and Sign in below `md`: with the nav, the row needs about 675 px.
 
@@ -164,16 +172,16 @@ Sign-in is GitHub or Google only (#208), designed in the design repository: the 
 
 Routes (`src/routeTree.tsx`): the public pages sit in a pathless layout `_public` with the
 site's header, the signed-in pages in `_app` with the app header. A page's `useSearch` therefore
-names the layout: `useSearch({ from: '/_public/instruments' })`.
+names the layout: `useSearch({ from: '/_app/instruments' })`.
 
 - `/signin?next=&error=` shows the start (GitHub, Google, the beta note) or, after
   `error=denied`, who was turned away with Use another account (back to the start, `next`
   kept) and Contact the team. A clicked button stays busy ("Opening GitHub", a spinner) while
   the browser leaves; Back from the provider offers the buttons again. An open session skips
   the page and goes to `next` or `/dashboard`.
-- `/dashboard`, `/backtests`, `/models` and `/settings` sit behind a guard
-  (`src/routes/accountGuards.ts`): signed out, it redirects to `/signin?next=<the page asked
-  for>`. The app code loads on demand, like the instrument page.
+- `/dashboard`, `/backtests`, `/models`, `/instruments`, `/instrument/$id` and `/settings` sit
+  behind a guard (`src/routes/accountGuards.ts`): signed out, it redirects to `/signin?next=<the
+  page asked for>`. The app code loads on demand.
 - `next` is only ever a path of this app (`appPath` in `src/routes/signInSearch.ts`): anything
   that leaves the origin (`https://…`, `//…`, `/\…`), `/signin` itself and `/api/…` are dropped,
   so signing in is no open redirect. The validator sets every key it drops to `undefined`: the
@@ -183,7 +191,7 @@ names the layout: `useSearch({ from: '/_public/instruments' })`.
 
 The app shell (`src/features/workspace/`) follows `mockups/app`: the app header (logo to the
 dashboard, no nav, New backtest, the theme toggle, the avatar), a 200 px sidebar (Dashboard,
-Backtests, Models with the model count, Settings, then the storage the models take, under "Model
+Backtests, Models with the model count, Instruments, Settings, then the storage the models take, under "Model
 storage" on one line ("4.7 MB of 100 MB"), and the note that market data is delayed 15 min; up to 980 px above the page as a row that scrolls sideways
 without a scrollbar, the foot left out) and the footer.
 The avatar is the user's initials (`initials.ts`), never a provider picture; its menu
@@ -192,7 +200,7 @@ API docs and, in red, Sign out. New backtest is a link to the builder ([Backtest
 `ComingSoonDialog` is a shadcn/ui Dialog with the home page's Coming soon card over a sketch, for
 every part of the app that is not built yet.
 Icons are lucide's where lucide draws the design's icon; the others (Backtests, Models,
-Settings, Home page, the moon) are drawn from the mockup in `src/components/icons.tsx`. The
+Instruments, Settings, Home page, the moon) are drawn from the mockup in `src/components/icons.tsx`. The
 mockups' button looks (`.btn`, `.btn.ghost`, `.btn.pri`) are class constants on shadcn's Button
 in `src/components/buttonStyles.ts`.
 

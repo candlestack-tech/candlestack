@@ -29,7 +29,7 @@ const LIGHT_CALM = {
 describe('the account’s appearance on the page', () => {
   it('wins over this browser’s theme on any page once signed in, and becomes its cache', async () => {
     stubApi(sessionWithPreferences(ARSEN, LIGHT_CALM));
-    await renderApp('/instruments');
+    await renderApp('/');
     await vi.waitFor(() => expect(document.documentElement.dataset.theme).toBe('light'));
     expect(document.documentElement.dataset.motion).toBe('reduce');
     expect(localStorage.getItem('candlestack-theme')).toBe('light');
@@ -73,7 +73,7 @@ describe('the account’s appearance on the page', () => {
       }
       return answer!(path, init);
     });
-    await renderApp('/instruments');
+    await renderApp('/');
     await vi.waitFor(() => expect(fetch.mock.calls.map(([path]) => path)).toContain('/api/v1/me/preferences'));
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Switch to light theme' }));

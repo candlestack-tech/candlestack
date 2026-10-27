@@ -3,8 +3,12 @@ import { cleanup, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { InstrumentDetail } from '@/api';
 import { ARSEN, dashboardAnswer, modelsAnswer, session, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
+
+// The instrument page's chart draws on a canvas jsdom has not.
+vi.mock('lightweight-charts', () => import('@/test/lightweightCharts'));
 
 afterEach(() => {
   cleanup();
@@ -12,6 +16,25 @@ afterEach(() => {
 });
 
 const heading = () => screen.getByRole('heading', { level: 1 }).textContent;
+
+// What the stubbed fetch was asked for, in order.
+const requests = (fetch: ReturnType<typeof stubApi>) => fetch.mock.calls.map(([path]) => path);
+
+const BTC: InstrumentDetail = {
+  id: 'crypto:BTCUSDT',
+  symbol: 'BTCUSDT',
+  name: 'Bitcoin / TetherUS',
+  market: 'crypto',
+  exchange: 'BINANCE',
+  source: 'binance',
+  feed: 'spot',
+  base: 'BTC',
+  quote: 'USDT',
+  available_from: 1_502_942_400,
+  available_to: 1_790_812_800,
+  max_candles: 1000,
+  timeframes: ['1h', '1d'],
+};
 
 describe('the signed-in pages', () => {
   it('send a visitor without a session to sign in, to come back to the page asked for', async () => {
@@ -21,6 +44,18 @@ describe('the signed-in pages', () => {
       expect(router.state.location.pathname).toBe('/signin');
       expect(router.state.location.search).toEqual({ next: url });
       expect(heading()).toBe('Sign in to CandleStack');
+      cleanup();
+    }
+  });
+
+  it('keep the instruments from a visitor without a session, asking the API for none of their data', async () => {
+    for (const url of ['/instruments?q=btc', '/instrument/crypto:BTCUSDT?tf=1h']) {
+      const fetch = stubApi(session(null));
+      const { router } = await renderApp(url);
+      expect(router.state.location.pathname).toBe('/signin');
+      expect(router.state.location.search).toEqual({ next: url });
+      expect(heading()).toBe('Sign in to CandleStack');
+      expect(requests(fetch)).toEqual(['/api/v1/me']);
       cleanup();
     }
   });
@@ -53,10 +88,45 @@ describe('the signed-in pages', () => {
       ['Dashboard', '/dashboard'],
       ['Backtests', '/backtests'],
       ['Models', '/models'],
+      ['Instruments', '/instruments'],
       ['Settings', '/settings'],
     ]);
-    expect(links.map((link) => link.getAttribute('aria-current'))).toEqual([null, null, 'page', null]);
+    expect(links.map((link) => link.getAttribute('aria-current'))).toEqual([null, null, 'page', null, null]);
     expect(heading()).toBe('Models');
+  });
+
+  it('show the instrument list beside the sidebar, Instruments marked, its search kept', async () => {
+    stubApi(session(ARSEN));
+    const { router } = await renderApp('/instruments?q=btc&market=crypto');
+    expect(heading()).toBe('Instruments');
+    expect(router.state.location.search).toEqual({ q: 'btc', market: 'crypto' });
+    const sidebar = within(screen.getByRole('navigation', { name: 'Workspace' }));
+    expect(sidebar.getByRole('link', { name: 'Instruments' }).getAttribute('aria-current')).toBe('page');
+    expect(screen.getByRole('searchbox').getAttribute('value')).toBe('btc');
+    expect(document.title).toBe('“btc” · Instruments · CandleStack');
+  });
+
+  it('show an instrument full width under the app header, its back link to the list', async () => {
+    stubApi({
+      ...sessionWithPreferences(ARSEN),
+      'GET /api/v1/data/instruments/crypto%3ABTCUSDT': { status: 200, body: BTC },
+    });
+    const { router } = await renderApp('/instrument/crypto:BTCUSDT?tf=1d');
+    await vi.waitFor(() => expect(heading()).toBe('Bitcoin / TetherUS'));
+    expect(router.state.location.search).toEqual({ tf: '1d' });
+    expect(screen.queryByRole('navigation', { name: 'Workspace' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'CandleStack dashboard' })).toBeDefined();
+    // with the list's last search, if this run has opened the list before
+    expect(screen.getByRole('link', { name: 'Instruments' }).getAttribute('href')).toMatch(/^\/instruments(\?|$)/);
+    const timeframes = within(screen.getByRole('navigation', { name: 'Timeframe' }));
+    expect(timeframes.getByRole('link', { name: '1d' }).getAttribute('aria-current')).toBe('page');
+    // The chart takes the height the page leaves: the page's two wrappers are growing flex
+    // columns, as the public layout's main column was (chartHeight.test.tsx).
+    const page = screen.getByRole('heading', { level: 1 }).closest('main > div > div');
+    for (const wrapper of [page, page?.parentElement]) {
+      expect(wrapper?.className.split(' ')).toEqual(expect.arrayContaining(['flex', 'flex-1', 'flex-col']));
+    }
+    expect(document.title).toBe('BTCUSDT 1d · CandleStack');
   });
 
   it('note under the sidebar that market data is delayed', async () => {
@@ -190,6 +260,25 @@ describe('the sign-in page', () => {
       expect(heading()).toBe('Sign in to CandleStack');
       cleanup();
     }
+  });
+});
+
+describe('the home page', () => {
+  it('asks the API only who is signed in, no market data, and shows the example rows', async () => {
+    const fetch = stubApi(session(null));
+    await renderApp('/');
+    expect(heading()).toBe('Backtest your models and compare every experiment');
+    const markets = within(document.getElementById('markets') as HTMLElement);
+    const rows = markets.getAllByRole('row').slice(1);
+    expect(rows.map((row) => within(row).getAllByRole('cell')[0]?.textContent)).toEqual([
+      'BTCUSDT',
+      'AAPL',
+      'ETHUSDT',
+      'TSLA',
+      'SPY',
+    ]);
+    expect(markets.getByText('Sample figures, not market data')).toBeDefined();
+    expect(requests(fetch)).toEqual(['/api/v1/me']);
   });
 });
 
