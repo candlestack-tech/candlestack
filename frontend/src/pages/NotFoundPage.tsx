@@ -9,8 +9,9 @@ export function NotFoundPage() {
   return (
     <>
       <PageTitle title="Page not found" description="There is nothing at this address." />
+      {/* Home, not the instrument list: that one is for signed-in accounts only (#340). */}
       <Button asChild variant="outline" className="self-start">
-        <Link to="/instruments">Back to instruments</Link>
+        <Link to="/">Back to home</Link>
       </Button>
     </>
   );

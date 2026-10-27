@@ -19,21 +19,25 @@ function sectionOf(pathname: string): Section | undefined {
 const NAV = 'text-muted-foreground hover:text-foreground';
 const ON = 'font-medium text-foreground';
 
-// No room on a phone: the logo leads home and the list is a link on the home page.
+// No room on a phone: the logo leads home. Instruments only signed in: the list is in the app,
+// market data being for signed-in accounts only (#340).
 function MainNav() {
   const section = useRouterState({ select: (state) => sectionOf(state.location.pathname) });
+  const signedIn = Boolean(useMe());
   return (
     <nav aria-label="Main" className="flex gap-[18px] text-sm max-sm:hidden">
       <Link to="/" className={cn(NAV, section === 'product' && ON)}>
         Product
       </Link>
-      <Link
-        to="/instruments"
-        activeOptions={{ includeSearch: false }}
-        className={cn(NAV, section === 'instruments' && ON)}
-      >
-        Instruments
-      </Link>
+      {signedIn && (
+        <Link
+          to="/instruments"
+          activeOptions={{ includeSearch: false }}
+          className={cn(NAV, section === 'instruments' && ON)}
+        >
+          Instruments
+        </Link>
+      )}
       {/* Same origin, so stage links to the stage API. */}
       <a href="/api/v1/docs" target="_blank" rel="noopener" className={NAV}>
         API
@@ -72,7 +76,7 @@ function Actions() {
   );
 }
 
-// The public pages' header: Product, Instruments and the API docs.
+// The public pages' header: Product, Instruments signed in, and the API docs.
 export function Header() {
   return (
     <HeaderBar home="/" homeLabel="CandleStack home">

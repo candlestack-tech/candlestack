@@ -91,7 +91,7 @@ describe('AccountMenu', () => {
 
   it('is in the public header too, beside Dashboard', async () => {
     stubApi(session(ARSEN));
-    await renderApp('/instruments');
+    await renderApp('/');
     const header = within(screen.getByRole('banner'));
     expect(header.getByRole('link', { name: 'Dashboard' }).getAttribute('href')).toBe('/dashboard');
     expect(header.getByRole('button', { name: 'Account' }).textContent).toBe('AL');

@@ -13,12 +13,20 @@ export function TryBacktest() {
   );
 }
 
-type BrowseProps = { size?: keyof typeof BUTTON_SIZES; className?: string };
+const BROWSE = cn(BUTTON_SIZES.default, OUTLINE_BUTTON, 'mt-4');
 
-export function BrowseInstruments({ size = 'default', className }: BrowseProps) {
+// The instrument list is in the app (#340): signed out, the way there is the sign-in page, which
+// returns to the list.
+export function BrowseInstruments({ signedIn }: { signedIn: boolean }) {
   return (
-    <Button asChild variant="outline" className={cn(BUTTON_SIZES[size], OUTLINE_BUTTON, className)}>
-      <Link to="/instruments">Browse instruments</Link>
+    <Button asChild variant="outline" className={BROWSE}>
+      {signedIn ? (
+        <Link to="/instruments">Browse instruments</Link>
+      ) : (
+        <Link to="/signin" search={{ next: '/instruments' }}>
+          Sign in to browse
+        </Link>
+      )}
     </Button>
   );
 }

@@ -1,12 +1,18 @@
 import type { QueryClient } from '@tanstack/react-query';
-import { Outlet, createRootRouteWithContext, createRoute, lazyRouteComponent, redirect } from '@tanstack/react-router';
+import {
+  Link,
+  Outlet,
+  createRootRouteWithContext,
+  createRoute,
+  lazyRouteComponent,
+  redirect,
+} from '@tanstack/react-router';
 
 import { deniedSignInQueryOptions, instrumentQueryOptions, meQueryOptions, preferencesQueryOptions } from '@/api';
 import { Layout } from '@/components/Layout';
 import { RouteError } from '@/components/RouteStates';
 import { AppearanceSync } from '@/features/preferences';
 import { HomePage } from '@/pages/HomePage';
-import { InstrumentsPage } from '@/pages/InstrumentsPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { SignInPage } from '@/pages/SignInPage';
 import { requireSignedIn, skipSignInWhenSignedIn } from '@/routes/accountGuards';
@@ -53,25 +59,6 @@ const homeRoute = createRoute({
   component: HomePage,
 });
 
-// /instruments?q=btc&market=crypto&page=2; broken values are dropped in validateSearch.
-const instrumentsRoute = createRoute({
-  getParentRoute: () => publicRoute,
-  path: '/instruments',
-  validateSearch: validateInstrumentsSearch,
-  component: InstrumentsPage,
-});
-
-// /instrument/crypto:BTCUSDT?tf=1h; the search params are checked once, in validateSearch.
-// The page is loaded on demand, so the chart library stays out of the main bundle; the loader
-// fetches the instrument meanwhile, into the same cache entry the page reads.
-const instrumentRoute = createRoute({
-  getParentRoute: () => publicRoute,
-  path: '/instrument/$id',
-  validateSearch: validateInstrumentSearch,
-  loader: ({ context, params }) => context.queryClient.ensureQueryData(instrumentQueryOptions(params.id)),
-  component: lazyRouteComponent(() => import('@/pages/InstrumentPage'), 'InstrumentPage'),
-});
-
 // /signin?next=/backtests&error=denied. An open session skips it. After a denied sign-in the
 // loader fetches who was turned away; when that fails, the page shows its buttons instead.
 const signInRoute = createRoute({
@@ -88,7 +75,7 @@ const signInRoute = createRoute({
 // The signed-in pages, under the app header beside the sidebar. Signed out, the guard sends the
 // browser to the sign-in page, which returns to the page asked for. When the API cannot say
 // who is signed in, the error shows under the site's header: the app's needs the user. Loaded on
-// demand like the instrument page: a visitor of the public pages never downloads the app.
+// demand: a visitor of the public pages never downloads the app.
 const appRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: '_app',
@@ -148,6 +135,29 @@ const modelRoute = createRoute({
   component: lazyRouteComponent(() => import('@/pages/ModelPage'), 'ModelPage'),
 });
 
+// /instruments?q=btc&market=crypto&page=2; broken values are dropped in validateSearch. Market
+// data is for signed-in accounts only (#340), so the list is part of the app.
+const instrumentsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/instruments',
+  validateSearch: validateInstrumentsSearch,
+  component: lazyRouteComponent(() => import('@/pages/InstrumentsPage'), 'InstrumentsPage'),
+});
+
+// /instrument/crypto:BTCUSDT?tf=1h: one instrument's page, without the sidebar like a backtest's,
+// filling the height for its chart. The search params are checked once, in validateSearch; the
+// loader fetches the instrument while the page's code loads, into the same cache entry the page
+// reads. When it fails (an unknown instrument, the rate limit), the way out is the list.
+const instrumentRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/instrument/$id',
+  validateSearch: validateInstrumentSearch,
+  staticData: { sidebar: false, fill: true },
+  loader: ({ context, params }) => context.queryClient.ensureQueryData(instrumentQueryOptions(params.id)),
+  errorComponent: (props) => <RouteError {...props} back={<Link to="/instruments">Back to instruments</Link>} />,
+  component: lazyRouteComponent(() => import('@/pages/InstrumentPage'), 'InstrumentPage'),
+});
+
 const openSettingsSection = (section: string) =>
   redirect({ to: '/settings/$section', params: { section }, replace: true });
 
@@ -178,7 +188,7 @@ const settingsSectionRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  publicRoute.addChildren([homeRoute, instrumentsRoute, instrumentRoute, signInRoute]),
+  publicRoute.addChildren([homeRoute, signInRoute]),
   appRoute.addChildren([
     dashboardRoute,
     backtestsRoute,
@@ -186,6 +196,8 @@ export const routeTree = rootRoute.addChildren([
     backtestRoute,
     modelsRoute,
     modelRoute,
+    instrumentsRoute,
+    instrumentRoute,
     settingsRoute,
     settingsSectionRoute,
   ]),

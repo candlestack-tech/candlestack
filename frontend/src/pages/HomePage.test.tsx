@@ -3,17 +3,22 @@ import { RouterProvider, createMemoryHistory, createRootRoute, createRouter } fr
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
+import { meQueryOptions, type Me } from '@/api';
+import { ARSEN } from '@/test/api';
 import { classes } from '@/test/markup';
 
 import { HomePage } from './HomePage';
 
-// The page needs a router for its links and a query client for the most traded instruments.
-async function render(): Promise<string> {
+// The page needs a router for its links and a query client that knows whether the visitor is
+// signed in (null: signed out).
+async function render(me: Me | null = null): Promise<string> {
   const rootRoute = createRootRoute({ component: HomePage });
   const router = createRouter({ routeTree: rootRoute, history: createMemoryHistory({ initialEntries: ['/'] }) });
   await router.load();
+  const queryClient = new QueryClient();
+  queryClient.setQueryData(meQueryOptions().queryKey, me);
   return renderToString(
-    <QueryClientProvider client={new QueryClient()}>
+    <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
@@ -39,11 +44,27 @@ describe('HomePage', () => {
     ]);
   });
 
-  it('links both Browse instruments buttons to the instrument list', async () => {
+  it('asks a visitor to sign in to browse the instruments, and back to the list after it', async () => {
     const html = await render();
+    const markets = section(html, 'markets');
+    expect(markets).toContain('Sign in to browse them and open their candles.');
+    expect(markets).toMatch(/<a [^>]*href="\/signin\?next=%2Finstruments"[^>]*>Sign in to browse<\/a>/);
+    expect(html).not.toContain('Browse instruments');
+    expect(html).not.toContain('href="/instruments"');
+  });
+
+  it('leads a signed-in visitor to the instrument list from the markets only', async () => {
+    const html = await render(ARSEN);
     const links = html.match(/<a [^>]*href="\/instruments"[^>]*>Browse instruments<\/a>/g);
-    expect(links).toHaveLength(2);
+    expect(links).toHaveLength(1);
     expect(section(html, 'markets')).toContain('>Browse instruments</a>');
+    expect(html).not.toContain('Sign in to browse');
+  });
+
+  it('shows the example of the instruments, with no link into them', async () => {
+    const markets = section(await render(), 'markets');
+    expect(markets).toContain('>EXAMPLE</span>');
+    expect(markets).not.toContain('/instrument/');
   });
 
   it('leads Try Backtest to the sign-in page', async () => {

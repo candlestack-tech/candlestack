@@ -1,4 +1,4 @@
-import { BrowseInstruments, TryBacktest } from './Buttons';
+import { TryBacktest } from './Buttons';
 import { Pipeline } from './Pipeline';
 
 // The headline, what the product does and the way in, over the pipeline every backtest takes.
@@ -17,7 +17,6 @@ export function Hero() {
         </p>
         <div className="mt-6 flex flex-wrap items-center gap-2.5">
           <TryBacktest />
-          <BrowseInstruments size="lg" />
         </div>
       </div>
       <Pipeline />

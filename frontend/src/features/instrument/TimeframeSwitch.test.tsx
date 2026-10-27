@@ -13,13 +13,13 @@ vi.mock('@tanstack/react-router', () => ({
 }));
 
 describe('TimeframeSwitch', () => {
-  it('keeps the history state, so an instrument opened from home still returns there', () => {
+  it('keeps the history state', () => {
     links.length = 0;
     renderToStaticMarkup(<TimeframeSwitch timeframes={['1h', '1d']} current="1h" />);
     expect(links).toHaveLength(2);
     for (const { state } of links) {
       expect(typeof state).toBe('function');
-      expect((state as (prev: object) => object)({ from: 'home' })).toEqual({ from: 'home' });
+      expect((state as (prev: object) => object)({ from: 'dashboard' })).toEqual({ from: 'dashboard' });
     }
   });
 });

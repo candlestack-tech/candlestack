@@ -4,7 +4,7 @@ import type { Timeframe } from '@/api';
 import { cn } from '@/lib/utils';
 
 // Links, not buttons: the timeframe lives in the URL (?tf=1h), so the address opens the same view.
-// The history state goes along, so an instrument opened from the home page still returns there.
+// The history state goes along.
 // Solid, so the background grid does not show through them.
 export function TimeframeSwitch({ timeframes, current }: { timeframes: readonly Timeframe[]; current: Timeframe }) {
   return (
