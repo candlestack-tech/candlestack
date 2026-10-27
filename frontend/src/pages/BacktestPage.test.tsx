@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, screen, within } from '@testing-library/react';
+import { act, cleanup, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -14,6 +14,7 @@ import {
   stubApi,
 } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
+import { step } from '@/test/steps';
 
 // The charts draw on a canvas, which jsdom has not: a stand-in keeps what they were given.
 const charts = vi.hoisted(() => ({
@@ -223,14 +224,34 @@ describe("a finished backtest's page", () => {
     expect(trades.getByText('Newest 8 of 12. All in the JSON.')).toBeDefined();
     expect(trades.getByRole('button', { name: 'Show less' })).toBeDefined();
   });
+
+  // #316: how long the run took, in total and by step.
+  it('says in the setup how long it ran, in total and each step', async () => {
+    await openPage({ status: 200, body: backtestDocument() });
+    await screen.findByRole('heading', { level: 1 });
+    const run = box('Setup').getByText('Run').parentElement!;
+    expect(within(run).getByText('2 min 42 s in total')).toBeDefined();
+    expect(
+      within(run)
+        .getAllByRole('term')
+        .map((term) => `${term.textContent} ${term.nextElementSibling?.textContent}`),
+    ).toEqual(['Load candles 2 min 30 s', 'Wait in the queue 0.4 s', 'Run the model 9.8 s', 'Simulate trades 1.6 s']);
+    expect(screen.queryByRole('region', { name: 'Steps' })).toBeNull();
+  });
 });
 
 describe("a backtest's page before it finished", () => {
-  it('shows a running backtest with its setup, asks again until it ends, then refreshes the lists', async () => {
+  it('shows a running backtest with its steps and setup, asks again until it ends, then refreshes the lists', async () => {
     const { all, queryClient } = await openPage({ status: 200, body: runningDocument() });
-    expect(await screen.findByText('Running', { selector: 'b' })).toBeDefined();
+    const steps = await screen.findByRole('region', { name: 'Steps' });
+    expect(
+      within(steps)
+        .getAllByRole('listitem')
+        .map((item) => item.querySelector('div > span')?.textContent),
+    ).toEqual(['Load candles', 'Wait in the queue', 'Run the model', 'Simulate trades']);
     expect(screen.getByText('You can close the page. The backtest keeps going.')).toBeDefined();
     expect(box('Setup').getByText('raw-candles.keras')).toBeDefined();
+    expect(box('Setup').queryByText('Run')).toBeNull();
     expect(screen.queryByRole('link', { name: 'Download JSON' })).toBeNull();
     expect(charts.made).toBe(0);
 
@@ -243,8 +264,50 @@ describe("a backtest's page before it finished", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['account', 'models'] });
   });
 
-  it('shows why a failed backtest failed, with its setup', async () => {
+  it('counts how long it runs in its status each second', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    vi.setSystemTime(new Date('2026-10-17T16:00:00Z'));
+    const running = runningDocument([
+      step('candles', { state: 'running', started_at: '2026-10-17T15:58:55Z' }),
+      step('queue'),
+      step('model'),
+      step('trades'),
+    ]);
+    running.backtest.created_at = '2026-10-17T15:58:55Z';
+    await openPage({ status: 200, body: running });
+    expect(await screen.findByText('Running · 1 min 5 s')).toBeDefined();
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByText('Running · 1 min 6 s')).toBeDefined();
+  });
+
+  it('shows the step a failed backtest failed at, its error and what did not run, with its setup', async () => {
     const running = runningDocument();
+    const failed = {
+      ...running,
+      backtest: {
+        ...running.backtest,
+        status: 'failed',
+        error: 'No prediction in the period.',
+        steps: [
+          step('candles', { state: 'done', duration_s: 1, candles: 29 }),
+          step('queue', { state: 'done', duration_s: 0.2 }),
+          step('model', { state: 'done', duration_s: 3 }),
+          step('trades', { state: 'failed', duration_s: 0.1 }),
+        ],
+      },
+    } as const;
+    await openPage({ status: 200, body: failed });
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('No prediction in the period.');
+    expect(alert.closest('li')?.textContent).toContain('Simulate trades');
+    expect(screen.getByText('Failed')).toBeDefined();
+    expect(box('Setup')).toBeDefined();
+  });
+
+  it('shows why a failed backtest from before the steps failed, with its setup', async () => {
+    const running = runningDocument([]);
     const failed = {
       ...running,
       backtest: { ...running.backtest, status: 'failed', error: 'No prediction in the period.' },

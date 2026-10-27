@@ -6,8 +6,9 @@ import { useDateStyle } from '@/features/preferences';
 import { allMetrics, basicMetrics, TONE } from './format';
 import { showsMarkers } from './chartData';
 import { EquityCharts, PriceChart } from './ResultCharts';
-import { FailedNote, Legend, MetricList, ResultBox, RunningBox, SetupBox } from './ResultParts';
+import { FailedNote, Legend, MetricList, ResultBox, SetupBox } from './ResultParts';
 import { ResultHeader } from './ResultHeader';
+import { RunSteps } from './RunSteps';
 import { TradesBox } from './TradesBox';
 
 const DAY = 86_400;
@@ -81,8 +82,9 @@ function Finished({ doc, results }: Props) {
   );
 }
 
-// One backtest's page by its status: the results once it finished, a running bar while it runs,
-// the error once it failed; the setup with either of the last two.
+// One backtest's page by its status: the results once it finished, its steps while it runs and
+// once it failed (only the error when it failed before steps were recorded); the setup with
+// either of the last two.
 export function BacktestResult({ doc }: { doc: BacktestDocument }) {
   const { backtest, results } = doc;
   return (
@@ -92,8 +94,8 @@ export function BacktestResult({ doc }: { doc: BacktestDocument }) {
         <Finished doc={doc} results={results} />
       ) : (
         <div className="flex flex-col gap-4">
-          {backtest.status === 'running' ? (
-            <RunningBox />
+          {backtest.status === 'running' || backtest.steps.some((step) => step.state === 'failed') ? (
+            <RunSteps doc={doc} />
           ) : (
             <FailedNote error={backtest.error ?? 'The backtest failed.'} />
           )}

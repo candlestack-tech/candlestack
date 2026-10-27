@@ -1,7 +1,7 @@
-import type { BacktestDocument, Manifest } from '@/api';
+import type { BacktestDocument, BacktestStep, Manifest } from '@/api';
 import { formatGrid, manifestRepresentation } from '@/features/models';
-import { formatDate, type DateStyle } from '@/lib/dates';
-import { formatCount, formatPercent, formatSharpe, formatWinRate, returnTone } from '@/lib/results';
+import { formatDate, formatMonth, type DateStyle } from '@/lib/dates';
+import { formatCount, formatPercent, formatSharpe, formatWinRate, MISSING, returnTone } from '@/lib/results';
 
 // How a backtest's page writes its document (mockups/app: runHead, runStats, resA, runSetupOf).
 // Results are fractions, market time is UTC epoch seconds of a candle's open.
@@ -62,6 +62,52 @@ export function periodText({ start, end }: { start: number; end: number }, style
 export function durationText(seconds: number): string {
   const whole = Math.round(seconds);
   return whole < 60 ? `${whole} s` : `${Math.floor(whole / 60)} min ${whole % 60} s`;
+}
+
+// The steps of a run as its page names them, in their order.
+export const STEP_NAMES: Record<BacktestStep['id'], string> = {
+  candles: 'Load candles',
+  queue: 'Wait in the queue',
+  model: 'Run the model',
+  trades: 'Simulate trades',
+};
+
+// How long a step took: tenths under a minute ("0 s", "0.3 s", "10.3 s"), then as durationText.
+export function stepTime(seconds: number | null): string {
+  if (seconds === null) return MISSING;
+  return seconds < 59.95 ? `${Number(seconds.toFixed(1))} s` : durationText(seconds);
+}
+
+const DAY_MS = 86_400_000;
+
+// How far the candles' load got, from the period's first month to the month of the last day
+// loaded: "Loaded Jan 2016 – Jan 2019". Nothing while it loads the warm-up before the period.
+export function loadedText(loadedUntil: string | null, periodStart: number): string {
+  if (loadedUntil === null) return '';
+  const until = new Date(`${loadedUntil}T00:00:00Z`);
+  const start = new Date(periodStart * 1000);
+  if (until.getTime() + DAY_MS <= start.getTime()) return '';
+  const utc = { timeZone: 'UTC' };
+  return `Loaded ${formatMonth(start, utc)} – ${formatMonth(until, utc)}`;
+}
+
+// What the done candles' step loaded: "35,912 candles", "412 candles · from the cache".
+export function candlesText({ candles, from_cache }: BacktestStep): string {
+  if (candles === null) return '';
+  return `${formatCount(candles)} candles${from_cache ? ' · from the cache' : ''}`;
+}
+
+// The worker's times of the done model's step: "load 1.4 s · input 2.1 s · predict 6.8 s".
+export function modelText({ load_s, input_s, predict_s }: BacktestStep): string {
+  const parts = [
+    ['load', load_s],
+    ['input', input_s],
+    ['predict', predict_s],
+  ] as const;
+  return parts
+    .filter(([, seconds]) => seconds !== null)
+    .map(([name, seconds]) => `${name} ${stepTime(seconds)}`)
+    .join(' · ');
 }
 
 // A fraction as a plain percent without trailing zeros: 0.05 → "5 %", 0.001 → "0.1 %".

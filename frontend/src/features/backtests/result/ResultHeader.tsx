@@ -7,6 +7,7 @@ import { InstrumentSymbol } from '@/components/InstrumentSymbol';
 import { Button } from '@/components/ui/button';
 import { useViewerDateStyle } from '@/features/preferences';
 import { formatRecentTime } from '@/lib/dates';
+import { secondsSince, useNow } from '@/lib/useNow';
 import { cn } from '@/lib/utils';
 
 import { StatusBadge } from '../parts';
@@ -97,18 +98,22 @@ function ModelLink({ model }: { model: BacktestDocument['model'] }) {
 }
 
 // The title with the status and the buttons, then what it ran on (the instrument with its icon),
-// with what, over which days and when (mockups/app, runHead).
+// with what, over which days and when (mockups/app, runHead). A running backtest's status counts
+// how long it runs.
 export function ResultHeader({ doc }: { doc: BacktestDocument }) {
   const dateStyle = useViewerDateStyle();
   const { backtest } = doc;
+  const running = backtest.status === 'running';
+  const now = useNow(running);
   const when = formatRecentTime(new Date(backtest.created_at), dateStyle);
+  const runs = running ? durationText(secondsSince(backtest.created_at, now) ?? 0) : undefined;
   return (
     <>
       <BackLink model={doc.model} />
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5">
           <h1 className="text-[22px]/7 font-semibold tracking-[-0.02em]">Backtest #{backtest.number}</h1>
-          <StatusBadge status={backtest.status} />
+          <StatusBadge status={backtest.status} detail={runs} />
         </div>
         {backtest.status === 'finished' && (
           <div className="flex flex-wrap gap-2">

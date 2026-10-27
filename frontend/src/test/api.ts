@@ -3,6 +3,7 @@ import { vi } from 'vitest';
 import type {
   Backtest,
   BacktestDocument,
+  BacktestStep,
   BacktestsPage,
   Catalog,
   CatalogBlock,
@@ -12,6 +13,8 @@ import type {
   Model,
   Preferences,
 } from '@/api';
+
+import { FINISHED_STEPS, step } from './steps';
 
 // A signed-in user as GET /api/v1/me sends it.
 export const ARSEN: Me = {
@@ -363,6 +366,7 @@ export const backtestDocument = (fields: Partial<BacktestDocument> = {}): Backte
     finished_at: '2026-10-17T14:07:42Z',
     duration_s: 162,
     error: null,
+    steps: FINISHED_STEPS,
   },
   software: {
     engine_version: '0.3.0',
@@ -393,12 +397,19 @@ export const backtestDocument = (fields: Partial<BacktestDocument> = {}): Backte
   ...fields,
 });
 
-// The same document while it runs: the setup only.
-export const runningDocument = (): BacktestDocument => {
+// The same document while it runs: the setup only, the candles loading (or the steps given).
+export const runningDocument = (
+  steps: BacktestStep[] = [
+    step('candles', { state: 'running', started_at: '2026-10-17T14:05:00Z' }),
+    step('queue'),
+    step('model'),
+    step('trades'),
+  ],
+): BacktestDocument => {
   const doc = backtestDocument();
   return {
     ...doc,
-    backtest: { ...doc.backtest, status: 'running', finished_at: null, duration_s: null },
+    backtest: { ...doc.backtest, status: 'running', finished_at: null, duration_s: null, steps },
     software: { ...doc.software, runner: null },
     data: { ...doc.data, loaded: null, changed: null, rows: null, predictions: null, align: null },
     results: null,

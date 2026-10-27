@@ -46,8 +46,8 @@ const BADGES: Record<BacktestStatus, { text: string; tone: string }> = {
 };
 
 // How far a backtest got (.badge.ok, .badge.run, .badge.bad): Finished in green, Running in the
-// accent, Failed in red.
-export function StatusBadge({ status }: { status: BacktestStatus }) {
+// accent, Failed in red; `detail` after a dot ("Running · 1 min 5 s").
+export function StatusBadge({ status, detail }: { status: BacktestStatus; detail?: string }) {
   const { text, tone } = BADGES[status];
   return (
     <span
@@ -56,7 +56,7 @@ export function StatusBadge({ status }: { status: BacktestStatus }) {
         tone,
       )}
     >
-      {text}
+      {detail ? `${text} · ${detail}` : text}
     </span>
   );
 }
