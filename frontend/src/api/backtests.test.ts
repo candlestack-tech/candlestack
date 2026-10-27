@@ -12,10 +12,10 @@ import {
 } from '@/test/api';
 
 import {
-  backtestDownloadUrl,
   backtestQueryOptions,
   backtestsQueryOptions,
   dashboardQueryOptions,
+  getBacktestFile,
   updateBacktest,
   type BacktestDocument,
 } from './backtests';
@@ -99,7 +99,11 @@ describe('backtestQueryOptions', () => {
     expect(staleTime(query(backtestDocument()))).toBe(Infinity);
   });
 
-  it('downloads the whole document from its own path', () => {
-    expect(backtestDownloadUrl('bt_7f3k2m9qx4')).toBe('/api/v1/backtests/bt_7f3k2m9qx4/download');
+  it('downloads the whole document from its own path, as a file', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response('{"version":1}', { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+    const file = await getBacktestFile('bt_7f3k2m9qx4');
+    expect(fetch.mock.calls[0]?.[0]).toBe('/api/v1/backtests/bt_7f3k2m9qx4/download');
+    expect(await file.text()).toBe('{"version":1}');
   });
 });

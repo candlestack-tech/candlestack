@@ -14,7 +14,7 @@ export {
   type SignInMethod,
 } from './accounts';
 export {
-  backtestDownloadUrl,
+  getBacktestFile,
   backtestQueryOptions,
   backtestsQueryOptions,
   dashboardQueryOptions,
