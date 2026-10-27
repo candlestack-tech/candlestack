@@ -80,8 +80,12 @@ class DataSource(Protocol):
         """The chunks of a base timeframe that cover ``[start, end)`` at ``now``."""
         ...
 
-    async def fetch_period(self, symbol: str, timeframe: Timeframe, period: Period) -> pl.DataFrame:
-        """Candles of the period in ``CANDLE_SCHEMA``: normalised, validated, closed only."""
+    async def fetch_period(
+        self, symbol: str, timeframe: Timeframe, period: Period, *, background: bool = False
+    ) -> pl.DataFrame:
+        """Candles of the period in ``CANDLE_SCHEMA``: normalised, validated, closed only. A
+        ``background`` load (a backtest's) may wait for its share of the request budget instead
+        of failing when the budget is spent."""
         ...
 
     async def health(self) -> SourceHealth:

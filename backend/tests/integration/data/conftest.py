@@ -10,6 +10,7 @@ import io
 import json
 import zipfile
 from collections.abc import AsyncIterator, Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -178,6 +179,25 @@ class Upstream:
                 httpx.Response(200, content=fixture_bytes(f"alpaca/{page}")) for page in pages
             ]
         )
+
+    def native_bars(self, timeframe: str, start: str, *pages: str) -> respx.Route:
+        """Bars of ``timeframe`` (``5Min``, ``15Min`` or ``30Min``) from ``start`` (RFC 3339),
+        built from the 1Min fixture pages as Alpaca builds them: bins on the clock's multiples of
+        the timeframe, extended hours included, in one page."""
+        step = {"5Min": 300, "15Min": 900, "30Min": 1800}[timeframe]
+        bins: dict[int, dict[str, Any]] = {}
+        for bar in self.aapl_bars(*pages):
+            ts = int(datetime.fromisoformat(bar["t"]).timestamp())
+            opens = ts // step * step
+            if opens not in bins:
+                bins[opens] = {"t": f"{datetime.fromtimestamp(opens, UTC):%Y-%m-%dT%H:%M:%SZ}"}
+                bins[opens].update(o=bar["o"], h=bar["h"], l=bar["l"], c=bar["c"], v=0)
+            native = bins[opens]
+            native.update(h=max(native["h"], bar["h"]), l=min(native["l"], bar["l"]), c=bar["c"])
+            native["v"] += bar["v"]
+        return self.router.get(
+            f"{ALPACA_DATA}/v2/stocks/bars", params={"timeframe": timeframe, "start": start}
+        ).respond(200, json={"bars": {"AAPL": list(bins.values())}, "next_page_token": None})
 
     def bars_json(self, timeframe: str, start: str, bars: list[dict[str, Any]]) -> respx.Route:
         return self.router.get(

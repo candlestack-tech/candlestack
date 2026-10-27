@@ -89,13 +89,15 @@ class FakeMarket:
     of a period gives the same candles). ``scale`` changes the prices, as a source that adjusted
     them would; ``refuse`` makes the checks of a new backtest raise, ``refuse_candles`` the
     loads. ``slow`` seconds pass in each check of a new backtest, and ``held`` has how many
-    connections of the app's pool (``pool``) were in use at each check and load."""
+    connections of the app's pool (``pool``) were in use at each check and load. ``loads`` has
+    the period of each load, ``background`` whether it was a background load."""
 
     def __init__(self) -> None:
         self.scale = 1.0
         self.refuse: DataError | None = None
         self.refuse_candles: DataError | None = None
         self.loads: list[tuple[int, int]] = []
+        self.background: list[bool] = []
         self.slow = 0.0
         self.pool: Any = None
         self.held: list[int] = []
@@ -140,12 +142,19 @@ class FakeMarket:
         return start - candles * timeframe.seconds
 
     async def candles(
-        self, instrument_id: InstrumentId, timeframe: Timeframe, start: int, end: int
+        self,
+        instrument_id: InstrumentId,
+        timeframe: Timeframe,
+        start: int,
+        end: int,
+        *,
+        background: bool = False,
     ) -> CandleSet:
         self._hold()
         if self.refuse_candles is not None:
             raise self.refuse_candles
         self.loads.append((start, end))
+        self.background.append(background)
         step = timeframe.seconds
         ts = np.arange(-(-start // step) * step, end, step, dtype=np.int64)
         close, opens = _walk(ts, self.scale), _walk(ts - step, self.scale)

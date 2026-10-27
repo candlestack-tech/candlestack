@@ -11,8 +11,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 # Our Alpaca request budget per minute. Alpaca allows 200 per key: prod and stage have one
-# each.
-_ALPACA_RATE_LIMITS = {"prod": 150, "stage": 100}
+# each, and about a tenth stays unused for retries and the skew between our minute and Alpaca's.
+_ALPACA_RATE_LIMITS = {"prod": 180, "stage": 180}
 _ALPACA_RATE_LIMIT_DEFAULT = 60
 
 

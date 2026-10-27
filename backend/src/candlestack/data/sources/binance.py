@@ -323,7 +323,16 @@ class BinanceSource:
             current_ttl=CLOSED_DAY_TTL,
         )
 
-    async def fetch_period(self, symbol: str, timeframe: Timeframe, period: Period) -> pl.DataFrame:
+    # DataSource.fetch_period: archives are not rate limited, and only the days not archived yet
+    # come from REST, so a background load asks as a request does.
+    async def fetch_period(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        period: Period,
+        *,
+        background: bool = False,  # noqa: ARG002
+    ) -> pl.DataFrame:
         if period.kind == "closed":
             frame = await self._month(symbol, timeframe, period)
         elif period.kind == "current":

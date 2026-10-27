@@ -97,7 +97,7 @@ def test_oauth_secrets_and_database_url_are_stripped_and_hidden(
 
 @pytest.mark.parametrize(
     ("app_env", "limit"),
-    [("prod", 150), ("stage", 100), ("local", 60), ("test", 60)],
+    [("prod", 180), ("stage", 180), ("local", 60), ("test", 60)],
 )
 def test_alpaca_rate_limit_default_depends_on_env(
     monkeypatch: pytest.MonkeyPatch, app_env: str, limit: int
@@ -108,7 +108,7 @@ def test_alpaca_rate_limit_default_depends_on_env(
 
 
 def test_alpaca_rate_limit_default_follows_init_arguments() -> None:
-    assert Settings(app_env="stage").alpaca_rate_limit == 100
+    assert Settings(app_env="stage").alpaca_rate_limit == 180
 
 
 def test_alpaca_rate_limit_can_be_set(monkeypatch: pytest.MonkeyPatch) -> None:
