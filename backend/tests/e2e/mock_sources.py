@@ -13,7 +13,8 @@ One server answers the paths of all five upstreams, which do not overlap, so the
 - ``paper-api.alpaca.markets``: ``/v2/assets``, ``/v2/calendar``, ``/v2/clock``
 - ``data.alpaca.markets``: ``/v2/stocks/bars`` and ``/v2/stocks/{symbol}/bars`` (the bars of
   every ``bars-<SYMBOL>-<timeframe>-*.json`` fixture, filtered by ``start``/``end``, both
-  inclusive like Alpaca, and paginated by ``limit``)
+  inclusive like Alpaca, and paginated by ``limit``; ``5Min``, ``15Min`` and ``30Min`` bars are
+  built from the ``1Min`` ones)
 - ``img.logo.dev``: ``/ticker/{symbol}`` and ``/crypto/{base asset}``, a 1x1 PNG for the symbols
   in ``LOGOS``, 404 for any other, 401 without the key ``e2e-logo-key``
 
@@ -163,7 +164,11 @@ def _time(value: str) -> datetime:
 
 @cache
 def bars_of(symbol: str, timeframe: str) -> list[dict[str, Any]]:
-    """Every fixture bar of the symbol and timeframe (adjusted ones only), oldest first."""
+    """Every fixture bar of the symbol and timeframe (adjusted ones only), oldest first.
+    ``5Min``, ``15Min`` and ``30Min`` bars are built from the ``1Min`` ones as Alpaca builds
+    them: in bins on the clock's multiples of the timeframe, extended hours included."""
+    if minutes := re.fullmatch(r"(5|15|30)Min", timeframe):
+        return _aggregated(bars_of(symbol, "1Min"), int(minutes[1]) * 60)
     bars = {}
     for name in FILES:
         parts = BARS_NAME.fullmatch(name)
@@ -172,6 +177,20 @@ def bars_of(symbol: str, timeframe: str) -> list[dict[str, Any]]:
         for bar in fixture_json(name)["bars"].get(symbol) or []:
             bars[bar["t"]] = bar
     return [bars[t] for t in sorted(bars)]
+
+
+def _aggregated(bars: list[dict[str, Any]], step: int) -> list[dict[str, Any]]:
+    built: dict[int, dict[str, Any]] = {}
+    for bar in bars:
+        opens = int(_time(bar["t"]).timestamp()) // step * step
+        if opens not in built:
+            moment = datetime.fromtimestamp(opens, UTC)
+            built[opens] = {"t": f"{moment:%Y-%m-%dT%H:%M:%SZ}", "o": bar["o"], "v": 0}
+            built[opens].update(h=bar["h"], l=bar["l"])
+        native = built[opens]
+        native.update(h=max(native["h"], bar["h"]), l=min(native["l"], bar["l"]), c=bar["c"])
+        native["v"] += bar["v"]
+    return list(built.values())
 
 
 def _page(items: list[Any], query: dict[str, str]) -> tuple[list[Any], str | None]:

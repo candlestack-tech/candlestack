@@ -2,8 +2,10 @@
 
 The free plan serves SIP bars only up to 15 minutes ago (``SIP_DELAY``): no request asks for
 anything newer, and the candles of the last 15 minutes come once they are that old. Intraday
-timeframes are built from regular-session 1m bars; 1d is Alpaca's 1Day bar (official open and
-close, extended-hours volume), relabelled from 00:00 New York to the session open. Trading days
+timeframes are built from Alpaca's bars of the regular sessions: 1m, 5m, 15m and 30m from the
+bars of their own timeframe, 1h and 4h from 30Min bars (``BASE_TIMEFRAMES``); 1d is Alpaca's
+1Day bar (official open and close, extended-hours volume), relabelled from 00:00 New York to
+the session open. Trading days
 come from ``GET /v2/calendar``. Every request spends our budget (``ALPACA_RATE_LIMIT``); Alpaca
 allows 200 per minute per key. The 24 h stats come from ``GET /v2/stocks/snapshots`` of the SIP
 feed delayed by 15 minutes and the daily candles of the mini charts from the 1Day bars, many
@@ -88,6 +90,31 @@ CALENDAR_TTL = 7 * DAY
 CALENDAR_MEMORY_SECONDS = 3600
 HISTORY_START = 2016
 BARS_LIMIT = 10_000
+# The bars each timeframe is built from. Alpaca's 5Min, 15Min and 30Min bars start on the clock's
+# quarter and half hours, as the sessions' 09:30 open does, so they are our session bins (checked
+# equal to resampled 1m bars, docs/data.md); 1Hour bars start on the clock hour (09:00 holds
+# 09:30-09:59), so 1h and 4h are built from 30Min bars.
+BASE_TIMEFRAMES = {
+    Timeframe.M1: Timeframe.M1,
+    Timeframe.M5: Timeframe.M5,
+    Timeframe.M15: Timeframe.M15,
+    Timeframe.M30: Timeframe.M30,
+    Timeframe.H1: Timeframe.M30,
+    Timeframe.H4: Timeframe.M30,
+    Timeframe.D1: Timeframe.D1,
+}
+_ALPACA_TIMEFRAMES = {
+    Timeframe.M1: "1Min",
+    Timeframe.M5: "5Min",
+    Timeframe.M15: "15Min",
+    Timeframe.M30: "30Min",
+    Timeframe.D1: "1Day",
+}
+# Base timeframes fetched in yearly chunks, the others in monthly ones, so that a chunk is one to
+# three requests of 10000 bars with extended hours (04:00-20:00 New York): a month of 1Min bars
+# is about 20000, of 5Min about 4000; a year of 15Min bars is about 16000, of 30Min about 8000,
+# of 1Day about 250.
+_YEARLY = frozenset({Timeframe.M15, Timeframe.M30, Timeframe.D1})
 # Snapshots: symbols per request (about 27 requests for the whole catalog, each URL under
 # 4 KB), and the share of our budget per minute they may take, so that chart requests keep the
 # rest (prod and stage 180: 20).
@@ -100,8 +127,9 @@ STATS_SHARE_DIVISOR = 5
 SPARK_RATE_KEY = "data:rl:alpaca-spark"
 SPARK_SHARE_MAX = 5
 SPARK_SHARE_DIVISOR = 20
-# Background loads (a backtest's candles: years of 1m bars, hundreds of requests) wait for their
-# own share instead of failing, all of them together, and then for room in the whole budget.
+# Background loads (a backtest's candles, which can take more requests than a minute's budget)
+# wait for their own share instead of failing, all of them together, and then for room in the
+# whole budget.
 # Half of it, so requests keep the other half minus the stats' and mini charts' shares
 # (prod and stage 180: 90, requests keep 65 or more, 90 while no refresh runs).
 BACKGROUND_RATE_KEY = "data:rl:alpaca-background"
@@ -335,9 +363,10 @@ def parse_daily_bars(body: dict[str, Any], days: list[Session]) -> tuple[pl.Data
 def regular_candles(
     frame: pl.DataFrame, timeframe: Timeframe, period: Period, sessions: list[Session]
 ) -> pl.DataFrame:
-    """Validated candles of the period from parsed bars (``parse_bars``): ``timeframe`` is
-    ``1m`` (bars outside the regular sessions dropped) or ``1d`` (1Day bars relabelled); only
-    candles closed by the end of the period."""
+    """Validated candles of the period from parsed bars (``parse_bars``) of a base timeframe:
+    an intraday one (bars outside the regular sessions dropped; Alpaca's bins are the session
+    bins, ``BASE_TIMEFRAMES``) or ``1d`` (1Day bars relabelled); only candles closed by the end of
+    the period."""
     if timeframe is Timeframe.D1:
         frame = relabel_daily(frame, sessions)
     frame = resample_sessions(normalise(frame), timeframe, sessions)
@@ -434,7 +463,7 @@ class AlpacaSource:
     feed: Feed = "sip"
     market = Market.STOCK
     # A chunk of 1m bars is a month, up to about 20000 bars with extended hours (2 or 3 pages)
-    # parsed from JSON while it is fetched, and years of them build one 1h request: few at once
+    # parsed from JSON while it is fetched, and months of them build one 1m request: few at once
     # keep the memory of a request small.
     chunk_concurrency = 4
 
@@ -489,27 +518,27 @@ class AlpacaSource:
         return sessions[first].open if first < len(sessions) else None
 
     def base_timeframe(self, timeframe: Timeframe) -> Timeframe:
-        return Timeframe.D1 if timeframe is Timeframe.D1 else Timeframe.M1
+        return BASE_TIMEFRAMES[timeframe]
 
     def periods(self, timeframe: Timeframe, start: int, end: int, now: int) -> list[Period]:
-        # A request returns up to 10000 bars: about half a month of 1m bars with extended hours,
-        # many years of 1Day bars. Whole spans keep the number of requests (our budget) small. The
-        # chunks are planned as of SIP_DELAY ago: the live one ends there (and is complete until
-        # then), and a day joins a cached chunk only once its bars are that old.
+        # A request returns up to 10000 bars: whole months or years (``_YEARLY``) keep the number
+        # of requests (our budget) small. The chunks are planned as of SIP_DELAY ago: the live
+        # one ends there (and is complete until then), and a day joins a cached chunk only once
+        # its bars are that old.
         periods = plan_periods(
             start,
             end,
             now - SIP_DELAY,
-            yearly=timeframe is Timeframe.D1,
+            yearly=timeframe in _YEARLY,
             daily=False,
             closed_ttl=CLOSED_TTL,
             current_ttl=CURRENT_TTL,
         )
         if timeframe is not Timeframe.D1:
             return periods
-        # The 1m bars of a regular session are final 15 minutes after its close, long before the
-        # UTC midnight that ends a chunk; its 1Day bar only once extended hours ended. A chunk
-        # fetched before that is kept until then, and then fetched again.
+        # The intraday bars of a regular session are final 15 minutes after its close, long
+        # before the UTC midnight that ends a chunk; its 1Day bar only once extended hours ended.
+        # A chunk fetched before that is kept until then, and then fetched again.
         return [
             replace(period, ttl=max(LIVE_TTL, final - now))
             if period.kind != "live" and (final := period.end + DAILY_FINAL_SECONDS) > now
@@ -683,7 +712,7 @@ class AlpacaSource:
         while True:
             body = await self._bars_page(
                 symbol,
-                "1Day" if timeframe is Timeframe.D1 else "1Min",
+                _ALPACA_TIMEFRAMES[timeframe],
                 params,
                 background=background,
             )

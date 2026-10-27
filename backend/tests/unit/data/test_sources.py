@@ -649,6 +649,43 @@ async def test_alpaca_chunks_end_15_minutes_before_now(alpaca: AlpacaSource) -> 
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("timeframe", "base"),
+    [
+        (Timeframe.M1, Timeframe.M1),
+        (Timeframe.M5, Timeframe.M5),
+        (Timeframe.M15, Timeframe.M15),
+        (Timeframe.M30, Timeframe.M30),
+        (Timeframe.H1, Timeframe.M30),
+        (Timeframe.H4, Timeframe.M30),
+        (Timeframe.D1, Timeframe.D1),
+    ],
+)
+async def test_alpaca_base_timeframes(
+    alpaca: AlpacaSource, timeframe: Timeframe, base: Timeframe
+) -> None:
+    assert alpaca.base_timeframe(timeframe) is base
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("timeframe", "labels"),
+    [
+        (Timeframe.M1, ["2024-05", "2024-06-01..2024-06-03", "2024-06-03-live"]),
+        (Timeframe.M5, ["2024-05", "2024-06-01..2024-06-03", "2024-06-03-live"]),
+        (Timeframe.M15, ["2024-01-01..2024-06-03", "2024-06-03-live"]),
+        (Timeframe.M30, ["2024-01-01..2024-06-03", "2024-06-03-live"]),
+    ],
+)
+async def test_alpaca_chunks_are_months_of_1min_and_5min_bars_and_years_of_longer_ones(
+    alpaca: AlpacaSource, timeframe: Timeframe, labels: list[str]
+) -> None:
+    plan = alpaca_plan(alpaca, timeframe, "2024-05-31", "2024-06-03T15:00")
+
+    assert [label for _, label, _, _ in plan] == labels
+
+
+@pytest.mark.anyio
 async def test_alpaca_daily_chunks_are_kept_only_until_extended_hours_are_final(
     alpaca: AlpacaSource,
 ) -> None:
