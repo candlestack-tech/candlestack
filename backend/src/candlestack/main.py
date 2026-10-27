@@ -7,12 +7,13 @@ from contextlib import asynccontextmanager, suppress
 from importlib.resources import files
 from typing import Any, override
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import HTMLResponse
 from scalar_fastapi import AgentScalarConfig, get_scalar_api_reference
 
 from candlestack.accounts import (
     AccountDeletionHook,
+    CurrentUserDep,
     accounts_router,
     dev_sign_in_allowed,
     dev_sign_in_router,
@@ -28,11 +29,12 @@ from candlestack.core import (
     get_settings,
     health_router,
     install_error_handlers,
+    problem_doc,
     sentry_check_router,
     setup_logging,
     setup_sentry,
 )
-from candlestack.data import DataService, build_data_service, data_router
+from candlestack.data import DataService, build_data_service, data_router, market_data_router
 from candlestack.experiments import BacktestRunner, backtests_router, model_usage
 from candlestack.jobs import JobClient, JobFiles, JobQueue
 from candlestack.ml import (
@@ -71,6 +73,7 @@ DOCS_CSS = (files("candlestack") / "docs_theme.css").read_text(encoding="utf-8")
 # The only environment with /api/debug/sentry-error, which fails on purpose to check Sentry:
 # stage, which is team-only (Cloudflare Access).
 SENTRY_CHECK_ENV = "stage"
+_NOT_SIGNED_IN = problem_doc(401, "Not signed in (`not-signed-in`).")
 
 
 class CandleStackAPI(FastAPI):
@@ -177,6 +180,11 @@ async def _background(service: DataService, *, stats: bool) -> AsyncIterator[Non
         yield
 
 
+async def _signed_in(_user: CurrentUserDep) -> None:
+    """401 ``not-signed-in`` without a session. Put on the market data here, as data and
+    accounts do not import each other; an account exists only for someone on the beta list."""
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Builds the app; `settings` default to the environment (``get_settings()``)."""
     settings = settings or get_settings()
@@ -205,6 +213,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(RequestContextMiddleware)
     install_error_handlers(app)
     app.include_router(health_router)
+    # Alpaca's terms do not let us show its market data to anyone on the internet.
+    app.include_router(
+        market_data_router, dependencies=[Depends(_signed_in)], responses=_NOT_SIGNED_IN
+    )
     app.include_router(data_router)
     app.include_router(accounts_router)
     app.include_router(models_router)

@@ -263,6 +263,8 @@ export interface paths {
          *
          *     When the instrument list of one market cannot be loaded, the other market is still
          *     searched and `unavailable` names the missing one; 503 when no market can be searched.
+         *
+         *     Needs a signed-in account.
          */
         get: operations["search_instruments_api_v1_data_instruments_get"];
         put?: never;
@@ -284,7 +286,7 @@ export interface paths {
          * Instrument detail
          * @description An instrument with its timeframes, available period and the candle limit: what a valid
          *     candle request can ask for. Counts against the per-minute limit of requests per client
-         *     address, like candle requests.
+         *     address, like candle requests. Needs a signed-in account.
          */
         get: operations["instrument_detail_api_v1_data_instruments__instrument_id__get"];
         put?: never;
@@ -310,7 +312,7 @@ export interface paths {
          *     Stocks have regular-session candles only (09:30-16:00 New York), aligned to the session
          *     open. Missing candles are never filled; `meta.gaps` reports them. Limits: `max_candles`
          *     expected candles per request (see the instrument detail) and a per-minute number of
-         *     candle and instrument requests per client address.
+         *     candle and instrument requests per client address. Needs a signed-in account.
          */
         get: operations["candles_api_v1_data_instruments__instrument_id__candles_get"];
         put?: never;
@@ -336,9 +338,33 @@ export interface paths {
          *     Logos are fetched once and kept for days: `Cache-Control` lets a browser keep a logo a day,
          *     the fallback an hour (a minute when logo.dev could not be asked, so a logo shows up as soon
          *     as it answers again). Not counted against the per-minute limit of candle and instrument
-         *     requests: a page of the list asks for one icon per row.
+         *     requests: a page of the list asks for one icon per row. Public: logos are not market data.
          */
         get: operations["instrument_icon_api_v1_data_instruments__instrument_id__icon_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data/top-instruments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Top instruments
+         * @description The five most traded instruments, as the first five items of the list without a query,
+         *     for the public home page. Public, unlike the list: only these few rows, the same for
+         *     everyone, kept a minute on the server and in the browser (`Cache-Control`).
+         *
+         *     503 when no market's instrument list can be loaded.
+         */
+        get: operations["top_instruments_api_v1_data_top_instruments_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2856,6 +2882,14 @@ export interface components {
          * @enum {string}
          */
         Timeframe: "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d";
+        /** TopInstrumentsOut */
+        TopInstrumentsOut: {
+            /**
+             * Items
+             * @description The most traded first.
+             */
+            items: components["schemas"]["InstrumentItemOut"][];
+        };
         /** TradeColumns */
         TradeColumns: {
             /**
@@ -3591,6 +3625,15 @@ export interface operations {
                     "application/json": components["schemas"]["InstrumentSearchOut"];
                 };
             };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Invalid parameters (`validation`). */
             422: {
                 headers: {
@@ -3639,6 +3682,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InstrumentDetailOut"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description The instrument is not in the catalog (`instrument-not-found`). */
@@ -3715,6 +3767,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CandlesOut"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description The instrument is not in the catalog (`instrument-not-found`). */
@@ -3799,6 +3860,44 @@ export interface operations {
             };
             /** @description Malformed instrument id (`validation`). */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    top_instruments_api_v1_data_top_instruments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopInstrumentsOut"];
+                };
+            };
+            /** @description The source sent data that failed validation (`source-data-invalid`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The source is down or our request budget for it is spent (`source-unavailable`); `Retry-After` when waiting helps. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

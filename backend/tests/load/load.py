@@ -4,8 +4,10 @@ Each user repeats one session: types a crypto base asset letter by letter into t
 (``/instruments?q=``), opens a result (``/instruments/{id}``), loads the candles the chart shows
 first (``/instruments/{id}/candles``) and scrolls back a few windows, with a pause between steps.
 Every user sends its own ``CF-Connecting-IP``, so the per-client rate limit counts it as one
-person, as it would behind Cloudflare. With ``--rate-limit-probe``, one more client sends
-detail requests without pause until it gets 429, and the backend must still answer afterwards.
+person, as it would behind Cloudflare. All share one session of the dev sign-in, as the market
+data is for signed-in accounts, so the backend must run with ``APP_ENV`` ``local``. With
+``--rate-limit-probe``, one more client sends detail requests without pause until it gets 429,
+and the backend must still answer afterwards.
 
 The report is Markdown on stdout: requests per second, latency percentiles and the answers
 per endpoint, the peak memory of ``--container`` (sampled with ``docker stats``) and the probe.
@@ -217,6 +219,9 @@ async def crypto_bases(client: httpx.AsyncClient) -> list[str]:
 async def main(args: argparse.Namespace) -> str:
     limits = httpx.Limits(max_connections=args.users + 2)
     async with httpx.AsyncClient(base_url=args.base_url, timeout=30, limits=limits) as client:
+        # The market data is for signed-in accounts: one session of the dev sign-in for all.
+        signed_in = await client.post("/api/v1/auth/dev", headers={"Sec-Fetch-Site": "same-origin"})
+        signed_in.raise_for_status()
         bases = await crypto_bases(client)
         stats = Stats()
         stop = asyncio.Event()

@@ -66,7 +66,9 @@ flowchart LR
 | --- | --- |
 | `GET /api/health` | liveness + Redis + Postgres; used by deploys and the ops page; not versioned |
 | `GET /api/health/sources` | reachability of Binance and Alpaca (cached 60 s) |
-| `GET /api/v1/data/...` | instruments and candles, see [data.md](data.md) |
+| `GET /api/v1/data/instruments`, `/instruments/{instrument_id}`, `/instruments/{instrument_id}/candles` | the instrument list, an instrument and its candles, for signed-in accounts only (401 `not-signed-in` otherwise), see [data.md](data.md) |
+| `GET /api/v1/data/instruments/{instrument_id}/icon` | the instrument's logo, or a fallback image; public ([data.md](data.md#icons)) |
+| `GET /api/v1/data/top-instruments` | the five most traded instruments for the home page, cached 60 s; public: these few rows only, not the list ([data.md](data.md#top-instruments)) |
 | `GET /api/v1/auth/{provider}/start?next=<path>` | sign-in with `github` or `google`: redirects to the provider, or to `/signin?error=failed` (provider not configured, too many sign-ins from the address); with `intent=connect` it adds a sign-in method to the signed-in user instead ([Accounts](#accounts)) |
 | `GET /api/v1/auth/{provider}/callback` | where the provider returns; sets the session cookie and redirects to `next` (default `/dashboard`), or to `/signin?error=denied` (not on the beta list) or `/signin?error=failed`; a connect returns to Settings instead; not in the API reference |
 | `GET /api/v1/auth/denied` | the account this browser was just turned away with (email, provider), for the sign-in page |
@@ -701,7 +703,8 @@ the ones whose folder exists while their code is being written.
   `from candlestack.data import DataService`, never `from candlestack.data.sources import ...`.
   The package root's `__init__.py` is the module's public API.
 - `candlestack.main` (builds the app) and `candlestack.openapi` (schema snapshot) wire the
-  modules together and may import any module root except `cli`.
+  modules together and may import any module root except `cli`. `main` puts the sign-in
+  check of `accounts` on the market data routes of `data`, which do not import each other.
 - Checked by import-linter (`uv run lint-imports`, contracts in `backend/pyproject.toml`) in
   the CI `lint` job.
 
@@ -859,7 +862,8 @@ to check that an error reaches Sentry. The Sentry settings are recorded in
 | Gaps are reported, never filled | filled candles would be invented prices |
 | Explicit limits instead of silent truncation (50000 candles, per-IP and per-source rate limits) | the client always gets exactly what it asked for or an error saying what to change |
 | A fingerprint over every candle set | later experiments can detect that a source changed its data |
-| Prod API and docs public (per-IP rate limit); stage behind Cloudflare Access | anyone can try the released API without an account; unreleased builds stay team-only |
+| Prod API and docs public (per-IP rate limit); stage behind Cloudflare Access | anyone can read the released API's reference; unreleased builds stay team-only |
+| Market data (the instrument list, an instrument, its candles) only for signed-in accounts; the icons and the home page's five top instruments public | Alpaca's terms let us use its data for ourselves, and showing it to anyone on the internet would need their notice and consent; an account exists only for someone on the beta list |
 | granian instead of uvicorn, ty instead of mypy, Polars instead of pandas | faster tools with the same role |
 | Coverage and TDD are team conventions, not CI gates | CI stays fast; test quality is checked in review |
 | Security headers at the edge, the Content-Security-Policy in report-only mode first; Trivy on every image in CI and weekly on what runs | the headers protect every page without app code; the policy's reports show what it would break before it blocks anything; the scans catch known vulnerabilities before a merge and after a release |

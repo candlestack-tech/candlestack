@@ -4600,6 +4600,23 @@
         "title": "Timeframe",
         "type": "string"
       },
+      "TopInstrumentsOut": {
+        "properties": {
+          "items": {
+            "description": "The most traded first.",
+            "items": {
+              "$ref": "#/components/schemas/InstrumentItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "TopInstrumentsOut",
+        "type": "object"
+      },
       "TradeColumns": {
         "properties": {
           "candles_held": {
@@ -5654,7 +5671,7 @@
     },
     "/api/v1/data/instruments": {
       "get": {
-        "description": "Searches the instruments of both markets: every Binance spot pair that is trading and\nevery active tradable US stock and ETF at Alpaca (without OTC). Each item carries its last\nprice, 24 h change and 24 h volume in USD, refreshed every few minutes, its last 10 daily\ncandles (`spark`), refreshed once a day (null without them), and the open time of its first\ncandle (`available_from`, null while not known yet).\n\nRanking: the top pair of a crypto base asset equal to the query (`btc` finds `BTCUSDT`\nfirst), exact symbol, the other pairs of that base asset, symbol prefix, prefix of a word\nin the name, substring of the symbol, substring of the name; ties go to `sort`, then to the\nshorter symbol, then alphabetically. Without `q`, every instrument comes back in `sort`:\nthe most traded first by default.\n`exchange` narrows any of these to the instruments that trade on it.\n`total` counts all matches: page through them with `offset` and `limit`.\n\nWhen the instrument list of one market cannot be loaded, the other market is still\nsearched and `unavailable` names the missing one; 503 when no market can be searched.",
+        "description": "Searches the instruments of both markets: every Binance spot pair that is trading and\nevery active tradable US stock and ETF at Alpaca (without OTC). Each item carries its last\nprice, 24 h change and 24 h volume in USD, refreshed every few minutes, its last 10 daily\ncandles (`spark`), refreshed once a day (null without them), and the open time of its first\ncandle (`available_from`, null while not known yet).\n\nRanking: the top pair of a crypto base asset equal to the query (`btc` finds `BTCUSDT`\nfirst), exact symbol, the other pairs of that base asset, symbol prefix, prefix of a word\nin the name, substring of the symbol, substring of the name; ties go to `sort`, then to the\nshorter symbol, then alphabetically. Without `q`, every instrument comes back in `sort`:\nthe most traded first by default.\n`exchange` narrows any of these to the instruments that trade on it.\n`total` counts all matches: page through them with `offset` and `limit`.\n\nWhen the instrument list of one market cannot be loaded, the other market is still\nsearched and `unavailable` names the missing one; 503 when no market can be searched.\n\nNeeds a signed-in account.",
         "operationId": "search_instruments_api_v1_data_instruments_get",
         "parameters": [
           {
@@ -5766,6 +5783,16 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`)."
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -5805,7 +5832,7 @@
     },
     "/api/v1/data/instruments/{instrument_id}": {
       "get": {
-        "description": "An instrument with its timeframes, available period and the candle limit: what a valid\ncandle request can ask for. Counts against the per-minute limit of requests per client\naddress, like candle requests.",
+        "description": "An instrument with its timeframes, available period and the candle limit: what a valid\ncandle request can ask for. Counts against the per-minute limit of requests per client\naddress, like candle requests. Needs a signed-in account.",
         "operationId": "instrument_detail_api_v1_data_instruments__instrument_id__get",
         "parameters": [
           {
@@ -5833,6 +5860,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`)."
           },
           "404": {
             "content": {
@@ -5893,7 +5930,7 @@
     },
     "/api/v1/data/instruments/{instrument_id}/candles": {
       "get": {
-        "description": "Closed candles of one instrument and timeframe: those with `start <= t < end`, or, without\n`start`, the last `limit` before `end`.\n\nStocks have regular-session candles only (09:30-16:00 New York), aligned to the session\nopen. Missing candles are never filled; `meta.gaps` reports them. Limits: `max_candles`\nexpected candles per request (see the instrument detail) and a per-minute number of\ncandle and instrument requests per client address.",
+        "description": "Closed candles of one instrument and timeframe: those with `start <= t < end`, or, without\n`start`, the last `limit` before `end`.\n\nStocks have regular-session candles only (09:30-16:00 New York), aligned to the session\nopen. Missing candles are never filled; `meta.gaps` reports them. Limits: `max_candles`\nexpected candles per request (see the instrument detail) and a per-minute number of\ncandle and instrument requests per client address. Needs a signed-in account.",
         "operationId": "candles_api_v1_data_instruments__instrument_id__candles_get",
         "parameters": [
           {
@@ -6020,6 +6057,16 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`)."
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -6079,7 +6126,7 @@
     },
     "/api/v1/data/instruments/{instrument_id}/icon": {
       "get": {
-        "description": "The instrument's logo from logo.dev (a stock by its ticker, a crypto pair by its base\nasset), or one fallback image when there is none, so an `<img>` always gets a picture.\n\nLogos are fetched once and kept for days: `Cache-Control` lets a browser keep a logo a day,\nthe fallback an hour (a minute when logo.dev could not be asked, so a logo shows up as soon\nas it answers again). Not counted against the per-minute limit of candle and instrument\nrequests: a page of the list asks for one icon per row.",
+        "description": "The instrument's logo from logo.dev (a stock by its ticker, a crypto pair by its base\nasset), or one fallback image when there is none, so an `<img>` always gets a picture.\n\nLogos are fetched once and kept for days: `Cache-Control` lets a browser keep a logo a day,\nthe fallback an hour (a minute when logo.dev could not be asked, so a logo shows up as soon\nas it answers again). Not counted against the per-minute limit of candle and instrument\nrequests: a page of the list asks for one icon per row. Public: logos are not market data.",
         "operationId": "instrument_icon_api_v1_data_instruments__instrument_id__icon_get",
         "parameters": [
           {
@@ -6149,6 +6196,48 @@
           }
         },
         "summary": "Instrument icon",
+        "tags": [
+          "data"
+        ]
+      }
+    },
+    "/api/v1/data/top-instruments": {
+      "get": {
+        "description": "The five most traded instruments, as the first five items of the list without a query,\nfor the public home page. Public, unlike the list: only these few rows, the same for\neveryone, kept a minute on the server and in the browser (`Cache-Control`).\n\n503 when no market's instrument list can be loaded.",
+        "operationId": "top_instruments_api_v1_data_top_instruments_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopInstrumentsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The source sent data that failed validation (`source-data-invalid`)."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The source is down or our request budget for it is spent (`source-unavailable`); `Retry-After` when waiting helps."
+          }
+        },
+        "summary": "Top instruments",
         "tags": [
           "data"
         ]

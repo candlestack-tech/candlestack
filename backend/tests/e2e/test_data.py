@@ -1,9 +1,11 @@
-"""The data API of the built image against the fake sources (mock_sources.py, tests/fixtures).
+"""The data API of the built image against the fake sources (mock_sources.py, tests/fixtures),
+signed in with the dev sign-in: the market data is for signed-in accounts only.
 
 Expected values come from the fixtures: BTCUSDT archives of 2024-01 (1h, 1d) and 2025-01 (1h,
 microsecond timestamps), AAPL IEX bars of 2024-06-03 and 2024-06-04 (1m) and June 2024 (1d).
 """
 
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -12,10 +14,19 @@ import pytest
 pytestmark = pytest.mark.e2e
 
 PROBLEMS = "https://candlestack.tech/problems/"
+ORIGIN = {"Origin": "http://testserver"}
 JAN_2024, FEB_2024 = 1704067200, 1706745600
 # 2024-06-03 and 2024-06-04 00:00 UTC; the session opens 09:30 New York = 13:30 UTC (EDT).
 JUNE_3, JUNE_4 = 1717372800, 1717459200
 JUNE_3_OPEN = JUNE_3 + 13 * 3600 + 1800
+
+
+@pytest.fixture(scope="module")
+def http(base_url: str) -> Iterator[httpx.Client]:
+    """One session for the module: the dev sign-in takes 20 sign-ins a minute per address."""
+    with httpx.Client(base_url=base_url, timeout=10) as client:
+        assert client.post("/api/v1/auth/dev", headers=ORIGIN).status_code == 204
+        yield client
 
 
 def candles(http: httpx.Client, *, instrument: str, **params: Any) -> httpx.Response:
