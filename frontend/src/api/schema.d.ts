@@ -263,6 +263,8 @@ export interface paths {
          *
          *     When the instrument list of one market cannot be loaded, the other market is still
          *     searched and `unavailable` names the missing one; 503 when no market can be searched.
+         *
+         *     Needs a signed-in account.
          */
         get: operations["search_instruments_api_v1_data_instruments_get"];
         put?: never;
@@ -284,7 +286,7 @@ export interface paths {
          * Instrument detail
          * @description An instrument with its timeframes, available period and the candle limit: what a valid
          *     candle request can ask for. Counts against the per-minute limit of requests per client
-         *     address, like candle requests.
+         *     address, like candle requests. Needs a signed-in account.
          */
         get: operations["instrument_detail_api_v1_data_instruments__instrument_id__get"];
         put?: never;
@@ -310,7 +312,7 @@ export interface paths {
          *     Stocks have regular-session candles only (09:30-16:00 New York), aligned to the session
          *     open. Missing candles are never filled; `meta.gaps` reports them. Limits: `max_candles`
          *     expected candles per request (see the instrument detail) and a per-minute number of
-         *     candle and instrument requests per client address.
+         *     candle and instrument requests per client address. Needs a signed-in account.
          */
         get: operations["candles_api_v1_data_instruments__instrument_id__candles_get"];
         put?: never;
@@ -336,7 +338,7 @@ export interface paths {
          *     Logos are fetched once and kept for days: `Cache-Control` lets a browser keep a logo a day,
          *     the fallback an hour (a minute when logo.dev could not be asked, so a logo shows up as soon
          *     as it answers again). Not counted against the per-minute limit of candle and instrument
-         *     requests: a page of the list asks for one icon per row.
+         *     requests: a page of the list asks for one icon per row. Public: logos are not market data.
          */
         get: operations["instrument_icon_api_v1_data_instruments__instrument_id__icon_get"];
         put?: never;
@@ -3591,6 +3593,15 @@ export interface operations {
                     "application/json": components["schemas"]["InstrumentSearchOut"];
                 };
             };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Invalid parameters (`validation`). */
             422: {
                 headers: {
@@ -3639,6 +3650,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InstrumentDetailOut"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description The instrument is not in the catalog (`instrument-not-found`). */
@@ -3715,6 +3735,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CandlesOut"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description The instrument is not in the catalog (`instrument-not-found`). */
