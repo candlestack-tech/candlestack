@@ -14,6 +14,9 @@ import {
   stubApi,
 } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
+import { charts } from '@/test/lightweightCharts';
+
+vi.mock('lightweight-charts', () => import('@/test/lightweightCharts'));
 
 const TWELVE = backtest({ starred: true, sharpe: 1.344 });
 const ELEVEN = failedBacktest({ id: 'bt_a2b3c4d5e6', number: 11, starred: true, created_at: '2026-10-16T22:10:00Z' });
@@ -46,6 +49,7 @@ const DRAFT = model({ id: 'mdl_q7r8s9t2u3', name: 'draft.keras', starred: true, 
 const TSMIXER = model({ starred: true, backtest_count: 10, best_sharpe: 1.34 });
 
 beforeEach(() => {
+  charts.reset();
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-10-17T16:00:00Z'));
   viewerIn('America/New_York');
@@ -203,11 +207,19 @@ describe('the dashboard of an account with backtests', () => {
     expect(starred.getByText('by Sharpe')).toBeDefined();
     const rows = starred.getAllByRole('button', { name: /^Unstar backtest/ }).map((star) => star.closest('div'));
     expect(rows.map((row) => row?.textContent)).toEqual([
-      '★#12AAPLMSFT+24.6 %blesk-novol-8.kerasTime windowsSharpe 1.34',
-      '★#11AAPLMSFTFailedblesk-novol-8.kerasTime windows',
+      '★#12AAPLMSFT+24.6 %blesk-novol-8.kerasSharpe 1.34',
+      '★#11AAPLMSFTFailedblesk-novol-8.keras',
     ]);
-    expect(rows[0]?.querySelectorAll('svg[aria-hidden="true"] path')).toHaveLength(3);
-    expect(rows[1]?.querySelector('svg[aria-hidden="true"]')).toBeNull();
+    // One tiny chart, of the finished backtest: its return in percent, on a baseline at zero.
+    const [line] = charts.of('Baseline');
+    expect(charts.of('Baseline')).toHaveLength(1);
+    expect(line?.options.baseValue).toEqual({ type: 'price', price: 0 });
+    expect(line?.data).toEqual(
+      TWELVE.equity?.strategy.map((value, index) => ({ time: index * 86400, value: value * 100 })),
+    );
+    expect(rows[0]?.querySelector('span[title*="keras"]')?.getAttribute('title')).toBe(
+      'blesk-novol-8.keras · Time windows',
+    );
     expect(rows.map((row) => row?.querySelector('svg[role="img"]')?.getAttribute('aria-label'))).toEqual([
       'Keras',
       'Keras',

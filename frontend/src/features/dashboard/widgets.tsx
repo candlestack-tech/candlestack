@@ -1,12 +1,7 @@
 import { Link } from '@tanstack/react-router';
 import type { ComponentProps } from 'react';
 
-import type { Backtest } from '@/api';
 import { DashboardCard } from '@/components/DashboardCard';
-import { returnTone } from '@/lib/results';
-import { cn } from '@/lib/utils';
-
-import { sparkPaths } from './sparkline';
 
 // The parts the dashboard's widgets share (mockups/app, ddDash).
 
@@ -47,21 +42,3 @@ export function MoreRow({ total, to }: { total: number; to: '/backtests' | '/mod
 // A row of a starred list (.dd-sr): the whole row lights up on hover and opens what it stands for.
 export const STARRED_ROW =
   'relative grid w-full items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors duration-150 hover:bg-muted motion-reduce:transition-none';
-
-// A small equity line, 72 × 24 px: the strategy in the colour of its return (green from zero, red
-// below) over a faint area, buy and hold a thin muted line behind it. A dashed line this small
-// broke into dots, and the accent made a loss look like a gain.
-export function Sparkline({ equity, total }: { equity: NonNullable<Backtest['equity']>; total: number }) {
-  const paths = sparkPaths(equity.strategy, equity.benchmark, 72, 24);
-  const up = returnTone(total) === 'up';
-  return (
-    <svg viewBox="0 0 72 24" aria-hidden="true" className="h-6 w-[72px] flex-none">
-      <path d={paths.benchmark} className="fill-none stroke-muted-foreground/60 stroke-[1.2]" />
-      <path d={paths.area} className={cn('stroke-none opacity-15', up ? 'fill-up' : 'fill-down')} />
-      <path
-        d={paths.strategy}
-        className={cn('fill-none stroke-[1.8] [stroke-linejoin:round]', up ? 'stroke-up' : 'stroke-down')}
-      />
-    </svg>
-  );
-}

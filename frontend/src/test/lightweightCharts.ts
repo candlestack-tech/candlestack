@@ -42,12 +42,13 @@ export const charts = {
 };
 
 export const AreaSeries = 'Area';
+export const BaselineSeries = 'Baseline';
 export const CandlestickSeries = 'Candlestick';
 export const HistogramSeries = 'Histogram';
 export const LineSeries = 'Line';
 export const ColorType = { Solid: 'solid' };
 export const CrosshairMode = { Normal: 0, Magnet: 1 };
-export const LineStyle = { Solid: 0, Dashed: 2 };
+export const LineStyle = { Solid: 0, Dotted: 1, Dashed: 2 };
 export const LineType = { Simple: 0, WithSteps: 1 };
 
 function addSeries(type: string, options: Options = {}, pane = 0) {
