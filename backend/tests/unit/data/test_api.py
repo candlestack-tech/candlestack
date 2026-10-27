@@ -144,6 +144,10 @@ class FakeDataService:
             firsts[offset : offset + limit],
         )
 
+    async def top(self) -> SearchResult:
+        self._called("top")
+        return SearchResult([BTCUSDT], [], 1, [BTCUSDT_STATS], [BTCUSDT_SPARK], [BTCUSDT_FIRST])
+
     async def instrument(self, instrument_id: InstrumentId) -> InstrumentInfo:
         self._called("instrument", instrument_id)
         if instrument_id != AAPL.id:
@@ -249,7 +253,10 @@ def test_market_data_answers_a_signed_in_account(client: TestClient, path: str) 
 
 
 @pytest.mark.usefixtures("signed_out")
-def test_the_icon_and_the_sources_health_need_no_session(client: TestClient) -> None:
+def test_the_top_instruments_the_icon_and_the_sources_health_need_no_session(
+    client: TestClient,
+) -> None:
+    assert client.get("/api/v1/data/top-instruments").status_code == 200
     assert client.get("/api/v1/data/instruments/stock:AAPL/icon").status_code == 200
     assert client.get("/api/health/sources").status_code == 200
 
@@ -433,6 +440,50 @@ def test_search_without_catalog(client: TestClient, service: FakeDataService) ->
     body = problem(response, 503, "source-unavailable")
     assert body["source"] == "alpaca"
     assert "retry-after" not in response.headers
+
+
+# --- top instruments ------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("signed_out")
+def test_top_instruments(
+    client: TestClient, service: FakeDataService, limiter: FakeLimiter
+) -> None:
+    response = client.get("/api/v1/data/top-instruments")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [
+            {
+                "id": "crypto:BTCUSDT",
+                "market": "crypto",
+                "symbol": "BTCUSDT",
+                "name": "BTC/USDT",
+                "source": "binance",
+                "feed": "spot",
+                "exchange": "BINANCE",
+                "base": "BTC",
+                "quote": "USDT",
+                "price": 83249.35,
+                "change_24h": 1.51,
+                "volume_24h": 1258811866.0,
+                "spark": [None, [1760313600, 115271.8, 115950.1, 113000.4, 115166.0]],
+                "available_from": 1502942400,
+            }
+        ]
+    }
+    assert response.headers["cache-control"] == "public, max-age=60"
+    assert service.calls == [("top", ())]
+    assert limiter.calls == []
+
+
+def test_top_instruments_without_catalog(client: TestClient, service: FakeDataService) -> None:
+    service.error = SourceUnavailable("binance", "Binance did not answer in time. Try again later.")
+
+    response = client.get("/api/v1/data/top-instruments")
+
+    problem(response, 503, "source-unavailable")
+    assert "cache-control" not in response.headers
 
 
 # --- instrument detail ----------------------------------------------------------------------
@@ -1095,14 +1146,26 @@ def test_openapi_documents_the_data_api(client: TestClient) -> None:
     for operation in (search, detail, candles):
         assert "not-signed-in" in operation["responses"]["401"]["description"]
         assert "Needs a signed-in account." in operation["description"]
-    icon = paths["/api/v1/data/instruments/{instrument_id}/icon"]["get"]
-    assert "401" not in icon["responses"]
     assert set(paths) >= {
         "/api/v1/data/instruments",
         "/api/v1/data/instruments/{instrument_id}",
         "/api/health/sources",
     }
     assert paths["/api/health/sources"]["get"]["tags"] == ["health"]
+
+
+def test_openapi_documents_the_public_data_routes(client: TestClient) -> None:
+    paths = client.get("/api/v1/openapi.json").json()["paths"]
+
+    icon = paths["/api/v1/data/instruments/{instrument_id}/icon"]["get"]
+    top = paths["/api/v1/data/top-instruments"]["get"]
+    assert set(top["responses"]) == {"200", "502", "503"}
+    assert top["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/TopInstrumentsOut"
+    }
+    for operation in (icon, top):
+        assert "401" not in operation["responses"]
+        assert "Public" in operation["description"]
 
 
 def test_candles_json_matches_the_documented_model() -> None:

@@ -85,6 +85,9 @@ RESAMPLE_CHUNKS = 12
 HEALTH_TTL = 60
 # How often the background task looks for stats that are due (StatsStore.REFRESH_SECONDS).
 STATS_CHECK_SECONDS = 60
+# The public home page's few instruments, and how long one answer is kept in memory.
+TOP_COUNT = 5
+TOP_SECONDS = 60
 
 # Patched by tests to move the clock.
 _time = time.time
@@ -143,6 +146,8 @@ class DataService:
         self._stats = stats
         self._sparks = sparks
         self._firsts = firsts
+        # The newest top instruments and until when they are kept (``top``).
+        self._top: tuple[SearchResult, float] | None = None
 
     async def search(
         self,
@@ -182,6 +187,19 @@ class DataService:
         sparks = await self._sparks.sparks(found.items)
         firsts = await self._firsts.known(found.items)
         return SearchResult(found.items, unavailable, found.total, found.stats, sparks, firsts)
+
+    async def top(self) -> SearchResult:
+        """The ``TOP_COUNT`` most traded instruments (the first page of the list without a
+        query) for the public home page, kept ``TOP_SECONDS`` in memory, so public requests do
+        not sort the catalog each time. A page without a market is not kept: the next request
+        tries again."""
+        now = _time()
+        if self._top is not None and now < self._top[1]:
+            return self._top[0]
+        found = await self.search(None, limit=TOP_COUNT)
+        if not found.unavailable:
+            self._top = (found, now + TOP_SECONDS)
+        return found
 
     async def close(self) -> None:
         """Stops what requests left running in the background (on shutdown)."""

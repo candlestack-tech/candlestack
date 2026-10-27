@@ -9,7 +9,8 @@ The market data is for signed-in accounts only: the instrument list, an instrume
 candles answer 401 `not-signed-in` without a session, as the routes of the signed-in user do
 (an account exists only for someone on the beta list). Alpaca's terms let us use its data for
 ourselves; showing it to anyone on the internet would need their notice and consent. The icons
-and `/api/health/sources` stay public: a logo is not market data.
+and `/api/health/sources` stay public: a logo is not market data. So do the few rows of the
+public home page ([Top instruments](#top-instruments)), not the list.
 
 ## Sources
 
@@ -125,6 +126,17 @@ source:
 - `max_candles`: `CANDLES_MAX`.
 
 Values in the examples of this document are illustrative.
+
+### Top instruments
+
+`GET /api/v1/data/top-instruments` returns the five most traded instruments for the public home
+page, `{"items": [<instrument>, ...]}`, each an item of the list as above: the first page of
+`GET /api/v1/data/instruments?limit=5`. It needs no session: it is these few rows only, the same
+for everyone, never a search or a page of the list. Each process keeps the answer in memory for
+60 s, so public requests do not sort the catalog each time (an answer without one market is not
+kept, so it is complete again once that market loads), and `Cache-Control: public, max-age=60`
+lets a browser keep it as long. It does not count against the client rate limit; 503
+`source-unavailable` when no market's catalog can be loaded.
 
 ### First candles in the list
 
@@ -426,7 +438,7 @@ Requests are checked in this order; the first failure is the answer.
 
 | Check | Error |
 | --- | --- |
-| a signed-in account (not for the icon) | 401 `not-signed-in` |
+| a signed-in account (not for the icon or the top instruments) | 401 `not-signed-in` |
 | client rate limit | 429 `rate-limited` |
 | parameters present and well-formed: instrument id, timeframe from the list, `start` (or `limit`) and `end` as epoch seconds or ISO 8601, `limit` 1 to 5000 and not together with `start`, `start < end` | 422 `validation` |
 | instrument in the catalog | 404 `instrument-not-found` |
@@ -584,7 +596,8 @@ again. Keys:
   A background load (a backtest's candles) does not take a kept error that waiting helps (one
   with `Retry-After`); it fetches itself (see [Limits](#limits)).
 - The catalogs are also kept in process memory for search (about 15k instruments, a search takes
-  a few ms). A process whose copy is older than 24 h first adopts a newer list from Redis.
+  a few ms). A process whose copy is older than 24 h first adopts a newer list from Redis. The
+  top instruments are kept in process memory for 60 s ([Top instruments](#top-instruments)).
 - When Redis fails, values are fetched from the source and not cached for 5 s at a time; a
   Redis failure never fails a request by itself.
 - The version (`v1`, `v2`, ...) is per key family, or per family and market, and changes when
@@ -708,7 +721,7 @@ RFC 9457 `application/problem+json`, `type` `https://candlestack.tech/problems/<
 
 | Status | Slug | When | Extensions |
 | --- | --- | --- | --- |
-| 401 | `not-signed-in` | no session came with the request, or it ended (not for the icon) | |
+| 401 | `not-signed-in` | no session came with the request, or it ended (not for the icon or the top instruments) | |
 | 404 | `instrument-not-found` | the id is not in the catalog | `instrument` |
 | 422 | `validation` | missing or malformed parameters | `errors`: one `{loc, msg, type}` per bad parameter |
 | 422 | `period-out-of-range` | `start` before `available_from`, or `end` in the future | `instrument`, `timeframe`, `available_from`, `available_to` |

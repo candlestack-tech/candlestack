@@ -371,6 +371,7 @@ only warns when it fails):
 | `access` | stage only: `/api/health` without the Access token gets Access (a redirect to its login, or 401/403), not the app |
 | `sources` | `/api/health/sources`: Binance and Alpaca reachable |
 | `search`, `instruments`, `candles` | the instrument list (with and without `q`), the detail of `crypto:BTCUSDT` and `stock:AAPL` and their 1h candles of 2024-06-03 answer 401 `not-signed-in`: the market data is for signed-in accounts only, and the smoke test has no session |
+| `top` | `/api/v1/data/top-instruments` answers 200 with one to five instruments without a session: the home page's few rows are public |
 | `icon` | the icon of `stock:AAPL` answers 200 with an image without a session |
 
 The stage deployment also reloads the edge Caddy, which serves prod too, so right after that it

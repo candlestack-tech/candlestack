@@ -3,7 +3,8 @@
 The routes validate parameters, ask the ``DataService`` and turn its errors into problem
 details (docs/data.md, "Errors"). The service lives on ``app.state.data_service``. The market
 data itself (``market``: the list, an instrument, its candles) is for signed-in accounts only:
-``candlestack.main`` adds that check, as data does not know accounts.
+``candlestack.main`` adds that check, as data does not know accounts. The home page's few top
+instruments and the icons are public.
 """
 
 import logging
@@ -38,15 +39,17 @@ from candlestack.data.schemas import (
     InstrumentItemOut,
     InstrumentSearchOut,
     SourcesHealthOut,
+    TopInstrumentsOut,
     candles_json,
 )
-from candlestack.data.service import DataService
+from candlestack.data.service import TOP_SECONDS, DataService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 # Alpaca's terms do not let us show its data to anyone on the internet: candlestack.main lets
-# only signed-in accounts call these. The icons stay public (logos, not market data).
+# only signed-in accounts call these. The home page's few top instruments and the icons (logos,
+# not market data) stay public.
 market = APIRouter(prefix="/api/v1/data", tags=["data"])
 data = APIRouter(prefix="/api/v1/data", tags=["data"])
 health = APIRouter(tags=["health"])
@@ -455,6 +458,30 @@ async def candles(  # noqa: PLR0913 (a query parameter each, the settings and th
     for cookie in response.headers.getlist("set-cookie"):
         sent.headers.append("set-cookie", cookie)
     return sent
+
+
+@data.get(
+    "/top-instruments",
+    summary="Top instruments",
+    responses=_errors(_SOURCE_ERRORS),
+)
+async def top_instruments(service: DataServiceDep, response: Response) -> TopInstrumentsOut:
+    """The five most traded instruments, as the first five items of the list without a query,
+    for the public home page. Public, unlike the list: only these few rows, the same for
+    everyone, kept a minute on the server and in the browser (`Cache-Control`).
+
+    503 when no market's instrument list can be loaded."""
+    with problems():
+        found = await service.top()
+    response.headers["Cache-Control"] = f"public, max-age={TOP_SECONDS}"
+    return TopInstrumentsOut(
+        items=[
+            InstrumentItemOut.of_item(item, stats, spark, first)
+            for item, stats, spark, first in zip(
+                found.items, found.stats, found.sparks, found.firsts, strict=True
+            )
+        ]
+    )
 
 
 _IMAGE = {"schema": {"type": "string", "format": "binary"}}

@@ -4600,6 +4600,23 @@
         "title": "Timeframe",
         "type": "string"
       },
+      "TopInstrumentsOut": {
+        "properties": {
+          "items": {
+            "description": "The most traded first.",
+            "items": {
+              "$ref": "#/components/schemas/InstrumentItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "TopInstrumentsOut",
+        "type": "object"
+      },
       "TradeColumns": {
         "properties": {
           "candles_held": {
@@ -6179,6 +6196,48 @@
           }
         },
         "summary": "Instrument icon",
+        "tags": [
+          "data"
+        ]
+      }
+    },
+    "/api/v1/data/top-instruments": {
+      "get": {
+        "description": "The five most traded instruments, as the first five items of the list without a query,\nfor the public home page. Public, unlike the list: only these few rows, the same for\neveryone, kept a minute on the server and in the browser (`Cache-Control`).\n\n503 when no market's instrument list can be loaded.",
+        "operationId": "top_instruments_api_v1_data_top_instruments_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopInstrumentsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The source sent data that failed validation (`source-data-invalid`)."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The source is down or our request budget for it is spent (`source-unavailable`); `Retry-After` when waiting helps."
+          }
+        },
+        "summary": "Top instruments",
         "tags": [
           "data"
         ]

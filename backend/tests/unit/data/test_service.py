@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import cast
+from typing import Any, cast
 
 import polars as pl
 import pytest
@@ -8,6 +8,8 @@ import candlestack.data.service as service_module
 from candlestack.data import (
     CANDLE_SCHEMA,
     InstrumentId,
+    Market,
+    SearchResult,
     Session,
     Timeframe,
     resample_sessions,
@@ -17,6 +19,7 @@ from candlestack.data import (
 from candlestack.data.cache import decode_chunk, encode_chunk
 from candlestack.data.service import (
     CandleRequest,
+    DataService,
     assemble,
     bin_open,
     daily_close,
@@ -188,3 +191,52 @@ def test_assemble_knows_candles_only_up_to_the_live_fetch() -> None:
     # Around the clock there is no session to be the last candle of.
     assert result.session_last is None
     assert result.marked_frame() is result.frame
+
+
+def searching(results: list[SearchResult]) -> tuple[DataService, list[dict[str, Any]]]:
+    """A DataService whose ``search`` answers ``results`` in turn, and the calls it got; ``top``
+    needs nothing else."""
+    parts: Any = None
+    service = DataService(
+        sources={},
+        cache=parts,
+        catalogs=parts,
+        icons=parts,
+        candles_max=50000,
+        stats=parts,
+        sparks=parts,
+        firsts=parts,
+    )
+    calls: list[dict[str, Any]] = []
+
+    async def search(q: str | None, **options: Any) -> SearchResult:
+        calls.append({"q": q, **options})
+        return results[len(calls) - 1]
+
+    service.search = search  # ty: ignore[invalid-assignment]
+    return service, calls
+
+
+@pytest.mark.anyio
+async def test_top_is_kept_a_minute(monkeypatch: pytest.MonkeyPatch) -> None:
+    first, second = SearchResult([], [], 0, [], [], []), SearchResult([], [], 1, [], [], [])
+    service, calls = searching([first, second])
+    monkeypatch.setattr(service_module, "_time", lambda: 1000.0)
+
+    assert await service.top() is first
+    monkeypatch.setattr(service_module, "_time", lambda: 1059.0)
+    assert await service.top() is first
+    monkeypatch.setattr(service_module, "_time", lambda: 1060.0)
+    assert await service.top() is second
+    assert calls == [{"q": None, "limit": 5}, {"q": None, "limit": 5}]
+
+
+@pytest.mark.anyio
+async def test_top_without_a_market_is_not_kept() -> None:
+    partial = SearchResult([], [Market.STOCK], 0, [], [], [])
+    full = SearchResult([], [], 0, [], [], [])
+    service, calls = searching([partial, full])
+
+    assert await service.top() is partial
+    assert await service.top() is full
+    assert len(calls) == 2

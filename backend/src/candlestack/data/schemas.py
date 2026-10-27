@@ -140,6 +140,10 @@ class InstrumentSearchOut(BaseModel):
     )
 
 
+class TopInstrumentsOut(BaseModel):
+    items: list[InstrumentItemOut] = Field(description="The most traded first.")
+
+
 class InstrumentDetailOut(InstrumentOut):
     """An instrument and what a valid candle request for it can ask for."""
 

@@ -8,12 +8,13 @@
 # message that says what was expected; what it prints on success is shown after "ok". All
 # checks run; the script fails if any failed. To add one, write the function and append its
 # name to CHECKS. The market data is for signed-in accounts only and the smoke test cannot sign
-# in, so its checks expect the not-signed-in problem: they never reach the sources. The icon is
-# public: its check goes through the deployed API to logo.dev.
+# in, so its checks expect the not-signed-in problem: they never reach the sources. The home
+# page's top instruments and the icon are public: the icon's check goes through the deployed API
+# to logo.dev.
 # shellcheck disable=SC2329 # the checks are called by name from the loop at the end
 set -euo pipefail
 
-CHECKS=(health openapi docs frontend headers access sources search instruments candles icon)
+CHECKS=(health openapi docs frontend headers access sources search instruments candles top icon)
 
 base=${1:?usage: smoke.sh <base-url>}
 base=${base%/}
@@ -151,6 +152,15 @@ check_instruments() {
 check_candles() {
   not_signed_in '/api/v1/data/instruments/crypto:BTCUSDT/candles?timeframe=1h&start=2024-06-03&end=2024-06-04'
   not_signed_in '/api/v1/data/instruments/stock:AAPL/candles?timeframe=1h&start=2024-06-03&end=2024-06-04'
+}
+
+# The home page's few instruments, without a session: public, unlike the list.
+check_top() {
+  get /api/v1/data/top-instruments
+  expect 200 application/json
+  jq -e '.items | length >= 1 and length <= 5' <<<"$body" >/dev/null ||
+    fail "not one to five instruments: ${body:0:300}"
+  jq -r '[.items[].id] | join(" ")' <<<"$body"
 }
 
 # The logo or the fallback image, without a session: the icons are public. Not through get, which

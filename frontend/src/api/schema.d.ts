@@ -349,6 +349,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/data/top-instruments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Top instruments
+         * @description The five most traded instruments, as the first five items of the list without a query,
+         *     for the public home page. Public, unlike the list: only these few rows, the same for
+         *     everyone, kept a minute on the server and in the browser (`Cache-Control`).
+         *
+         *     503 when no market's instrument list can be loaded.
+         */
+        get: operations["top_instruments_api_v1_data_top_instruments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me": {
         parameters: {
             query?: never;
@@ -2858,6 +2882,14 @@ export interface components {
          * @enum {string}
          */
         Timeframe: "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d";
+        /** TopInstrumentsOut */
+        TopInstrumentsOut: {
+            /**
+             * Items
+             * @description The most traded first.
+             */
+            items: components["schemas"]["InstrumentItemOut"][];
+        };
         /** TradeColumns */
         TradeColumns: {
             /**
@@ -3828,6 +3860,44 @@ export interface operations {
             };
             /** @description Malformed instrument id (`validation`). */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    top_instruments_api_v1_data_top_instruments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopInstrumentsOut"];
+                };
+            };
+            /** @description The source sent data that failed validation (`source-data-invalid`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The source is down or our request budget for it is spent (`source-unavailable`); `Retry-After` when waiting helps. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
