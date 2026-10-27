@@ -64,30 +64,62 @@ function near(view: View, range: View): boolean {
   return Math.abs(view.from - range.from) <= room && Math.abs(view.to - range.to) <= room;
 }
 
-// The candles' times, what lies on them and what the chart draws.
-function useDrawn(frame: PriceFrame | undefined, series: Series, trades: readonly TradeRow[]) {
-  const candles = useMemo<Candles | undefined>(
-    () => frame && { times: frame.bars.map((bar) => bar.time), end: frame.end },
-    [frame],
-  );
+// The candles' times, what lies on them and what the chart draws. Without candles, when they
+// did not load, the document's own rows stand in for them: the strategy, buy and hold and the
+// drawdown need nothing else.
+function useDrawn(
+  frame: PriceFrame | undefined,
+  failed: boolean,
+  run: Run,
+  series: Series,
+  trades: readonly TradeRow[],
+) {
+  const candles = useMemo<Candles | undefined>(() => {
+    if (frame) return { times: frame.bars.map((bar) => bar.time), end: frame.end };
+    const { ts } = series.columns;
+    return failed && ts.length > 0 ? { times: ts, end: (ts.at(-1) ?? 0) + run.seconds } : undefined;
+  }, [frame, failed, run, series]);
   const returns = useMemo(() => candles && returnsOn(candles, series), [candles, series]);
   const drawn = useMemo<Frame | undefined>(
     () =>
-      frame &&
       candles &&
       returns && {
-        bars: frame.bars,
+        bars: frame?.bars ?? [],
+        times: candles.times,
+        seconds: frame ? LEVEL_SECONDS[frame.level] : run.seconds,
         bands: positionBands(candles, trades),
         strategy: percentPoints(candles.times, returns.strategy),
         benchmark: returns.benchmark && percentPoints(candles.times, returns.benchmark),
-        decimals: priceDecimals(frame.bars.at(-1)?.close ?? 0),
+        decimals: priceDecimals(frame?.bars.at(-1)?.close ?? 0),
       },
-    [frame, candles, returns, trades],
+    [frame, run, candles, returns, trades],
   );
   return { candles, returns, drawn };
 }
 
 type Target = View & { level: Level };
+
+// The user's own zooming or scrolling (a wheel, a drag, a swipe) drops the target still waiting.
+function useDropOnUserMove(view: TradesChartView | null, pending: { current: Target | null }) {
+  useEffect(() => {
+    if (!view) return;
+    const element = view.chart.chartElement();
+    const drop = () => {
+      pending.current = null;
+    };
+    const onDrag = (event: PointerEvent) => {
+      if (event.buttons !== 0) drop();
+    };
+    element.addEventListener('wheel', drop, { passive: true });
+    element.addEventListener('pointermove', onDrag);
+    element.addEventListener('touchmove', drop, { passive: true });
+    return () => {
+      element.removeEventListener('wheel', drop);
+      element.removeEventListener('pointermove', onDrag);
+      element.removeEventListener('touchmove', drop);
+    };
+  }, [view, pending]);
+}
 
 // Going to a part of time: at once while the candles shown cover it, else once the right ones
 // are in (the frame effect shows it then).
@@ -97,11 +129,13 @@ function useGoTo(view: TradesChartView | null, frame: PriceFrame | undefined, ru
   useEffect(() => {
     shown.current = frame;
   }, [frame]);
+  useDropOnUserMove(view, pending);
   const goTo = useCallback(
     (target: View) => {
       const now = shown.current;
       const level = pickLevel(target.to - target.from, run.levels, now?.level ?? coarsest(run), run.source.market);
       if (view && now?.level === level && now.start <= target.from && now.end >= target.to) {
+        pending.current = null;
         view.show(target);
         return;
       }
@@ -137,9 +171,9 @@ function useFrameOnChart(
     first.current = onFirst;
   }, [onFirst]);
   useEffect(() => {
-    if (!view || !drawn || !frame) return;
-    view.setFrame(drawn, take(frame.level));
-    if (!opened.current) {
+    if (!view || !drawn) return;
+    view.setFrame(drawn, frame ? take(frame.level) : null);
+    if (frame && !opened.current) {
       opened.current = true;
       first.current();
     }
@@ -147,20 +181,22 @@ function useFrameOnChart(
 }
 
 // Once the chart stopped moving: other candles when the span in view wants another size or the
-// view reached past the blocks around it.
+// view reached past the blocks around it. Not while a target waits for its candles: the chart
+// only moved there by itself (the first candles came in), and the user's own move drops it.
 function useLoadOnMove(
   visible: View | null,
   current: () => PriceFrame | undefined,
+  waiting: () => boolean,
   run: Run,
   setWant: (want: Want) => void,
 ) {
   const settled = useDebouncedValue(visible, SETTLE_MS);
   useEffect(() => {
     const frame = current();
-    if (!settled || !frame) return;
+    if (!settled || !frame || waiting()) return;
     const next = nextWant({ start: settled.from, end: settled.to }, frame, run.levels, run.source);
     if (next) setWant(next);
-  }, [settled, current, run, setWant]);
+  }, [settled, current, waiting, run, setWant]);
 }
 
 // The range the chart was put on: a pick goes there, a move of the user's own leaves it. A range
@@ -197,12 +233,12 @@ export function useChartNavigation(doc: BacktestDocument, series: Series, trades
   const level = frame?.level ?? want.level;
   const style = useDateStyle();
   const { container, view } = useChartView(style, LEVEL_SECONDS[level] >= DAY);
-  const { candles, returns, drawn } = useDrawn(frame, series, trades);
-  const events = useChartEvents(view, { candles, seconds: LEVEL_SECONDS[level] });
+  const { candles, returns, drawn } = useDrawn(frame, prices.failed, run, series, trades);
+  const events = useChartEvents(view, { candles, seconds: drawn?.seconds ?? LEVEL_SECONDS[level] });
   const { goTo, take, waiting, current } = useGoTo(view, frame, run, setWant);
   const { range, setRange, pick } = useRange(goTo, run, events.visible, waiting);
   useFrameOnChart(view, drawn, frame, take, () => pick('1M'));
-  useLoadOnMove(events.visible, current, run, setWant);
+  useLoadOnMove(events.visible, current, waiting, run, setWant);
   return {
     run,
     prices,

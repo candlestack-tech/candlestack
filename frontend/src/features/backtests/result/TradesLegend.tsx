@@ -88,7 +88,7 @@ function Key({ inView }: { inView: number }) {
       </span>
       <span>
         · {formatCount(inView)} {inView === 1 ? 'trade' : 'trades'} in view
-        {inView > DENSE_MOST && ', zoom in or pick 1M to see each one'}
+        {inView > DENSE_MOST && ', zoom in to see each one'}
       </span>
     </span>
   );
@@ -151,6 +151,8 @@ function LineToggle({ label, swatch, tone, line }: { label: string; swatch: stri
     <button
       type="button"
       aria-pressed={line.on}
+      // The name stays the line's: the value under it changes with the cursor.
+      aria-label={label}
       title="Show or hide"
       onClick={line.onToggle}
       className={cn(

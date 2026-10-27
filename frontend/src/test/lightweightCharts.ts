@@ -22,8 +22,11 @@ export const charts = {
   made: 0,
   options: [] as Options[],
   series: [] as FakeSeries[],
+  // The parts of time the chart was put on, `[from, to)`.
   shown: [] as { from: number; to: number }[],
   crosshair: [] as Handler[],
+  // The user zooming or scrolling the last chart made to a logical range.
+  scroll: (_range: { from: number; to: number }) => {},
   reset() {
     Object.assign(charts, { made: 0, options: [], series: [], shown: [], crosshair: [] });
   },
@@ -61,20 +64,72 @@ function addSeries(type: string, options: Options = {}, pane = 0) {
   };
 }
 
-export function createChart(_box: HTMLElement, options: Options) {
+// The time points: those of the candles, else of the strategy (the candles did not load).
+function points(): Point[] {
+  const candles = charts.series.find((series) => series.type === 'Candlestick')?.data ?? [];
+  if (candles.length > 0) return candles;
+  return charts.series.find((series) => series.pane === 1 && series.data.length > 0)?.data ?? [];
+}
+
+// A logical position as a time, on candles evenly apart as the tests have them.
+function timeOf(position: number): number {
+  const [first, second] = points();
+  return (first?.time ?? 0) + position * ((second?.time ?? 0) - (first?.time ?? 0));
+}
+
+// One chart's time axis: the logical range in view, the parts of time it was put on recorded.
+function timeAxis() {
+  const ranges: RangeHandler[] = [];
+  let logical: { from: number; to: number } | null = null;
+  const moved = () => {
+    for (const handler of ranges) handler();
+  };
+  const setRange = (range: { from: number; to: number }) => {
+    logical = range;
+    charts.shown.push({ from: timeOf(range.from), to: timeOf(range.to + 1) });
+    moved();
+  };
+  // The first candles show all of them, as the real chart shows its last ones.
+  const showFirst = (count: number) => {
+    if (logical || count === 0) return;
+    logical = { from: 0, to: count - 1 };
+    moved();
+  };
+  const scroll = (range: { from: number; to: number }) => {
+    logical = range;
+    moved();
+  };
+  const api = {
+    getVisibleLogicalRange: () => logical,
+    setVisibleLogicalRange: setRange,
+    fitContent: () => setRange({ from: 0, to: points().length - 1 }),
+    subscribeVisibleLogicalRangeChange: (handler: RangeHandler) => ranges.push(handler),
+    unsubscribeVisibleLogicalRangeChange: vi.fn(),
+    subscribeSizeChange: vi.fn(),
+    unsubscribeSizeChange: vi.fn(),
+  };
+  return { api, showFirst, scroll };
+}
+
+export function createChart(box: HTMLElement, options: Options) {
   charts.made += 1;
   charts.options.push(options);
-  const ranges: RangeHandler[] = [];
-  let shown: { from: number; to: number } | null = null;
-  const candles = () => charts.series.find((series) => series.type === 'Candlestick')?.data ?? [];
-  // The candle at or after a time, the last one past them.
-  const indexOf = (time: number) => {
-    const index = candles().findIndex((point) => point.time >= time);
-    return index < 0 ? candles().length - 1 : index;
-  };
+  const axis = timeAxis();
+  charts.scroll = axis.scroll;
   return {
     applyOptions: vi.fn(),
-    addSeries,
+    addSeries: (type: string, options?: Options, pane?: number) => {
+      const series = addSeries(type, options, pane);
+      if (type !== 'Candlestick') return series;
+      const setData = series.setData;
+      series.setData = (data: Point[]) => {
+        setData(data);
+        axis.showFirst(data.length);
+        return data;
+      };
+      return series;
+    },
+    chartElement: () => box,
     priceScale: () => ({ applyOptions: vi.fn() }),
     panes: () => [
       { setHeight: vi.fn(), getHeight: () => 300 },
@@ -82,19 +137,7 @@ export function createChart(_box: HTMLElement, options: Options) {
     ],
     subscribeCrosshairMove: (handler: Handler) => charts.crosshair.push(handler),
     unsubscribeCrosshairMove: vi.fn(),
-    timeScale: () => ({
-      getVisibleRange: () => shown,
-      getVisibleLogicalRange: () => shown && { from: indexOf(shown.from), to: indexOf(shown.to) },
-      setVisibleRange: (range: { from: number; to: number }) => {
-        shown = range;
-        charts.shown.push(range);
-        for (const handler of ranges) handler();
-      },
-      subscribeVisibleLogicalRangeChange: (handler: RangeHandler) => ranges.push(handler),
-      unsubscribeVisibleLogicalRangeChange: vi.fn(),
-      subscribeSizeChange: vi.fn(),
-      unsubscribeSizeChange: vi.fn(),
-    }),
+    timeScale: () => axis.api,
     remove: vi.fn(),
   };
 }

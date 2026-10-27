@@ -8,12 +8,15 @@ import {
   TEXT_MOST,
   candleAt,
   chartTrades,
+  logicalAtTime,
+  logicalOfTimes,
   marksIn,
   onCandles,
   percentPoints,
   positionBands,
   returnsOn,
   timeAtLogical,
+  timesOfLogical,
   tradeAt,
   tradeRows,
   tradeView,
@@ -215,5 +218,27 @@ describe('the view', () => {
     expect(timeAtLogical(CANDLES.times, -2, HOUR)).toBe(-2 * HOUR);
     expect(timeAtLogical(CANDLES.times, 12, HOUR)).toBe(12 * HOUR);
     expect(timeAtLogical([], 5, HOUR)).toBe(5 * HOUR);
+  });
+
+  it('turns a time into a logical position, between candles in proportion and past them', () => {
+    expect(logicalAtTime(CANDLES.times, 3 * HOUR, HOUR)).toBe(3);
+    expect(logicalAtTime(CANDLES.times, -4 * HOUR, HOUR)).toBe(-4);
+    expect(logicalAtTime(CANDLES.times, 15 * HOUR, HOUR)).toBe(15);
+    // A night between two sessions: halfway through it is halfway between the candles.
+    expect(logicalAtTime([0, HOUR, 13 * HOUR], 7 * HOUR, HOUR)).toBe(1.5);
+    expect(logicalAtTime([], 5 * HOUR, HOUR)).toBe(5);
+  });
+
+  it('keeps a view with blank parts through the logical range and back', () => {
+    // The left half of the chart before the first candle.
+    const range = { from: -10, to: 9 };
+    const view = timesOfLogical(CANDLES.times, range, HOUR);
+    expect(view).toEqual({ from: -10 * HOUR, to: 10 * HOUR });
+    expect(logicalOfTimes(CANDLES.times, view, HOUR)).toEqual(range);
+    // On other candles, the same part of time.
+    const finer = Array.from({ length: 40 }, (_, index) => (index - 20) * HOUR);
+    expect(logicalOfTimes(finer, view, HOUR)).toEqual({ from: 10, to: 29 });
+    // A view shorter than a candle is one candle wide, not reversed.
+    expect(logicalOfTimes(CANDLES.times, { from: 3 * HOUR, to: 3 * HOUR + 60 }, HOUR)).toEqual({ from: 3, to: 3 });
   });
 });

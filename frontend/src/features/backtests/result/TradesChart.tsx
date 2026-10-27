@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import type { BacktestDocument } from '@/api';
+import { exchangeLabel, type BacktestDocument } from '@/api';
 import { HINT } from '@/components/Hint';
 import { cn } from '@/lib/utils';
 
@@ -92,12 +92,18 @@ function useTradeMarks(
   return marked.inView;
 }
 
+// The candle under the cursor, else the last.
+function candleIndex({ candles, events }: Chart): number {
+  if (!candles) return -1;
+  const index = events.cursor === null ? -1 : candleAt(candles, events.cursor);
+  return index >= 0 ? index : candles.times.length - 1;
+}
+
 // What the legends show: the candle under the cursor, else the last, and the returns at it.
 function legendAt(chart: Chart) {
-  const { frame, candles, returns, events } = chart;
+  const { frame, returns } = chart;
   const bars = frame?.bars ?? [];
-  const index = candles && events.cursor !== null ? candleAt(candles, events.cursor) : -1;
-  const at = index >= 0 ? index : bars.length - 1;
+  const at = candleIndex(chart);
   const value = (values: readonly (number | undefined)[] | null | undefined) =>
     values ? valueAt(values, at) : undefined;
   return {
@@ -115,6 +121,8 @@ type Props = {
   trades: readonly TradeRow[];
   picked: Picked | null;
   onHover: (index: number | null) => void;
+  // A range picked under the chart: the trade picked in the table no longer shows.
+  onUnpick: () => void;
 };
 
 // The way to zoom, or why the candles are missing with a way to ask again.
@@ -142,7 +150,9 @@ type LegendsProps = {
 function Legends({ doc, chart, controls, trades, highlighted, inView }: LegendsProps) {
   const legend = legendAt(chart);
   const { instrument } = doc.data;
-  const exchange = instrument.exchange ?? instrument.source.charAt(0).toUpperCase() + instrument.source.slice(1);
+  const exchange = instrument.exchange
+    ? exchangeLabel(instrument.exchange)
+    : instrument.source.charAt(0).toUpperCase() + instrument.source.slice(1);
   const line = (name: 'strategy' | 'benchmark', value: number | undefined) => ({
     value,
     on: controls.lines[name],
@@ -197,6 +207,7 @@ export function TradesChart(props: Props) {
           range={chart.range}
           onRange={(name) => {
             unpin();
+            props.onUnpick();
             chart.pick(name);
           }}
           label={levelLabel(chart.level)}

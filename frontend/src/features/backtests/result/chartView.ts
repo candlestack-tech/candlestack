@@ -21,7 +21,7 @@ import type { DateStyle } from '@/lib/dates';
 import { formatPriceWith } from '@/lib/numbers';
 import { formatPercent } from '@/lib/results';
 
-import type { Band, Mark, TradeRow } from './chartData';
+import { logicalOfTimes, timesOfLogical, type Band, type Mark, type TradeRow } from './chartData';
 
 // The backtest page's TradingView chart (#309): the price in the top pane with the volume at its
 // bottom, the trades as Buy and Sell arrows over shading while in a position, and the strategy
@@ -73,10 +73,13 @@ const at = (time: number) => time as UTCTimestamp;
 
 export type Point = { time: number; value: number };
 
-// What one size of candles draws: the candles, the shading, the returns in percent and the
-// decimals of the price.
+// What one size of candles draws: the candles (none when they did not load, the returns then on
+// the document's own rows), the times the chart goes by and their length, the shading, the
+// returns in percent and the decimals of the price.
 export type Frame = {
   bars: readonly Bar[];
+  times: readonly number[];
+  seconds: number;
   bands: readonly Band[];
   strategy: readonly Point[];
   benchmark: readonly Point[] | null;
@@ -151,6 +154,9 @@ export class TradesChartView {
   private colors: ChartColors;
   private frame: Frame | null = null;
   private lineMode = false;
+  // What the arrows and the link last showed, drawn again in a new theme's colours.
+  private shownMarks: readonly Mark[] = [];
+  private shownLink: { trade: TradeRow | null; times: { open?: number; close?: number } } = { trade: null, times: {} };
 
   constructor(container: HTMLElement, colors: ChartColors) {
     this.colors = colors;
@@ -201,6 +207,8 @@ export class TradesChartView {
     strategy.applyOptions({ color: accent });
     for (const priceLine of strategy.priceLines()) priceLine.applyOptions({ color: rule });
     if (this.frame) this.drawVolume(this.frame.bars);
+    this.setMarks(this.shownMarks);
+    this.setLink(this.shownLink.trade, this.shownLink.times);
   }
 
   // The axis and the crosshair in the user's zone and formats; days and weeks without the time.
@@ -234,6 +242,7 @@ export class TradesChartView {
     benchmark.setData((frame.benchmark ?? []).map(({ time, value }) => ({ time: at(time), value })));
     link.setData([]);
     if (keep) this.show(keep);
+    else if (!frame.bars.length) this.chart.timeScale().fitContent();
   }
 
   private drawVolume(bars: readonly Bar[]) {
@@ -247,14 +256,17 @@ export class TradesChartView {
     );
   }
 
+  // The part of time in view, the blank past the candles too (the chart's own time range stops
+  // at the first and the last candle).
   private visibleTimes() {
-    const range = this.chart.timeScale().getVisibleRange();
-    return range ? { from: range.from as number, to: range.to as number } : null;
+    const range = this.chart.timeScale().getVisibleLogicalRange();
+    if (!range || !this.frame?.times.length) return null;
+    return timesOfLogical(this.frame.times, range, this.frame.seconds);
   }
 
-  show({ from, to }: { from: number; to: number }) {
-    if (!this.frame?.bars.length) return;
-    this.chart.timeScale().setVisibleRange({ from: at(from), to: at(to) });
+  show(view: { from: number; to: number }) {
+    if (!this.frame?.times.length) return;
+    this.chart.timeScale().setVisibleLogicalRange(logicalOfTimes(this.frame.times, view, this.frame.seconds));
   }
 
   // Candles or the closes as a line; the arrows go with whichever shows.
@@ -265,6 +277,7 @@ export class TradesChartView {
   }
 
   setMarks(marks: readonly Mark[]) {
+    this.shownMarks = marks;
     const { accent, down } = this.colors;
     const list = marks.map(({ time, kind, size, text }) =>
       kind === 'buy'
@@ -283,8 +296,9 @@ export class TradesChartView {
 
   // The dashed line from a trade's entry to its exit, at the candles they fall in.
   setLink(trade: TradeRow | null, times: { open?: number; close?: number }) {
+    this.shownLink = { trade, times };
     const { open, close } = times;
-    if (!trade || open === undefined || close === undefined) {
+    if (!trade || open === undefined || close === undefined || !this.frame?.bars.length) {
       this.series.link.setData([]);
       return;
     }

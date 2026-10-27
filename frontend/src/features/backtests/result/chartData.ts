@@ -226,3 +226,31 @@ export function timeAtLogical(times: readonly number[], logical: number, seconds
   if (logical >= last) return (times[last] ?? 0) + (logical - last) * seconds;
   return times[Math.round(logical)] ?? first;
 }
+
+// The other way: the logical position of a time, between two candles in proportion and off the
+// candles a candle at a time, so the chart can show a part of time it has no candles for.
+export function logicalAtTime(times: readonly number[], time: number, seconds: number): number {
+  const last = times.length - 1;
+  const first = times[0] ?? 0;
+  if (time <= first || last < 0) return (time - first) / seconds;
+  const lastTime = times[last] ?? 0;
+  if (time >= lastTime) return last + (time - lastTime) / seconds;
+  const after = lowerBound(times.length, (index) => times[index] ?? 0, time);
+  const next = times[after] ?? time;
+  const before = times[after - 1] ?? next;
+  return next === time || next === before ? after : after - 1 + (time - before) / (next - before);
+}
+
+// The part of time a logical range shows, `[from, to)`, past the loaded candles too.
+export function timesOfLogical(times: readonly number[], range: { from: number; to: number }, seconds: number) {
+  return {
+    from: timeAtLogical(times, range.from, seconds),
+    to: timeAtLogical(times, range.to, seconds) + seconds,
+  };
+}
+
+// The logical range that shows a part of time `[from, to)`.
+export function logicalOfTimes(times: readonly number[], view: { from: number; to: number }, seconds: number) {
+  const from = logicalAtTime(times, view.from, seconds);
+  return { from, to: Math.max(from, logicalAtTime(times, view.to - seconds, seconds)) };
+}

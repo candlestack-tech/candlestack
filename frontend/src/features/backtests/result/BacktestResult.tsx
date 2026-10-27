@@ -24,9 +24,17 @@ function Charts({ doc, results }: Props) {
   const [hovered, setHovered] = useState<number | null>(null);
   const [picked, setPicked] = useState<Picked | null>(null);
   const onPick = useCallback((index: number) => setPicked((last) => ({ index, count: (last?.count ?? 0) + 1 })), []);
+  const onUnpick = useCallback(() => setPicked(null), []);
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <TradesChart doc={doc} series={results.series} trades={trades} picked={picked} onHover={setHovered} />
+      <TradesChart
+        doc={doc}
+        series={results.series}
+        trades={trades}
+        picked={picked}
+        onHover={setHovered}
+        onUnpick={onUnpick}
+      />
       <TradesBox
         trades={results.trades}
         longOnly={doc.decision.long_only}

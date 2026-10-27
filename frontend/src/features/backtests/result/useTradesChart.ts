@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { DateStyle } from '@/lib/dates';
 import { useTheme } from '@/theme';
 
-import { timeAtLogical, type Candles } from './chartData';
+import { timesOfLogical, type Candles } from './chartData';
 import { TradesChartView, readColors } from './chartView';
 
 // The chart of a backtest's page as React sees it: made once, painted with the theme, writing
@@ -39,10 +39,7 @@ export function useChartView(style: DateStyle, daily: boolean) {
 // The part of time in view, `[from, to)`, past the loaded candles too.
 function viewOf(range: LogicalRange | null, candles: Candles, seconds: number): View | null {
   if (!range || candles.times.length === 0) return null;
-  return {
-    from: timeAtLogical(candles.times, range.from, seconds),
-    to: timeAtLogical(candles.times, range.to, seconds) + seconds,
-  };
+  return timesOfLogical(candles.times, range, seconds);
 }
 
 type Events = {

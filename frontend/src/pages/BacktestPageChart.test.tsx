@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { act, cleanup, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ARSEN, backtestDocument, problem, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
-import { candles } from '@/test/candles';
+import { candles, times } from '@/test/candles';
 import { charts } from '@/test/lightweightCharts';
 
 vi.mock('lightweight-charts', () => import('@/test/lightweightCharts'));
@@ -151,6 +151,16 @@ describe("a finished backtest's chart", () => {
     expect(box('Price and trades').getByRole('button', { name: '1M' }).getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('lets go of the picked trade, in the table too, once a range is picked', async () => {
+    await openChart();
+    const row = () => box('Trades 1').getAllByRole('row')[1]!;
+    await userEvent.click(row());
+    await vi.waitFor(() => expect(row().getAttribute('aria-current')).toBe('true'));
+    await userEvent.click(box('Price and trades').getByRole('button', { name: '1M' }));
+    await vi.waitFor(() => expect(row().getAttribute('aria-current')).toBeNull());
+    expect(candleMarkers().every((marker) => marker.size !== 1.6)).toBe(true);
+  });
+
   it('says when the candles did not load and asks again', async () => {
     const { all } = await openPage(
       { status: 200, body: backtestDocument() },
@@ -159,9 +169,97 @@ describe("a finished backtest's chart", () => {
     await screen.findByRole('heading', { level: 2, name: 'Price and trades' });
     const again = await box('Price and trades').findByRole('button', { name: 'Try again' });
     expect(charts.of('Candlestick')[0]?.data).toEqual([]);
+    // The strategy and buy and hold come from the document alone.
+    const [benchmark, strategy] = charts.of('Line').filter((series) => series.pane === 1);
+    await vi.waitFor(() => expect(strategy?.data).toHaveLength(5));
+    expect(benchmark?.data.at(-1)).toEqual({ time: TIMES[4], value: expect.closeTo(-2, 5) });
     all[CANDLES] = { status: 200, body: candles(TIMES) };
     await userEvent.click(again);
     await vi.waitFor(() => expect(charts.of('Candlestick')[0]?.data).toHaveLength(5));
     expect(box('Price and trades').queryByRole('button', { name: 'Try again' })).toBeNull();
+  });
+});
+
+// #309: a run of two years opens on its days, then goes to its last month once the 4-hour candles
+// are in, unless the user moved the chart first.
+describe("a long backtest's chart", () => {
+  const [START, END] = [1672531200, 1735689600];
+  const MONTH = { from: END - 30 * 86_400, to: END };
+  const SECONDS: Record<string, number> = { '1h': 3600, '4h': 14_400, '1d': 86_400 };
+  const base = backtestDocument().data;
+  const LONG = backtestDocument({
+    data: {
+      ...base,
+      instrument: {
+        ...base.instrument,
+        id: 'crypto:BTCUSDT',
+        market: 'crypto',
+        symbol: 'BTCUSDT',
+        exchange: 'BINANCE',
+      },
+      timeframe: '1h',
+      timeframe_seconds: 3600,
+      period: { start: START, end: END },
+      rows: { first_ts: START, last_ts: END - 3600, count: (END - START) / 3600 },
+    },
+  });
+
+  // The candles of any request, those of `held` sizes only once released.
+  async function openLong(held: string[]) {
+    const waiting: (() => void)[] = [];
+    const api = stubApi({ ...sessionWithPreferences(ARSEN), [DOCUMENT]: { status: 200, body: LONG } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (path: string, init?: RequestInit) => {
+        if (!path.includes('/candles?')) return api(path, init);
+        const query = new URL(path, 'http://localhost').searchParams;
+        const timeframe = query.get('timeframe') ?? '1d';
+        const [start, end] = [Number(query.get('start')), Number(query.get('end'))];
+        if (held.includes(timeframe)) await new Promise<void>((release) => waiting.push(release));
+        const step = SECONDS[timeframe] ?? 86_400;
+        const first = Math.ceil(start / step) * step;
+        const page = candles(times(first, Math.ceil((end - first) / step), step), { start, end });
+        return new Response(JSON.stringify(page), { status: 200 });
+      }),
+    );
+    await renderApp(`/backtests/${ID}`);
+    await vi.waitFor(() => expect(charts.of('Candlestick')[0]?.data.length).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(waiting.length).toBeGreaterThan(0));
+    const release = async () => {
+      act(() => waiting.splice(0).forEach((done) => done()));
+      await vi.waitFor(() => expect(box('Price and trades').queryByText(/BTCUSDT · 4h/)).not.toBeNull());
+    };
+    return { release };
+  }
+
+  const pressed = (name: string) =>
+    box('Price and trades').getByRole('button', { name }).getAttribute('aria-pressed') === 'true';
+
+  it('opens on the days, then goes to the last month', async () => {
+    const { release } = await openLong(['4h']);
+    expect(box('Price and trades').getByText('BTCUSDT · 1D · Binance')).toBeDefined();
+    expect(pressed('1M')).toBe(true);
+    await release();
+    expect(charts.shown.at(-1)).toEqual(MONTH);
+    expect(pressed('1M')).toBe(true);
+  });
+
+  it('stays where the user zoomed before the month came in', async () => {
+    const { release } = await openLong(['4h']);
+    fireEvent.wheel(screen.getByRole('figure', { name: /BTCUSDT price/ }));
+    act(() => charts.scroll({ from: 100, to: 400 }));
+    await release();
+    expect(charts.shown).not.toContainEqual(MONTH);
+    await vi.waitFor(() => expect(pressed('1M')).toBe(false));
+  });
+
+  it('stays on a range shown at once over one still waiting for its candles', async () => {
+    const { release } = await openLong(['4h']);
+    await userEvent.click(box('Price and trades').getByRole('button', { name: 'All' }));
+    const all = charts.shown.at(-1);
+    expect(all).toEqual({ from: START, to: END });
+    await release();
+    expect(charts.shown).not.toContainEqual(MONTH);
+    expect(pressed('All')).toBe(true);
   });
 });
