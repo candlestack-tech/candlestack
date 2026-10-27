@@ -31,8 +31,8 @@ compresses the responses (zstd or gzip) on the way to Cloudflare.
 | `migrate` | the backend image, `alembic upgrade head` | runs once per deploy, before the backend starts | `160m` |
 | `backup` | `prodrigestivill/postgres-backup-local:18-alpine`, pinned by digest | nothing reaches it | `32m` |
 | `models-backup` | `offen/docker-volume-backup`, pinned by digest | nothing reaches it, no network | `32m` |
-| `worker` | `ghcr.io/candlestack-tech/candlestack/worker` (the stage `worker` of `backend/Dockerfile`); stage only ([Worker](#worker)) | nothing reaches it; it reaches only `queue`, on the internal network `<env>_jobs` | `1g`, no swap, one CPU |
-| `queue` | `redis:8-alpine`, pinned by digest; stage only | `queue:6379` on `<env>_jobs` only | `32m` |
+| `worker` | `ghcr.io/candlestack-tech/candlestack/worker` (the stage `worker` of `backend/Dockerfile`) ([Worker](#worker)) | nothing reaches it; it reaches only `queue`, on the internal network `<env>_jobs` | `1g`, no swap, one CPU |
+| `queue` | `redis:8-alpine`, pinned by digest | `queue:6379` on `<env>_jobs` only | `32m` |
 
 The frontend image holds the app, built with Node in the image's build stage and served by its
 Caddy (`frontend/Caddyfile`), the same in every environment. A path that is no file gets the
@@ -80,8 +80,8 @@ them. After the resize to 4 GB (2026-10-25, the worker not deployed yet), the VM
 | `postgres` | `128m` | about 30 MB with the backend's pool connected |
 | `backup`, `models-backup` | `32m` each | about 2 MB between their nightly runs; the models archive took under 32 MB for 300 MB of files |
 | `migrate` | `160m` | runs only during a deploy |
-| `worker` (stage only) | `1g`, no swap | about 85 MB idle (the loop); a job adds a process with Keras and JAX (below) |
-| `queue` (stage only) | `32m` (`maxmemory` 16 MB) | a few MB idle, a few kilobytes per job |
+| `worker` | `1g`, no swap | about 85 MB idle (the loop); a job adds a process with Keras and JAX (below) |
+| `queue` | `32m` (`maxmemory` 16 MB) | a few MB idle, a few kilobytes per job |
 
 The limits of one environment add up to 896 MB without `migrate`, 1.79 GB for prod and stage,
 on top of the edge Caddy, cloudflared, the server agent (`2 x 64m`) and the system. Besides
@@ -91,18 +91,23 @@ backend's 384 MB hold the app (about 150 MB at its peak so far) and the check's 
 limits itself to 192 MB of data (`RLIMIT_DATA`; a real model's check takes about 45 MB): about
 40 MB stay free even when both are at their limits.
 
-With the worker on stage, stage's limits add up to 1.95 GB (the 896 MB above, the worker's
-1 GB and the queue's 32 MB) and the VM's to 2.85 GB with prod's 896 MB, before the edge,
-cloudflared, the agent and the system. What runs is far less, except while a job runs:
+With the worker in both environments (since 2026-10-27), each one's limits add up to 1.95 GB
+(the 896 MB above, the worker's 1 GB and the queue's 32 MB), 3.9 GB for the two: just over the
+3.8 GB, before the edge, cloudflared, the agent and the system. The limits are ceilings: what
+runs is far less, and a real job stays near half of the worker's limit (below):
 
-| | prod | stage with the worker |
-| --- | --- | --- |
-| idle, cache empty | about 200 MB | about 290 MB (the worker's loop 85 MB, the queue a few MB) |
-| idle, cache full | about 460 MB | about 550 MB |
-| a job running, cache full | about 460 MB | up to 1.49 GB (the worker at its 1 GB) |
+| | each environment |
+| --- | --- |
+| idle, cache empty | about 290 MB (the worker's loop 85 MB, the queue a few MB) |
+| idle, cache full | about 550 MB |
+| a job running, cache full | about 1.05 GB (a 25 x 28 model over 50000 candles, about 500 MB) |
+| a job at the worker's limit | up to 1.49 GB |
 
-That is up to about 1.95 GB for both environments, which leaves about 1.9 GB of the 3.8 GB for
-the edge, cloudflared, the agent, the system and the page cache (those not measured here). The
+Measured on the VM after v0.8.0 (prod without the worker yet, stage with it idle): 1.41 GB used,
+2.42 GB available. Both environments running a real job at once take about 2.1 GB, which leaves
+about 1.7 GB for the edge, cloudflared, the agent, the system and the page cache. Only two jobs
+at the worker's limit together (3 GB) would push the other containers' idle pages into the 2 GB
+swap file; each environment runs one job at a time, and stage's are the team's. The
 worker has no swap (`memswap_limit` equal to `mem_limit`): a model over its limit fails its job
 (`stopped`) instead of pushing the other containers into the 2 GB swap file. What goes to swap
 under pressure are the other containers' idle pages, the caches' first. If stage's jobs make
@@ -237,7 +242,7 @@ The Docker networks:
 | --- | --- |
 | `edge` | the edge Caddy, the backend and frontend of prod and stage, the server agent (`vm-agent`) |
 | `<env>_default` | the backend, Redis, Postgres, `migrate` and `backup` of that environment (`models-backup` is on no network) |
-| `<env>_jobs` (internal) | the backend, and on stage the worker and its queue (the profile `worker`): no way out |
+| `<env>_jobs` (internal) | the backend, the worker and its queue (the profile `worker`): no way out |
 | `agent_docker` (internal) | the server agent and its Docker socket proxy |
 
 Every push to `main` builds the backend, worker, frontend and agent images once, and a release
@@ -288,41 +293,29 @@ end as timeouts at the backend).
 
 | Environment | Worker and queue |
 | --- | --- |
-| prod | off, until the tech lead decides otherwise |
+| prod | on since v0.8.1: every release starts them with the worker image stage ran for its commit |
 | stage | on: every stage deploy starts them with the worker image of its commit |
 
 Every push to `main` builds the stage `worker` of `backend/Dockerfile` (`build.yml` with the
 input `target`) next to the backend, as `ghcr.io/candlestack-tech/candlestack/worker`, and
 `stage.yml` passes it to `up stage` as a third image
 ([How a deployment reaches the VM](#how-a-deployment-reaches-the-vm)). `vm/candlestack-deploy`
-checks it (a GHCR digest reference) and pulls it like the other two, and for stage only
-(`runs_worker`) sets `COMPOSE_PROFILES=worker` and `WORKER_IMAGE=<worker@digest>`: prod sets
-neither, so its `up` starts neither service, whatever the stage record holds. CI builds and
-scans the image (job `e2e`), and `security-scan.yml` scans the one stage runs every Monday
-(`worker-stage`).
+checks it (a GHCR digest reference) and pulls it like the other two, and sets
+`COMPOSE_PROFILES=worker` and `WORKER_IMAGE=<worker@digest>` (`runs_worker`). `up prod` takes
+the worker's image from the stage record's line of the release's commit, like the other two,
+and a release tags it with the version too. CI builds and scans the image (job `e2e`), and
+`security-scan.yml` scans the ones prod and stage run every Monday (`worker-prod`,
+`worker-stage`).
 
 An `up stage` without a worker image, as a re-run of a stage workflow run from before the
-worker sends it, runs stage without the worker and its queue: the script removes them
+worker sends it, and an `up prod` of a commit stage ran without one (a line of three fields),
+run the environment without the worker and its queue: the script removes them
 (`compose rm --stop --force worker queue`), since compose leaves the services of a profile it
 was not given running, and the worker of an earlier deploy would go on next to a backend it was
 not built with. The next stage deploy starts them again.
 
-The status page lists them under stage as `worker` (with its deploy's version) and `queue`: the
-server agent reports every container (`stage-worker-1`, `stage-queue-1`). prod's backend has
-`JOBS_REDIS_URL` too, pointing to a queue that does not run there; reporting that cleanly is a
-part of #269.
-
-What prod still needs, once the tech lead turns it on:
-
-1. `runs_worker` in `vm/candlestack-deploy` true for prod too: `up prod` then runs the worker
-   image of the stage record's line (`stage_images_of` reads it already), and a release of a
-   commit that stage ran without one (three fields: every commit before the worker) runs prod
-   without the worker, removing it as above.
-2. `release.yml` tags the worker image too: `up` prints it as the third image, and the `tag`
-   job reads only the first two.
-3. `security-scan.yml` scans `worker-prod` (`worker:<release tag>`, once the release tags it).
-4. The memory budget ([Memory](#memory)) with the worker on prod too, and the tests: `up prod`
-   with and without a recorded worker.
+The status page lists them under each environment as `worker` (with its deploy's version) and
+`queue`: the server agent reports every container (`prod-worker-1`, `stage-queue-1`).
 
 ### Test backtests
 
@@ -423,7 +416,7 @@ takes no images: it finds the commit of the release tag and runs the images of t
 `up stage main-<commit>` in the record, or fails when there is none. Only the stage key writes
 the record, and only the workflow of `main` holds that key. Every `up` prints
 `images <backend@digest> <frontend@digest>` at the end, followed by `<worker@digest>` when it
-started the worker (stage); the release tags the images prod runs with the version in the
+started the worker; the release tags the images prod runs with the version in the
 registry.
 
 The lines from before the worker have three fields, and so does the line of an `up stage`

@@ -62,6 +62,7 @@ jobs:
             OAUTH_GOOGLE_CLIENT_ID=${{ secrets.OAUTH_GOOGLE_CLIENT_ID }}
             OAUTH_GOOGLE_CLIENT_SECRET=${{ secrets.OAUTH_GOOGLE_CLIENT_SECRET }}
             BETA_ALLOWLIST=${{ secrets.BETA_ALLOWLIST }}
+            QUEUE_PASSWORD=${{ secrets.QUEUE_PASSWORD }}
           health-url: https://app.candlestack.tech/api/health
           health-expect: '"version":"${{ github.ref_name }}"'
 
@@ -95,11 +96,12 @@ jobs:
         env:
           IMAGES: ${{ needs.deploy.outputs.images }}
         run: |
-          read -r backend frontend _ <<<"$IMAGES"
+          # The worker's image is the third when the deploy started the worker.
+          read -r backend frontend worker _ <<<"$IMAGES"
           if [[ -z $backend || -z $frontend ]]; then
             echo "::error::The deploy reported no images: '$IMAGES'"
             exit 1
           fi
-          for image in "$backend" "$frontend"; do
+          for image in "$backend" "$frontend" ${worker:+"$worker"}; do
             docker buildx imagetools create --tag "${image%@*}:$GITHUB_REF_NAME" "$image"
           done

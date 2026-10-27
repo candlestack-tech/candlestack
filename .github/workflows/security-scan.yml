@@ -37,6 +37,7 @@ jobs:
             {
               echo "backend-prod $registry/backend:$release"
               echo "frontend-prod $registry/frontend:$release"
+              echo "worker-prod $registry/worker:$release"
               echo "backend-stage $registry/backend:$stage"
               echo "frontend-stage $registry/frontend:$stage"
               echo "worker-stage $registry/worker:$stage"

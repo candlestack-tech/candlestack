@@ -65,11 +65,12 @@ redis_memory() {
   export REDIS_MAXMEMORY REDIS_MEM_LIMIT
 }
 
-# The worker and its queue (the profile "worker" of compose.yaml) run on stage only: prod runs
-# without them until the tech lead decides otherwise. Once it runs them, "up prod" takes the
-# worker's image from the stage record like the other two (stage_images_of reads it already).
+# The worker and its queue (the profile "worker" of compose.yaml) run in both environments:
+# "up stage" gets the worker's image in its command, "up prod" takes it from the stage record's
+# line of the release's commit like the other two (stage_images_of). A line without one (a
+# commit stage ran before the worker) runs the environment without them.
 runs_worker() {
-  [ "$1" = stage ]
+  [ "$1" = prod ] || [ "$1" = stage ]
 }
 
 # worker_profile <worker@digest or nothing>: compose starts the worker and its queue only with
