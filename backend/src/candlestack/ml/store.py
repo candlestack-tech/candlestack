@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import with_expression
 
 from candlestack.ml.models import Model
+from candlestack.ml.schemas import CheckPart
 from candlestack.ml.usage import ModelUsage, ModelUsageStats, no_usage
 
 # The manifest without its example and notes (``Model.manifest_spec``): a few KB where the
@@ -96,16 +97,23 @@ class ModelStore:
         return [(row[0], row[1]) for row in rows]
 
     async def record_check(
-        self, model_id: str, *, checked_at: datetime, verified: bool, error: str | None
+        self,
+        model_id: str,
+        *,
+        checked_at: datetime,
+        verified: bool,
+        failed: CheckPart | None,
+        error: str | None,
     ) -> None:
         """Keeps what the check of the model's manifest came to: verified now, or not, with
-        the error of a failed one."""
+        the part that failed and the error of a failed one."""
         await self._db.execute(
             update(Model)
             .where(Model.id == model_id)
             .values(
                 checked_at=checked_at,
                 verified_at=checked_at if verified else None,
+                check_failed=failed,
                 check_error=error,
             )
         )

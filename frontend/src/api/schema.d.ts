@@ -1459,6 +1459,14 @@ export interface components {
             blocks: components["schemas"]["BlockOut"][];
         };
         /**
+         * CheckPart
+         * @description The part of the worker's check of a model with its manifest that failed: `trial_run`
+         *     (the run on built-in candles) or `example` (the output for the manifest's example is not
+         *     the expected one, after a trial run that passed).
+         * @enum {string}
+         */
+        CheckPart: "trial_run" | "example";
+        /**
          * DashboardOut
          * @description Everything the Dashboard shows, in one response.
          */
@@ -2261,6 +2269,17 @@ export interface components {
              * @example null
              */
             check_error: string | null;
+            /**
+             * @description Which part of that check failed; null when it passed or has not run
+             * @example null
+             */
+            check_failed: components["schemas"]["CheckPart"] | null;
+            /**
+             * Checked At
+             * @description When the worker's check of its manifest (the trial run, then the example) came to an end, passed or failed (UTC); null while it has not, as without a manifest
+             * @example null
+             */
+            checked_at: string | null;
             /**
              * Created At
              * Format: date-time

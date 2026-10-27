@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useCallback } from 'react';
 
 import {
   ApiError,
@@ -119,16 +120,34 @@ export function useRenameModel() {
   });
 }
 
+// The list without a deleted model, which frees its size of the storage.
+const without = (data: Models, model: Model): Models => ({
+  models: data.models.filter((item) => item.id !== model.id),
+  usage: { ...data.usage, used_bytes: Math.max(0, data.usage.used_bytes - model.size_bytes) },
+});
+
 // Deletes a model, which frees its size of the storage.
 export function useDeleteModel() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (model: Model) => deleteModel(model.id),
-    onSuccess: (_answer, model) =>
-      change(queryClient, (data) => ({
-        models: data.models.filter((item) => item.id !== model.id),
-        usage: { ...data.usage, used_bytes: Math.max(0, data.usage.used_bytes - model.size_bytes) },
-      })),
+    onSuccess: (_answer, model) => change(queryClient, (data) => without(data, model)),
     onError: (error) => forgetIfGone(queryClient, error),
   });
+}
+
+// Deletes a model the upload kept but nobody added: the dialog closed before Add model. Not a
+// mutation, as the dialog is gone by then. When the API does not delete it, the list is asked for
+// again, so a model left behind shows on Models (Needs setup) and can be deleted there.
+export function useDiscardModel() {
+  const queryClient = useQueryClient();
+  return useCallback(
+    (model: Model) => {
+      deleteModel(model.id).then(
+        () => change(queryClient, (data) => without(data, model)),
+        () => void queryClient.invalidateQueries({ queryKey: KEY }),
+      );
+    },
+    [queryClient],
+  );
 }

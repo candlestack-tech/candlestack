@@ -6,7 +6,7 @@ import { HINT } from '@/components/Hint';
 import { StarButton } from '@/components/StarButton';
 import { Button } from '@/components/ui/button';
 import { useViewerDateStyle } from '@/features/preferences';
-import { formatRecentDay } from '@/lib/dates';
+import { formatRecentDayInline } from '@/lib/dates';
 import { pluralNoun } from '@/lib/plural';
 import { formatSharpe } from '@/lib/results';
 import { cn } from '@/lib/utils';
@@ -75,8 +75,8 @@ function TileTop({ model, onStar }: Pick<Props, 'model' | 'onStar'>) {
 }
 
 // A model on the Models page (mockups/app, mdTileA): a square card with the framework's mark, its
-// state and the star, the name, what it is and what it reads, then its results, or Add manifest
-// while it has none. The whole tile opens the model's page: the name's link is stretched over it,
+// state and the star, the name (up to two lines, broken anywhere, in full in its title), what it is
+// and what it reads, then its results, or Add manifest while it has none. The whole tile opens the model's page: the name's link is stretched over it,
 // and the star and Add manifest sit above it.
 export function ModelTile({ model, onStar, onAddManifest }: Props) {
   const dateStyle = useViewerDateStyle();
@@ -88,13 +88,13 @@ export function ModelTile({ model, onStar, onAddManifest }: Props) {
           to="/models/$modelId"
           params={{ modelId: model.id }}
           title={model.name}
-          className="truncate font-semibold outline-none after:absolute after:inset-0 after:rounded-lg"
+          className="line-clamp-2 font-semibold [overflow-wrap:anywhere] outline-none after:absolute after:inset-0 after:rounded-lg"
         >
           {model.name}
         </Link>
         <span className={HINT}>
           {API_FRAMEWORKS[model.framework]} · {formatSize(model.size_bytes)} · added{' '}
-          {formatRecentDay(new Date(model.created_at), dateStyle)}
+          {formatRecentDayInline(new Date(model.created_at), dateStyle)}
         </span>
       </div>
       <div className="font-mono text-xs/[17px] text-muted-foreground">{readsOf(model)}</div>

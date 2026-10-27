@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { ApiError, errorMessage, type Manifest, type Model, type StorageUsage } from '@/api';
+import { ApiError, deleteModelOnLeave, errorMessage, type Manifest, type Model, type StorageUsage } from '@/api';
 
 import { frameworkOfFile, type Framework } from './frameworks';
 import { formatSize } from './format';
-import { useModels, useSetManifest, useUploadModel } from './useModels';
+import { useDiscardModel, useModels, useSetManifest, useUploadModel } from './useModels';
 
 // Why the API did not keep a file: one of its checks failed (`opens`, `weights`), it is too
 // large, the storage is full, another upload of the user's is still running (`busy`), the user
@@ -42,13 +42,21 @@ export type ModelStep =
   | { step: 'failed'; file: File; failure: UploadFailure };
 
 // The second: choose its manifest; the manifest's checks running; the manifest kept with the
-// model; why it was not; or no manifest for now.
+// model; or why it was not. Choosing another manifest after one was kept (Change), the earlier one
+// stays the model's until the new one passes: `earlier` while the new one is checked or failed.
+type KeptManifest = { step: 'kept'; file: File; manifest: Manifest };
 export type ManifestStep =
   | { step: 'pick' }
-  | { step: 'checking'; file: File }
-  | { step: 'kept'; file: File; manifest: Manifest }
-  | { step: 'failed'; file: File; failure: ManifestFailure }
-  | { step: 'skipped' };
+  | { step: 'checking'; file: File; earlier?: KeptManifest | undefined }
+  | KeptManifest
+  | { step: 'failed'; file: File; failure: ManifestFailure; earlier?: KeptManifest | undefined };
+
+// The manifest the API holds for the model once the step is not checking one: the one kept, or
+// the earlier one a new manifest failed to replace.
+export function heldManifest(state: ManifestStep): KeptManifest | undefined {
+  if (state.step === 'kept') return state;
+  return state.step === 'failed' ? state.earlier : undefined;
+}
 
 const field = (body: unknown, key: string): unknown =>
   typeof body === 'object' && body !== null ? (body as Record<string, unknown>)[key] : undefined;
@@ -135,12 +143,13 @@ function useManifestStep(onKept: (model: Model) => void) {
   const saveManifest = useSetManifest();
 
   const choose = async (model: Model, file: File) => {
-    const fail = (failure: ManifestFailure) => setState({ step: 'failed', file, failure });
+    const earlier = state.step === 'pick' ? undefined : state.step === 'kept' ? state : state.earlier;
+    const fail = (failure: ManifestFailure) => setState({ step: 'failed', file, failure, earlier });
     if (file.size > MANIFEST_MAX_BYTES) {
       fail({ kind: 'large', detail: `The file is ${formatSize(file.size)}.` });
       return;
     }
-    setState({ step: 'checking', file });
+    setState({ step: 'checking', file, earlier });
     const json = await readJson(file);
     if (json === undefined) {
       fail({ kind: 'json' });
@@ -157,15 +166,63 @@ function useManifestStep(onKept: (model: Model) => void) {
   return { state, setState, choose };
 }
 
+// The new model the dialog uploaded until it is added (`keep`). A model needs its manifest to be
+// added, yet the API keeps the file as soon as it passed its checks: when the dialog closes
+// before Add model, the model goes, at once or, while its upload runs, once the API answers.
+function useUploadedModel() {
+  const discard = useDiscardModel();
+  // Read through a ref, so the cleanup below runs only when the dialog closes, never again for a
+  // new `discard` while the dialog is open.
+  const discardRef = useRef(discard);
+  const uploaded = useRef<Model | null>(null);
+  const closed = useRef(false);
+  // The page going away (a reload, the tab closed) unmounts nothing: while a model is held, a
+  // pagehide sends its DELETE with keepalive, so it does not stay behind as Needs setup.
+  const leave = useCallback(() => {
+    if (uploaded.current) deleteModelOnLeave(uploaded.current.id);
+  }, []);
+  const release = () => {
+    uploaded.current = null;
+    window.removeEventListener('pagehide', leave);
+  };
+  useEffect(() => {
+    discardRef.current = discard;
+  }, [discard]);
+  useEffect(() => {
+    // Open again: React's strict mode mounts the dialog's content twice.
+    closed.current = false;
+    return () => {
+      closed.current = true;
+      if (uploaded.current) discardRef.current(uploaded.current);
+      uploaded.current = null;
+      window.removeEventListener('pagehide', leave);
+    };
+  }, [leave]);
+  return {
+    // The upload's answer; false when the dialog closed meanwhile and the model went.
+    take: (model: Model) => {
+      if (closed.current) {
+        discardRef.current(model);
+        return false;
+      }
+      uploaded.current = model;
+      window.addEventListener('pagehide', leave);
+      return true;
+    },
+    keep: release,
+  };
+}
+
 // The two steps of adding a model (mockups/app, the upload in three steps): the model file goes to
 // the API at once, then its manifest. Given a model (Add manifest), the first step is done. An
 // upload does not stop when the dialog closes: once the file is in, the API checks and keeps it
-// whatever the page does, so it runs to its answer, which puts a kept model on the page
-// (useUploadModel); a manifest likewise.
+// whatever the page does, so it runs to its answer (useUploadModel); a new model not added is then
+// deleted (useUploadedModel). A manifest likewise runs to its answer.
 export function useUpload(existing?: Model) {
   const [model, setModel] = useState<ModelStep>(existing ? { step: 'kept', model: existing } : { step: 'pick' });
   const manifest = useManifestStep((kept) => setModel({ step: 'kept', model: kept }));
   const upload = useUploadModel();
+  const uploaded = useUploadedModel();
   const usage = useModels().data?.usage;
 
   const chooseModel = (file: File) => {
@@ -181,7 +238,9 @@ export function useUpload(existing?: Model) {
     }
     setModel({ step: 'checking', file });
     upload(file).then(
-      (kept) => setModel({ step: 'kept', model: kept }),
+      (kept) => {
+        if (uploaded.take(kept)) setModel({ step: 'kept', model: kept });
+      },
       (error: unknown) => setModel({ step: 'failed', file, failure: failureOf(error, usage) }),
     );
   };
@@ -194,7 +253,11 @@ export function useUpload(existing?: Model) {
       if (model.step === 'kept') await manifest.choose(model.model, file);
     },
     resetModel: () => setModel({ step: 'pick' }),
-    resetManifest: () => manifest.setState({ step: 'pick' }),
-    skipManifest: () => manifest.setState({ step: 'skipped' }),
+    // Choose another file: a failed manifest gives way to the earlier one the model keeps, if any;
+    // a kept one stays until the new one passes (Change).
+    resetManifest: () =>
+      manifest.setState((state) => (state.step === 'failed' ? (state.earlier ?? { step: 'pick' }) : state)),
+    // Add model: the model stays when the dialog closes.
+    keep: uploaded.keep,
   };
 }

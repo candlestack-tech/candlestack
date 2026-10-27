@@ -50,6 +50,7 @@ from candlestack.ml.schemas import (
     QUOTA_BYTES,
     SUFFIXES,
     BlockUse,
+    CheckPart,
     Framework,
     ManifestSummary,
     ModelCheck,
@@ -188,6 +189,8 @@ def _out(
         created_at=model.created_at,
         state=_state(model, manifest),
         manifest_summary=None if manifest is None else _summary(manifest),
+        checked_at=model.checked_at,
+        check_failed=None if model.check_failed is None else CheckPart(model.check_failed),
         check_error=model.check_error,
     )
 
@@ -491,6 +494,7 @@ class ModelsService:
         model.manifest = manifest.model_dump(mode="json", exclude_unset=True)
         model.verified_at = None
         model.checked_at = None
+        model.check_failed = None
         model.check_error = None
         usage = await self._store.backtest_usage(user_id, [model.id])
         await self._store.commit()

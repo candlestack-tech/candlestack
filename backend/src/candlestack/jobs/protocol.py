@@ -29,7 +29,7 @@ Reason = Literal[
     "load",  # Keras or onnxruntime refused the file
     "predict",  # the model failed on its input
     "output",  # the model's output has the wrong shape or numbers that are not finite
-    "example",  # the output for the manifest's example is not the expected one
+    "example",  # the model failed on the manifest's example or its output is not the expected one
     "time-limit",  # the job ran longer than JOB_TIME_LIMIT and was stopped
     "stopped",  # the job's process ended without a result (its memory, a crash)
     "worker-stopped",  # the worker stopped or lost the job while it ran

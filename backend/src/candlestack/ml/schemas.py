@@ -58,6 +58,15 @@ class ModelState(StrEnum):
     verified = "verified"
 
 
+class CheckPart(StrEnum):
+    """The part of the worker's check of a model with its manifest that failed: `trial_run`
+    (the run on built-in candles) or `example` (the output for the manifest's example is not
+    the expected one, after a trial run that passed)."""
+
+    trial_run = "trial_run"
+    example = "example"
+
+
 class BlockUse(BaseModel):
     id: str = Field(description="A block of the catalog and its version", examples=["candles@1"])
     params: dict[str, Any] = Field(
@@ -127,6 +136,17 @@ class ModelOut(BaseModel):
     state: ModelState
     manifest_summary: ManifestSummary | None = Field(
         description="What its manifest says, in short; null without one"
+    )
+    checked_at: datetime | None = Field(
+        description=(
+            "When the worker's check of its manifest (the trial run, then the example) came to "
+            "an end, passed or failed (UTC); null while it has not, as without a manifest"
+        ),
+        examples=[None],
+    )
+    check_failed: CheckPart | None = Field(
+        description="Which part of that check failed; null when it passed or has not run",
+        examples=[None],
     )
     check_error: str | None = Field(
         description=(

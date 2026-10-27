@@ -8,6 +8,7 @@ import {
   formatDate,
   formatMonth,
   formatRecentDay,
+  formatRecentDayInline,
   formatRecentTime,
   formatShortDay,
   formatTime,
@@ -135,6 +136,17 @@ describe('formatRecentDay', () => {
     expect(formatRecentDay(new Date('2026-12-31T20:00:00Z'), style, new Date('2027-01-01T08:00:00Z'), true)).toBe(
       'Yesterday',
     );
+  });
+});
+
+describe('formatRecentDayInline', () => {
+  const now = new Date('2026-10-17T12:00:00Z');
+  const style = { timeZone: 'UTC', dateFormat: 'dmy' } as const;
+
+  it('writes today and yesterday in lowercase, for the middle of a sentence', () => {
+    expect(formatRecentDayInline(new Date('2026-10-17T09:00:00Z'), style, now)).toBe('today');
+    expect(formatRecentDayInline(new Date('2026-10-16T09:00:00Z'), style, now, true)).toBe('yesterday');
+    expect(formatRecentDayInline(new Date('2026-10-12T09:00:00Z'), style, now)).toBe('12 Oct');
   });
 });
 

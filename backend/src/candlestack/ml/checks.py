@@ -13,7 +13,8 @@ worker's queue, and a model set again before its turn is checked once, with the 
 has then.
 
 A check that says something about the model sets ``checked_at``: passed (``verified_at`` too,
-when the example matched) or failed (``check_error``, the worker's sentences for the user). A
+when the example matched) or failed (``check_failed``, the trial run or the example, and
+``check_error``, the worker's sentences for the user). A
 worker that cannot be reached or does not answer says nothing about the model, which stays
 ``ready`` unchecked: so without a worker (prod for now) nothing waits for it. The API runs in
 one process, so a check that a stopped process was waiting for is lost with it; at startup
@@ -31,6 +32,7 @@ from redis.exceptions import RedisError
 
 from candlestack.core import DATABASE_ERRORS, Database
 from candlestack.jobs import DEFAULT_WAIT, JobClient, JobResult, Reason, manifest_sha256
+from candlestack.ml.schemas import CheckPart
 from candlestack.ml.storage import model_file
 from candlestack.ml.store import ModelStore
 
@@ -51,6 +53,15 @@ def says_something(result: JobResult) -> bool:
     """Whether the check's result says something about the model: it passed or failed on the
     model, not on the worker."""
     return result.status == "done" or result.reason not in _NOT_THE_MODELS
+
+
+def failed_part(result: JobResult) -> CheckPart | None:
+    """The part of the check that failed: the example when its output was not the expected one
+    (the worker compares it after a trial run that passed), else the trial run; None when it
+    passed."""
+    if result.status == "done":
+        return None
+    return CheckPart.example if result.reason == "example" else CheckPart.trial_run
 
 
 class ModelChecks:
@@ -171,6 +182,7 @@ class ModelChecks:
                 model_id,
                 checked_at=_now(),
                 verified=verified,
+                failed=failed_part(result),
                 error=result.error if result.status == "failed" else None,
             )
             await store.commit()

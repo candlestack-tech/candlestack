@@ -64,10 +64,12 @@ class Model(Base):
     # then, and again when the manifest is replaced.
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # When the worker's trial run of this manifest came to an end that says something about the
-    # model (passed or failed, not a worker that did not answer), and why it failed in plain
-    # sentences for the Models page; both null until then, and again when the manifest is
-    # replaced. A model with a manifest and no checked_at is checked again at startup (checks.py).
+    # model (passed or failed, not a worker that did not answer), which part of the check failed
+    # (`trial_run` or `example`, schemas.CheckPart) and why in plain sentences for the Models
+    # page; all null until then, and again when the manifest is replaced. A model with a manifest
+    # and no checked_at is checked again at startup (checks.py).
     checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    check_failed: Mapped[str | None] = mapped_column(String(16))
     check_error: Mapped[str | None] = mapped_column(Text)
     # The manifest without its example and notes, what the model's summary is made of: loaded
     # by the queries of store.py that ask for it, None where they do not.

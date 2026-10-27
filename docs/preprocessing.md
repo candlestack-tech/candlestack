@@ -215,9 +215,11 @@ it (`PUT /api/v1/models/{model_id}/manifest`, [architecture.md](architecture.md#
    the trial run in the worker (checks 4 and 5 below), which starts once the manifest is kept,
    compares it, and the model is `verified` when it matches; a trial run that fails leaves
    the model `ready` with its error.
-3. Add model. Step 2 can be skipped: the model is kept as `needs_setup`, and its manifest is
-   added later from the Models page ("Add manifest"). A manifest added again replaces the one
-   the model had, and the model is `ready` until a trial run verifies it again.
+3. Add model, once the manifest is kept: a model needs its manifest to be added, and closing
+   the dialog before Add model deletes the model it uploaded. The API can still hold a model
+   without one (`needs_setup`), whose manifest is added later from the Models page ("Add
+   manifest"). A manifest added again replaces the one the model had, and the model is `ready`
+   until a trial run verifies it again.
 
 Each check shows as passed or failed with what is wrong, in plain words ("The model has 2
 inputs; CandleStack takes models with one input"), one sentence for each thing wrong: at most

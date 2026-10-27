@@ -61,6 +61,7 @@ export {
 export {
   catalogQueryOptions,
   deleteModel,
+  deleteModelOnLeave,
   manifestQueryOptions,
   modelsQueryOptions,
   setManifest,

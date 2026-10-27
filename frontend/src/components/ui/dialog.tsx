@@ -5,10 +5,11 @@ import { XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-// shadcn/ui's Dialog with the app design's modal (mockups/app, modalShell): 560 px wide and at
-// most the screen high less 16 px around it, a title row with the close button, a body that
-// scrolls, and the buttons in a footer under a line. It fades and scales in from 10 px lower; the
-// backdrop fades in.
+// shadcn/ui's Dialog with the app design's modal (mockups/app, modalShell): 560 px wide, its top a
+// tenth of the screen down and at most as high as the rest less 16 px, a title row with the close
+// button, a body that scrolls, and the buttons in a footer under a line. Anchored at the top, not
+// centred, a dialog whose steps grow (the upload) only grows downwards instead of jumping. It fades
+// and scales in from 10 px lower; the backdrop fades in.
 
 function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />;
@@ -86,7 +87,7 @@ function DialogContent({
         data-slot="dialog-content"
         onCloseAutoFocus={returnFocus}
         className={cn(
-          'fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100vh-32px)] w-[min(560px,calc(100%-32px))] -translate-1/2 flex-col rounded-xl border bg-background text-sm/[1.5] shadow-[0_20px_50px_var(--shadow)] outline-none supports-[height:100dvh]:max-h-[calc(100dvh-32px)]',
+          'fixed top-[10vh] left-1/2 z-50 flex max-h-[calc(90vh-16px)] w-[min(560px,calc(100%-32px))] -translate-x-1/2 flex-col rounded-xl border bg-background text-sm/[1.5] shadow-[0_20px_50px_var(--shadow)] outline-none supports-[height:100dvh]:top-[10dvh] supports-[height:100dvh]:max-h-[calc(90dvh-16px)]',
           'duration-220 ease-[cubic-bezier(0.2,0.8,0.2,1)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-97 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-97 data-[state=open]:slide-in-from-bottom-[10px] motion-reduce:animate-none',
           className,
         )}

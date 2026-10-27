@@ -1724,6 +1724,15 @@
         "title": "CatalogOut",
         "type": "object"
       },
+      "CheckPart": {
+        "description": "The part of the worker's check of a model with its manifest that failed: `trial_run`\n(the run on built-in candles) or `example` (the output for the manifest's example is not\nthe expected one, after a trial run that passed).",
+        "enum": [
+          "trial_run",
+          "example"
+        ],
+        "title": "CheckPart",
+        "type": "string"
+      },
       "DashboardOut": {
         "description": "Everything the Dashboard shows, in one response.",
         "properties": {
@@ -3284,6 +3293,36 @@
             ],
             "title": "Check Error"
           },
+          "check_failed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CheckPart"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which part of that check failed; null when it passed or has not run",
+            "examples": [
+              null
+            ]
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the worker's check of its manifest (the trial run, then the example) came to an end, passed or failed (UTC); null while it has not, as without a manifest",
+            "examples": [
+              null
+            ],
+            "title": "Checked At"
+          },
           "created_at": {
             "description": "When the model was uploaded (UTC)",
             "format": "date-time",
@@ -3400,6 +3439,8 @@
           "created_at",
           "state",
           "manifest_summary",
+          "checked_at",
+          "check_failed",
           "check_error"
         ],
         "title": "ModelOut",

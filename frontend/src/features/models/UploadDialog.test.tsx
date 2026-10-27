@@ -12,8 +12,8 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { MB, model, modelsAnswer, problem, stubApi } from '@/test/api';
-import { addButton, file, LSTM, openUpload, steps, UPLOAD, type Answers } from '@/test/upload';
+import { catalogAnswer, manifest, MB, model, modelsAnswer, problem, stubApi } from '@/test/api';
+import { addButton, file, jsonFile, LSTM, openUpload, PUT, READY, steps, UPLOAD, type Answers } from '@/test/upload';
 
 import { UploadDialog } from './UploadDialog';
 
@@ -61,6 +61,9 @@ describe('the upload, step 1: the model', () => {
     const input = dialog.getByLabelText<HTMLInputElement>('Model file');
     expect([input.type, input.accept]).toEqual(['file', '.keras,.onnx']);
     expect(addButton(dialog).disabled).toBe(true);
+    // Off, it drops the accent for the muted surface, so it does not look like a button to press.
+    expect(addButton(dialog).className).toContain('disabled:bg-surface-2');
+    expect(addButton(dialog).className).toContain('disabled:text-muted-foreground');
   });
 
   it('opens the file picker on a click of the drop zone', async () => {
@@ -152,28 +155,33 @@ describe('the upload, step 1: the model', () => {
   });
 
   // Once the file is in, the API checks and keeps it whatever the page does: closing the dialog
-  // lets the upload come to its answer, and a model the API kept joins the page.
-  it('shows the model the API kept after the dialog closed during its checks', async () => {
+  // lets the upload come to its answer, and the model the API kept, never added, is deleted then.
+  it('deletes the model the API kept after the dialog closed during its checks', async () => {
     let answer = (_value: { status: number; body: unknown }) => undefined as void;
     let request: RequestInit | undefined;
-    const { dialog, choose, user } = await openUpload({
+    const { dialog, choose, user, fetch } = await openUpload({
       [UPLOAD]: (init) => {
         request = init;
         return new Promise((resolve) => {
           answer = resolve;
         });
       },
+      'DELETE /api/v1/models/mdl_a2b3c4d5e6': { status: 204 },
     });
     choose(file('lstm-signals.keras'));
     await vi.waitFor(() => expect(request).toBeDefined());
     await user.click(dialog.getByRole('button', { name: 'Cancel' }));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(request?.signal?.aborted ?? false).toBe(false);
+    expect(fetch.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
 
-    stubApi(modelsAnswer([LSTM]));
     answer({ status: 201, body: LSTM });
-    expect(await screen.findByText(/^1 model · 12.4 MB of 100 MB used/)).toBeDefined();
-    expect(screen.getAllByRole('article')).toHaveLength(1);
+    await vi.waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        '/api/v1/models/mdl_a2b3c4d5e6',
+        expect.objectContaining({ method: 'DELETE' }),
+      ),
+    );
   });
 
   it.each([
@@ -270,13 +278,22 @@ describe('a refused model', () => {
 
 describe('Add model elsewhere', () => {
   it("opens the model's page on Add model when it was opened elsewhere", async () => {
-    stubApi({ ...modelsAnswer([]), [UPLOAD]: { status: 201, body: LSTM } });
+    stubApi({
+      ...modelsAnswer([]),
+      ...catalogAnswer,
+      [UPLOAD]: { status: 201, body: LSTM },
+      [PUT]: { status: 200, body: READY },
+    });
     const router = renderElsewhere();
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'Upload' }));
     const dialog = within(screen.getByRole('dialog', { name: 'Add a model' }));
     fireEvent.change(dialog.getByLabelText('Model file'), { target: { files: [file('lstm-signals.keras')] } });
-    await user.click(await dialog.findByRole('button', { name: 'Add the model without a manifest' }));
+    await dialog.findByRole('heading', { name: 'Done: Model uploaded' });
+    fireEvent.change(dialog.getByLabelText('Manifest file'), {
+      target: { files: [jsonFile('lstm.manifest.json', manifest())] },
+    });
+    await dialog.findByRole('heading', { name: 'Done: Manifest uploaded' });
     await user.click(addButton(dialog));
     await vi.waitFor(() => expect(router.state.location.pathname).toBe('/models/mdl_a2b3c4d5e6'));
   });

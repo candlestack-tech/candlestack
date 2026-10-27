@@ -183,8 +183,8 @@ names the layout: `useSearch({ from: '/_public/instruments' })`.
 
 The app shell (`src/features/workspace/`) follows `mockups/app`: the app header (logo to the
 dashboard, no nav, New backtest, the theme toggle, the avatar), a 200 px sidebar (Dashboard,
-Backtests, Models with the model count, Settings, then the storage the models take and the note
-that market data is delayed 15 min; up to 980 px above the page as a row that scrolls sideways
+Backtests, Models with the model count, Settings, then the storage the models take, under "Model
+storage" on one line ("4.7 MB of 100 MB"), and the note that market data is delayed 15 min; up to 980 px above the page as a row that scrolls sideways
 without a scrollbar, the foot left out) and the footer.
 The avatar is the user's initials (`initials.ts`), never a provider picture; its menu
 (`src/features/account/AccountMenu.tsx`) is a shadcn/ui DropdownMenu with Settings, Home page,
@@ -289,11 +289,15 @@ delete modals):
   `['account', 'manifest', <id>]`, and the catalog (`GET /api/v1/preprocessing/catalog`) is asked
   for once.
 - The line under the title says how many models there are, the storage they take and, in the
-  warning colour, how many still need a manifest.
+  warning colour, how many still need a manifest. At the right of the title row (under it when
+  the row is too narrow), Upload model: an outline button with the upload icon and "Keras or
+  ONNX, up to 50 MB" under it (the API's `file_max_bytes`), which opens the upload dialog; the Upload card stays on the
+  Dashboard's quick actions. The tiles start under the title row, across the whole width.
 - A tile per model, oldest first: the framework's mark (Simple Icons paths and brand colours in
   `frameworks.ts`, a quarter lighter in the dark theme), the state (Verified, Ready, Needs setup;
-  `StatePill.tsx`), the star (`src/components/StarButton.tsx`), the name, `Keras · size · added
-  day`, what it reads from its manifest ("Renko · 30m · 25 × 23", else "in 25 × 23 · no
+  `StatePill.tsx`), the star (`src/components/StarButton.tsx`), the name (up to two lines, broken
+  anywhere, in full in its title), `Keras · size · added day` ("added today"), what it reads
+  from its manifest ("Renko · 30m · 25 × 23", else "in 25 × 23 · no
   manifest"), then the best Sharpe and the backtest count, or Add manifest while it has none. The
   name's link is stretched over the tile, so the whole tile opens the model's page; the star and
   Add manifest sit above it. Sizes are binary MB like the API's limits. The day goes through
@@ -308,23 +312,33 @@ delete modals):
   and a refused one shows the API's sentences (`problems`, then how many more) in the step with
   Choose another file. A kept manifest folds into a line of facts (input, output, what it reads,
   the warm-up) and the bar "model [25, 5] = manifest [25, 5]", which opens the input matrix.
-  "Add the model without a manifest" skips the step. 3, one line of what goes to Models, and Add
-  model, which opens the model's page. The API keeps the model, and then the manifest, as soon as
-  each passed its checks, so closing the dialog early keeps what was uploaded (as Needs setup
-  without a manifest); an upload still running goes on to its answer. Add manifest
-  (`ManifestDialog`) is the same steps with the model done, ending in Save.
+  A model needs its manifest to be added: there is no way past the step. 3, one line of what goes
+  to Models, and Add model, which opens the model's page. The API keeps the model, and then the
+  manifest, as soon as each passed its checks, so closing the dialog before Add model deletes the
+  model it uploaded (`useUpload`), and an upload still running goes on to its answer and is
+  deleted then. While the dialog holds such a model, a `pagehide` (a reload, the tab closed)
+  sends its DELETE with `keepalive`. Change on a kept manifest keeps it until another passes: one
+  that fails says the model keeps the earlier one, and Add model stays on. Add manifest (`ManifestDialog`) is the same steps with the model done, ending in
+  Save; closing it keeps the model. The API still holds a model without a manifest (Needs setup),
+  which gets one with Add manifest. Every dialog (`src/components/ui/dialog.tsx`) is anchored a
+  tenth of the screen from the top, so one whose steps grow only grows downwards.
 - The model's page (`src/pages/ModelPage.tsx`), one screen without tabs: the header (the name,
   the state, `Keras · size · added day`; Backtest with it and Download manifest, or Add manifest;
   Rename and Delete), a strip of facts (what it reads and the warm-up, or the input shape without
   a manifest; the backtests and the best Sharpe), the input drawn as a matrix beside the checks,
   then the first 10 backtests of `GET /api/v1/backtests?model=<name>` with a link to all of them.
+  The checks end with the trial run and the example from `checked_at`, `check_failed` and
+  `check_error`: not run yet, passed, or failed with the worker's sentences, the example
+  "Example matches" once verified, "No example" when the manifest has none, and "Example does not
+  match" when it failed on the example after a trial run that passed.
   Backtest with it opens the builder with the model chosen. Delete goes back to Models.
 - The matrix (`InputMatrix.tsx`): the window's rows down (the oldest at the top, at most 32 drawn,
   spread over a longer window), the columns across under their catalog groups, then the one
   number it predicts. The cells are shaded by the first sample of the manifest's `example`,
   scaled per column; without one every cell has the same tint, as there are no values to draw.
   A column is a button (one tab stop for all, the arrows, Home and End move between them): it
-  shows its catalog description, its parameters and its scaling ("as is", "BLESK scaling").
+  shows its catalog description, its parameters and its scaling ("as is", "BLESK scaling"). The
+  chosen column is drawn in the accent.
 - A model deleted meanwhile (404) closes its Rename or Delete dialog, and its page says it is not
   found.
 

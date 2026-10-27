@@ -6,13 +6,14 @@ import { UploadIcon } from '@/components/icons';
 import { DIALOG_HINT } from '@/components/ui/dialog';
 
 import { DropZone } from './DropZone';
-import { formatSize } from './format';
+import { formatLimit, formatSize } from './format';
 import { API_FRAMEWORKS, frameworkOfFile, UPLOAD_FRAMEWORKS } from './frameworks';
 import { InputMatrix } from './InputMatrix';
 import { formatDims, formatGrid, formatReads, formatWarmUp, representationName } from './manifest';
 import { manifestProblem, modelProblem, type Problem } from './problems';
 import { Facts, LinkButton, MatchBar, OutLink, Step, StepError, StepLine } from './UploadSteps';
-import type { ManifestStep, ModelStep } from './useUpload';
+import { useModels } from './useModels';
+import { heldManifest, type ManifestStep, type ModelStep } from './useUpload';
 
 // The three steps of the upload (mockups/app, dModalBody), each in the state it is in.
 
@@ -47,10 +48,14 @@ function BusyStep({ n, title, file, children }: { n: number; title: string; file
   );
 }
 
+// "up to 50 MB" once the API said its limit (`file_max_bytes`).
+const upTo = (fileMax: number | undefined) => (fileMax === undefined ? '' : `, up to ${formatLimit(fileMax)}`);
+
 function PickModel({ onPick, onDrop }: Picker) {
+  const fileMax = useModels().data?.usage.file_max_bytes;
   return (
     <Step n={1} state="on" title="Upload the model">
-      <Line>A trained model in Keras (.keras) or ONNX (.onnx), up to 50 MB.</Line>
+      <Line>A trained model in Keras (.keras) or ONNX (.onnx){upTo(fileMax)}.</Line>
       <DropZone
         icon={UploadIcon}
         title="Drop the model here"
@@ -103,7 +108,7 @@ export function ModelPart({ state, adding, onPick, onDrop }: ModelProps) {
   }
 }
 
-function PickManifest({ adding, onPick, onDrop, onSkip }: Picker & { adding: boolean; onSkip: () => void }) {
+function PickManifest({ onPick, onDrop }: Picker) {
   return (
     <Step n={2} state="on" title="Upload the manifest">
       <Line>
@@ -111,11 +116,6 @@ function PickManifest({ adding, onPick, onDrop, onSkip }: Picker & { adding: boo
         how many rows. <OutLink href={MANIFEST_DOCS}>About the manifest format</OutLink>
       </Line>
       <DropZone icon={FileIcon} title="Drop manifest.json here" onPick={onPick} onDrop={onDrop} />
-      {!adding && (
-        <p>
-          <LinkButton onClick={onSkip}>Add the model without a manifest</LinkButton>
-        </p>
-      )}
     </Step>
   );
 }
@@ -154,15 +154,22 @@ function KeptManifest({ state, model, onPick }: KeptProps) {
   );
 }
 
-type ManifestProps = Picker & { state: ManifestStep; model: Model | null; adding: boolean; onSkip: () => void };
+// Why a manifest failed, and that the model keeps the earlier one it had (after Change).
+function failedManifest(state: Extract<ManifestStep, { step: 'failed' }>): Problem {
+  const problem = manifestProblem(state.failure);
+  if (!state.earlier) return problem;
+  return { ...problem, lines: [...problem.lines, `The model keeps ${state.earlier.file.name}.`] };
+}
 
-// Step 2: the manifest, which waits for the model. A new model can go without one for now.
-export function ManifestPart({ state, model, adding, onPick, onDrop, onSkip }: ManifestProps) {
+type ManifestProps = Picker & { state: ManifestStep; model: Model | null };
+
+// Step 2: the manifest, which waits for the model. A model needs one to be added.
+export function ManifestPart({ state, model, onPick, onDrop }: ManifestProps) {
   const title = 'Upload the manifest';
   if (model === null) return <Step n={2} state="wait" title={title} />;
   switch (state.step) {
     case 'pick':
-      return <PickManifest adding={adding} onPick={onPick} onDrop={onDrop} onSkip={onSkip} />;
+      return <PickManifest onPick={onPick} onDrop={onDrop} />;
     case 'checking':
       return (
         <BusyStep n={2} title={title} file={state.file}>
@@ -170,42 +177,28 @@ export function ManifestPart({ state, model, adding, onPick, onDrop, onSkip }: M
         </BusyStep>
       );
     case 'failed':
-      return <FailedStep n={2} title={title} problem={manifestProblem(state.failure)} onPick={onPick} />;
+      return <FailedStep n={2} title={title} problem={failedManifest(state)} onPick={onPick} />;
     case 'kept':
       return <KeptManifest state={state} model={model} onPick={onPick} />;
-    case 'skipped':
-      return (
-        <Step n={2} state="done" title="No manifest for now">
-          <Line>
-            You can add it later from Models. <LinkButton onClick={onPick}>Add it now</LinkButton>
-          </Line>
-        </Step>
-      );
   }
 }
 
 type SummaryProps = { model: Model | null; manifest: ManifestStep; adding: boolean };
 
-// Step 3: one line of what goes to Models.
+// Step 3: one line of what goes to Models, once the API holds a manifest for the model (the model
+// it answered with has its summary).
 export function SummaryPart({ model, manifest, adding }: SummaryProps) {
-  const ready = model !== null && (manifest.step === 'kept' || manifest.step === 'skipped');
-  if (!ready) return <Step n={3} state="wait" title={adding ? 'Save' : 'Add the model'} />;
-  const summary = model.manifest_summary;
+  const summary = model?.manifest_summary;
+  if (!model || heldManifest(manifest) === undefined || !summary) {
+    return <Step n={3} state="wait" title={adding ? 'Save' : 'Add the model'} />;
+  }
   return (
     <Step n={3} state="on" title={adding ? 'Save the manifest' : 'Add the model'}>
-      {manifest.step === 'skipped' || !summary ? (
-        <p className="[overflow-wrap:anywhere]">
-          {model.name} goes to Models as <b className="font-semibold">Needs setup</b>. It can run once it has a
-          manifest.
-        </p>
-      ) : (
-        <StepLine name={model.name}>
-          <Muted>
-            {representationName(summary.representation.id, true)}, {summary.timeframe} ·{' '}
-            {formatGrid(summary.input_shape)}
-          </Muted>
-        </StepLine>
-      )}
+      <StepLine name={model.name}>
+        <Muted>
+          {representationName(summary.representation.id, true)}, {summary.timeframe} · {formatGrid(summary.input_shape)}
+        </Muted>
+      </StepLine>
     </Step>
   );
 }

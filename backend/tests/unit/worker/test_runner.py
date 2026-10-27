@@ -391,6 +391,58 @@ def test_numbers_that_are_not_finite_fail_the_job(
     )
 
 
+class WrongOnTheExample:
+    """Gives zeros for the trial run, and for the example's two samples `answer`."""
+
+    def __init__(self, answer: Callable[[int], np.ndarray]) -> None:
+        self.answer = answer
+
+    def predict(self, samples: np.ndarray, **_: object) -> np.ndarray:
+        if len(samples) == 2:
+            return self.answer(len(samples))
+        return np.zeros((len(samples), 1), dtype=np.float32)
+
+
+def fail_on_input(_count: int) -> np.ndarray:
+    raise ValueError("bad input")
+
+
+@pytest.mark.parametrize(
+    ("answer", "error"),
+    [
+        (fail_on_input, "For the manifest's example: The model failed on its input (ValueError)."),
+        (
+            lambda count: np.full((count, 1), np.nan, dtype=np.float32),
+            "For the manifest's example: The model gave 2 of 2 values that are not finite numbers.",
+        ),
+        (
+            lambda count: np.zeros((count, 3), dtype=np.float32),
+            (
+                "For the manifest's example: The model gave an output of shape [3] per sample, "
+                "the manifest says [1]."
+            ),
+        ),
+    ],
+)
+def test_a_model_that_fails_on_the_example_fails_the_example_not_the_trial_run(
+    make_job: Callable[..., Job],
+    run_job: Callable[[Job], Outcome],
+    models: Path,
+    manifest: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    answer: Callable[[int], np.ndarray],
+    error: str,
+) -> None:
+    job = make_job("check", manifest=example_of(models, manifest))
+    monkeypatch.setattr(keras_model, "load_keras", lambda *_: WrongOnTheExample(answer))
+
+    result = run_job(job).result
+
+    assert (result.status, result.reason, result.verified) == ("failed", "example", False)
+    assert result.error is not None
+    assert result.error.startswith(error)
+
+
 def test_a_bug_of_ours_is_an_internal_failure_with_its_trace(
     make_job: Callable[..., Job],
     make_candles: Callable[[int], pl.DataFrame],

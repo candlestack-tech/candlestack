@@ -150,7 +150,7 @@ describe("a model's page", () => {
       'Passed: One input, one output',
       'Passed: Manifest fits [25, 5]',
       'Not yet: Trial runNot run yet',
-      'Not yet: No example',
+      'Not checked: No example',
     ]);
   });
 

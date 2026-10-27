@@ -89,8 +89,9 @@ def test_a_check_that_gives_the_example_verifies_the_model(ada, sql, worker) -> 
 
     until(lambda: only(ada)["state"] == "verified")
 
-    assert model["state"] == "ready"
-    assert only(ada)["check_error"] is None
+    assert (model["state"], model["checked_at"]) == ("ready", None)
+    assert only(ada)["checked_at"] is not None
+    assert (only(ada)["check_failed"], only(ada)["check_error"]) == (None, None)
     (job,) = worker.jobs
     stored = sql("SELECT sha256, manifest FROM models")[0]
     assert (job.kind, job.model, job.sha256) == (
@@ -109,8 +110,23 @@ def test_a_failed_check_leaves_the_model_ready_with_its_error(ada, sql, worker) 
     until(lambda: checked(sql))
 
     assert only(ada)["state"] == "ready"
-    assert only(ada)["check_error"] == EXAMPLE_ERROR
+    assert (only(ada)["check_failed"], only(ada)["check_error"]) == ("example", EXAMPLE_ERROR)
     assert sql("SELECT verified_at FROM models") == [(None,)]
+
+
+def test_a_check_that_failed_in_the_trial_run_says_so(ada, sql, worker) -> None:
+    worker.answer = lambda job: JobResult.failed(
+        job.id, job.kind, "predict", "The model failed on its input."
+    )
+    with_manifest(ada)
+
+    until(lambda: checked(sql))
+
+    assert (only(ada)["state"], only(ada)["check_failed"], only(ada)["check_error"]) == (
+        "ready",
+        "trial_run",
+        "The model failed on its input.",
+    )
 
 
 def test_a_check_without_an_example_leaves_the_model_ready(ada, sql, worker) -> None:
@@ -121,7 +137,12 @@ def test_a_check_without_an_example_leaves_the_model_ready(ada, sql, worker) -> 
 
     until(lambda: checked(sql))
 
-    assert (only(ada)["state"], only(ada)["check_error"]) == ("ready", None)
+    assert (only(ada)["state"], only(ada)["check_failed"], only(ada)["check_error"]) == (
+        "ready",
+        None,
+        None,
+    )
+    assert only(ada)["checked_at"] is not None
 
 
 def test_a_new_manifest_clears_the_check_of_the_old_one(ada, sql, worker) -> None:
@@ -132,8 +153,10 @@ def test_a_new_manifest_clears_the_check_of_the_old_one(ada, sql, worker) -> Non
 
     response = ada.set_manifest(model["id"], json.dumps(raw_manifest("Second")))
 
-    assert (response.json()["state"], response.json()["check_error"]) == ("ready", None)
-    assert sql("SELECT checked_at, verified_at FROM models") == [(None, None)]
+    answer = response.json()
+    assert (answer["state"], answer["checked_at"], answer["check_failed"]) == ("ready", None, None)
+    assert answer["check_error"] is None
+    assert sql("SELECT checked_at, verified_at, check_failed FROM models") == [(None, None, None)]
 
 
 def test_a_manifest_replaced_while_its_check_ran_keeps_the_model_ready(

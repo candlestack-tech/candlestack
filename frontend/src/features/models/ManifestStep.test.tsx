@@ -3,9 +3,28 @@ import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { Model } from '@/api';
 import { ARSEN, catalogAnswer, manifest, MB, modelsAnswer, problem, sentBody, session, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 import { addButton, file, jsonFile, LSTM, openUpload, PUT, READY, steps, UPLOAD, type Answers } from '@/test/upload';
+
+const DELETE = 'DELETE /api/v1/models/mdl_a2b3c4d5e6';
+
+// The API's list as it changes: the upload keeps the model, a DELETE that succeeds removes it.
+function keptUntilDeleted(deleted: { status: number; body?: unknown } = { status: 204 }): Answers {
+  let list: Model[] = [];
+  return {
+    [UPLOAD]: async () => {
+      list = [LSTM];
+      return { status: 201, body: LSTM };
+    },
+    'GET /api/v1/models': async () => modelsAnswer(list)['GET /api/v1/models'] as { status: number; body: unknown },
+    [DELETE]: async () => {
+      if (deleted.status < 300) list = [];
+      return deleted;
+    },
+  };
+}
 
 afterEach(() => {
   cleanup();
@@ -20,14 +39,15 @@ describe('the upload, step 2: the manifest', () => {
     return opened;
   }
 
-  it('asks for the manifest with a link to its format, or lets the model go without one', async () => {
+  it('asks for the manifest with a link to its format: a model needs one to be added', async () => {
     const { dialog } = await uploaded();
     expect(dialog.getByRole('link', { name: 'About the manifest format' }).getAttribute('href')).toBe(
       'https://candlestack.tech/docs/manifest',
     );
     expect(dialog.getByRole('button', { name: /Drop manifest\.json here/ })).toBeDefined();
     expect(dialog.getByLabelText<HTMLInputElement>('Manifest file').accept).toBe('.json,application/json');
-    expect(dialog.getByRole('button', { name: 'Add the model without a manifest' })).toBeDefined();
+    expect(dialog.queryByRole('button', { name: /without a manifest/ })).toBeNull();
+    expect(dialog.queryByText(/without a manifest/)).toBeNull();
     expect(addButton(dialog).disabled).toBe(true);
   });
 
@@ -110,26 +130,113 @@ describe('the upload, step 2: the manifest', () => {
     expect(click).toHaveBeenCalledOnce();
   });
 
-  it('adds the model without a manifest as Needs setup, or takes one after all', async () => {
-    const { dialog, user } = await uploaded();
-    await user.click(dialog.getByRole('button', { name: 'Add the model without a manifest' }));
-    expect(steps(dialog)).toEqual(['Done: Model uploaded', 'Done: No manifest for now', 'Add the model']);
-    expect(dialog.getByText(/goes to Models as/).textContent).toBe(
-      'lstm-signals.keras goes to Models as Needs setup. It can run once it has a manifest.',
-    );
+  it('keeps the kept manifest while another is chosen, and after the other failed', async () => {
+    const { dialog, chooseManifest, user } = await uploaded({ [PUT]: { status: 200, body: READY } });
+    chooseManifest(jsonFile('lstm.manifest.json', manifest()));
+    await dialog.findByRole('heading', { name: 'Done: Manifest uploaded' });
+
+    // Change opens the picker; cancelling it changes nothing.
+    const click = vi.spyOn(dialog.getByLabelText<HTMLInputElement>('Manifest file'), 'click');
+    await user.click(dialog.getByRole('button', { name: 'Change' }));
+    expect(click).toHaveBeenCalledOnce();
+    expect(dialog.getByRole('heading', { name: 'Done: Manifest uploaded' })).toBeDefined();
     expect(addButton(dialog).disabled).toBe(false);
 
-    await user.click(dialog.getByRole('button', { name: 'Add it now' }));
-    expect(dialog.getByRole('button', { name: /Drop manifest\.json here/ })).toBeDefined();
-    expect(addButton(dialog).disabled).toBe(true);
+    // A new manifest that fails leaves the earlier one with the model, so Add model stays on.
+    chooseManifest(new File(['{'], 'broken.json'));
+    expect((await dialog.findByRole('alert')).textContent).toBe(
+      'This file is not JSONChoose the manifest, a .json file.The model keeps lstm.manifest.json.Choose another file',
+    );
+    expect(steps(dialog)[2]).toBe('Add the model');
+    expect(addButton(dialog).disabled).toBe(false);
+
+    // Choose another file goes back to the earlier manifest, with the picker open.
+    await user.click(dialog.getByRole('button', { name: 'Choose another file' }));
+    expect(dialog.getByRole('heading', { name: 'Done: Manifest uploaded' })).toBeDefined();
+    expect(click).toHaveBeenCalledTimes(2);
   });
 
-  it("opens the model's page on Add model", async () => {
-    const { dialog, user, router } = await uploaded({ [PUT]: { status: 200, body: READY } });
-    await user.click(dialog.getByRole('button', { name: 'Add the model without a manifest' }));
+  it("opens the model's page on Add model and keeps the model", async () => {
+    const { dialog, user, router, fetch, chooseManifest } = await uploaded({ [PUT]: { status: 200, body: READY } });
+    chooseManifest(jsonFile('lstm.manifest.json', manifest()));
+    await dialog.findByRole('heading', { name: 'Done: Manifest uploaded' });
     await user.click(addButton(dialog));
     await vi.waitFor(() => expect(router.state.location.pathname).toBe('/models/mdl_a2b3c4d5e6'));
     expect(screen.queryByRole('dialog', { name: 'Add a model' })).toBeNull();
+    expect(fetch.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+  });
+
+  it.each([
+    ['before the manifest', false],
+    ['with the manifest kept but before Add model', true],
+  ])('deletes the uploaded model when the dialog is cancelled %s', async (_, withManifest) => {
+    const { dialog, user, fetch, chooseManifest } = await uploaded({
+      ...keptUntilDeleted(),
+      [PUT]: { status: 200, body: READY },
+    });
+    if (withManifest) {
+      chooseManifest(jsonFile('lstm.manifest.json', manifest()));
+      await dialog.findByRole('heading', { name: 'Done: Manifest uploaded' });
+    }
+    // Behind the dialog, so hidden from the accessibility tree while it is open.
+    expect(screen.getAllByRole('article', { hidden: true })).toHaveLength(1);
+    await user.click(dialog.getByRole('button', { name: 'Cancel' }));
+
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await vi.waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        '/api/v1/models/mdl_a2b3c4d5e6',
+        expect.objectContaining({ method: 'DELETE' }),
+      ),
+    );
+    await vi.waitFor(() => expect(screen.queryAllByRole('article')).toHaveLength(0));
+  });
+
+  const deletes = (fetch: ReturnType<typeof stubApi>) =>
+    fetch.mock.calls.filter(([, init]) => init?.method === 'DELETE');
+
+  it('deletes the held model with a request that outlives the page when the page goes away', async () => {
+    const { fetch } = await uploaded(keptUntilDeleted());
+    window.dispatchEvent(new Event('pagehide'));
+    expect(deletes(fetch)).toHaveLength(1);
+    expect(deletes(fetch)[0]).toEqual([
+      '/api/v1/models/mdl_a2b3c4d5e6',
+      expect.objectContaining({ method: 'DELETE', keepalive: true, credentials: 'same-origin' }),
+    ]);
+  });
+
+  it('leaves the page going away alone once the model is added or deleted', async () => {
+    const added = await uploaded({ [PUT]: { status: 200, body: READY } });
+    added.chooseManifest(jsonFile('lstm.manifest.json', manifest()));
+    await added.dialog.findByRole('heading', { name: 'Done: Manifest uploaded' });
+    await added.user.click(addButton(added.dialog));
+    await vi.waitFor(() => expect(added.router.state.location.pathname).toBe('/models/mdl_a2b3c4d5e6'));
+    window.dispatchEvent(new Event('pagehide'));
+    expect(deletes(added.fetch)).toHaveLength(0);
+    cleanup();
+
+    const cancelled = await uploaded(keptUntilDeleted());
+    await cancelled.user.click(cancelled.dialog.getByRole('button', { name: 'Cancel' }));
+    await vi.waitFor(() => expect(deletes(cancelled.fetch)).toHaveLength(1));
+    window.dispatchEvent(new Event('pagehide'));
+    expect(deletes(cancelled.fetch)).toHaveLength(1);
+  });
+
+  it('asks for the list again when the model could not be deleted, so it shows', async () => {
+    const { dialog, user, fetch } = await uploaded(keptUntilDeleted({ status: 503, body: { detail: 'Down.' } }));
+    const listed = () => fetch.mock.calls.filter(([path]) => path === '/api/v1/models').length;
+    // The list asked for again after the upload first.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const before = listed();
+    await user.click(dialog.getByRole('button', { name: 'Close' }));
+    await vi.waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        '/api/v1/models/mdl_a2b3c4d5e6',
+        expect.objectContaining({ method: 'DELETE' }),
+      ),
+    );
+    await vi.waitFor(() => expect(listed()).toBeGreaterThan(before));
+    expect(screen.getAllByRole('article')).toHaveLength(1);
   });
 });
 
@@ -141,7 +248,6 @@ describe('Add manifest', () => {
     await user.click(await screen.findByRole('button', { name: 'Add manifest to lstm-signals.keras' }));
     const dialog = within(screen.getByRole('dialog', { name: 'Add a manifest to lstm-signals.keras' }));
     expect(steps(dialog)).toEqual(['Done: The model', 'Upload the manifest', 'Save']);
-    expect(dialog.queryByRole('button', { name: 'Add the model without a manifest' })).toBeNull();
 
     const fetch = stubApi({ ...modelsAnswer([READY]), ...catalogAnswer, [PUT]: { status: 200, body: READY } });
     fireEvent.change(dialog.getByLabelText('Manifest file'), {
@@ -154,5 +260,18 @@ describe('Add manifest', () => {
     await user.click(dialog.getByRole('button', { name: 'Save' }));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(within(screen.getByRole('article')).getByText('Ready')).toBeDefined();
+  });
+
+  it('keeps the model when the dialog is cancelled', async () => {
+    const fetch = stubApi({ ...session(ARSEN), ...modelsAnswer([LSTM]), ...catalogAnswer });
+    await renderApp('/models');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Add manifest to lstm-signals.keras' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Add a manifest to lstm-signals.keras' }));
+    await user.click(dialog.getByRole('button', { name: 'Cancel' }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetch.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+    expect(screen.getAllByRole('article')).toHaveLength(1);
   });
 });

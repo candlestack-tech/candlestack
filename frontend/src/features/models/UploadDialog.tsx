@@ -16,7 +16,7 @@ import {
 import { ACCEPTED_EXTENSIONS } from './frameworks';
 import { ManifestPart, ModelPart, SummaryPart } from './UploadParts';
 import { Steps } from './UploadSteps';
-import { useUpload, type ManifestStep, type ModelStep } from './useUpload';
+import { heldManifest, useUpload, type ManifestStep, type ModelStep } from './useUpload';
 
 // A hidden file input that the drop zones and Choose another file open.
 function FileInput({
@@ -86,13 +86,14 @@ function usePickers(flow: ReturnType<typeof useUpload>) {
 }
 
 // The three steps, all in view, and Cancel and Add model (Save) under them. It mounts with the
-// dialog and unmounts with it; a file still being checked goes on to its answer (useUpload).
+// dialog and unmounts with it; a file still being checked goes on to its answer, and a new model
+// not added goes when it closes (useUpload).
 function UploadFlow({ existing, onAdded }: FlowProps) {
   const flow = useUpload(existing);
   const pickers = usePickers(flow);
   const adding = existing !== undefined;
   const model = flow.model.step === 'kept' ? flow.model.model : null;
-  const ready = model !== null && (flow.manifest.step === 'kept' || flow.manifest.step === 'skipped');
+  const ready = model !== null && heldManifest(flow.manifest) !== undefined;
   return (
     <>
       <DialogBody>
@@ -105,17 +106,22 @@ function UploadFlow({ existing, onAdded }: FlowProps) {
           <ManifestPart
             state={flow.manifest}
             model={model}
-            adding={adding}
             onPick={pickers.pickManifest}
             onDrop={pickers.chooseManifest}
-            onSkip={flow.skipManifest}
           />
           <SummaryPart model={model} manifest={flow.manifest} adding={adding} />
         </Steps>
       </DialogBody>
       <DialogFooter>
         <CancelButton />
-        <PrimaryButton disabled={!ready} onClick={() => model && onAdded(model)}>
+        <PrimaryButton
+          disabled={!ready}
+          onClick={() => {
+            if (!model) return;
+            flow.keep();
+            onAdded(model);
+          }}
+        >
           {adding ? 'Save' : 'Add model'}
         </PrimaryButton>
       </DialogFooter>
@@ -124,9 +130,9 @@ function UploadFlow({ existing, onAdded }: FlowProps) {
 }
 
 // Add a model (mockups/app, MODALS.upload): the model file, its manifest, then Add model, which
-// opens the model's page, or with `onAdded` hands the model over (the builder chooses it). The API
-// keeps the model as soon as its file passed the checks, and the manifest as soon as it passed its
-// own, so closing the dialog early keeps what was uploaded.
+// opens the model's page, or with `onAdded` hands the model over (the builder chooses it). A model
+// needs its manifest to be added: the API keeps the model as soon as its file passed the checks,
+// so closing the dialog before Add model deletes the model it uploaded.
 export function UploadDialog({ children, onAdded }: { children: ReactNode; onAdded?: (model: Model) => void }) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();

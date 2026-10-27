@@ -116,6 +116,8 @@ export const model = (fields: Partial<Model> = {}): Model => ({
   created_at: '2026-10-13T09:00:00Z',
   state: 'needs_setup',
   manifest_summary: null,
+  checked_at: null,
+  check_failed: null,
   check_error: null,
   ...fields,
 });
