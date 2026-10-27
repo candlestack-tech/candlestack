@@ -27,6 +27,7 @@ import json
 import math
 import re
 import shutil
+import stat
 import struct
 import sys
 import unicodedata
@@ -210,10 +211,14 @@ def _check_members(archive: zipfile.ZipFile, file_max: int) -> None:
         raise _opens(_TOO_MANY_FILES)
     for info in infos:
         name = info.filename
+        # A Unix file type in the external attributes other than a file or a folder is a link
+        # or a device, which an unpacker that keeps them (unzip) would follow outside the model.
+        kind = stat.S_IFMT(info.external_attr >> 16)
         if (
             name.startswith(("/", "\\"))
             or re.match(r"^[A-Za-z]:", name)
             or ".." in PurePosixPath(name.replace("\\", "/")).parts
+            or kind not in (0, stat.S_IFREG, stat.S_IFDIR)
         ):
             raise _opens("The file holds a path that points outside the model. " + _SAVE_AGAIN)
         if name not in _MEMBERS and not name.startswith(_ASSETS):

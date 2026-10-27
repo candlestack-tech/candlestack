@@ -2,6 +2,7 @@
 broken ones made from them."""
 
 import json
+import stat
 import sys
 import zipfile
 from collections.abc import Callable
@@ -157,6 +158,36 @@ def test_a_path_outside_the_model_fails_opens(member: str, tmp_path: Path, scrat
     assert opens_fails(path, scratch) == (
         "The file holds a path that points outside the model. " + SAVE_AGAIN
     )
+
+
+def with_member(tmp_path: Path, name: str, mode: int, content: bytes = b"x") -> Path:
+    """A copy of the functional fixture with the member `name` of the Unix `mode` added."""
+    path = rezip(tmp_path)
+    info = zipfile.ZipInfo(name)
+    info.create_system = 3
+    info.external_attr = mode << 16
+    with zipfile.ZipFile(path, "a") as archive:
+        archive.writestr(info, content)
+    return path
+
+
+@pytest.mark.parametrize("kind", [stat.S_IFLNK, stat.S_IFIFO, stat.S_IFCHR, stat.S_IFBLK])
+def test_a_member_that_is_no_file_fails_opens(kind: int, tmp_path: Path, scratch: Path):
+    path = with_member(tmp_path, "assets/vocabulary.txt", kind | 0o777, b"/etc/passwd")
+
+    assert opens_fails(path, scratch) == (
+        "The file holds a path that points outside the model. " + SAVE_AGAIN
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "mode"),
+    [("assets/vocabulary.txt", stat.S_IFREG | 0o644), ("assets/", stat.S_IFDIR | 0o755)],
+)
+def test_unix_files_and_folders_are_fine(name: str, mode: int, tmp_path: Path, scratch: Path):
+    path = with_member(tmp_path, name, mode, b"" if name.endswith("/") else b"up")
+
+    assert check(path, scratch).parameters == 9325
 
 
 def test_an_unknown_member_fails_opens(tmp_path: Path, scratch: Path) -> None:
