@@ -46,6 +46,12 @@ are, by the mock and by `Upstream.native_bars` of the integration tests.
 the manifest without preprocessing of [docs/preprocessing.md](../../../docs/preprocessing.md),
 for the manifest checks (`candlestack.preprocessing`);
 `keras/make_allowlist.py` writes `candlestack/ml/allowlist.py` from Keras the same way.
+`keras/hostile/*.keras` are what an attacker could upload instead, each `raw_candles.keras` with
+one harmful change (a zip bomb, zip64, a path out of the archive, a symlink, a config.json past
+1 MB, a `Lambda` layer in a nested model, `get_file` and `enable_unsafe_deserialization` as an
+activation), for `tests/unit/ml/test_inspect_hostile.py`. `keras/make_hostile.py` builds them
+with the standard library only, from `backend/`
+(`uv run python tests/fixtures/keras/make_hostile.py`); its docstrings say what each file is.
 
 `onnx/raw_candles.onnx` is the same kind of model in ONNX (25 x 5 in, one score out, 128
 weights), which takes the same manifest, for the ONNX upload check and the worker's onnxruntime
