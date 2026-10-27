@@ -14,20 +14,21 @@ import {
 import { formatSharpe } from '@/lib/results';
 import { cn } from '@/lib/utils';
 
-import { MoreRow, STARRED_ROW, Sparkline, Widget } from './widgets';
+import { MiniChart } from './MiniChart';
+import { MoreRow, STARRED_ROW, Widget } from './widgets';
 
 type RowProps = { backtest: Backtest; onStar: (backtest: Backtest) => void };
 
-// Three lines (.dd-sb): the star beside them; the number with up to two instruments and their
-// icons, the small equity line and the return; the model by its mark across the row, on up to two
-// lines (the BLESK names differ in the middle, so cutting either end hid what tells them apart);
-// the representation and the Sharpe ratio. A failed backtest has the Failed badge instead, without
-// a line.
+// Two lines (.dd-sb): the star beside both; the number with up to two instruments and their icons,
+// the tiny chart of the return and the return; under them the model by its mark, on one line, and
+// the Sharpe ratio. The full name and the representation are the model's tooltip. A failed
+// backtest has the Failed badge instead, without a chart.
 function Row({ backtest, onStar }: RowProps) {
   const done = hasResults(backtest);
+  const { name, framework } = backtest.model;
   return (
-    <div className={cn(STARRED_ROW, 'grid-cols-[auto_minmax(0,1fr)_auto_auto] gap-y-px')}>
-      <span className="row-span-3 self-start">
+    <div className={cn(STARRED_ROW, 'grid-cols-[auto_minmax(0,1fr)_64px_86px] gap-y-1')}>
+      <span className="row-span-2 self-start">
         <RowStar starred label={`Unstar backtest ${backtest.number}`} onToggle={() => onStar(backtest)} />
       </span>
       <span className="flex items-center gap-1.5 overflow-hidden text-[13px] text-ellipsis whitespace-nowrap">
@@ -36,15 +37,15 @@ function Row({ backtest, onStar }: RowProps) {
         </RowOpener>
         <BacktestInstruments backtest={backtest} max={2} size={16} />
       </span>
-      {done && backtest.equity ? <Sparkline equity={backtest.equity} total={backtest.total_return ?? 0} /> : <span />}
+      {done && backtest.equity ? <MiniChart strategy={backtest.equity.strategy} /> : <span />}
       <span className="text-right font-mono text-sm/[1.5] font-semibold whitespace-nowrap">
         <BacktestReturn backtest={backtest} />
       </span>
-      <span className="col-span-3 min-w-0 text-xs/[1.5] text-muted-foreground">
-        <ModelName name={backtest.model.name} framework={backtest.model.framework} wrap />
-      </span>
-      <span className="col-span-2 truncate text-xs/[1.5] text-muted-foreground">
-        {representationName(backtest.representation)}
+      <span
+        title={`${name} · ${representationName(backtest.representation)}`}
+        className="col-span-2 flex min-w-0 text-xs/[1.5] text-muted-foreground"
+      >
+        <ModelName name={name} framework={framework} />
       </span>
       <span className="text-right font-mono text-[11px]/[1.5] whitespace-nowrap text-muted-foreground">
         {done && `Sharpe ${formatSharpe(backtest.sharpe)}`}
