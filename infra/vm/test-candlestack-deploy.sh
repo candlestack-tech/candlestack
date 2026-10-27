@@ -190,12 +190,15 @@ release_git() {
 
 # up_calls <env> <version> <maxmemory> <container limit> [with-secrets [with-dsn [with-logo
 # [with-db [with-oauth]]]]]: what "up"
-# asks of Docker; prod with the compose file of its release tag and never the worker, stage with
-# the worker ($WORKER) and its queue, or without them and removing them when $no_worker is set.
+# asks of Docker; prod with the compose file of its release tag. Both with the worker ($WORKER)
+# and its queue, or without them and removing them when $no_worker is set.
 up_calls() {
-  local worker=
-  if [[ $1 == stage && -z ${no_worker-} ]]; then
+  local worker='' file=/opt/candlestack/infra/env/compose.yaml
+  if [[ -z ${no_worker-} ]]; then
     worker=$WORKER
+  fi
+  if [[ $1 == prod ]]; then
+    file=TMP/compose.yaml
   fi
   echo "docker login ghcr.io --username deploy --password-stdin"
   echo "  stdin $TOKEN"
@@ -212,8 +215,11 @@ up_calls() {
     echo "docker compose -p $1 -f /opt/candlestack/infra/env/compose.yaml up --detach --remove-orphans"
   fi
   up_env "$@"
-  if [[ $1 == stage && -z $worker ]]; then
-    echo "docker compose -p $1 -f /opt/candlestack/infra/env/compose.yaml rm --stop --force worker queue"
+  if [[ -z $worker ]]; then
+    echo "docker compose -p $1 -f $file rm --stop --force worker queue"
+    if [[ $1 == prod ]]; then
+      echo "  file # infra/env/compose.yaml of the release"
+    fi
     up_env "$@"
   fi
   echo "docker image prune --all --force"
@@ -274,16 +280,21 @@ else
 fi
 
 echo "# What each key may run"
-# A line from before the worker: three fields.
-echo "main-$COMMIT $IMAGES" >"$RECORD"
-allowed "prod: up prod, with the compose file of the release" prod "up prod v0.2.0" \
-  "$TOKEN
+echo "main-$COMMIT $STAGE_IMAGES" >"$RECORD"
+allowed "prod: up prod, with the compose file of the release, the worker and its queue" prod \
+  "up prod v0.2.0" "$TOKEN
 $SECRETS" "$(release_git v0.2.0 6)
 $(up_calls prod v0.2.0 256mb 288m with-secrets)"
 FAKE_GIT=not-shallow allowed "prod: up prod, a release candidate in a full clone" prod \
   "up prod v0.3.0-rc.1" "$TOKEN
 $SECRETS" "$(release_git v0.3.0-rc.1 6 | sed 's/ --unshallow//')
 $(up_calls prod v0.3.0-rc.1 256mb 288m with-secrets)"
+# A line from before the worker: three fields. prod then runs without the worker and its queue.
+echo "main-$COMMIT $IMAGES" >"$RECORD"
+allowed "prod: a commit stage ran before the worker removes the worker and its queue" prod \
+  "up prod v0.2.0" "$TOKEN
+$SECRETS" "$(release_git v0.2.0 6)
+$(no_worker=1 up_calls prod v0.2.0 256mb 288m with-secrets)"
 allowed "stage: up stage, with the worker and its queue" stage "up stage main-0123abc $STAGE_IMAGES" "$TOKEN
 $SECRETS" "$(up_calls stage main-0123abc 256mb 288m with-secrets)"
 # A stage workflow run from before the worker (re-run) passes no worker image.
@@ -404,11 +415,12 @@ FAKE_DOCKER=fail-up recorded "stage: a failed up stage adds nothing" "$record" \
 # A version that only starts with the commit is another stage deploy, never the release's.
 echo "main-$COMMIT-x $OLD_STAGE_IMAGES" >>"$RECORD"
 record=$(<"$RECORD")
-allowed "prod: the images of the last up stage of the tag's commit, without its worker" prod \
+allowed "prod: the images of the last up stage of the tag's commit, its worker's too" prod \
   "up prod v0.2.0" "$TOKEN" "$(release_git v0.2.0 6)
 $(up_calls prod v0.2.0 256mb 288m)"
 recorded "prod: up prod adds nothing" "$record" prod "up prod v0.2.0" "$TOKEN"
-printed "prod: up prints the images it runs, no worker" "images $IMAGES"
+printed "prod: up prints the images it runs, the worker's too" "candlestack-deploy: no QUEUE_PASSWORD: the job queue of prod runs without a password
+images $STAGE_IMAGES"
 recorded "stage: up stage without a worker image records three fields" "$record
 main-0123abc $OLD_IMAGES" stage "up stage main-0123abc $OLD_IMAGES" "$TOKEN"
 printed "stage: up without a worker image prints two images" "images $OLD_IMAGES"

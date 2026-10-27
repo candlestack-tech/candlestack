@@ -41,7 +41,7 @@ outputs:
   images:
     description: >-
       The images an "up" command started, "<backend@digest> <frontend@digest>" followed by
-      "<worker@digest>" when it started the worker (stage); for "up prod", the ones the VM chose
+      "<worker@digest>" when it started the worker; for "up prod", the ones the VM chose
       from its stage record; empty for other commands
     value: ${{ steps.run.outputs.images }}
 

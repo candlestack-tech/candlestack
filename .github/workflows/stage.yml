@@ -2,8 +2,8 @@ name: Stage
 
 # Every push to main is built once and deployed to stage.candlestack.tech,
 # together with the edge proxy and the server agent (vm.candlestack.tech, read by ops).
-# The same backend and frontend images are later promoted to prod by a v* tag (release.yml);
-# the worker that runs the models runs on stage only (infra/README.md, "Worker").
+# The same backend, frontend and worker images are later promoted to prod by a v* tag
+# (release.yml; infra/README.md, "Worker").
 on:
   push:
     branches: [main]

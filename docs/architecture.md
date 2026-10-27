@@ -57,7 +57,7 @@ flowchart LR
 | `redis` | `redis:8-alpine` | private network of the environment, no persistence, `allkeys-lru` |
 | `postgres` | `postgres:18-alpine` | private network of the environment, data in a volume; migrated by a one-shot `migrate` container (the backend image, `alembic upgrade head`) before the backend starts; prod and stage dump it every night (`backup`) |
 | `models-backup` | `offen/docker-volume-backup` | archives the `models` volume (read-only) every night at 00:30 UTC into the volume `model_backups`, keeps 7 days; no network |
-| `worker` | `ghcr.io/candlestack-tech/candlestack/worker` (the stage `worker` of `backend/Dockerfile`) | runs the uploaded models ([Worker](#worker)); only on the internal network `jobs`, the `models` volume read-only, the `jobs` volume shared with the backend, a read-only root filesystem, 1 GB without swap, one CPU; in `compose.yaml`, and on the VM on stage only, where the deploy starts the profile `worker` ([infra/README.md](../infra/README.md#worker)) |
+| `worker` | `ghcr.io/candlestack-tech/candlestack/worker` (the stage `worker` of `backend/Dockerfile`) | runs the uploaded models ([Worker](#worker)); only on the internal network `jobs`, the `models` volume read-only, the `jobs` volume shared with the backend, a read-only root filesystem, 1 GB without swap, one CPU; in `compose.yaml`, where the deploy of prod and stage starts the profile `worker` ([infra/README.md](../infra/README.md#worker)) |
 | `queue` | `redis:8-alpine` | the job queue: only on the network `jobs`, no persistence, `noeviction`; with the worker |
 
 ## HTTP surface
@@ -584,8 +584,8 @@ checked at the next start.
   manifest (`ready` or `verified`), its timeframe is one the list can show (5m, 30m, 1h, 1d),
   its session fits the instrument's market (`regular` for stocks, `24/7` for crypto), the user
   has no backtest running (checked again under the lock that gives the number), the worker's
-  queue answers a ping (prod has no worker yet: `503 backtests-unavailable` at once, never a
-  wait), and the period with the manifest's warm-up before it fits the data
+  queue answers a ping (an environment without the worker: `503 backtests-unavailable` at
+  once, never a wait), and the period with the manifest's warm-up before it fits the data
   (`DataService.warm_up_start`: the period as the candles endpoint checks it, the warm-up's
   candles before `start`, and all of them against `CANDLES_MAX`). The model is held under
   that lock until the backtest is stored, so one deleted meanwhile is `404 not-found`. The
