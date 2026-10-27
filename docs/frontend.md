@@ -267,8 +267,8 @@ The two sections with the account's preferences load them in the route's loader
   setting); `useDateStyle()` gives the account's choice, zone and all. A visitor has no setting:
   the API's formats, in New York time or the zone the page passes. The instrument page writes its
   first day, the chart's crosshair and axis and the note under it in the user's zone and formats
-  (a visitor sees the market's zone: New York for stocks, their own for crypto,
-  `src/features/instrument/time.ts`). The list's mini candles write their day in the user's date
+  (until the account's setting arrives, the market's zone: New York for stocks, their own for
+  crypto, `src/features/instrument/time.ts`). The list's mini candles write their day in the user's date
   format.
   The zone setting is for market times (candles, trades). When something happened here (a
   backtest ran, a model was added) is on the viewer's own clock in the user's formats
@@ -490,7 +490,7 @@ where it has no room; with the name, the name does; each shows in full in its ti
 | Place | Size | Corner radius | Row |
 | --- | --- | --- | --- |
 | Instrument list, before the symbol | 32 px | 3.2 px | 41 px (4 px padding), as high as without it |
-| Home page, the five most traded, before the symbol | 32 px | 3.2 px | as in the list |
+| Home page, the example rows, before the symbol | 32 px | 3.2 px | as in the list |
 | Instrument page header, next to the name | 64 px | 6.4 px | - |
 | Lists of backtests (Backtests page and its search, dashboard, a model's page), a backtest's header, the builder's instrument list and Run step | 20 px | 2 px | as high as without it |
 | A backtest's setup, next to the model's 28 px framework tile | 28 px | 2.8 px | - |

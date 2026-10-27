@@ -1,4 +1,5 @@
 import { Link, useRouter, type ErrorComponentProps } from '@tanstack/react-router';
+import type { ReactNode } from 'react';
 
 import { ApiError } from '@/api';
 import { PageTitle } from '@/components/PageTitle';
@@ -19,8 +20,9 @@ function describe(error: unknown): { title: string; detail: string } {
   return { title: 'Could not load this page', detail: `${error.message}${wait}` };
 }
 
-// Shown when a route loader fails, e.g. an unknown instrument (404) or the rate limit (429).
-export function RouteError({ error }: ErrorComponentProps) {
+// Shown when a route loader fails, e.g. an unknown instrument (404) or the rate limit (429). Its
+// way out leads home unless the route passes one of its own (`back`).
+export function RouteError({ error, back }: ErrorComponentProps & { back?: ReactNode }) {
   const router = useRouter();
   const { title, detail } = describe(error);
   usePageTitle(title);
@@ -33,7 +35,7 @@ export function RouteError({ error }: ErrorComponentProps) {
           Try again
         </Button>
         <Button asChild variant="ghost">
-          <Link to="/">Back to home</Link>
+          {back ?? <Link to="/">Back to home</Link>}
         </Button>
       </div>
     </>

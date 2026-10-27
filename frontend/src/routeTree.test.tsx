@@ -131,6 +131,18 @@ describe('the signed-in pages', () => {
     expect(document.title).toBe('BTCUSDT 1d · CandleStack');
   });
 
+  it('lead from an instrument that cannot load back to the list, not the public home page', async () => {
+    stubApi({
+      ...sessionWithPreferences(ARSEN),
+      'GET /api/v1/data/instruments/crypto%3ANOPE': { status: 404, body: { detail: 'No instrument crypto:NOPE.' } },
+    });
+    await renderApp('/instrument/crypto:NOPE');
+    await vi.waitFor(() => expect(heading()).toBe('Not found'));
+    expect(screen.getByText('No instrument crypto:NOPE.')).toBeDefined();
+    expect(screen.getByRole('link', { name: 'Back to instruments' }).getAttribute('href')).toBe('/instruments');
+    expect(screen.queryByRole('link', { name: 'Back to home' })).toBeNull();
+  });
+
   it('note under the sidebar that market data is delayed', async () => {
     stubApi(session(ARSEN));
     await renderApp('/backtests');

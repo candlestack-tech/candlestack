@@ -1,5 +1,12 @@
 import type { QueryClient } from '@tanstack/react-query';
-import { Outlet, createRootRouteWithContext, createRoute, lazyRouteComponent, redirect } from '@tanstack/react-router';
+import {
+  Link,
+  Outlet,
+  createRootRouteWithContext,
+  createRoute,
+  lazyRouteComponent,
+  redirect,
+} from '@tanstack/react-router';
 
 import { deniedSignInQueryOptions, instrumentQueryOptions, meQueryOptions, preferencesQueryOptions } from '@/api';
 import { Layout } from '@/components/Layout';
@@ -140,13 +147,14 @@ const instrumentsRoute = createRoute({
 // /instrument/crypto:BTCUSDT?tf=1h: one instrument's page, without the sidebar like a backtest's,
 // filling the height for its chart. The search params are checked once, in validateSearch; the
 // loader fetches the instrument while the page's code loads, into the same cache entry the page
-// reads.
+// reads. When it fails (an unknown instrument, the rate limit), the way out is the list.
 const instrumentRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/instrument/$id',
   validateSearch: validateInstrumentSearch,
   staticData: { sidebar: false, fill: true },
   loader: ({ context, params }) => context.queryClient.ensureQueryData(instrumentQueryOptions(params.id)),
+  errorComponent: (props) => <RouteError {...props} back={<Link to="/instruments">Back to instruments</Link>} />,
   component: lazyRouteComponent(() => import('@/pages/InstrumentPage'), 'InstrumentPage'),
 });
 
