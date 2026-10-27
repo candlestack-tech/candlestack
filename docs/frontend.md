@@ -291,7 +291,7 @@ delete modals):
 - The line under the title says how many models there are, the storage they take and, in the
   warning colour, how many still need a manifest. At the right of the title row (under it when
   the row is too narrow), Upload model: an outline button with the upload icon and "Keras or
-  ONNX, up to 50 MB" under it, which opens the upload dialog; the Upload card stays on the
+  ONNX, up to 50 MB" under it (the API's `file_max_bytes`), which opens the upload dialog; the Upload card stays on the
   Dashboard's quick actions. The tiles start under the title row, across the whole width.
 - A tile per model, oldest first: the framework's mark (Simple Icons paths and brand colours in
   `frameworks.ts`, a quarter lighter in the dark theme), the state (Verified, Ready, Needs setup;
@@ -316,7 +316,9 @@ delete modals):
   to Models, and Add model, which opens the model's page. The API keeps the model, and then the
   manifest, as soon as each passed its checks, so closing the dialog before Add model deletes the
   model it uploaded (`useUpload`), and an upload still running goes on to its answer and is
-  deleted then. Add manifest (`ManifestDialog`) is the same steps with the model done, ending in
+  deleted then. While the dialog holds such a model, a `pagehide` (a reload, the tab closed)
+  sends its DELETE with `keepalive`. Change on a kept manifest keeps it until another passes: one
+  that fails says the model keeps the earlier one, and Add model stays on. Add manifest (`ManifestDialog`) is the same steps with the model done, ending in
   Save; closing it keeps the model. The API still holds a model without a manifest (Needs setup),
   which gets one with Add manifest. Every dialog (`src/components/ui/dialog.tsx`) is anchored a
   tenth of the screen from the top, so one whose steps grow only grows downwards.

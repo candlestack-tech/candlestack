@@ -75,6 +75,15 @@ describe('the Models page', () => {
     expect(document.title).toBe('Models · CandleStack');
   });
 
+  it("writes the API's limit of a model file under Upload model", async () => {
+    const answer = modelsAnswer([TSMIXER]);
+    const list = answer['GET /api/v1/models'] as { status: number; body: { usage: object } };
+    list.body.usage = { ...list.body.usage, file_max_bytes: 20 * 1024 * 1024 };
+    stubApi({ ...session(ARSEN), ...answer });
+    await renderApp('/models');
+    expect(await screen.findByText('Keras or ONNX, up to 20 MB')).toBeDefined();
+  });
+
   it('opens the upload from an outline button, not the quick action card of the dashboard', async () => {
     stubApi({ ...session(ARSEN), ...modelsAnswer([TSMIXER]) });
     await renderApp('/models');

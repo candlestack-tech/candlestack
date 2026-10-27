@@ -495,7 +495,7 @@ lock of the user's models and only while the stored manifest has the result's
 | --- | --- | --- | --- | --- | --- |
 | `done`, `verified` true | now | now | null | null | `verified` |
 | `done`, `verified` false (no `example`) | null | now | null | null | `ready` |
-| `failed` on the example (`example`) | null | now | `example` | the result's `error` | `ready` |
+| `failed` on the example (`example`: the model failed on it, gave a wrong output for it or not the expected one) | null | now | `example` | the result's `error` | `ready` |
 | `failed` on the model (`manifest`, `candles`, `load`, `predict`, `output`, `time-limit`, `stopped`, `model-changed`) | null | now | `trial_run` | the result's `error` | `ready` |
 | `failed` on the worker (`expired`, `worker-stopped`, `internal`, `model-missing`), or the queue out of reach | unchanged (null) | unchanged (null) | unchanged (null) | unchanged (null) | `ready` |
 

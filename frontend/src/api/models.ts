@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 
-import { del, get, patch, postFile, put } from './client';
+import { apiUrl, del, get, patch, postFile, put } from './client';
 import type { components } from './schema';
 
 export type Model = components['schemas']['ModelOut'];
@@ -40,6 +40,18 @@ export function updateModel(id: string, update: ModelUpdate): Promise<Model> {
 // DELETE /api/v1/models/{id}: the model and its file go, which frees its storage.
 export function deleteModel(id: string): Promise<void> {
   return del(modelPath(id));
+}
+
+// DELETE /api/v1/models/{id} as the page goes away (pagehide): `keepalive` lets the request outlive
+// the page. The browser sends the Origin header the API's cross-origin check reads and, on the
+// same origin, the session cookie. Nobody is left to read the answer.
+export function deleteModelOnLeave(id: string): void {
+  fetch(apiUrl(modelPath(id)), {
+    method: 'DELETE',
+    keepalive: true,
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' },
+  }).catch(() => undefined);
 }
 
 // GET /api/v1/models/{id}/manifest: the manifest as it was given, its example too (the list

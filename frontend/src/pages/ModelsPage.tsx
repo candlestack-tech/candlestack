@@ -5,7 +5,7 @@ import { HINT } from '@/components/Hint';
 import { UploadIcon } from '@/components/icons';
 import { PageTitle } from '@/components/PageTitle';
 import { Button } from '@/components/ui/button';
-import { formatUsage, ModelsGrid, UploadDialog, useModels } from '@/features/models';
+import { formatLimit, formatUsage, ModelsGrid, UploadDialog, useModels } from '@/features/models';
 import { plural } from '@/lib/plural';
 import { cn } from '@/lib/utils';
 import { usePageTitle } from '@/lib/usePageTitle';
@@ -35,9 +35,10 @@ function useDescription(): ReactNode {
 }
 
 // Upload model beside the title (#220): an outline button with the upload icon and what it takes
-// under it, which opens the upload dialog. Not the accent: New backtest in the app header is the
-// one primary button.
+// under it (the size once the API said its limit), which opens the upload dialog. Not the accent:
+// New backtest in the app header is the one primary button.
 function UploadModel() {
+  const fileMax = useModels().data?.usage.file_max_bytes;
   return (
     <div className="flex flex-col items-start gap-1 sm:items-end">
       <UploadDialog>
@@ -46,7 +47,7 @@ function UploadModel() {
           Upload model
         </Button>
       </UploadDialog>
-      <span className={HINT}>Keras or ONNX, up to 50 MB</span>
+      <span className={HINT}>Keras or ONNX{fileMax === undefined ? '' : `, up to ${formatLimit(fileMax)}`}</span>
     </div>
   );
 }

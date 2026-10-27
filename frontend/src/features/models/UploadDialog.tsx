@@ -16,7 +16,7 @@ import {
 import { ACCEPTED_EXTENSIONS } from './frameworks';
 import { ManifestPart, ModelPart, SummaryPart } from './UploadParts';
 import { Steps } from './UploadSteps';
-import { useUpload, type ManifestStep, type ModelStep } from './useUpload';
+import { heldManifest, useUpload, type ManifestStep, type ModelStep } from './useUpload';
 
 // A hidden file input that the drop zones and Choose another file open.
 function FileInput({
@@ -93,7 +93,7 @@ function UploadFlow({ existing, onAdded }: FlowProps) {
   const pickers = usePickers(flow);
   const adding = existing !== undefined;
   const model = flow.model.step === 'kept' ? flow.model.model : null;
-  const ready = model !== null && flow.manifest.step === 'kept';
+  const ready = model !== null && heldManifest(flow.manifest) !== undefined;
   return (
     <>
       <DialogBody>

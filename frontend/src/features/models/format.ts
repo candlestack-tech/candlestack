@@ -18,6 +18,11 @@ function formatMegabytes(mb: number): string {
   return formatPriceWith(mb, Number.isInteger(Math.round(mb * 10) / 10) ? 0 : 1);
 }
 
+// A limit of the API in megabytes: 50 MB, the largest model file.
+export function formatLimit(bytes: number): string {
+  return `${formatMegabytes(bytes / MB)} MB`;
+}
+
 // `{used} MB of {quota} MB`, the storage the user's models take. Storage that is not full never
 // reads as full: what would round up to the quota is rounded down instead (99.9 MB of 100 MB).
 export function formatUsage(used: number, quota: number): string {

@@ -322,12 +322,19 @@ def _finite(output: np.ndarray) -> np.ndarray:
 
 def _example(model: Model, manifest: Manifest) -> float | None:
     """The largest difference between the model's output for the manifest's example and the
-    expected one; None without an example."""
+    expected one; None without an example. Every failure here is an ``example`` one: the model
+    failed on the example, gave a wrong output for it or not the expected one."""
     example = manifest.example
     if example is None:
         return None
     samples = np.asarray(example.input, dtype=np.float32)
-    output = _finite(_predict_part(model, samples, BATCH, manifest))
+    try:
+        output = _finite(_predict_part(model, samples, BATCH, manifest))
+    except JobFailed as failure:
+        # The trial run passed, so a model that fails on the example fails the example.
+        raise JobFailed(
+            "example", f"For the manifest's example: {failure.message}", verified=False
+        ) from None
     difference = float(np.max(np.abs(output - np.asarray(example.output, dtype=np.float64))))
     if difference > EXAMPLE_TOLERANCE:
         raise JobFailed(
