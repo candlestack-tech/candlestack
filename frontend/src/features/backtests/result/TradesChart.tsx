@@ -5,7 +5,7 @@ import { HINT } from '@/components/Hint';
 import { cn } from '@/lib/utils';
 
 import { ChartBar, type Kind } from './ChartBar';
-import { candleAt, marksIn, tradeAt, tradeView, valueAt, type Series, type TradeRow } from './chartData';
+import { candleAt, DENSE_MOST, marksIn, tradeAt, tradeView, valueAt, type Series, type TradeRow } from './chartData';
 import { useChartNavigation } from './chartNavigation';
 import { levelLabel } from './priceLevels';
 import { ResultBox } from './ResultParts';
@@ -26,7 +26,6 @@ function useControls(view: Chart['view']) {
   const [showTrades, setShowTrades] = useState(true);
   const [lines, setLines] = useState({ strategy: true, benchmark: true });
   useEffect(() => view?.setKind(kind === 'line'), [view, kind]);
-  useEffect(() => view?.showTrades(showTrades), [view, showTrades]);
   useEffect(() => view?.setLines(lines), [view, lines]);
   return { kind, setKind, showTrades, setShowTrades, lines, setLines };
 }
@@ -81,6 +80,10 @@ function useTradeMarks(
   useEffect(() => {
     view?.setMarks(showTrades ? marked.marks : []);
   }, [view, drawn, kind, showTrades, marked]);
+  // Past DENSE_MOST trades in view nearly every candle holds one, so the shading would tint the
+  // whole chart: it shows again with the arrows once the chart zooms in.
+  const shaded = showTrades && marked.inView <= DENSE_MOST;
+  useEffect(() => view?.showTrades(shaded), [view, shaded]);
   useEffect(() => {
     const trade = highlighted === null ? null : (trades[highlighted] ?? null);
     const time = (seconds: number) => (candles ? candles.times[candleAt(candles, seconds)] : undefined);

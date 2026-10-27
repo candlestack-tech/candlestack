@@ -229,7 +229,8 @@ export class TradesChartView {
     const format = {
       type: 'custom',
       minMove: 10 ** -frame.decimals,
-      formatter: (value: number) => formatPriceWith(value, frame.decimals),
+      // The room kept under the candles for the volume reaches below zero: no price there.
+      formatter: (value: number) => (value < 0 ? '' : formatPriceWith(value, frame.decimals)),
     } as const;
     candles.applyOptions({ priceFormat: format });
     line.applyOptions({ priceFormat: format });

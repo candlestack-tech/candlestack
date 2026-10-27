@@ -72,8 +72,8 @@ export function tradesIn(trades: readonly TradeRow[], from: number, to: number):
 }
 
 // Up to this many trades in view each has its full-size arrows, up to TEXT_MOST with Buy and
-// Sell written by them; past DENSE_MOST the arrows would hide the price, so only the shading
-// shows until the chart zooms in.
+// Sell written by them; past DENSE_MOST the arrows would hide the price, so neither they nor the
+// shading show until the chart zooms in.
 export const MARK_MOST = 50;
 export const TEXT_MOST = 14;
 export const DENSE_MOST = 160;
