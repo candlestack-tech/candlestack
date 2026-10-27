@@ -67,13 +67,13 @@ export function Sparkline({ equity, total }: { equity: NonNullable<Backtest['equ
 }
 
 // A long name cut in the middle, so the end that tells similar names apart stays: its last 10 to 22
-// characters, from a separator where there is one, never shrink; the start ends in an ellipsis
+// characters, from a separator where there is one (a space stays in it), never shrink; the start ends in an ellipsis
 // where the row is too narrow. The full name is the tooltip.
 function tailOf(text: string): string {
   if (text.length <= 24) return '';
   const window = text.slice(-22, -10);
   const cut = window.search(/[-_. ]/);
-  return cut < 0 ? text.slice(-18) : text.slice(text.length - 22 + cut + 1);
+  return cut < 0 ? text.slice(-18) : text.slice(text.length - 22 + cut);
 }
 
 export function MiddleCut({ text }: { text: string }) {

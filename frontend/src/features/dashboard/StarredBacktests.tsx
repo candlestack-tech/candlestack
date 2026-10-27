@@ -38,7 +38,7 @@ function Row({ backtest, onStar }: RowProps) {
       <span className="text-right font-mono text-sm/[1.5] font-semibold whitespace-nowrap">
         <BacktestReturn backtest={backtest} />
       </span>
-      <span className="col-span-2 flex min-w-0 text-xs/[1.5] whitespace-nowrap text-muted-foreground">
+      <span className="col-span-2 flex min-w-0 overflow-hidden text-xs/[1.5] whitespace-nowrap text-muted-foreground">
         <MiddleCut text={backtest.model.name} />
         <span className="flex-none whitespace-pre"> · {representationName(backtest.representation)}</span>
       </span>
