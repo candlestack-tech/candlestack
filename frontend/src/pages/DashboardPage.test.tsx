@@ -203,11 +203,15 @@ describe('the dashboard of an account with backtests', () => {
     expect(starred.getByText('by Sharpe')).toBeDefined();
     const rows = starred.getAllByRole('button', { name: /^Unstar backtest/ }).map((star) => star.closest('div'));
     expect(rows.map((row) => row?.textContent)).toEqual([
-      '★#12AAPLMSFT+24.6 %blesk-novol-8.keras · Time windowsSharpe 1.34',
-      '★#11AAPLMSFTFailedblesk-novol-8.keras · Time windows',
+      '★#12AAPLMSFT+24.6 %blesk-novol-8.kerasTime windowsSharpe 1.34',
+      '★#11AAPLMSFTFailedblesk-novol-8.kerasTime windows',
     ]);
-    expect(rows[0]?.querySelectorAll('svg path')).toHaveLength(3);
-    expect(rows[1]?.querySelector('svg')).toBeNull();
+    expect(rows[0]?.querySelectorAll('svg[aria-hidden="true"] path')).toHaveLength(3);
+    expect(rows[1]?.querySelector('svg[aria-hidden="true"]')).toBeNull();
+    expect(rows.map((row) => row?.querySelector('svg[role="img"]')?.getAttribute('aria-label'))).toEqual([
+      'Keras',
+      'Keras',
+    ]);
     expect(starred.queryByRole('link', { name: /More/ })).toBeNull();
   });
 
