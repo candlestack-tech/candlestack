@@ -203,10 +203,10 @@ describe('the dashboard of an account with backtests', () => {
     expect(starred.getByText('by Sharpe')).toBeDefined();
     const rows = starred.getAllByRole('button', { name: /^Unstar backtest/ }).map((star) => star.closest('div'));
     expect(rows.map((row) => row?.textContent)).toEqual([
-      '★#12AAPLMSFT+24.6 %Time windows · blesk-novol-8.kerasSharpe 1.34',
-      '★#11AAPLMSFTFailedTime windows · blesk-novol-8.keras',
+      '★#12AAPLMSFT+24.6 %blesk-novol-8.keras · Time windowsSharpe 1.34',
+      '★#11AAPLMSFTFailedblesk-novol-8.keras · Time windows',
     ]);
-    expect(rows[0]?.querySelectorAll('svg path')).toHaveLength(2);
+    expect(rows[0]?.querySelectorAll('svg path')).toHaveLength(3);
     expect(rows[1]?.querySelector('svg')).toBeNull();
     expect(starred.queryByRole('link', { name: /More/ })).toBeNull();
   });

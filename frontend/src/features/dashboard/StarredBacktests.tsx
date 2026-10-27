@@ -13,13 +13,14 @@ import {
 import { formatSharpe } from '@/lib/results';
 import { cn } from '@/lib/utils';
 
-import { MoreRow, STARRED_ROW, Sparkline, Widget } from './widgets';
+import { MiddleCut, MoreRow, STARRED_ROW, Sparkline, Widget } from './widgets';
 
 type RowProps = { backtest: Backtest; onStar: (backtest: Backtest) => void };
 
 // Two lines (.dd-sb): the star beside both; the number with up to two instruments and their icons,
-// the small equity line and the return; under them the representation and the model, and the
-// Sharpe ratio. A failed backtest has the Failed badge instead, without a line.
+// the small equity line and the return; under them the model, cut in the middle, with the
+// representation, and the Sharpe ratio. A failed backtest has the Failed badge instead, without a
+// line.
 function Row({ backtest, onStar }: RowProps) {
   const done = hasResults(backtest);
   return (
@@ -33,12 +34,13 @@ function Row({ backtest, onStar }: RowProps) {
         </RowOpener>
         <BacktestInstruments backtest={backtest} max={2} size={16} />
       </span>
-      {done && backtest.equity ? <Sparkline equity={backtest.equity} /> : <span />}
+      {done && backtest.equity ? <Sparkline equity={backtest.equity} total={backtest.total_return ?? 0} /> : <span />}
       <span className="text-right font-mono text-sm/[1.5] font-semibold whitespace-nowrap">
         <BacktestReturn backtest={backtest} />
       </span>
-      <span className="col-span-2 truncate text-xs/[1.5] text-muted-foreground">
-        {representationName(backtest.representation)} · {backtest.model.name}
+      <span className="col-span-2 flex min-w-0 text-xs/[1.5] whitespace-nowrap text-muted-foreground">
+        <MiddleCut text={backtest.model.name} />
+        <span className="flex-none whitespace-pre"> · {representationName(backtest.representation)}</span>
       </span>
       <span className="text-right font-mono text-[11px]/[1.5] whitespace-nowrap text-muted-foreground">
         {done && `Sharpe ${formatSharpe(backtest.sharpe)}`}
