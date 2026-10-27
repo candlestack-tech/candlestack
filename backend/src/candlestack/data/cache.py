@@ -143,7 +143,7 @@ class Cache:
         except _REDIS_ERRORS as exc:
             self._failed(exc)
 
-    async def get_or_fetch(self, name: str, fetch: Fetch) -> bytes:
+    async def get_or_fetch(self, name: str, fetch: Fetch, *, background: bool = False) -> bytes:
         """The cached value, or the one ``fetch`` produces, which is then cached.
 
         Single-flight: one caller takes the lock ``lock_key(name)`` (``SET NX``, 30 s) and
@@ -151,18 +151,20 @@ class Cache:
         when it expires. When ``fetch`` fails with ``SourceUnavailable`` or
         ``DataIntegrityError``, the error is kept as ``fail_key(name)`` for ``FAIL_SECONDS``
         (at most its ``retry_after``): the waiting callers and new ones raise it without calling
-        the source. Other errors propagate and nothing is kept.
+        the source. Other errors propagate and nothing is kept. A ``background`` caller, whose
+        ``fetch`` waits for the source's budget, does not take a kept error that waiting helps
+        (one with ``retry_after``: a budget spent, a source limiting us): it fetches itself.
         """
         lock, token = lock_key(name), secrets.token_hex(8)
         while True:
             if self._is_down():
                 return (await fetch())[0]
             try:
-                value = await self._lookup(name)
+                value = await self._lookup(name, background=background)
                 if value is not None:
                     return value
                 if await self._redis.set(lock, token, nx=True, px=LOCK_TTL_MS):
-                    value = await self._recheck(name, lock, token)
+                    value = await self._recheck(name, lock, token, background=background)
                     if value is None:
                         break
                     return value
@@ -181,22 +183,28 @@ class Cache:
         finally:
             await self._release(lock, token)
 
-    async def _lookup(self, name: str) -> bytes | None:
-        """The stored value, or ``None``; raises the error kept by a failed fetch."""
+    async def _lookup(self, name: str, *, background: bool = False) -> bytes | None:
+        """The stored value, or ``None``; raises the error kept by a failed fetch, except one
+        that waiting helps for a ``background`` caller."""
         value, failure = await self._redis.mget(key(name), fail_key(name))
         if value is not None:
             # redis-py types values as bytes | str; this client never decodes.
             return value  # ty: ignore[invalid-return-type]
         if failure is not None:
-            raise _decode_failure(failure)
+            error = _decode_failure(failure)
+            waitable = isinstance(error, SourceUnavailable) and error.retry_after is not None
+            if not (background and waitable):
+                raise error
         return None
 
-    async def _recheck(self, name: str, lock: str, token: str) -> bytes | None:
+    async def _recheck(
+        self, name: str, lock: str, token: str, *, background: bool = False
+    ) -> bytes | None:
         """Looks again right after the lock was taken: the holder may have stored the value and
         released the lock between the first lookup and the lock, and it would be fetched twice.
         When it is there (or its error), the lock is given back."""
         try:
-            value = await self._lookup(name)
+            value = await self._lookup(name, background=background)
         except (SourceUnavailable, DataIntegrityError):
             await self._release(lock, token)
             raise

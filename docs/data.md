@@ -472,7 +472,7 @@ requested timeframe.
 | Alpaca: `ALPACA_RATE_LIMIT` | environment; each Alpaca request | prod and stage 180, else 60 | 503 `source-unavailable` with `Retry-After` |
 | Alpaca, stats refresh | environment; each snapshots request, on top of the above | a fifth of `ALPACA_RATE_LIMIT`, at most 20 | the refresh waits for the next minute |
 | Alpaca, daily candles refresh | environment; each daily bars request, on top of the above | a twentieth of `ALPACA_RATE_LIMIT`, at most 5 | the refresh waits for the next minute |
-| Alpaca, background loads (the candles of backtests, all together) | environment; each bars request of a background load, on top of the above | half of `ALPACA_RATE_LIMIT`, at most 90 | the load waits for the next minute |
+| Alpaca, background loads (the candles of backtests, all together) | environment; each bars request of a background load, on top of the above | half of `ALPACA_RATE_LIMIT`, at most 90 | the load waits for the next minute (and while Alpaca answers 429) |
 | Binance REST: `BINANCE_WEIGHT_LIMIT` | environment; request weight of each REST call | 1000 | 503 `source-unavailable` with `Retry-After` |
 | Binance, daily candles refresh | environment; weight of each klines request, on top of the above | a third of `BINANCE_WEIGHT_LIMIT`, at most 300 | the refresh waits for the next minute |
 | logo.dev: `LOGO_DEV_RATE_LIMIT` | environment; each logo.dev request | prod 50, else 20 | the fallback icon, no waiting |
@@ -483,31 +483,44 @@ requested timeframe.
 - Alpaca allows 200 requests per minute per key. Prod and stage have one each; our 180 leaves
   about a tenth for retries and the skew between our minute and Alpaca's.
 - Alpaca requests of a cold load of SPY (extended hours make the pages; less liquid stocks
-  need fewer), and how long ten years take at the background loads' 90 a minute:
+  need fewer). One load (a chart request or a backtest) holds at most `CANDLES_MAX` candles
+  (50000), so the longest load of 1m is about 6 months, of 5m about 2.5 years and of 15m about
+  7.5 years; 30m and longer reach all of SIP's history (2016 on, about 11 years).
 
-  | Timeframe | Alpaca bars, chunk | Requests per year | Ten years | At 90 a minute | Before #317 (all from 1Min) |
+  | Timeframe | Alpaca bars, chunk | Requests per year | Longest load | Its requests, cold | Before #317 (all from 1Min) |
   | --- | --- | --- | --- | --- | --- |
-  | 1m | `1Min`, month | about 36 | about 390 | about 5 min | the same |
-  | 5m | `5Min`, month | 12 | about 130 | about 2 min | about 390 |
-  | 15m | `15Min`, year | 2 | about 22 | under a minute | about 390 |
-  | 30m, 1h, 4h | `30Min`, year | 1 | about 11 | seconds | about 390 |
-  | 1d | `1Day`, year | 1 | about 11 | seconds | the same |
+  | 1m | `1Min`, month | about 36 | about 6 months | about 21 | the same |
+  | 5m | `5Min`, month | 12 | about 2.5 years | about 32 | about 95 |
+  | 15m | `15Min`, year | 2 | about 7.5 years | about 18 | about 275 |
+  | 30m, 1h, 4h | `30Min`, year | 1 | all, about 11 years | about 11 | about 390 |
+  | 1d | `1Day`, year | 1 | all, about 11 years | about 11 | the same |
 
-  One request holds at most `CANDLES_MAX` candles, so ten years of 1m, 5m or 15m take several
-  requests (about 6 months, 2.5 years and 7.5 years each).
+  Every load now fits in one minute of the background loads' share (90), so a backtest waits
+  only when several run at once or the budget is busy; before #317 a cold 30m load of all of
+  SPY's history took about 390 requests.
 - A cold chart request that needs more than the budget left this minute gets 503 with
   `Retry-After`; the chunks fetched so far stay cached (each is cached on its own) and the
   retry continues from there.
-- The candles of a backtest are a background load (#317): each of its bars requests waits for
+- The candles of a backtest are a background load (#317). Each of its bars requests waits for
   room in the background loads' share (`data:rl:alpaca-background`) and then in the whole
-  budget, as long as that takes, instead of failing. The share is half the budget, so chart
-  requests keep the other half minus the stats' share (20) and the mini charts' (5): 65 a
-  minute or more, 90 while no refresh runs. Several backtests at once share the one share.
-  Only Alpaca really failing (down, timing out, rejecting us) still fails a backtest, with a
-  message that names the market data source and says to try again later.
+  budget, as long as that takes, and when Alpaca answers 429 it waits for its `Retry-After`
+  (the next minute without one) and asks again, as long as Alpaca keeps answering 429. Each of
+  these waits ends up to 3 s late at random, so the waiting loads do not all ask at the second
+  a minute begins. Several backtests at once share the one share.
+- The share is half the budget. Of the other half the stats take up to 20 a minute, the mini
+  charts 5 and the list's first-candle lookups 6, so everything else keeps at least 59 a
+  minute (90 while no refresh runs): chart and instrument requests, the catalogs (one request a
+  day) and the calendar (one a week), and the health check (at most one a minute).
+- A background load does not take an error another request left in the cache for a chunk when
+  waiting helps (our budget spent, Alpaca limiting us: an error with `Retry-After`): it fetches
+  the chunk itself and waits. So a backtest fails only when Alpaca really fails (down, timing
+  out, rejecting us or answering what cannot be read), and its message names the market data
+  source and says to try again later.
 - A chunk of a background load can take longer than its single-flight lock (30 s) while it
-  waits for the budget; a request for the same chunk then fetches it too. That costs a few
-  requests twice, never a failure.
+  waits. Until the lock expires, a chart request for the same chunk waits for it (up to 30 s);
+  then it fetches the chunk itself, as a chart request does (failing fast when the budget is
+  spent). The background load still stores its chunk when it gets it: some requests are made
+  twice, and no background load fails because of it.
 - Since #317 each stock timeframe is fetched in Alpaca's bars of its own timeframe (1h and 4h
   share the `30Min` chunks), so the timeframes no longer share cached 1m chunks: 5m, 15m, 30m,
   1h and 4h are cached under their base timeframe (`...:5m:2024-06`, `...:30m:2024`), and the
@@ -517,7 +530,8 @@ requested timeframe.
   ends. Weights: `exchangeInfo` 20, `ticker/24hr` of every pair 80, `klines` 2 (any `limit`),
   `ping` 1.
 - A 429 from a source is retried with backoff when its `Retry-After` is at most 10 s; when
-  retries run out the request gets 503 `source-unavailable`. After a 429 or 418 (IP ban) from
+  retries run out the request gets 503 `source-unavailable` (a background load waits and asks
+  again instead, above). After a 429 or 418 (IP ban) from
   Binance, REST calls pause for its `Retry-After` (60 s without one).
 - When Redis fails, the limits are not counted (requests pass) for 5 s at a time.
 
@@ -556,6 +570,8 @@ again. Keys:
   stores the value; concurrent requests for the same key, in any process, wait for the value
   instead of calling the source again. When the fetch fails, its error is kept for 10 s: the
   waiting requests and new ones get the same 502 or 503 at once, without calling the source.
+  A background load (a backtest's candles) does not take a kept error that waiting helps (one
+  with `Retry-After`); it fetches itself (see [Limits](#limits)).
 - The catalogs are also kept in process memory for search (about 15k instruments, a search takes
   a few ms). A process whose copy is older than 24 h first adopts a newer list from Redis.
 - When Redis fails, values are fetched from the source and not cached for 5 s at a time; a

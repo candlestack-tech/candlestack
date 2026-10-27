@@ -16,6 +16,7 @@ of their own instead of failing when the budget is spent.
 import bisect
 import logging
 import math
+import random
 import time
 from collections import Counter
 from collections.abc import Awaitable, Callable, Sequence
@@ -30,7 +31,7 @@ import orjson
 import polars as pl
 from anyio import to_thread
 
-from candlestack.core import RateLimiter, Settings
+from candlestack.core import RateLimiter, Settings, retry_after
 from candlestack.data.cache import Cache
 from candlestack.data.candles import (
     closed_only,
@@ -130,11 +131,13 @@ SPARK_SHARE_DIVISOR = 20
 # Background loads (a backtest's candles, which can take more requests than a minute's budget)
 # wait for their own share instead of failing, all of them together, and then for room in the
 # whole budget.
-# Half of it, so requests keep the other half minus the stats' and mini charts' shares
-# (prod and stage 180: 90, requests keep 65 or more, 90 while no refresh runs).
+# Half of it, so requests keep the other half minus the shares of the stats, the mini charts and
+# the list's first-candle lookups (prod and stage 180: 90, requests keep 59 or more).
 BACKGROUND_RATE_KEY = "data:rl:alpaca-background"
 BACKGROUND_SHARE_MAX = 90
 BACKGROUND_SHARE_DIVISOR = 2
+# The longest a background load's wait for the next minute ends late, at random.
+BACKGROUND_JITTER_SECONDS = 3.0
 # A daily bar older than this is from a stock that has not traded on any exchange lately (halted,
 # suspended): it has no 24 h change and no 24 h volume (0) rather than those of an old session.
 # Covers a long weekend.
@@ -143,8 +146,9 @@ STALE_BAR_SECONDS = 5 * DAY
 # The values of Exchange a stock can have; BINANCE is the crypto pairs'.
 STOCK_EXCHANGES = frozenset(str(each) for each in Exchange if each.market is Market.STOCK)
 
-# Patched by tests to move the clock.
+# Patched by tests to move the clock, and to take the randomness out of the waits.
 _time = time.time
+_jitter = random.random
 
 _COLUMNS = list(CANDLE_SCHEMA)
 _BAR_SCHEMA = {
@@ -745,20 +749,36 @@ class AlpacaSource:
     async def _background_turn(self) -> None:
         """Waits until the background loads' share of this minute and then our whole budget
         have room for one more request, as long as that takes: the share is taken again in the
-        minute the whole budget had no room."""
+        minute the whole budget had no room. Each wait ends up to ``BACKGROUND_JITTER_SECONDS``
+        late, so the waiting loads do not all ask at the second a minute begins."""
         while True:
-            await self._turn(BACKGROUND_RATE_KEY, self._background_limit)
-            wait = await self._limiter.hit(RATE_KEY, self._limit)
+            wait = await self._limiter.hit(BACKGROUND_RATE_KEY, self._background_limit)
             if wait <= 0:
-                return
-            await pause(wait)
+                wait = await self._limiter.hit(RATE_KEY, self._limit)
+                if wait <= 0:
+                    return
+            await pause(wait + _jitter() * BACKGROUND_JITTER_SECONDS)
+
+    async def _background_get(self, url: str, params: dict[str, str | int]) -> httpx.Response:
+        """A GET of a background load: within its share and our budget (``_background_turn``),
+        and asked again while Alpaca answers 429 (its own limit), after its ``Retry-After`` or
+        until the next minute, as long as that takes. Other answers are the caller's to check."""
+        while True:
+            await self._background_turn()
+            response = await get(self._http, NAME, TITLE, url, params=params, headers=self._headers)
+            if response.status_code != 429:
+                return response
+            wait = retry_after(response) or 60 - _time() % 60
+            logger.warning("Alpaca rate limited a background load: asking again in %.0f s", wait)
+            await pause(wait + _jitter() * BACKGROUND_JITTER_SECONDS)
 
     async def _request(
         self, url: str, params: dict[str, str | int], *, background: bool = False
     ) -> httpx.Response:
-        """A request within our budget (a ``background`` one waits for it, others fail when it
-        is spent, ``spend``); 401/403 and other failures become ``SourceUnavailable`` (error
-        bodies are not trusted to be JSON: Alpaca answers 401 in HTML)."""
+        """A request within our budget (a ``background`` one waits for it and for Alpaca's
+        limit, ``_background_get``; others fail when it is spent, ``spend``); 401/403 and other
+        failures become ``SourceUnavailable`` (error bodies are not trusted to be JSON: Alpaca
+        answers 401 in HTML)."""
         if self._headers is None:
             raise SourceUnavailable(
                 NAME,
@@ -766,7 +786,7 @@ class AlpacaSource:
                 "ALPACA_SECRET_KEY) are not configured on this server.",
             )
         if background:
-            await self._background_turn()
+            response = await self._background_get(url, params)
         else:
             await spend(
                 self._limiter,
@@ -775,7 +795,7 @@ class AlpacaSource:
                 RATE_KEY,
                 self._limit,
             )
-        response = await get(self._http, NAME, TITLE, url, params=params, headers=self._headers)
+            response = await get(self._http, NAME, TITLE, url, params=params, headers=self._headers)
         if 400 <= response.status_code < 500 and b"subscription" in response.content:
             # The data plan does not cover the request (recent SIP data, a feed of a paid plan):
             # a developer has to look, and asking for fewer symbols would not help.

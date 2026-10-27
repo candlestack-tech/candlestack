@@ -536,7 +536,7 @@ class NoCache(Cache):
         pass
 
     @override
-    async def get_or_fetch(self, name: str, fetch: Fetch) -> bytes:
+    async def get_or_fetch(self, name: str, fetch: Fetch, *, background: bool = False) -> bytes:
         return (await fetch())[0]
 
 

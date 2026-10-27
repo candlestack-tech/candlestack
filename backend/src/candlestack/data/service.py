@@ -481,7 +481,9 @@ class DataService:
                 return known[period.label]
             async with limit:
                 name = f"candles:{instrument.id}:{timeframe}:{period.label}"
-                return await self._cache.get_or_fetch(name, partial(fetch, period))
+                return await self._cache.get_or_fetch(
+                    name, partial(fetch, period), background=background
+                )
 
         return await asyncio.gather(*(chunk(period) for period in periods))
 

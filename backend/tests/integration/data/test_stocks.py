@@ -2,6 +2,7 @@
 
 import json
 import logging
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import httpx
@@ -557,12 +558,15 @@ async def test_the_warm_up_counts_session_candles_only(service: DataService):
 FIRST_DAYS_2024 = {"01": "02", "02": "01", "03": "01", "04": "01", "05": "01", "06": "03"}
 
 
-def paged_bars(upstream, minutes: list[int]) -> respx.Route:
+def paged_bars(upstream, minutes: list[int], first: Sequence[httpx.Response] = ()) -> respx.Route:
     """1m bars of AAPL in two pages for any month of the first half of 2024: a bar at 15:00 UTC
     of the month's first session, then one at 15:01; ``minutes`` gets the minute of our budget
-    (``ratelimit._time() // 60``) each page was asked in."""
+    (``ratelimit._time() // 60``) each page was asked in. ``first`` are answered before."""
+    before = iter(first)
 
     def answer(request: httpx.Request) -> httpx.Response:
+        if (response := next(before, None)) is not None:
+            return response
         minutes.append(int(ratelimit_module._time() // 60))
         month = request.url.params["start"][5:7]
         second = "page_token" in request.url.params
@@ -589,6 +593,7 @@ def budget_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     instead of sleeping; ``budget_clock[1:]`` are the waits."""
     clock = [1_800_000_001.0]
     monkeypatch.setattr(ratelimit_module, "_time", lambda: clock[0])
+    monkeypatch.setattr(alpaca_module, "_jitter", lambda: 0.0)
     return clock
 
 
@@ -666,3 +671,88 @@ async def test_a_background_load_waits_for_room_in_the_whole_budget(
     # The share is taken again in the minute the request is sent.
     assert await redis.get(f"data:rl:alpaca-background:{minute}") == b"1"
     assert await redis.get(f"data:rl:alpaca-background:{minute + 1}") == b"2"
+
+
+@pytest.mark.usefixtures("stocks")
+async def test_a_background_load_does_not_take_a_kept_budget_error(
+    settings: Settings,
+    redis: Redis,
+    http: httpx.AsyncClient,
+    upstream,
+    monkeypatch: pytest.MonkeyPatch,
+    budget_clock: list[float],
+):
+    service = build_data_service(settings.model_copy(update={"alpaca_rate_limit": 10}), redis, http)
+    upstream.bars("1Min", "2024-11-01T00:00:00Z", "bars-AAPL-1Min-2024-11-29.json")
+    minutes: list[int] = []
+    pages = paged_bars(upstream, minutes)
+
+    async def sleep(delay: float) -> None:
+        budget_clock[0] += delay
+
+    monkeypatch.setattr(base_module, "_sleep", sleep)
+    await service.candles(AAPL, Timeframe.M1, *period(NOVEMBER_29))  # the lookup, cached
+    minute = int(budget_clock[0] // 60)
+    await redis.set(f"data:rl:alpaca:{minute}", 10)
+    january = (utc("2024-01-02T14:30"), utc("2024-02-01"))
+    # A chart finds the budget spent; its error is kept for the chunk.
+    with pytest.raises(SourceUnavailable, match="budget"):
+        await service.candles(AAPL, Timeframe.M1, *january)
+    assert await redis.exists("data:fail:v3:candles:stock:AAPL:1m:2024-01") == 1
+
+    candles = await service.candles(AAPL, Timeframe.M1, *january, background=True)
+
+    assert candles.frame.height == 2
+    assert pages.call_count == 2
+    assert minutes == [minute + 1, minute + 1]
+
+
+@pytest.mark.usefixtures("stocks")
+async def test_a_background_load_takes_a_kept_error_of_alpaca_failing(
+    service: DataService, upstream
+):
+    january = upstream.router.get(
+        f"{upstream.ALPACA_DATA}/v2/stocks/bars", params={"timeframe": "1Min"}
+    ).respond(503)
+    period_of_january = (utc("2024-01-02T14:30"), utc("2024-02-01"))
+
+    with pytest.raises(SourceUnavailable) as first:
+        await service.candles(AAPL, Timeframe.M1, *period_of_january, background=True)
+    with pytest.raises(SourceUnavailable) as second:
+        await service.candles(AAPL, Timeframe.M1, *period_of_january, background=True)
+
+    assert first.value.detail == "Alpaca failed with HTTP 503. Try again in a minute."
+    assert second.value.detail == first.value.detail
+    assert january.call_count == 3  # one request with its two retries, then the kept error
+
+
+@pytest.mark.usefixtures("stocks")
+async def test_a_background_load_waits_while_alpaca_rate_limits_it(
+    service: DataService, upstream, monkeypatch: pytest.MonkeyPatch, caplog
+):
+    limited = [
+        httpx.Response(429, headers={"Retry-After": "30"}),  # longer than a retry waits
+        # Without Retry-After: retried twice at once, then until the next minute.
+        httpx.Response(429),
+        httpx.Response(429),
+        httpx.Response(429),
+    ]
+    pages = paged_bars(upstream, [], limited)
+    monkeypatch.setattr(alpaca_module, "_time", lambda: 1_800_000_015.0)  # 45 s to the minute
+    monkeypatch.setattr(alpaca_module, "_jitter", lambda: 0.0)
+    waits: list[float] = []
+
+    async def sleep(delay: float) -> None:
+        waits.append(delay)
+
+    monkeypatch.setattr(base_module, "_sleep", sleep)
+
+    with caplog.at_level(logging.WARNING):
+        candles = await service.candles(
+            AAPL, Timeframe.M1, utc("2024-01-02T14:30"), utc("2024-02-01"), background=True
+        )
+
+    assert candles.frame.height == 2
+    assert pages.call_count == 6  # four 429s, then the two pages
+    assert waits == [30.0, 45.0]
+    assert "Alpaca rate limited a background load: asking again in 30 s" in caplog.text
