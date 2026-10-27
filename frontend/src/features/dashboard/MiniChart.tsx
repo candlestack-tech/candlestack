@@ -71,7 +71,8 @@ function draw(container: HTMLElement, strategy: readonly number[]) {
 }
 
 // A tiny TradingView chart of a backtest's return, 64 × 28 px in a soft border: green above zero
-// and red below, as the return is coloured. It is a picture; the row around it opens the backtest.
+// and red below, as the return is coloured. It is a picture and takes no clicks (its canvases would
+// cover the row's link), so the row around it opens the backtest.
 // Buy and hold is left out: on one scale with it, a strategy that lost everything while the stock
 // rose tenfold is a flat line.
 export function MiniChart({ strategy }: { strategy: readonly number[] }) {
@@ -85,6 +86,10 @@ export function MiniChart({ strategy }: { strategy: readonly number[] }) {
   }, [strategy, theme]);
 
   return (
-    <div ref={box} aria-hidden="true" className="h-7 w-16 overflow-hidden rounded-[5px] border border-border/70" />
+    <div
+      ref={box}
+      aria-hidden="true"
+      className="pointer-events-none h-7 w-16 overflow-hidden rounded-[5px] border border-border/70"
+    />
   );
 }
