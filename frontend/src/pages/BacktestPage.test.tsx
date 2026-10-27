@@ -94,16 +94,40 @@ describe("a finished backtest's page", () => {
     expect(within(setup).getByText('Model').parentElement!.querySelector('[title="Keras"]')).not.toBeNull();
   });
 
-  it('downloads the whole document, links its format and shows Compare', async () => {
-    await openPage({ status: 200, body: backtestDocument() });
-    const download = await screen.findByRole('link', { name: 'Download JSON' });
-    expect(download.getAttribute('href')).toBe(`/api/v1/backtests/${ID}/download`);
-    expect(download.hasAttribute('download')).toBe(true);
+  it('saves the whole document under its own name and links its format', async () => {
+    const createObjectURL = vi.fn(() => 'blob:document');
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }));
+    const saved: string[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push(this.download);
+    });
+    const { fetch } = await openPage(
+      { status: 200, body: backtestDocument() },
+      { [`GET /api/v1/backtests/${ID}/download`]: { status: 200, body: { version: 1 } } },
+    );
+    await userEvent.click(await screen.findByRole('button', { name: 'Download JSON' }));
+    expect(fetch.mock.calls.some(([path]) => path === `/api/v1/backtests/${ID}/download`)).toBe(true);
+    expect(saved).toEqual(['candlestack-backtest-12.json']);
+    click.mockRestore();
     const docs = screen.getByRole('link', { name: 'About the JSON format' });
     expect(docs.getAttribute('href')).toBe('https://candlestack.tech/docs/backtest-json');
     expect(docs.getAttribute('target')).toBe('_blank');
-    expect(screen.getByRole('button', { name: 'Compare' })).toBeDefined();
     expect(screen.queryByRole('button', { name: /run again/i })).toBeNull();
+  });
+
+  it('says so when the file does not download', async () => {
+    await openPage(
+      { status: 200, body: backtestDocument() },
+      { [`GET /api/v1/backtests/${ID}/download`]: { status: 503 } },
+    );
+    await userEvent.click(await screen.findByRole('button', { name: 'Download JSON' }));
+    expect((await screen.findByText('The file did not download. Try again.')).getAttribute('role')).toBe('alert');
+  });
+
+  it('opens Compare as Coming soon', async () => {
+    await openPage({ status: 200, body: backtestDocument() });
+    await userEvent.click(await screen.findByRole('button', { name: 'Compare' }));
+    expect((await screen.findByRole('dialog')).textContent).toContain('Compare backtests');
   });
 
   it('shows the first results in a strip and every metric beside the charts', async () => {
@@ -242,7 +266,7 @@ describe("a backtest's page before it finished", () => {
     expect(screen.getByText('You can close the page. The backtest keeps going.')).toBeDefined();
     expect(box('Setup').getByText('raw-candles.keras')).toBeDefined();
     expect(box('Setup').queryByText('Run')).toBeNull();
-    expect(screen.queryByRole('link', { name: 'Download JSON' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Download JSON' })).toBeNull();
     expect(charts.made).toBe(0);
     expect(fetchedCandles(fetch)).toBe(0);
 
@@ -307,7 +331,7 @@ describe("a backtest's page before it finished", () => {
     expect((await screen.findByRole('alert')).textContent).toBe('No prediction in the period.');
     expect(screen.getAllByText('Failed').length).toBeGreaterThan(0);
     expect(box('Setup')).toBeDefined();
-    expect(screen.queryByRole('link', { name: 'Download JSON' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Download JSON' })).toBeNull();
   });
 });
 

@@ -111,6 +111,12 @@ export async function post(path: string): Promise<void> {
   await send(path, { method: 'POST', headers: { Accept: 'application/json' } });
 }
 
+// A file the API answers with (any type), with its errors as ApiErrors like those of get.
+export async function getBlob(path: string): Promise<Blob> {
+  const res = await send(path, {});
+  return res.blob();
+}
+
 // DELETE, answered without a body (204), e.g. deleting the account.
 export async function del(path: string): Promise<void> {
   await send(path, { method: 'DELETE', headers: { Accept: 'application/json' } });

@@ -1,6 +1,6 @@
 import { keepPreviousData, queryOptions } from '@tanstack/react-query';
 
-import { apiUrl, get, patch, postJson } from './client';
+import { get, getBlob, patch, postJson } from './client';
 import type { components } from './schema';
 
 // A backtest as the API sends it. Returns and rates are fractions (0.246 is 24.6 %); the results
@@ -84,11 +84,10 @@ export function backtestQueryOptions(id: string) {
   });
 }
 
-// GET /api/v1/backtests/{id}/download: the whole document, every row and trade, which the browser
-// saves as candlestack-backtest-<number>.json (the API's Content-Disposition).
-export function backtestDownloadUrl(id: string): string {
-  return apiUrl(`${backtestPath(id)}/download`);
-}
+// GET /api/v1/backtests/{id}/download: the whole document, every row and trade, as a Blob. The page
+// saves it under its own name (candlestack-backtest-<number>.json): some browsers drop the API's
+// Content-Disposition name and save a bare id without an extension.
+export const getBacktestFile = (id: string) => getBlob(`${backtestPath(id)}/download`);
 
 // POST /api/v1/backtests: starts a backtest and answers with its document, `running`.
 export const startBacktest = (body: BacktestIn) => postJson<BacktestDocument>('/v1/backtests', body);

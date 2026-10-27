@@ -1,7 +1,8 @@
 import { Link, useRouterState } from '@tanstack/react-router';
 import { Download } from 'lucide-react';
+import { useState } from 'react';
 
-import { backtestDownloadUrl, type BacktestDocument } from '@/api';
+import { getBacktestFile, type BacktestDocument } from '@/api';
 import { BUTTON_SIZES, OUTLINE_BUTTON } from '@/components/buttonStyles';
 import { InstrumentSymbol } from '@/components/InstrumentSymbol';
 import { Button } from '@/components/ui/button';
@@ -11,6 +12,7 @@ import { formatRecentTime } from '@/lib/dates';
 import { secondsSince, useNow } from '@/lib/useNow';
 import { cn } from '@/lib/utils';
 
+import { CompareDialog } from '../CompareDialog';
 import { StatusBadge } from '../parts';
 import { durationText, periodText } from './format';
 
@@ -47,17 +49,60 @@ export function BackLink({ model }: { model?: BacktestDocument['model'] }) {
 
 const SMALL = cn(BUTTON_SIZES.sm, OUTLINE_BUTTON, 'font-medium');
 
-// [⤓ Download JSON | ?] as one group, then Compare, which does nothing yet.
-function FinishedActions({ id }: { id: string }) {
+// Saves the whole document as candlestack-backtest-<number>.json, a name the page gives it
+// itself: some browsers drop the API's Content-Disposition name and save a bare id.
+function useDownload(id: string, number: number) {
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const save = async () => {
+    setSaving(true);
+    setFailed(false);
+    try {
+      const url = URL.createObjectURL(await getBacktestFile(id));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `candlestack-backtest-${number}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setFailed(true);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return { save, saving, failed };
+}
+
+// Download JSON, and why it did not work when it failed.
+function DownloadButton({ id, number }: { id: string; number: number }) {
+  const download = useDownload(id, number);
+  return (
+    <>
+      {download.failed && (
+        <span role="alert" className="mr-2 self-center text-[13px] text-down">
+          The file did not download. Try again.
+        </span>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        className={cn(SMALL, 'rounded-r-none')}
+        disabled={download.saving}
+        onClick={() => void download.save()}
+      >
+        <Download aria-hidden="true" />
+        Download JSON
+      </Button>
+    </>
+  );
+}
+
+// [⤓ Download JSON | ?] as one group, then Compare, which opens its Coming soon dialog.
+function FinishedActions({ id, number }: { id: string; number: number }) {
   return (
     <>
       <span className="inline-flex">
-        <Button asChild variant="outline" className={cn(SMALL, 'rounded-r-none')}>
-          <a href={backtestDownloadUrl(id)} download>
-            <Download aria-hidden="true" />
-            Download JSON
-          </a>
-        </Button>
+        <DownloadButton id={id} number={number} />
         <Button
           asChild
           variant="outline"
@@ -77,9 +122,11 @@ function FinishedActions({ id }: { id: string }) {
           </a>
         </Button>
       </span>
-      <Button type="button" variant="outline" className={SMALL}>
-        Compare
-      </Button>
+      <CompareDialog>
+        <Button type="button" variant="outline" className={SMALL}>
+          Compare
+        </Button>
+      </CompareDialog>
     </>
   );
 }
@@ -128,7 +175,7 @@ export function ResultHeader({ doc }: { doc: BacktestDocument }) {
         </div>
         {backtest.status === 'finished' && (
           <div className="flex flex-wrap gap-2">
-            <FinishedActions id={backtest.id} />
+            <FinishedActions id={backtest.id} number={backtest.number} />
           </div>
         )}
       </div>
