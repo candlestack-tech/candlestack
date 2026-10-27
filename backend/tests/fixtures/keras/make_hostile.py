@@ -40,8 +40,10 @@ def config(name: str = "raw_candles") -> dict[str, Any]:
 
 
 def member(name: str, compress_type: int = zipfile.ZIP_DEFLATED) -> zipfile.ZipInfo:
-    """A member with a fixed date, so a file built again is the same bytes."""
+    """A member with a fixed date and system, so a file built again is the same bytes on any OS
+    (zipfile takes the system from the OS that writes the file)."""
     info = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
+    info.create_system = 3  # Unix, as Keras on Linux writes it, on any OS that builds the file
     info.compress_type = compress_type
     return info
 
@@ -96,7 +98,6 @@ def symlink() -> None:
     """An asset that is a symlink to a file of the server: unpacked by a tool that keeps links,
     reading the asset would read that file."""
     info = member("assets/vocabulary.txt")
-    info.create_system = 3  # Unix, so the attributes mean a symlink
     info.external_attr = _SYMLINK
     write("symlink", {**members(), info.filename: (info, b"/etc/passwd")})
 

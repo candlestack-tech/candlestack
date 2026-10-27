@@ -32,6 +32,7 @@ def hostile(name: str) -> Path:
         ("zip_bomb", f"The file unpacks to more than 200 MB, {TOO_LARGE}"),
         ("zip64", "The file holds far more files than a Keras model has. " + SAVE_AGAIN),
         ("path_traversal", "The file holds a path that points outside the model. " + SAVE_AGAIN),
+        ("symlink", "The file holds a path that points outside the model. " + SAVE_AGAIN),
         ("huge_config", f"The config.json of the file is larger than 1 MB, {TOO_LARGE}"),
         # Found in the model nested in the model, named by its own layer.
         ("nested_lambda", custom_code("lambda", "Lambda")),
@@ -49,18 +50,6 @@ def test_a_hostile_file_fails_opens_before_anything_is_unpacked(
 
     assert (failed.value.check, failed.value.detail) == ("opens", detail)
     assert not scratch.exists()
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="The check lets a symlink among the assets through. Harmless today: the worker "
-    "copies the members by name, which drops the link, and zipfile never makes one.",
-)
-def test_a_symlink_in_the_archive_fails_opens(tmp_path: Path) -> None:
-    with pytest.raises(CheckFailed) as failed:
-        inspect_keras(hostile("symlink"), tmp_path / "weights.part", file_max=FILE_MAX)
-
-    assert failed.value.check == "opens"
 
 
 def test_the_files_are_what_they_say() -> None:
