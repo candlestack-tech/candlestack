@@ -1,59 +1,47 @@
+import { useCallback, useMemo, useState } from 'react';
+
 import type { BacktestDocument } from '@/api';
 import { FactsStrip } from '@/components/FactsStrip';
-import { InstrumentSymbol } from '@/components/InstrumentSymbol';
-import { useDateStyle } from '@/features/preferences';
 
+import { chartTrades } from './chartData';
 import { allMetrics, basicMetrics, TONE } from './format';
-import { showsMarkers } from './chartData';
-import { EquityCharts, PriceChart } from './ResultCharts';
-import { FailedNote, Legend, MetricList, ResultBox, SetupBox } from './ResultParts';
+import { FailedNote, MetricList, ResultBox, SetupBox } from './ResultParts';
 import { ResultHeader } from './ResultHeader';
 import { RunSteps } from './RunSteps';
 import { TradesBox } from './TradesBox';
+import { TradesChart, type Picked } from './TradesChart';
 
 const DAY = 86_400;
 
 type Results = NonNullable<BacktestDocument['results']>;
 type Props = { doc: BacktestDocument; results: Results };
 
-// The charts and the trades: the equity with the drawdown, the price with the trades on it (the box
-// named by the instrument with its icon).
+// The chart of the price and the trades over the strategy's return, then the trades. The two
+// point at the same trade: the one under the chart's cursor is marked in the table, a row clicked
+// shows its trade on the chart.
 function Charts({ doc, results }: Props) {
-  const dateStyle = useDateStyle();
-  const { series, trades } = results;
-  const daily = doc.data.timeframe_seconds >= DAY;
-  const { instrument } = doc.data;
-  const symbol = instrument.symbol;
-  // A run of days, or the light view's one point per day: no time of day on the axis.
-  const time = { dateStyle, daily: daily || series.resolution === 'day' };
-  const lines =
-    doc.benchmarks.length > 0
-      ? ([
-          ['line', 'Strategy'],
-          ['dashed', 'Buy and hold'],
-        ] as const)
-      : ([['line', 'Strategy']] as const);
+  const trades = useMemo(() => chartTrades(results.trades), [results.trades]);
+  const [hovered, setHovered] = useState<number | null>(null);
+  const [picked, setPicked] = useState<Picked | null>(null);
+  const onPick = useCallback((index: number) => setPicked((last) => ({ index, count: (last?.count ?? 0) + 1 })), []);
+  const onUnpick = useCallback(() => setPicked(null), []);
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <ResultBox title="Equity" aside={<Legend items={lines} />}>
-        <EquityCharts series={series} time={time} />
-      </ResultBox>
-      <ResultBox
-        title={<InstrumentSymbol id={instrument.id} symbol={symbol} size={16} />}
-        aside={
-          showsMarkers(trades) && (
-            <Legend
-              items={[
-                ['up', 'Buy'],
-                ['down', 'Sell'],
-              ]}
-            />
-          )
-        }
-      >
-        <PriceChart series={series} trades={trades} time={time} symbol={symbol} />
-      </ResultBox>
-      <TradesBox trades={trades} longOnly={doc.decision.long_only} daily={daily} />
+      <TradesChart
+        doc={doc}
+        series={results.series}
+        trades={trades}
+        picked={picked}
+        onHover={setHovered}
+        onUnpick={onUnpick}
+      />
+      <TradesBox
+        trades={results.trades}
+        longOnly={doc.decision.long_only}
+        daily={doc.data.timeframe_seconds >= DAY}
+        highlighted={hovered ?? picked?.index ?? null}
+        onPick={onPick}
+      />
     </div>
   );
 }

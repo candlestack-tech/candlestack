@@ -9,9 +9,9 @@ export type Candles = components['schemas']['CandlesOut'];
 // How many candles one page shows: the chart opens with one page, scrolling left adds one more.
 export const PAGE_SIZE = 500;
 
-// What one request asks for: the last `limit` candles before `end` (now without it). The API
-// counts the candles by the market schedule itself.
-export type CandleRange = { limit: number; end?: number };
+// What one request asks for: the last `limit` candles before `end` (now without it), or every
+// candle in `[start, end)`. The API counts the candles by the market schedule itself.
+export type CandleRange = { limit: number; end?: number } | { start: number; end: number };
 
 // GET /api/v1/data/instruments/{id}/candles.
 export function getCandles(
@@ -21,8 +21,9 @@ export function getCandles(
   signal?: AbortSignal,
 ): Promise<Candles> {
   const query = new URLSearchParams({ timeframe });
+  if ('start' in range) query.set('start', String(range.start));
   if (range.end !== undefined) query.set('end', String(range.end));
-  query.set('limit', String(range.limit));
+  if ('limit' in range) query.set('limit', String(range.limit));
   return get<Candles>(`/v1/data/instruments/${encodeURIComponent(instrument)}/candles?${query.toString()}`, signal);
 }
 
@@ -67,5 +68,18 @@ export function candleBridgeQueryOptions({ instrument, timeframe, maxCandles, en
             getCandles(instrument, timeframe, { limit: Math.min(BRIDGE_CANDLES, maxCandles), end }, signal),
     staleTime: Infinity,
     gcTime: 60_000,
+  });
+}
+
+export type CandleSpan = { instrument: string; timeframe: Timeframe; start: number; end: number };
+
+// Every candle of `[start, end)`, for a backtest's chart: the past never changes, so it stays
+// cached for the whole visit.
+export function candleSpanQueryOptions({ instrument, timeframe, start, end }: CandleSpan) {
+  return queryOptions({
+    queryKey: ['candles', instrument, timeframe, 'span', start, end],
+    queryFn: ({ signal }) => getCandles(instrument, timeframe, { start, end }, signal),
+    staleTime: Infinity,
+    gcTime: 30 * 60_000,
   });
 }

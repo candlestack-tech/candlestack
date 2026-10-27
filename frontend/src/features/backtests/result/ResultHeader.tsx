@@ -5,6 +5,7 @@ import { backtestDownloadUrl, type BacktestDocument } from '@/api';
 import { BUTTON_SIZES, OUTLINE_BUTTON } from '@/components/buttonStyles';
 import { InstrumentSymbol } from '@/components/InstrumentSymbol';
 import { Button } from '@/components/ui/button';
+import { FrameworkTile, frameworkOf } from '@/features/models';
 import { useViewerDateStyle } from '@/features/preferences';
 import { formatRecentTime } from '@/lib/dates';
 import { secondsSince, useNow } from '@/lib/useNow';
@@ -83,8 +84,18 @@ function FinishedActions({ id }: { id: string }) {
   );
 }
 
-// The model it ran with, a link to its page while it exists.
+// The model it ran with beside its framework's mark, a link to its page while it exists.
 function ModelLink({ model }: { model: BacktestDocument['model'] }) {
+  const framework = frameworkOf(model.framework);
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      {framework && <FrameworkTile framework={framework} size="sm" />}
+      <ModelName model={model} />
+    </span>
+  );
+}
+
+function ModelName({ model }: { model: BacktestDocument['model'] }) {
   if (!model.id) return <span>{model.name}</span>;
   return (
     <Link

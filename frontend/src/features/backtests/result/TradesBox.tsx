@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 
 import { BUTTON_SIZES, GHOST_BUTTON } from '@/components/buttonStyles';
 import { HINT } from '@/components/Hint';
@@ -29,8 +29,9 @@ type Columns = { opened: string; closed: string; side: boolean };
 
 // A long-only run buys and sells, as in the mockup; one that also goes short opens and closes, and
 // says which way.
-const columnsOf = (longOnly: boolean): Columns =>
-  longOnly ? { opened: 'Bought', closed: 'Sold', side: false } : { opened: 'Opened', closed: 'Closed', side: true };
+const LONG_ONLY: Columns = { opened: 'Bought', closed: 'Sold', side: false };
+const BOTH_SIDES: Columns = { opened: 'Opened', closed: 'Closed', side: true };
+const columnsOf = (longOnly: boolean): Columns => (longOnly ? LONG_ONLY : BOTH_SIDES);
 
 // A candle's time: its day, and under it its time of day for candles shorter than a day.
 function CandleTime({ seconds, style, daily }: { seconds: number; style: DateStyle; daily: boolean }) {
@@ -44,11 +45,36 @@ function CandleTime({ seconds, style, daily }: { seconds: number; style: DateSty
   );
 }
 
-type RowProps = { trade: TradeRow; columns: Columns; style: DateStyle; daily: boolean };
+// The chart and the table point at the same trade: a row of the trade under the chart's cursor is
+// marked, a row clicked shows its trade on the chart.
+type Link = { highlighted: number | null; onPick: (index: number) => void };
 
-function Row({ trade, columns, style, daily }: RowProps) {
+type RowProps = {
+  trade: TradeRow;
+  columns: Columns;
+  style: DateStyle;
+  daily: boolean;
+  highlighted: boolean;
+  onPick: Link['onPick'];
+};
+
+// Memoized with only whether it is highlighted: a trade under the chart's cursor re-renders two
+// rows, not thousands.
+const Row = memo(function Row({ trade, columns, style, daily, highlighted, onPick }: RowProps) {
+  const pick = () => onPick(trade.index);
   return (
-    <tr>
+    <tr
+      tabIndex={0}
+      title="Show on the chart"
+      aria-current={highlighted ? 'true' : undefined}
+      onClick={pick}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        pick();
+      }}
+      className="cursor-pointer outline-none hover:bg-muted focus-visible:bg-muted aria-[current]:bg-muted"
+    >
       {columns.side && <td className={CELL}>{trade.long ? 'Long' : 'Short'}</td>}
       <td className={cn(CELL, TIME)}>
         <CandleTime seconds={trade.openTs} style={style} daily={daily} />
@@ -63,9 +89,11 @@ function Row({ trade, columns, style, daily }: RowProps) {
       <td className={cn(CELL, 'text-muted-foreground', WIDE)}>{trade.reason}</td>
     </tr>
   );
-}
+});
 
-function Table({ rows, columns, daily }: { rows: readonly TradeRow[]; columns: Columns; daily: boolean }) {
+type TableProps = { rows: readonly TradeRow[]; columns: Columns; daily: boolean; link: Link };
+
+function Table({ rows, columns, daily, link }: TableProps) {
   const style = useDateStyle();
   return (
     <table className="w-full border-collapse text-[12.5px]">
@@ -82,21 +110,29 @@ function Table({ rows, columns, daily }: { rows: readonly TradeRow[]; columns: C
         </tr>
       </thead>
       <tbody>
-        {rows.map((trade, index) => (
-          <Row key={index} trade={trade} columns={columns} style={style} daily={daily} />
+        {rows.map((trade) => (
+          <Row
+            key={trade.index}
+            trade={trade}
+            columns={columns}
+            style={style}
+            daily={daily}
+            highlighted={link.highlighted === trade.index}
+            onPick={link.onPick}
+          />
         ))}
       </tbody>
     </table>
   );
 }
 
-type Props = { trades: Trades; longOnly: boolean; daily: boolean };
+type Props = { trades: Trades; longOnly: boolean; daily: boolean } & Link;
 
 // The trades, the newest first: six of them, all of them after Show all. A run with more than the
-// light view keeps says how many it shows.
-export function TradesBox({ trades, longOnly, daily }: Props) {
+// light view keeps says how many it shows. Clicking a trade shows it on the chart.
+export function TradesBox({ trades, longOnly, daily, highlighted, onPick }: Props) {
   const [all, setAll] = useState(false);
-  const rows = tradeRows(trades);
+  const rows = useMemo(() => tradeRows(trades), [trades]);
   const shown = all ? rows : rows.slice(0, FIRST_TRADES);
   const toggle = rows.length > FIRST_TRADES && (
     <Button
@@ -128,7 +164,7 @@ export function TradesBox({ trades, longOnly, daily }: Props) {
         <div
           className={cn('@container -mx-4 -mb-3.5 overflow-x-auto border-t', all && 'max-h-[480px] overflow-y-auto')}
         >
-          <Table rows={shown} columns={columnsOf(longOnly)} daily={daily} />
+          <Table rows={shown} columns={columnsOf(longOnly)} daily={daily} link={{ highlighted, onPick }} />
         </div>
       )}
     </ResultBox>

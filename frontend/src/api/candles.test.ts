@@ -3,7 +3,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { candles } from '@/test/candles';
 
-import { BRIDGE_CANDLES, PAGE_SIZE, candleBridgeQueryOptions, candlePageQueryOptions, getCandles } from './candles';
+import {
+  BRIDGE_CANDLES,
+  PAGE_SIZE,
+  candleBridgeQueryOptions,
+  candlePageQueryOptions,
+  candleSpanQueryOptions,
+  getCandles,
+} from './candles';
 
 const END = 1_780_000_000;
 const URL = '/api/v1/data/instruments/crypto%3ABTCUSDT/candles';
@@ -27,6 +34,26 @@ describe('getCandles', () => {
       `${URL}?timeframe=1h&limit=500`,
       `${URL}?timeframe=1h&end=${END}&limit=500`,
     ]);
+  });
+
+  it('asks for every candle between a start and an end', async () => {
+    const fetch = stubFetch();
+    await getCandles('crypto:BTCUSDT', '4h', { start: END - 86_400, end: END });
+    expect(fetch).toHaveBeenCalledWith(`${URL}?timeframe=4h&start=${END - 86_400}&end=${END}`, expect.anything());
+  });
+});
+
+describe('candleSpanQueryOptions', () => {
+  it('keys a span by its start and end and keeps it for good', async () => {
+    const fetch = stubFetch();
+    const span = candleSpanQueryOptions({ instrument: 'crypto:BTCUSDT', timeframe: '1d', start: 0, end: END });
+    expect(span.queryKey).toEqual(['candles', 'crypto:BTCUSDT', '1d', 'span', 0, END]);
+    expect(span.staleTime).toBe(Infinity);
+    const client = new QueryClient();
+    await client.fetchQuery(span);
+    await client.fetchQuery(span);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(`${URL}?timeframe=1d&start=0&end=${END}`, expect.anything());
   });
 });
 

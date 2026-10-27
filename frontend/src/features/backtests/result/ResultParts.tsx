@@ -1,7 +1,8 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 
 import type { BacktestDocument } from '@/api';
-import { InstrumentSymbol } from '@/components/InstrumentSymbol';
+import { InstrumentIcon } from '@/components/InstrumentIcon';
+import { FrameworkTile, frameworkOf } from '@/features/models';
 import { useDateStyle } from '@/features/preferences';
 import { cn } from '@/lib/utils';
 
@@ -15,43 +16,22 @@ export function ResultBox({
   aside,
   className,
   children,
+  ref,
 }: {
   title: ReactNode;
   aside?: ReactNode;
   className?: string;
   children: ReactNode;
+  ref?: Ref<HTMLElement>;
 }) {
   return (
-    <section className={cn('flex min-w-0 flex-col gap-2.5 rounded-lg border bg-card px-4 py-3.5', className)}>
+    <section ref={ref} className={cn('flex min-w-0 flex-col gap-2.5 rounded-lg border bg-card px-4 py-3.5', className)}>
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <h2 className="text-sm font-semibold">{title}</h2>
         {aside}
       </div>
       {children}
     </section>
-  );
-}
-
-type Swatch = 'line' | 'dashed' | 'up' | 'down';
-
-const SWATCHES: Record<Swatch, string> = {
-  line: 'h-[3px] rounded-[2px] bg-primary',
-  dashed: 'h-0 border-t-2 border-dashed border-muted-foreground',
-  up: 'h-[3px] rounded-[2px] bg-up',
-  down: 'h-[3px] rounded-[2px] bg-down',
-};
-
-// What the lines and arrows of a chart are (.r3-legend).
-export function Legend({ items }: { items: readonly (readonly [Swatch, string])[] }) {
-  return (
-    <div className="flex flex-wrap gap-3.5 text-xs text-muted-foreground">
-      {items.map(([swatch, label]) => (
-        <span key={label} className="inline-flex items-center gap-1.5">
-          <i aria-hidden="true" className={cn('inline-block w-3.5', SWATCHES[swatch])} />
-          {label}
-        </span>
-      ))}
-    </div>
   );
 }
 
@@ -91,25 +71,56 @@ function RunTimes({ backtest }: { backtest: BacktestDocument['backtest'] }) {
   );
 }
 
-// The setup it ran with, step by step (.r3-setup): each step's name over what it was and its
-// details. The data names its instrument with the icon, the symbol and the name. A finished run
-// adds how long it took.
+// The model's name beside its framework's mark, in two lines at most (in full in its title).
+function ModelName({ model }: { model: BacktestDocument['model'] }) {
+  const framework = frameworkOf(model.framework);
+  return (
+    <div className="flex min-w-0 items-center gap-2.5">
+      {framework && <FrameworkTile framework={framework} />}
+      <b title={model.name} className="line-clamp-2 leading-[1.35] font-medium [overflow-wrap:anywhere]">
+        {model.name}
+      </b>
+    </div>
+  );
+}
+
+// The instrument's icon beside its symbol over its name.
+function InstrumentName({ instrument }: { instrument: BacktestDocument['data']['instrument'] }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2.5">
+      <InstrumentIcon id={instrument.id} size={28} />
+      <span className="flex min-w-0 flex-col">
+        <b className="font-mono font-medium">{instrument.symbol}</b>
+        <span title={instrument.name} className="truncate text-[12.5px] text-muted-foreground">
+          {instrument.name}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+// The setup it ran with (#309): the builder's steps as groups between rules, one value per row.
+// The model starts with its name and mark, the data with the instrument. A finished run adds how
+// long it took.
 export function SetupBox({ doc }: { doc: BacktestDocument }) {
   const dateStyle = useDateStyle();
-  const { instrument } = doc.data;
   const { backtest } = doc;
   return (
     <ResultBox title="Setup">
-      <div className="flex flex-col gap-3 text-[13px]">
-        {setupOf(doc, dateStyle).map(({ step, main, detail }) => (
-          <div key={step} className="flex min-w-0 flex-col gap-[3px]">
-            <span className={LABEL}>{step}</span>
-            {step === 'Data' ? (
-              <InstrumentSymbol id={instrument.id} symbol={instrument.symbol} name={instrument.name} size={20} />
-            ) : (
-              <b className="font-medium [overflow-wrap:anywhere]">{main}</b>
-            )}
-            {detail && <span className="font-mono text-[12.5px] text-muted-foreground">{detail}</span>}
+      <div className="flex flex-col text-[13px]">
+        {setupOf(doc, dateStyle).map(({ name, rows }) => (
+          <div key={name} className="flex min-w-0 flex-col gap-2 border-t py-3 first:border-t-0 first:pt-0">
+            <span className={LABEL}>{name}</span>
+            {name === 'Model' && <ModelName model={doc.model} />}
+            {name === 'Data' && <InstrumentName instrument={doc.data.instrument} />}
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-[5px]">
+              {rows.map(([label, value]) => (
+                <div key={label} className="contents">
+                  <dt className="text-muted-foreground">{label}</dt>
+                  <dd className="text-right font-mono text-[12.5px] [overflow-wrap:anywhere]">{value}</dd>
+                </div>
+              ))}
+            </dl>
           </div>
         ))}
         {backtest.status === 'finished' && backtest.steps.length > 0 && <RunTimes backtest={backtest} />}

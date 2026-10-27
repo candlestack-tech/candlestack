@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { backtestDocument, manifest } from '@/test/api';
+import { backtestDocument } from '@/test/api';
 import { step } from '@/test/steps';
 
 import {
@@ -9,7 +9,6 @@ import {
   candlesText,
   durationText,
   loadedText,
-  manifestText,
   modelText,
   periodText,
   setupOf,
@@ -71,58 +70,92 @@ describe('the header', () => {
 });
 
 describe('the setup', () => {
-  it('reads the manifest it ran with in short', () => {
-    expect(manifestText(manifest() as unknown as Record<string, unknown>)).toBe('Candles · 30m · 25 × 5');
-    expect(manifestText({})).toBe('');
-  });
+  const group = (doc: typeof DOC, name: string) => setupOf(doc, DMY).find((item) => item.name === name)?.rows;
 
-  it('writes each step of the builder with its details', () => {
+  it('writes each step of the builder as a group with one value per row', () => {
     expect(setupOf(DOC, DMY)).toEqual([
-      { step: 'Model', main: 'raw-candles.keras', detail: 'Candles · 30m · 25 × 5' },
-      { step: 'Data', main: 'AAPL', detail: '30m · 3 Jun 2024 – 3 Jun 2024' },
-      { step: 'Decision', main: 'threshold 0.05 · long and short', detail: '' },
       {
-        step: 'Execution',
-        main: "next candle's open",
-        detail: 'stop loss 5 % · fees 0.1 % · slippage 0 % · vs buy and hold',
+        name: 'Model',
+        rows: [
+          ['Reads', 'Candles'],
+          ['Timeframe', '30m'],
+          ['Input', '25 × 5'],
+        ],
+      },
+      {
+        name: 'Data',
+        rows: [
+          ['From', '3 Jun 2024'],
+          ['To', '3 Jun 2024'],
+          ['Candles', '5'],
+        ],
+      },
+      {
+        name: 'Decision',
+        rows: [
+          ['Threshold', '0.05'],
+          ['Positions', 'Long and short'],
+        ],
+      },
+      {
+        name: 'Execution',
+        rows: [
+          ['Fills at', "Next candle's open"],
+          ['Stop loss', '5 %'],
+          ['Fees', '0.1 %'],
+          ['Slippage', '0 %'],
+          ['Benchmark', 'Buy and hold'],
+        ],
       },
     ]);
   });
 
-  it('writes every rule and the steps that are on', () => {
+  it("takes the run's timeframe without a manifest and leaves out what it does not know", () => {
+    const doc = backtestDocument({ model: { ...DOC.model, manifest: {} } });
+    expect(group(doc, 'Model')).toEqual([['Timeframe', '30m']]);
+    expect(group(backtestDocument({ data: { ...DOC.data, rows: null } }), 'Data')).toHaveLength(2);
+  });
+
+  it('writes every rule and the steps that are on, before and after it', () => {
     const decision = (fields: Partial<typeof DOC.decision>) =>
-      setupOf(backtestDocument({ decision: { ...DOC.decision, ...fields } }), DMY)[2];
-    expect(decision({ rule: { name: 'hysteresis', enter: 0.3, exit: 0.1 }, long_only: true })).toEqual({
-      step: 'Decision',
-      main: 'hysteresis 0.3 / 0.1 · long only',
-      detail: '',
-    });
+      group(backtestDocument({ decision: { ...DOC.decision, ...fields } }), 'Decision');
+    expect(decision({ rule: { name: 'hysteresis', enter: 0.3, exit: 0.1 }, long_only: true })).toEqual([
+      ['Enter at', '0.3'],
+      ['Leave at', '0.1'],
+      ['Positions', 'Long only'],
+    ]);
     expect(
       decision({
         rule: { name: 'kmeans', k: 5, window: 500, refit_every: 50 },
         calibrate: { name: 'rank', window: 500 },
         ema: { span: 5 },
         confirm: { candles: 2 },
-        min_hold: { candles: 3 },
+        min_hold: { candles: 1 },
       }),
-    ).toEqual({
-      step: 'Decision',
-      main: 'k-means 5 · 500 · refit 50 · long and short',
-      detail: 'rank 500 · EMA 5 · confirm 2 · hold 3',
-    });
-    expect(decision({ calibrate: { name: 'zscore', window: 200 } })?.detail).toBe('z-score 200');
+    ).toEqual([
+      ['Calibration', 'Rank 500'],
+      ['Smoothing', 'EMA 5'],
+      ['K-means groups', '5'],
+      ['K-means window', '500'],
+      ['Refit every', '50 candles'],
+      ['Confirm', '2 candles'],
+      ['Minimum hold', '1 candle'],
+      ['Positions', 'Long and short'],
+    ]);
+    expect(decision({ calibrate: { name: 'zscore', window: 200 } })?.[0]).toEqual(['Calibration', 'Z-score 200']);
   });
 
-  it('writes the fill, the stops and the costs, and says when there is no benchmark', () => {
+  it('writes the fill, the stops and the costs, and no benchmark without one', () => {
     const doc = backtestDocument({
       execution: { fill: 'signal_close', stop_loss: null, drawdown_stop: 0.2, fee_bps: 2.5, slippage_bps: 1 },
       benchmarks: [],
     });
-    expect(setupOf(doc, DMY)[3]).toEqual({
-      step: 'Execution',
-      main: "signal candle's close",
-      detail: 'drawdown stop 20 % · fees 0.025 % · slippage 0.01 % · no benchmark',
-    });
+    expect(group(doc, 'Execution')).toEqual([
+      ['Fills at', "Signal candle's close"],
+      ['Drawdown stop', '20 %'],
+      ['Fees', '0.025 %'],
+      ['Slippage', '0.01 %'],
+    ]);
   });
 });
 
