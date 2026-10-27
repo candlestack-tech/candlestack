@@ -69,6 +69,7 @@ from candlestack.data.models import (
     Timeframe,
     empty_candles,
 )
+from candlestack.data.progress import tracker
 from candlestack.data.sessions import Session, sessions_between
 from candlestack.data.sources.alpaca import AlpacaSource
 from candlestack.data.sources.base import DAY, DataSource, Period, pause
@@ -468,24 +469,34 @@ class DataService:
         background: bool = False,
     ) -> list[bytes]:
         limit = asyncio.Semaphore(source.chunk_concurrency)
+        # A watched load (a backtest's) reports each chunk, and whether the source sent it.
+        progress = tracker()
+        if progress is not None:
+            progress.plan(periods)
+        fetched: set[str] = set()
 
         async def fetch(period: Period) -> tuple[bytes, int]:
+            fetched.add(period.label)
             frame = await source.fetch_period(
                 instrument.symbol, timeframe, period, background=background
             )
             blob = await to_thread.run_sync(encode_chunk, frame, period.end)
             return blob, period.ttl
 
-        async def chunk(period: Period) -> bytes:
+        async def chunk(index: int, period: Period) -> bytes:
             if period.label in known:
-                return known[period.label]
-            async with limit:
-                name = f"candles:{instrument.id}:{timeframe}:{period.label}"
-                return await self._cache.get_or_fetch(
-                    name, partial(fetch, period), background=background
-                )
+                blob = known[period.label]
+            else:
+                async with limit:
+                    name = f"candles:{instrument.id}:{timeframe}:{period.label}"
+                    blob = await self._cache.get_or_fetch(
+                        name, partial(fetch, period), background=background
+                    )
+            if progress is not None:
+                progress.loaded(index, cached=period.label not in fetched)
+            return blob
 
-        return await asyncio.gather(*(chunk(period) for period in periods))
+        return await asyncio.gather(*(chunk(i, period) for i, period in enumerate(periods)))
 
     async def _health(self, source: DataSource) -> SourceHealth:
         async def fetch() -> tuple[bytes, int]:

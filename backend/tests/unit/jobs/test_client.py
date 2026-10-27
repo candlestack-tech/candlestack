@@ -2,6 +2,7 @@
 files go once the result is in, whatever it is."""
 
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import polars as pl
@@ -18,7 +19,8 @@ PREDICTIONS = pl.DataFrame({"ts": [0], "prediction": [0.5]})
 
 
 class FakeQueue:
-    """Answers each job as ``answer`` says, as the worker would."""
+    """Answers each job as ``answer`` says, as the worker would, and tells ``claimed`` that a
+    worker took it first."""
 
     def __init__(self, files: JobFiles, answer: str) -> None:
         self.files = files
@@ -33,8 +35,16 @@ class FakeQueue:
     async def submit(self, job: Job) -> None:
         self.submitted.append(job)
 
-    async def result(self, job_id: str, wait: float) -> JobResult | None:
+    async def result(
+        self,
+        job_id: str,
+        wait: float,
+        *,
+        claimed: Callable[[], Awaitable[None]] | None = None,
+    ) -> JobResult | None:
         self.waits.append(wait)
+        if claimed is not None:
+            await claimed()
         job = self.submitted[-1]
         if self.answer == "none":
             return None
@@ -77,6 +87,20 @@ async def test_predict_returns_the_predictions_and_removes_the_files(tmp_path: P
     )
     assert queue.waits == [30]
     assert leftovers(tmp_path) == []
+
+
+async def test_predict_tells_when_a_worker_took_the_job(tmp_path: Path) -> None:
+    jobs, _, _ = client(tmp_path, "done")
+    claims: list[bool] = []
+
+    async def claimed() -> None:
+        claims.append(True)
+
+    await jobs.predict(
+        model="u/m.keras", sha256=SHA256, manifest=MANIFEST, candles=CANDLES, claimed=claimed
+    )
+
+    assert claims == [True]
 
 
 async def test_a_failed_predict_has_no_predictions_and_removes_the_files(tmp_path: Path) -> None:

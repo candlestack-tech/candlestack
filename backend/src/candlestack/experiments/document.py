@@ -7,7 +7,7 @@ with orjson from the Polars columns (``assembly.py``), as the candles endpoint d
 models never hold the long tables.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -207,6 +207,77 @@ class BacktestIn(BaseModel):
 # --- The document -------------------------------------------------------------------------
 
 
+StepId = Literal["candles", "queue", "model", "trades"]
+StepState = Literal["pending", "running", "done", "failed"]
+
+
+class BacktestStep(BaseModel):
+    """A step of the run. `candles` loads the candles with the warm-up, `queue` hands the job
+    to the worker until a worker takes it, `model` is the worker's job (it loads the model,
+    builds its input and predicts), `trades` runs the engine and the statistics and stores the
+    result. The fields after `duration_s` belong to one step each and are null for the others.
+    """
+
+    # Every field is in every step (null when it does not apply).
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
+
+    id: StepId
+    state: StepState = Field(
+        description="`pending` until it begins (a step after a failed one stays `pending`), "
+        "`running`, `done` or `failed`"
+    )
+    started_at: datetime | None = Field(
+        default=None, description="When it began (UTC); null while pending or when unknown"
+    )
+    duration_s: float | None = Field(
+        default=None,
+        description="Seconds it took, once done or failed; null while it runs, or when it is "
+        "not known",
+        examples=[192.4],
+    )
+    loaded: int | None = Field(
+        default=None,
+        description="`candles`: the chunks loaded so far (closed months or years, then days, "
+        "as the source splits the period); null until the load has planned them",
+        examples=[37],
+    )
+    total: int | None = Field(
+        default=None, description="`candles`: the chunks of the load", examples=[128]
+    )
+    cached: int | None = Field(
+        default=None,
+        description="`candles`: of the chunks loaded, those that came from the cache",
+        examples=[3],
+    )
+    loaded_until: date | None = Field(
+        default=None,
+        description="`candles`: the last day of the candles loaded so far from the start of "
+        "the load on (UTC)",
+    )
+    candles: int | None = Field(
+        default=None, description="`candles`, once done: the candles loaded", examples=[35912]
+    )
+    from_cache: bool | None = Field(
+        default=None, description="`candles`, once done: every chunk came from the cache"
+    )
+    waiting_until: datetime | None = Field(
+        default=None,
+        description="`candles`: while the load waits for the market data source's request "
+        "limit, when it goes on (UTC); else null",
+    )
+    load_s: float | None = Field(
+        default=None, description="`model`, once done: seconds to load the model", examples=[1.2]
+    )
+    input_s: float | None = Field(
+        default=None,
+        description="`model`, once done: seconds to build the model's input",
+        examples=[0.4],
+    )
+    predict_s: float | None = Field(
+        default=None, description="`model`, once done: seconds to predict", examples=[6.1]
+    )
+
+
 class BacktestHeader(BaseModel):
     id: str = Field(examples=["bt_7f3k2m9qx4"])
     number: int = Field(ge=1, description="The user's own number, shown as #N", examples=[12])
@@ -215,6 +286,11 @@ class BacktestHeader(BaseModel):
     finished_at: datetime | None = Field(description="When it finished or failed (UTC)")
     duration_s: float | None = Field(description="Seconds it took", examples=[162.0])
     error: str | None = Field(description="What went wrong and what to do, for a failed one")
+    steps: list[BacktestStep] = Field(
+        description="The steps of the run in their order, while it runs and after: the "
+        "failed one of a failed backtest is `failed` and its error is `error`. Empty for a "
+        "backtest that failed before steps were recorded"
+    )
 
 
 class RunnerOut(BaseModel):

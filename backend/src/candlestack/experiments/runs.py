@@ -65,6 +65,7 @@ from candlestack.experiments.schemas import (
     SetupTimeframe,
 )
 from candlestack.experiments.spec import RunReport, RunSpec, SpecData, SpecModel, SpecWarmUp
+from candlestack.experiments.steps import pending, shown_steps
 from candlestack.experiments.store import BacktestStore
 from candlestack.ml import Model
 from candlestack.preprocessing import Manifest, warm_up
@@ -129,6 +130,7 @@ class BacktestRuns:
             model_framework=model.framework,
             setup=_setup(spec),
             spec=spec.model_dump(mode="json"),
+            steps=pending(),
             created_at=datetime.now(UTC),
         )
         self._store.add(backtest)
@@ -254,6 +256,7 @@ def _document(
             finished_at=backtest.finished_at,
             duration_s=backtest.duration_s,
             error=backtest.error,
+            steps=shown_steps(backtest.steps, None if report is None else report.timings),
         ),
         software=Software(
             engine_version=ENGINE_VERSION,

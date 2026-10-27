@@ -33,6 +33,7 @@ from sqlalchemy.sql import visitors
 from candlestack.accounts import User
 from candlestack.experiments.models import Backtest
 from candlestack.experiments.schemas import BacktestShow, BacktestSort, BacktestStatus, SortOrder
+from candlestack.experiments.steps import Steps, failed
 from candlestack.ml import Model, ModelUsageStats
 
 # A column of the table, or an expression over the columns.
@@ -297,7 +298,12 @@ class BacktestStore:
         """The user's backtest with what its run stored, its predictions aside."""
         return await self._db.scalar(
             select(Backtest)
-            .options(undefer(Backtest.spec), undefer(Backtest.report), undefer(Backtest.stats))
+            .options(
+                undefer(Backtest.spec),
+                undefer(Backtest.report),
+                undefer(Backtest.stats),
+                undefer(Backtest.steps),
+            )
             .where(Backtest.id == backtest_id, Backtest.user_id == user_id)
         )
 
@@ -310,23 +316,35 @@ class BacktestStore:
     async def predictions(self, backtest_id: str) -> bytes | None:
         return await self._db.scalar(select(Backtest.predictions).where(Backtest.id == backtest_id))
 
+    async def set_steps(self, backtest_id: str, steps: Steps) -> None:
+        """Stores the steps of the backtest while it is running (one that has ended keeps
+        those it ended with)."""
+        await self._db.execute(
+            update(Backtest).where(Backtest.id == backtest_id, _RUNNING).values(steps=steps)
+        )
+
     async def fail(self, error: str, now: datetime, backtest_id: str | None = None) -> int:
         """Marks the running backtest with the ID (every running one without an ID) failed
-        with ``error``; how many. One that has ended keeps what it has."""
-        query = update(Backtest).where(_RUNNING)
+        with ``error``, and the step it was at; how many. One that has ended keeps what it
+        has."""
+        query = select(Backtest.id, Backtest.steps).where(_RUNNING).with_for_update()
         if backtest_id is not None:
             query = query.where(Backtest.id == backtest_id)
-        failed = await self._db.scalars(
-            query.values(
-                status=BacktestStatus.failed.value,
-                error=error,
-                finished_at=now,
-                duration_s=func.extract(
+        running = (await self._db.execute(query)).all()
+        for found, steps in running:
+            values: dict[str, Any] = {
+                "status": BacktestStatus.failed.value,
+                "error": error,
+                "finished_at": now,
+                "duration_s": func.extract(
                     "epoch", literal(now, DateTime(timezone=True)) - Backtest.created_at
                 ),
-            ).returning(Backtest.id)
-        )
-        return len(failed.all())
+            }
+            # Without steps (stored before they were recorded) the column stays null.
+            if (marked := failed(steps, now)) is not None:
+                values["steps"] = marked
+            await self._db.execute(update(Backtest).where(Backtest.id == found).values(values))
+        return len(running)
 
     # --- What the seed command needs ----------------------------------------------------------
 

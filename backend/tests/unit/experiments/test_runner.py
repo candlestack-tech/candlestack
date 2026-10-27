@@ -28,6 +28,14 @@ async def test_without_postgres_the_start_goes_on(
     assert "The backtests left running were not checked" in caplog.text
 
 
+async def test_steps_that_cannot_be_saved_do_not_stop_the_run(
+    fake_database: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    await runner(fake_database)._save_steps("bt_7f3k2m9qx4", [])
+
+    assert "The steps of backtest bt_7f3k2m9qx4 were not saved" in caplog.text
+
+
 async def test_a_run_that_fails_on_a_bug_is_reported_and_its_marking_too(
     fake_database: Any, caplog: pytest.LogCaptureFixture
 ) -> None:

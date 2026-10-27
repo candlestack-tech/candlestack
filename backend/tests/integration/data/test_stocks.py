@@ -18,11 +18,14 @@ from candlestack.data import (
     DataService,
     InstrumentId,
     InstrumentNotFound,
+    LoadProgress,
     Market,
     SourceUnavailable,
     Timeframe,
     build_data_service,
+    watch_load,
 )
+from candlestack.data import progress as progress_module
 from candlestack.data import service as service_module
 from candlestack.data.sources import alpaca as alpaca_module
 from candlestack.data.sources import base as base_module
@@ -662,13 +665,23 @@ async def test_a_background_load_waits_for_room_in_the_whole_budget(
     minute = int(budget_clock[0] // 60)
     # Requests spent the rest of this minute's budget: the share has room, the budget none.
     await redis.set(f"data:rl:alpaca:{minute}", 10)
+    monkeypatch.setattr(progress_module, "_time", lambda: 1_800_000_001.0)
+    seen: list[LoadProgress] = []
 
-    january = await service.candles(
-        AAPL, Timeframe.M1, utc("2024-01-02T14:30"), utc("2024-02-01"), background=True
-    )
+    with watch_load(seen.append):
+        january = await service.candles(
+            AAPL, Timeframe.M1, utc("2024-01-02T14:30"), utc("2024-02-01"), background=True
+        )
 
     assert january.frame.height == 2
     assert waits == [59.0]
+    # A watched load says how long it waits, and that it goes on.
+    assert seen == [
+        LoadProgress(total=1),
+        LoadProgress(total=1, waiting_until=1_800_000_060.0),
+        LoadProgress(total=1),
+        LoadProgress(total=1, loaded=1, cached=0, until=utc("2024-02-01")),
+    ]
     assert minutes == [minute + 1, minute + 1]
     # The share is taken again in the minute the request is sent.
     assert await redis.get(f"data:rl:alpaca-background:{minute}") == b"1"
@@ -749,7 +762,10 @@ async def test_a_background_load_waits_while_alpaca_rate_limits_it(
 
     monkeypatch.setattr(base_module, "_sleep", sleep)
 
-    with caplog.at_level(logging.WARNING):
+    monkeypatch.setattr(progress_module, "_time", lambda: 1_800_000_015.0)
+    seen: list[LoadProgress] = []
+
+    with caplog.at_level(logging.WARNING), watch_load(seen.append):
         candles = await service.candles(
             AAPL, Timeframe.M1, utc("2024-01-02T14:30"), utc("2024-02-01"), background=True
         )
@@ -757,4 +773,6 @@ async def test_a_background_load_waits_while_alpaca_rate_limits_it(
     assert candles.frame.height == 2
     assert pages.call_count == 6  # four 429s, then the two pages
     assert waits == [30.0, 45.0]
+    waiting = [progress.waiting_until for progress in seen]
+    assert waiting == [None, 1_800_000_045.0, None, 1_800_000_060.0, None, None]
     assert "Alpaca rate limited a background load: asking again in 30 s" in caplog.text

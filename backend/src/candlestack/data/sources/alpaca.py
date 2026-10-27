@@ -56,6 +56,7 @@ from candlestack.data.models import (
     SourceStats,
     Timeframe,
 )
+from candlestack.data.progress import waiting
 from candlestack.data.sessions import NEW_YORK, Session, parse_calendar
 from candlestack.data.sources.base import (
     DAY,
@@ -757,7 +758,7 @@ class AlpacaSource:
                 wait = await self._limiter.hit(RATE_KEY, self._limit)
                 if wait <= 0:
                     return
-            await pause(wait + _jitter() * BACKGROUND_JITTER_SECONDS)
+            await _wait(wait + _jitter() * BACKGROUND_JITTER_SECONDS)
 
     async def _background_get(self, url: str, params: dict[str, str | int]) -> httpx.Response:
         """A GET of a background load: within its share and our budget (``_background_turn``),
@@ -765,12 +766,13 @@ class AlpacaSource:
         until the next minute, as long as that takes. Other answers are the caller's to check."""
         while True:
             await self._background_turn()
+            waiting(None)
             response = await get(self._http, NAME, TITLE, url, params=params, headers=self._headers)
             if response.status_code != 429:
                 return response
             wait = retry_after(response) or 60 - _time() % 60
             logger.warning("Alpaca rate limited a background load: asking again in %.0f s", wait)
-            await pause(wait + _jitter() * BACKGROUND_JITTER_SECONDS)
+            await _wait(wait + _jitter() * BACKGROUND_JITTER_SECONDS)
 
     async def _request(
         self, url: str, params: dict[str, str | int], *, background: bool = False
@@ -818,6 +820,12 @@ class AlpacaSource:
             )
             raise unavailable(NAME, TITLE, response)
         return response
+
+
+async def _wait(seconds: float) -> None:
+    """A background load's wait for the budget or Alpaca's limit, which a watched load shows."""
+    waiting(seconds)
+    await pause(seconds)
 
 
 def _symbol_bars(body: dict[str, Any], symbol: str) -> list[Any]:

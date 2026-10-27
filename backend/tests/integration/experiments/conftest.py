@@ -16,6 +16,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +40,9 @@ from candlestack.data import (
     Timeframe,
     fingerprint,
 )
-from candlestack.jobs import Job, JobFiles, JobQueue, JobResult, Reason, Runner
+from candlestack.data.progress import tracker, waiting
+from candlestack.data.sources.base import Period
+from candlestack.jobs import Job, JobFiles, JobQueue, JobResult, Reason, Runner, Timings
 from candlestack.worker.service import JobProcess, Paths, Worker
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "keras"
@@ -48,6 +51,9 @@ MANIFEST: dict[str, Any] = json.loads((FIXTURES / "raw_candles.manifest.json").r
 # The market the fake has: 30-minute candles from FIRST on, around the clock (sessions do not
 # matter to the backtests).
 FIRST = 1_704_067_200  # 2024-01-01
+
+# The times of the model's parts a done job of the fake worker reports.
+TIMINGS = Timings(load=1200.0, input=100.0, predict=500.0)
 
 # When the backtests of the tests start: #N an hour after #N-1.
 EPOCH = datetime(2026, 10, 1, 12, tzinfo=UTC)
@@ -90,7 +96,11 @@ class FakeMarket:
     them would; ``refuse`` makes the checks of a new backtest raise, ``refuse_candles`` the
     loads. ``slow`` seconds pass in each check of a new backtest, and ``held`` has how many
     connections of the app's pool (``pool``) were in use at each check and load. ``loads`` has
-    the period of each load, ``background`` whether it was a background load."""
+    the period of each load, ``background`` whether it was a background load.
+
+    With ``chunks``, a load reports its progress as the data module does (``data.watch_load``):
+    that many chunks, the first half from the cache, then a wait of a minute for the source
+    while ``load_gate`` is clear, then the rest from the source."""
 
     def __init__(self) -> None:
         self.scale = 1.0
@@ -101,6 +111,9 @@ class FakeMarket:
         self.slow = 0.0
         self.pool: Any = None
         self.held: list[int] = []
+        self.chunks = 0
+        self.load_gate = threading.Event()
+        self.load_gate.set()
 
     def _hold(self) -> None:
         if self.pool is not None:
@@ -155,6 +168,7 @@ class FakeMarket:
             raise self.refuse_candles
         self.loads.append((start, end))
         self.background.append(background)
+        await self._progress(start, end)
         step = timeframe.seconds
         ts = np.arange(-(-start // step) * step, end, step, dtype=np.int64)
         close, opens = _walk(ts, self.scale), _walk(ts - step, self.scale)
@@ -185,6 +199,22 @@ class FakeMarket:
             session_last=pl.Series("session_last", ts // step % 13 == 12) if stock else None,
         )
 
+    async def _progress(self, start: int, end: int) -> None:
+        load = tracker()
+        if load is None or not self.chunks:
+            return
+        size = -(-(end - start) // self.chunks)
+        bounds = [min(start + n * size, end) for n in range(self.chunks + 1)]
+        load.plan([Period("closed", a, b, f"chunk-{a}", 60) for a, b in pairwise(bounds)])
+        half = self.chunks // 2
+        for index in range(half):
+            load.loaded(index, cached=True)
+        waiting(60)
+        await anyio.to_thread.run_sync(self.load_gate.wait)
+        waiting(None)
+        for index in range(half, self.chunks):
+            load.loaded(index, cached=False)
+
 
 @pytest.fixture
 def market(app: FastAPI, client: Any) -> FakeMarket:
@@ -200,7 +230,9 @@ class FakeWorker:
     """Answers the jobs of the queue as the worker would, without a model: one prediction per
     candle after the window's first rows (the warm-up), the candle's return over the one before
     it in percent; or, with ``failure``, that failure (its reason and the user's sentences).
-    A job claimed waits to be answered while ``gate`` is clear."""
+    A job claimed waits to be answered while ``gate`` is clear. Its result has the timings as
+    the worker gives them: the wait in the queue and the time to the result, and of a done job
+    the model's parts (``TIMINGS``)."""
 
     def __init__(self, redis_url: str, files: Path) -> None:
         self._redis_url = redis_url
@@ -232,9 +264,17 @@ class FakeWorker:
                 if claimed is None or claimed.job is None:
                     await anyio.sleep(0.02)
                     continue
+                taken = time.time()
                 self.jobs.append(claimed.job)
                 await anyio.to_thread.run_sync(self.gate.wait)
-                await queue.finish(self._answer(claimed.job))
+                result = self._answer(claimed.job)
+                timings = result.timings.model_copy(
+                    update={
+                        "queued": round((taken - claimed.job.enqueued_at) * 1000, 1),
+                        "total": round((time.time() - taken) * 1000, 1),
+                    }
+                )
+                await queue.finish(result.model_copy(update={"timings": timings}))
         finally:
             await client.aclose()
 
@@ -256,6 +296,7 @@ class FakeWorker:
             samples=predictions.height,
             dropped=dropped,
             runner=Runner(keras="3.15.1", backend="jax", backend_version="0.7.2"),
+            timings=TIMINGS,
         )
 
 

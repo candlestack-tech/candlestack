@@ -804,7 +804,21 @@ The engine's worked example ([Worked example](#worked-example)) with `next_open`
   "backtest": {
     "id": "bt_7f3k2m9qx4", "number": 12, "status": "finished",   // running, finished or failed
     "created_at": "2026-10-25T14:02:11Z", "finished_at": "2026-10-25T14:04:53Z",
-    "duration_s": 162.0, "error": null
+    "duration_s": 162.0, "error": null,
+    "steps": [                                                    // in their order, while it runs and after
+      {"id": "candles", "state": "done", "started_at": "2026-10-25T14:02:11Z", "duration_s": 157.0,
+       "loaded": 2, "total": 2, "cached": 0, "loaded_until": "2024-06-03", "candles": 29,
+       "from_cache": false, "waiting_until": null, "load_s": null, "input_s": null, "predict_s": null},
+      {"id": "queue", "state": "done", "started_at": "2026-10-25T14:04:48Z", "duration_s": 1.0,
+       "loaded": null, "total": null, "cached": null, "loaded_until": null, "candles": null,
+       "from_cache": null, "waiting_until": null, "load_s": null, "input_s": null, "predict_s": null},
+      {"id": "model", "state": "done", "started_at": "2026-10-25T14:04:49Z", "duration_s": 3.0,
+       "loaded": null, "total": null, "cached": null, "loaded_until": null, "candles": null,
+       "from_cache": null, "waiting_until": null, "load_s": 1.2, "input_s": 0.1, "predict_s": 0.5},
+      {"id": "trades", "state": "done", "started_at": "2026-10-25T14:04:52Z", "duration_s": 1.0,
+       "loaded": null, "total": null, "cached": null, "loaded_until": null, "candles": null,
+       "from_cache": null, "waiting_until": null, "load_s": null, "input_s": null, "predict_s": null}
+    ]
   },
   "software": {
     "engine_version": "0.3.0", "app_version": "2026.10.24-3f2a1c9",
@@ -877,7 +891,7 @@ compares it with what is printed here; change both together.
 
 | Group | Fields | From |
 | --- | --- | --- |
-| `backtest` | ID, the user's number, status, when it was created and finished (ISO 8601 UTC), seconds it took, the error of a failed run | the stored backtest |
+| `backtest` | ID, the user's number, status, when it was created and finished (ISO 8601 UTC), seconds it took, the error of a failed run, the steps of the run ([architecture.md](architecture.md#backtests)) | the stored backtest |
 | `software` | `ENGINE_VERSION`, the app's version, the versions of the model runner | the engine, the app, the worker |
 | `model` | ID (null once the model is deleted), file name, framework, SHA-256, size, the manifest copy | the model at run time |
 | `data` | the instrument, timeframe and session; `period`: the user's dates; `loaded`: the candles asked for, warm-up included, with their fingerprint; `changed`; `warm_up` as the preprocessing reports it; `rows`: what the engine ran on; the predictions' count and SHA-256; the `AlignReport` | the data module, the preprocessing, `align` |

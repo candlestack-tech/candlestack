@@ -405,6 +405,14 @@
           },
           "status": {
             "$ref": "#/components/schemas/BacktestStatus"
+          },
+          "steps": {
+            "description": "The steps of the run in their order, while it runs and after: the failed one of a failed backtest is `failed` and its error is `error`. Empty for a backtest that failed before steps were recorded",
+            "items": {
+              "$ref": "#/components/schemas/BacktestStep"
+            },
+            "title": "Steps",
+            "type": "array"
           }
         },
         "required": [
@@ -414,7 +422,8 @@
           "created_at",
           "finished_at",
           "duration_s",
-          "error"
+          "error",
+          "steps"
         ],
         "title": "BacktestHeader",
         "type": "object"
@@ -859,6 +868,221 @@
         ],
         "title": "BacktestStatus",
         "type": "string"
+      },
+      "BacktestStep": {
+        "description": "A step of the run. `candles` loads the candles with the warm-up, `queue` hands the job\nto the worker until a worker takes it, `model` is the worker's job (it loads the model,\nbuilds its input and predicts), `trades` runs the engine and the statistics and stores the\nresult. The fields after `duration_s` belong to one step each and are null for the others.",
+        "properties": {
+          "cached": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`candles`: of the chunks loaded, those that came from the cache",
+            "examples": [
+              3
+            ],
+            "title": "Cached"
+          },
+          "candles": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`candles`, once done: the candles loaded",
+            "examples": [
+              35912
+            ],
+            "title": "Candles"
+          },
+          "duration_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seconds it took, once done or failed; null while it runs, or when it is not known",
+            "examples": [
+              192.4
+            ],
+            "title": "Duration S"
+          },
+          "from_cache": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`candles`, once done: every chunk came from the cache",
+            "title": "From Cache"
+          },
+          "id": {
+            "enum": [
+              "candles",
+              "queue",
+              "model",
+              "trades"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "input_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`model`, once done: seconds to build the model's input",
+            "examples": [
+              0.4
+            ],
+            "title": "Input S"
+          },
+          "load_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`model`, once done: seconds to load the model",
+            "examples": [
+              1.2
+            ],
+            "title": "Load S"
+          },
+          "loaded": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`candles`: the chunks loaded so far (closed months or years, then days, as the source splits the period); null until the load has planned them",
+            "examples": [
+              37
+            ],
+            "title": "Loaded"
+          },
+          "loaded_until": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`candles`: the last day of the candles loaded so far from the start of the load on (UTC)",
+            "title": "Loaded Until"
+          },
+          "predict_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`model`, once done: seconds to predict",
+            "examples": [
+              6.1
+            ],
+            "title": "Predict S"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it began (UTC); null while pending or when unknown",
+            "title": "Started At"
+          },
+          "state": {
+            "description": "`pending` until it begins (a step after a failed one stays `pending`), `running`, `done` or `failed`",
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`candles`: the chunks of the load",
+            "examples": [
+              128
+            ],
+            "title": "Total"
+          },
+          "waiting_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`candles`: while the load waits for the market data source's request limit, when it goes on (UTC); else null",
+            "title": "Waiting Until"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "started_at",
+          "duration_s",
+          "loaded",
+          "total",
+          "cached",
+          "loaded_until",
+          "candles",
+          "from_cache",
+          "waiting_until",
+          "load_s",
+          "input_s",
+          "predict_s"
+        ],
+        "title": "BacktestStep",
+        "type": "object"
       },
       "BacktestTimeframe": {
         "description": "Timeframes a new backtest can start with (Settings, Backtest defaults): those of the data.",
