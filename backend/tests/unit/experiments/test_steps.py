@@ -147,7 +147,7 @@ async def test_the_progress_is_saved_at_most_once_a_period() -> None:
     assert len(saved.saves) == after_block  # none after the block
 
 
-async def test_a_load_that_fails_stops_saving_its_progress() -> None:
+async def test_a_load_that_fails_saves_its_last_progress_and_stops() -> None:
     steps, saved = recorder(every=0.02)
     await steps.start("candles")
 
@@ -162,6 +162,8 @@ async def test_a_load_that_fails_stops_saving_its_progress() -> None:
     await asyncio.sleep(0.06)
 
     assert len(saved.saves) == count
+    # Saved before the error went on, though the period had not passed.
+    assert saved.last["candles"]["loaded"] == 1
 
 
 async def test_the_workers_wait_in_the_queue_replaces_what_the_backend_saw() -> None:

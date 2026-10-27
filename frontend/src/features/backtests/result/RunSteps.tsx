@@ -81,8 +81,8 @@ function StepMark({ mark }: { mark: Mark }) {
 function CandlesProgress({ step, periodStart, now }: { step: BacktestStep; periodStart: number; now: number }) {
   const share = step.total ? Math.min(step.loaded ?? 0, step.total) / step.total : 0;
   const span = loadedText(step.loaded_until, periodStart);
-  const wait =
-    step.waiting_until === null ? null : Math.max(0, Math.ceil((Date.parse(step.waiting_until) - now) / 1000));
+  // The wait shows only while it lasts: the step is saved up to a few seconds after it ended.
+  const wait = step.waiting_until === null ? 0 : Math.ceil((Date.parse(step.waiting_until) - now) / 1000);
   const slow = (secondsSince(step.started_at, now) ?? 0) >= SLOW_S;
   return (
     <>
@@ -93,7 +93,7 @@ function CandlesProgress({ step, periodStart, now }: { step: BacktestStep; perio
         className="block h-1.5 w-full appearance-none overflow-hidden rounded-[3px] border-0 bg-surface-2 [&::-moz-progress-bar]:rounded-[3px] [&::-moz-progress-bar]:bg-primary [&::-webkit-progress-bar]:bg-surface-2 [&::-webkit-progress-value]:rounded-[3px] [&::-webkit-progress-value]:bg-primary"
       />
       {span && <span className={DETAIL}>{span}</span>}
-      {wait !== null ? (
+      {wait > 0 ? (
         <span className="flex items-center gap-1.5 text-[12.5px] text-warn">
           <Clock aria-hidden="true" className="size-3.5 flex-none" />
           Waiting for the Alpaca request limit. Continues in {wait} s.
@@ -186,6 +186,15 @@ function StepTime({ step, notRun, now }: { step: BacktestStep | undefined; notRu
   );
 }
 
+// A step's state in words for screen readers, which skip the mark. A step that never ran says so
+// in its time.
+const STATE_WORDS: Record<BacktestStep['state'], string> = {
+  done: 'done',
+  running: 'running',
+  failed: 'failed',
+  pending: 'waiting to start',
+};
+
 const NAMES: Record<BacktestStep['state'], string> = {
   done: 'font-semibold',
   running: 'font-semibold',
@@ -216,7 +225,10 @@ export function RunSteps({ doc }: { doc: BacktestDocument }) {
             >
               <StepMark mark={notRun ? 'not-run' : state} />
               <div className={cn('flex min-w-0 flex-col', roomy ? 'gap-2' : 'gap-0.5')}>
-                <span className={cn('text-sm', NAMES[state])}>{STEP_NAMES[id]}</span>
+                <span className={cn('text-sm', NAMES[state])}>
+                  {STEP_NAMES[id]}
+                  {!notRun && <span className="sr-only">, {STATE_WORDS[state]}</span>}
+                </span>
                 {step && <StepDetail id={id} step={step} doc={doc} now={now} />}
               </div>
               <StepTime step={step} notRun={notRun} now={now} />

@@ -248,7 +248,12 @@ describe("a backtest's page before it finished", () => {
       within(steps)
         .getAllByRole('listitem')
         .map((item) => item.querySelector('div > span')?.textContent),
-    ).toEqual(['Load candles', 'Wait in the queue', 'Run the model', 'Simulate trades']);
+    ).toEqual([
+      'Load candles, running',
+      'Wait in the queue, waiting to start',
+      'Run the model, waiting to start',
+      'Simulate trades, waiting to start',
+    ]);
     expect(screen.getByText('You can close the page. The backtest keeps going.')).toBeDefined();
     expect(box('Setup').getByText('raw-candles.keras')).toBeDefined();
     expect(box('Setup').queryByText('Run')).toBeNull();

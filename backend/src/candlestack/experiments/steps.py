@@ -156,7 +156,7 @@ class StepRecorder:
     @asynccontextmanager
     async def loading(self) -> AsyncIterator[None]:
         """Watches the loads of candles within the block, and saves their progress when it
-        changed, at most once every ``every`` seconds."""
+        changed, at most once every ``every`` seconds and once more as the block ends."""
         stop = asyncio.Event()
         flusher = asyncio.create_task(self._flush(stop))
         try:
@@ -166,6 +166,9 @@ class StepRecorder:
             # A save going on ends first: none is cut off, and none comes after the block.
             stop.set()
             await flusher
+            # The last change is saved too: a failed load's step is built from what is stored.
+            if self._changed:
+                await self._write()
 
     async def _flush(self, stop: asyncio.Event) -> None:
         while not stop.is_set():

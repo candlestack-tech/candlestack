@@ -54,7 +54,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-// The rows of the steps: the name, what it says and the time, as one text each.
+// The rows of the steps: the name with its state for screen readers, what it says and the time, as one text each.
 const rows = () => within(screen.getByRole('region', { name: 'Steps' })).getAllByRole('listitem');
 const row = (name: string) => within(rows().find((item) => item.textContent?.startsWith(name))!);
 const tick = (seconds: number) =>
@@ -81,10 +81,10 @@ describe('the steps of a running backtest', () => {
       />,
     );
     expect(rows().map((item) => item.textContent)).toEqual([
-      'Load candlesLoaded Jan 2016 – Jan 2019The first load of a long period takes a few minutes. Later backtests take it from the cache.1 min 5 s',
-      'Wait in the queue',
-      'Run the model',
-      'Simulate trades',
+      'Load candles, runningLoaded Jan 2016 – Jan 2019The first load of a long period takes a few minutes. Later backtests take it from the cache.1 min 5 s',
+      'Wait in the queue, waiting to start',
+      'Run the model, waiting to start',
+      'Simulate trades, waiting to start',
     ]);
     expect(screen.getByRole('progressbar', { name: 'Candles loaded' }).getAttribute('value')).toBe('29');
     expect(screen.getByText('You can close the page. The backtest keeps going.')).toBeDefined();
@@ -111,7 +111,7 @@ describe('the steps of a running backtest', () => {
     expect(screen.getByText(/takes a few minutes/)).toBeDefined();
   });
 
-  it('counts down the wait for the Alpaca request limit instead', async () => {
+  it('counts down the wait for the Alpaca request limit instead, until it is over', async () => {
     render(
       <RunSteps
         doc={doc([
@@ -135,8 +135,10 @@ describe('the steps of a running backtest', () => {
     expect(row('Load candles').getByText('2 min 36 s')).toBeDefined();
     await tick(1);
     expect(screen.getByText('Waiting for the Alpaca request limit. Continues in 23 s.')).toBeDefined();
+    // Once the wait is over it goes, though the page has not heard yet.
     await tick(30);
-    expect(screen.getByText('Waiting for the Alpaca request limit. Continues in 0 s.')).toBeDefined();
+    expect(screen.queryByText(/Waiting for the Alpaca request limit/)).toBeNull();
+    expect(screen.getByText(/takes a few minutes/)).toBeDefined();
   });
 
   it('shows no months while it loads the warm-up before the period', () => {
@@ -165,10 +167,10 @@ describe('the steps of a running backtest', () => {
       />,
     );
     expect(rows().map((item) => item.textContent)).toEqual([
-      'Load candles35,912 candles3 min 12 s',
-      'Wait in the queue2 s',
-      'Run the model',
-      'Simulate trades',
+      'Load candles, done35,912 candles3 min 12 s',
+      'Wait in the queue, running2 s',
+      'Run the model, waiting to start',
+      'Simulate trades, waiting to start',
     ]);
   });
 
@@ -184,10 +186,10 @@ describe('the steps of a running backtest', () => {
       />,
     );
     expect(rows().map((item) => item.textContent)).toEqual([
-      'Load candles412 candles · from the cache0.3 s',
-      'Wait in the queue0 s',
-      'Run the modelLoads the model, builds its input, predicts7 s',
-      'Simulate trades',
+      'Load candles, done412 candles · from the cache0.3 s',
+      'Wait in the queue, done0 s',
+      'Run the model, runningLoads the model, builds its input, predicts7 s',
+      'Simulate trades, waiting to start',
     ]);
   });
 
@@ -205,10 +207,10 @@ describe('the steps of a running backtest', () => {
   it('shows every step as not begun when it has none yet', () => {
     render(<RunSteps doc={doc([])} />);
     expect(rows().map((item) => item.textContent)).toEqual([
-      'Load candles',
-      'Wait in the queue',
-      'Run the model',
-      'Simulate trades',
+      'Load candles, waiting to start',
+      'Wait in the queue, waiting to start',
+      'Run the model, waiting to start',
+      'Simulate trades, waiting to start',
     ]);
   });
 });
@@ -263,9 +265,9 @@ describe('the steps of a failed backtest', () => {
       />,
     );
     expect(rows().map((item) => item.textContent)).toEqual([
-      'Load candles412 candles · from the cache0.3 s',
-      'Wait in the queue0 s',
-      `Run the model${error}1.9 s`,
+      'Load candles, done412 candles · from the cache0.3 s',
+      'Wait in the queue, done0 s',
+      `Run the model, failed${error}1.9 s`,
       'Simulate tradesnot run',
     ]);
     expect(screen.getByRole('alert').textContent).toBe(error);
@@ -301,6 +303,6 @@ describe('the steps of a failed backtest', () => {
       />,
     );
     expect(row('Load candles').getByRole('alert').textContent).toBe('The model was deleted.');
-    expect(rows()[0]?.textContent).toBe('Load candlesThe model was deleted.');
+    expect(rows()[0]?.textContent).toBe('Load candles, failedThe model was deleted.');
   });
 });
