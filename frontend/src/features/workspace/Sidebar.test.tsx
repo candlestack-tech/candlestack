@@ -32,14 +32,16 @@ describe('the sidebar', () => {
   it('shows the storage the models take above the data note', async () => {
     stubApi({ ...session(ARSEN), ...modelsAnswer([model({ size_bytes: 25 * MB })]) });
     await renderApp('/backtests');
-    const usage = await within(sidebar()).findByText('25 MB of 100 MB models');
+    const usage = await within(sidebar()).findByText('25 MB of 100 MB');
     const foot = usage.parentElement;
     expect([...(foot?.children ?? [])].map((child) => child.textContent)).toEqual([
-      'Storage',
+      'Model storage',
       '',
-      '25 MB of 100 MB models',
+      '25 MB of 100 MB',
       'Market data delayed 15 min',
     ]);
+    // On one line: the figure never breaks, so nothing lands alone on a second line.
+    expect(usage.className).toContain('whitespace-nowrap');
     const fill = foot?.children[1]?.firstElementChild as HTMLElement | null | undefined;
     expect(fill?.style.width).toBe('25%');
   });

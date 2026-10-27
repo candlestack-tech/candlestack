@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from candlestack.ml.errors import ModelNameTaken
 from candlestack.ml.inspect import ModelFacts
 from candlestack.ml.models import Model
-from candlestack.ml.schemas import Framework, ModelState
+from candlestack.ml.schemas import CheckPart, Framework, ModelState
 from candlestack.ml.service import ModelsService, _checked_alone, _out
 from candlestack.preprocessing import Manifest, ManifestProblem, parse_manifest
 
@@ -114,7 +114,12 @@ def test_a_model_without_a_manifest_needs_setup() -> None:
     out = _out(model())
 
     assert out.state == ModelState.needs_setup
-    assert (out.manifest_summary, out.check_error) == (None, None)
+    assert (out.manifest_summary, out.checked_at, out.check_failed, out.check_error) == (
+        None,
+        None,
+        None,
+        None,
+    )
 
 
 def test_a_model_with_a_manifest_is_ready_until_a_trial_run_verifies_it(raw: Manifest) -> None:
@@ -124,11 +129,32 @@ def test_a_model_with_a_manifest_is_ready_until_a_trial_run_verifies_it(raw: Man
 
 def test_a_failed_trial_run_leaves_the_model_ready_with_its_error(raw: Manifest) -> None:
     failed = model()
+    failed.checked_at = datetime(2026, 10, 26, tzinfo=UTC)
+    failed.check_failed = "trial_run"
     failed.check_error = "The model failed on its input."
 
     out = _out(failed, manifest=raw)
 
-    assert (out.state, out.check_error) == (ModelState.ready, "The model failed on its input.")
+    assert (out.state, out.check_failed, out.check_error) == (
+        ModelState.ready,
+        CheckPart.trial_run,
+        "The model failed on its input.",
+    )
+    assert out.checked_at == datetime(2026, 10, 26, tzinfo=UTC)
+
+
+def test_a_check_that_passed_without_an_example_says_when_it_ran(raw: Manifest) -> None:
+    passed = model()
+    passed.checked_at = datetime(2026, 10, 26, tzinfo=UTC)
+
+    out = _out(passed, manifest=raw)
+
+    assert (out.state, out.checked_at, out.check_failed, out.check_error) == (
+        ModelState.ready,
+        datetime(2026, 10, 26, tzinfo=UTC),
+        None,
+        None,
+    )
 
 
 def test_the_summary_says_what_the_manifest_reads(raw: Manifest) -> None:

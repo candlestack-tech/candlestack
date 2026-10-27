@@ -65,12 +65,27 @@ const tile = (name: string) => within(tiles().find((item) => item.textContent?.i
 const subtitle = () => screen.getByRole('heading', { level: 1 }).parentElement?.querySelector('p')?.textContent;
 
 describe('the Models page', () => {
-  it('says how many models there are and the storage they take, the Upload card beside it', async () => {
+  it('says how many models there are and the storage they take, Upload model beside it', async () => {
     stubApi({ ...session(ARSEN), ...modelsAnswer([TSMIXER, LSTM]) });
     await renderApp('/models');
     expect(await screen.findByText('2 models · 17.2 MB of 100 MB used')).toBeDefined();
-    expect(screen.getByRole('button', { name: /^Upload model/ })).toBeDefined();
+    const upload = screen.getByRole('button', { name: 'Upload model' });
+    expect(upload.textContent).toBe('Upload model');
+    expect(upload.nextElementSibling?.textContent).toBe('Keras or ONNX, up to 50 MB');
     expect(document.title).toBe('Models · CandleStack');
+  });
+
+  it('opens the upload from an outline button, not the quick action card of the dashboard', async () => {
+    stubApi({ ...session(ARSEN), ...modelsAnswer([TSMIXER]) });
+    await renderApp('/models');
+    const upload = await screen.findByRole('button', { name: 'Upload model' });
+    // Outline: the app header's New backtest is the one primary button.
+    expect(upload.className).toContain('border bg-background');
+    expect(upload.className).not.toContain('bg-primary');
+    // The card shows the format marks (Upload modelKerasONNX); the button does not.
+    expect(screen.queryByRole('button', { name: /^Upload model\s*Keras/ })).toBeNull();
+    await userEvent.setup().click(upload);
+    expect(screen.getByRole('dialog', { name: 'Add a model' })).toBeDefined();
   });
 
   it('says how many models still need a manifest', async () => {
@@ -137,7 +152,7 @@ describe('the Models page', () => {
 
     const lstm = tile('lstm-signals.keras');
     expect(lstm.getByText('Verified')).toBeDefined();
-    expect(lstm.getByText('Keras · 3.0 MB · added Today')).toBeDefined();
+    expect(lstm.getByText('Keras · 3.0 MB · added today')).toBeDefined();
     expect(lstm.getByText('Candles · 30m · 25 × 5')).toBeDefined();
     expect(lstm.getByText('−0.18')).toBeDefined();
     expect(lstm.getByText('1').nextElementSibling?.textContent).toBe('backtest');
@@ -164,6 +179,17 @@ describe('the Models page', () => {
     await vi.waitFor(() => expect(router.state.location.pathname).toBe('/models/mdl_7f3k2m9qx4'));
   });
 
+  it('wraps a long name to at most two lines, with the whole name in its title', async () => {
+    const name = 'BLESK_ATR06_R8_OHLCV_window25_threshold005_retrained_final.keras';
+    stubApi({ ...session(ARSEN), ...modelsAnswer([model({ name })]) });
+    await renderApp('/models');
+    const link = await screen.findByRole('link', { name });
+    expect(link.getAttribute('title')).toBe(name);
+    expect(link.className).toContain('line-clamp-2');
+    expect(link.className).toContain('[overflow-wrap:anywhere]');
+    expect(link.className).not.toContain('truncate');
+  });
+
   it('writes the day a model was added in the date format and zone of the account', async () => {
     const appearance = { ...DEFAULT_PREFERENCES.appearance, date_format: 'iso', time_zone: 'local' } as const;
     stubApi({
@@ -172,7 +198,7 @@ describe('the Models page', () => {
     });
     await renderApp('/models');
     expect(await screen.findByText('Keras · 14.2 MB · added 2026-10-13')).toBeDefined();
-    expect(tile('lstm-signals.keras').getByText('Keras · 3.0 MB · added Today')).toBeDefined();
+    expect(tile('lstm-signals.keras').getByText('Keras · 3.0 MB · added today')).toBeDefined();
   });
 
   it('stars a model at once, then keeps what the API answered', async () => {

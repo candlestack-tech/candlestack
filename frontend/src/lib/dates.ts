@@ -126,6 +126,13 @@ export function formatRecentDay(
   return formatDate(date, style);
 }
 
+// A recent day in the middle of a sentence, in lowercase where it is a word: "added today",
+// "added yesterday", "added 13 Oct". Where it starts a cell, formatRecentDay keeps the capital.
+export function formatRecentDayInline(...args: Parameters<typeof formatRecentDay>): string {
+  const day = formatRecentDay(...args);
+  return day === 'Today' || day === 'Yesterday' ? day.toLowerCase() : day;
+}
+
 // When something ran, day and time: "Today 16:05", "Yesterday 18:10", "12 Oct 19:44".
 export function formatRecentTime(date: Date, style: DateStyle, now = new Date()): string {
   return `${formatRecentDay(date, style, now, true)} ${formatTime(date, style)}`;

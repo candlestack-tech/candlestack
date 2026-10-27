@@ -18,9 +18,11 @@ export const OUTLINE_BUTTON = 'shadow-none dark:bg-background dark:hover:bg-acce
 export const GHOST_BUTTON = 'border border-transparent dark:hover:bg-accent';
 
 // .btn.pri on the default variant (Try Backtest, New backtest): the accent border makes the
-// button 2 px wider and stays as a rim around the hover color.
+// button 2 px wider and stays as a rim around the hover color. Disabled (Add model before the
+// manifest is in), it drops the accent for the muted surface and text: faded, the accent still
+// read as a button to press, in the dark theme above all.
 export const ACCENT_BUTTON =
-  'border border-primary shadow-none hover:bg-[color-mix(in_srgb,var(--accent)_86%,var(--ink))]';
+  'border border-primary shadow-none hover:bg-[color-mix(in_srgb,var(--accent)_86%,var(--ink))] disabled:border-border disabled:bg-surface-2 disabled:text-muted-foreground disabled:opacity-100';
 
 // .btn.danger on the outline variant (Delete account): the text in the falling red, the border
 // tinted with it.

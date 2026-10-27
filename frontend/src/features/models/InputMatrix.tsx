@@ -14,9 +14,10 @@ const NO_VALUE = 18;
 const repeat = (count: number) => ({ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` });
 
 // A cell's tint, from its shade (--a): the accent over the surface; ink while its column is
-// hovered or chosen.
+// hovered; the accent at half strength and more while it is chosen, so the chosen column stands
+// out in the accent rather than greyed out.
 const CELL =
-  'block h-[7px] rounded-[1.5px] bg-[color-mix(in_srgb,var(--accent)_var(--a),var(--surface))] last:h-[9px] group-hover:bg-[color-mix(in_srgb,var(--ink)_calc(var(--a)*0.8),var(--surface))] group-aria-pressed:bg-[color-mix(in_srgb,var(--ink)_calc(var(--a)*0.9),var(--surface))]';
+  'block h-[7px] rounded-[1.5px] bg-[color-mix(in_srgb,var(--accent)_var(--a),var(--surface))] last:h-[9px] group-hover:bg-[color-mix(in_srgb,var(--ink)_calc(var(--a)*0.8),var(--surface))] group-aria-pressed:bg-[color-mix(in_srgb,var(--accent)_calc(var(--a)*0.5_+_50%),var(--surface))]';
 
 type GridProps = {
   columns: Column[];
@@ -37,7 +38,7 @@ type ButtonProps = {
   onPick: () => void;
 };
 
-// A column (.p6-col): its cells top to bottom, outlined in ink while it is chosen.
+// A column (.p6-col): its cells top to bottom, outlined in the accent while it is chosen.
 function ColumnButton({ name, index, rows, shades, focused, picked, onFocus, onPick }: ButtonProps) {
   return (
     <button
@@ -48,7 +49,7 @@ function ColumnButton({ name, index, rows, shades, focused, picked, onFocus, onP
       title={name}
       onFocus={onFocus}
       onClick={onPick}
-      className="group flex cursor-pointer flex-col gap-px rounded-[3px] outline-offset-1 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-primary aria-pressed:outline-2 aria-pressed:outline-solid aria-pressed:outline-foreground"
+      className="group flex cursor-pointer flex-col gap-px rounded-[3px] outline-offset-1 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-primary aria-pressed:outline-2 aria-pressed:outline-solid aria-pressed:outline-primary"
     >
       {rows.map((row, cell) => (
         <i key={row} className={CELL} style={{ '--a': `${shades?.[cell] ?? NO_VALUE}%` } as CSSProperties} />

@@ -14,7 +14,7 @@ type Props = {
   // A line of text; the Models page colours a part of it.
   description?: ReactNode;
   variant?: keyof typeof VARIANTS;
-  // What the page offers beside its title, e.g. the Models page's Upload card. Bottom-aligned at
+  // What the page offers beside its title, e.g. the Models page's Upload model. Bottom-aligned at
   // the right, under the title when the row is too narrow for both.
   action?: ReactNode;
 };

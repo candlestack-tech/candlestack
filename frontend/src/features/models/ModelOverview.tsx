@@ -1,11 +1,11 @@
-import { Check, Minus } from 'lucide-react';
+import { Check, Minus, XIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import type { Manifest, Model } from '@/api';
 import { FactsStrip } from '@/components/FactsStrip';
 import { HINT } from '@/components/Hint';
 import { useViewerDateStyle } from '@/features/preferences';
-import { formatRecentDay } from '@/lib/dates';
+import { formatRecentDayInline } from '@/lib/dates';
 import { formatSharpe } from '@/lib/results';
 import { cn } from '@/lib/utils';
 
@@ -38,7 +38,8 @@ export function ModelHeader({ model, actions }: { model: Model; actions: ReactNo
       <div className="flex min-w-0 flex-col gap-0.5">
         <h1 className="text-2xl/[30px] font-semibold tracking-[-0.02em] [overflow-wrap:anywhere]">{model.name}</h1>
         <span className="text-[13px] text-muted-foreground">
-          {framework} · {formatSize(model.size_bytes)} · added {formatRecentDay(new Date(model.created_at), dateStyle)}
+          {framework} · {formatSize(model.size_bytes)} · added{' '}
+          {formatRecentDayInline(new Date(model.created_at), dateStyle)}
         </span>
       </div>
       <StatePill state={model.state} />
@@ -81,27 +82,83 @@ export function ModelInput({ manifest }: { manifest: Manifest | undefined }) {
   );
 }
 
-type CheckItem = { passed: boolean; title: string; hint?: string };
+// `passed`; `failed`, with why in its hint; `todo`, not done yet; `none`, nothing to check (no
+// example).
+type CheckState = 'passed' | 'failed' | 'todo' | 'none';
+type CheckItem = { state: CheckState; title: string; hint?: string | undefined };
 
-// A check (.ck-r): passed on a green circle, not done yet on a muted one with the title muted.
-function CheckRow({ passed, title, hint }: CheckItem) {
+const SPOKEN: Record<CheckState, string> = {
+  passed: 'Passed',
+  failed: 'Failed',
+  todo: 'Not yet',
+  none: 'Not checked',
+};
+
+const MARK: Record<CheckState, string> = {
+  passed: 'bg-[color-mix(in_srgb,var(--up)_15%,var(--bg))] text-up',
+  failed: 'bg-[color-mix(in_srgb,var(--down)_15%,var(--bg))] text-down',
+  todo: 'bg-surface-2 text-muted-foreground',
+  none: 'bg-surface-2 text-muted-foreground',
+};
+
+const ICON: Record<CheckState, ReactNode> = {
+  passed: <Check aria-hidden="true" />,
+  failed: <XIcon aria-hidden="true" />,
+  todo: <Minus aria-hidden="true" />,
+  none: <Minus aria-hidden="true" />,
+};
+
+// A check (.ck-r): passed on a green circle, failed on a red one with why under it, not done yet
+// (or nothing to check) on a muted one with the title muted.
+function CheckRow({ state, title, hint }: CheckItem) {
+  const muted = state === 'todo' || state === 'none';
   return (
     <li className="flex items-start gap-2.5">
       <span
-        className={cn(
-          'grid size-[22px] flex-none place-items-center rounded-full [&_svg]:size-[13px]',
-          passed ? 'bg-[color-mix(in_srgb,var(--up)_15%,var(--bg))] text-up' : 'bg-surface-2 text-muted-foreground',
-        )}
+        className={cn('grid size-[22px] flex-none place-items-center rounded-full [&_svg]:size-[13px]', MARK[state])}
       >
-        {passed ? <Check aria-hidden="true" /> : <Minus aria-hidden="true" />}
+        {ICON[state]}
       </span>
       <span className="min-w-0">
-        <span className="sr-only">{passed ? 'Passed' : 'Not yet'}: </span>
-        <b className={cn('font-medium', !passed && 'text-muted-foreground')}>{title}</b>
-        {hint && <span className={cn('block', HINT)}>{hint}</span>}
+        <span className="sr-only">{SPOKEN[state]}: </span>
+        <b className={cn('font-medium', muted && 'text-muted-foreground', state === 'failed' && 'text-down')}>
+          {title}
+        </b>
+        {hint && <span className={cn('block break-words', HINT)}>{hint}</span>}
       </span>
     </li>
   );
+}
+
+const NO_EXAMPLE: CheckItem = { state: 'none', title: 'No example' };
+
+// The example while it waits for a trial run: compared then, or nothing to compare without one.
+const exampleLater = (manifest: Manifest | undefined, hint: string): CheckItem =>
+  manifest?.example ? { state: 'todo', title: 'Example', hint } : NO_EXAMPLE;
+
+// The trial run in the worker and its example once the model has a manifest: not run yet
+// (`checked_at` null), passed, or failed in the trial run or on the example (`check_failed`, with
+// the worker's sentences in `check_error`). The example is compared only after a trial run that
+// passed, and only when the manifest has one.
+function workerChecks(model: Model, manifest: Manifest | undefined): CheckItem[] {
+  const error = model.check_error ?? undefined;
+  if (model.state === 'verified') {
+    return [
+      { state: 'passed', title: 'Trial run' },
+      { state: 'passed', title: 'Example matches' },
+    ];
+  }
+  if (model.check_failed === 'example') {
+    return [
+      { state: 'passed', title: 'Trial run' },
+      { state: 'failed', title: 'Example does not match', hint: error },
+    ];
+  }
+  if (model.check_failed === 'trial_run' || error !== undefined) {
+    return [{ state: 'failed', title: 'Trial run failed', hint: error }, exampleLater(manifest, 'Not compared')];
+  }
+  if (model.checked_at !== null) return [{ state: 'passed', title: 'Trial run' }, NO_EXAMPLE];
+  return [{ state: 'todo', title: 'Trial run', hint: 'Not run yet' }, exampleLater(manifest, 'Not compared yet')];
 }
 
 // What the model passed: the file's checks on upload, the manifest's, then the trial run in the
@@ -109,29 +166,23 @@ function CheckRow({ passed, title, hint }: CheckItem) {
 function checksOf(model: Model, manifest: Manifest | undefined): CheckItem[] {
   const shapes = model.input_shape !== null && model.output_shape !== null;
   const checks: CheckItem[] = [
-    { passed: true, title: 'Opens, no custom code' },
-    { passed: true, title: 'Trained weights' },
-    { passed: shapes, title: shapes ? 'One input, one output' : 'Shape not in the file' },
+    { state: 'passed', title: 'Opens, no custom code' },
+    { state: 'passed', title: 'Trained weights' },
+    shapes ? { state: 'passed', title: 'One input, one output' } : { state: 'todo', title: 'Shape not in the file' },
   ];
   const summary = model.manifest_summary;
   if (model.state === 'needs_setup' || !summary) {
     return [
       ...checks,
-      { passed: false, title: 'Manifest' },
-      { passed: false, title: 'Trial run' },
-      { passed: false, title: 'Example' },
+      { state: 'todo', title: 'Manifest' },
+      { state: 'todo', title: 'Trial run' },
+      { state: 'todo', title: 'Example' },
     ];
-  }
-  checks.push({ passed: true, title: `Manifest fits ${formatDims(summary.input_shape)}` });
-  if (model.state === 'verified') {
-    return [...checks, { passed: true, title: 'Trial run' }, { passed: true, title: 'Example matches' }];
   }
   return [
     ...checks,
-    { passed: false, title: 'Trial run', hint: 'Not run yet' },
-    manifest?.example
-      ? { passed: false, title: 'Example', hint: 'Not compared yet' }
-      : { passed: false, title: 'No example' },
+    { state: 'passed', title: `Manifest fits ${formatDims(summary.input_shape)}` },
+    ...workerChecks(model, manifest),
   ];
 }
 

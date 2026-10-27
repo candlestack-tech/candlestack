@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from candlestack.jobs import JobResult, Reason
 from candlestack.ml import ModelChecks
-from candlestack.ml.checks import says_something
+from candlestack.ml.checks import failed_part, says_something
+from candlestack.ml.schemas import CheckPart
 
 
 class NoDatabase:
@@ -54,6 +55,31 @@ def test_a_failed_check_says_something_when_it_failed_on_the_model(
     result = JobResult.failed("0" * 32, "check", reason, "It failed.")
 
     assert says_something(result) is about_the_model
+
+
+def test_a_passed_check_failed_in_no_part() -> None:
+    result = JobResult(id="0" * 32, kind="check", status="done", verified=True)
+
+    assert failed_part(result) is None
+
+
+@pytest.mark.parametrize(
+    ("reason", "part"),
+    [
+        ("example", CheckPart.example),
+        ("manifest", CheckPart.trial_run),
+        ("load", CheckPart.trial_run),
+        ("predict", CheckPart.trial_run),
+        ("output", CheckPart.trial_run),
+        ("time-limit", CheckPart.trial_run),
+    ],
+)
+def test_a_failed_check_failed_on_the_example_or_in_the_trial_run(
+    reason: Reason, part: CheckPart
+) -> None:
+    result = JobResult.failed("0" * 32, "check", reason, "It failed.")
+
+    assert failed_part(result) == part
 
 
 @pytest.mark.anyio

@@ -319,9 +319,11 @@ flowchart LR
   (it passed every check above), `verified` once `models.verified_at` is set. The worker's
   trial run sets it when the model gives the output of the manifest's `example`, and only
   while the manifest is still the one it ran with; replacing the manifest clears it
-  ([the check of a model](#the-check-of-a-model)). A trial run that failed on the model
-  leaves it `ready` with `check_error`, the worker's sentences for the Models page (null when
-  it passed or has not run).
+  ([the check of a model](#the-check-of-a-model)). `checked_at` says when that check came to
+  an end (null while it has not); one that failed on the model leaves it `ready` with
+  `check_failed`, the part that failed (`trial_run`, or `example` when the trial run passed
+  and the output for the example was not the expected one), and `check_error`, the worker's
+  sentences for the Models page (both null when it passed or has not run).
   Each model also carries `manifest_summary` (the representation, timeframe, session, input
   shape and warm-up), so the Models tiles and the model's page need no second request. The
   column `manifest` is deferred: the queries of the list and of a change read
@@ -489,14 +491,15 @@ result (`DEFAULT_WAIT`, 180 s), then keeps what it came to in another transactio
 lock of the user's models and only while the stored manifest has the result's
 `manifest_sha256`:
 
-| Result | `verified_at` | `checked_at` | `check_error` | State |
-| --- | --- | --- | --- | --- |
-| `done`, `verified` true | now | now | null | `verified` |
-| `done`, `verified` false (no `example`) | null | now | null | `ready` |
-| `failed` on the model (`manifest`, `candles`, `load`, `predict`, `output`, `example`, `time-limit`, `stopped`, `model-changed`) | null | now | the result's `error` | `ready` |
-| `failed` on the worker (`expired`, `worker-stopped`, `internal`, `model-missing`), or the queue out of reach | unchanged (null) | unchanged (null) | unchanged (null) | `ready` |
+| Result | `verified_at` | `checked_at` | `check_failed` | `check_error` | State |
+| --- | --- | --- | --- | --- | --- |
+| `done`, `verified` true | now | now | null | null | `verified` |
+| `done`, `verified` false (no `example`) | null | now | null | null | `ready` |
+| `failed` on the example (`example`) | null | now | `example` | the result's `error` | `ready` |
+| `failed` on the model (`manifest`, `candles`, `load`, `predict`, `output`, `time-limit`, `stopped`, `model-changed`) | null | now | `trial_run` | the result's `error` | `ready` |
+| `failed` on the worker (`expired`, `worker-stopped`, `internal`, `model-missing`), or the queue out of reach | unchanged (null) | unchanged (null) | unchanged (null) | unchanged (null) | `ready` |
 
-Replacing the manifest clears all three. A user's checks run one after the other, as their
+Replacing the manifest clears all four. A user's checks run one after the other, as their
 backtests do: a manifest set while one of the user's checks runs waits for it (a model set
 again before its turn is checked once, with the manifest it has then), so a user who keeps
 replacing manifests holds at most one job in the worker's queue. A worker that cannot be reached or does not answer
