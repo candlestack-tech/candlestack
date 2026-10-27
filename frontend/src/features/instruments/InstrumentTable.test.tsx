@@ -193,29 +193,29 @@ describe('InstrumentTable', () => {
     expect(classes(btc, /<a [^>]*>BTCUSDT/)).toContain('font-mono');
   });
 
-  it('fits every width: fixed columns, the name takes the rest, phones get three columns', async () => {
+  it('fits the width of its box: fixed columns, the name takes the rest, a narrow box gets three columns', async () => {
     const html = await render();
     expect(classes(html, /<table [^>]*>/)).toContain('table-fixed');
     const th = (index: number) => classes(headers(html)[index] ?? '', /<th [^>]*>/);
     const [phoneSymbol, phoneCandles, phonePrice, symbol, price, change, candles, volume, name, type, exchange, since] =
       [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(th);
-    // a phone: the symbol takes the rest, the candles 60 px, the price 100 px
-    expect(phoneSymbol).toContain('md:hidden');
+    // a narrow box (a phone): the symbol takes the rest, the candles 60 px, the price 100 px
+    expect(phoneSymbol).toContain('@min-[740px]:hidden');
     expect(phoneSymbol?.some((each) => each.startsWith('w-'))).toBe(false);
-    expect(phoneCandles).toEqual(expect.arrayContaining(['md:hidden', 'w-[60px]']));
-    expect(phonePrice).toEqual(expect.arrayContaining(['md:hidden', 'w-[100px]']));
-    // from md up
-    expect(symbol).toEqual(expect.arrayContaining(['hidden', 'md:table-cell', 'w-[168px]']));
-    expect(price).toEqual(expect.arrayContaining(['hidden', 'md:table-cell', 'w-[128px]']));
-    expect(change).toEqual(expect.arrayContaining(['hidden', 'md:table-cell', 'w-[104px]']));
-    expect(volume).toEqual(expect.arrayContaining(['hidden', 'md:table-cell', 'w-[112px]']));
-    // from lg, as from md to lg it would leave the name no room
-    expect(candles).toEqual(expect.arrayContaining(['hidden', 'lg:table-cell', 'w-[136px]']));
+    expect(phoneCandles).toEqual(expect.arrayContaining(['@min-[740px]:hidden', 'w-[60px]']));
+    expect(phonePrice).toEqual(expect.arrayContaining(['@min-[740px]:hidden', 'w-[100px]']));
+    // from a 740 px wide table
+    expect(symbol).toEqual(expect.arrayContaining(['hidden', '@min-[740px]:table-cell', 'w-[168px]']));
+    expect(price).toEqual(expect.arrayContaining(['hidden', '@min-[740px]:table-cell', 'w-[128px]']));
+    expect(change).toEqual(expect.arrayContaining(['hidden', '@min-[740px]:table-cell', 'w-[104px]']));
+    expect(volume).toEqual(expect.arrayContaining(['hidden', '@min-[740px]:table-cell', 'w-[112px]']));
+    // from 880 px, as below it would leave the name no room
+    expect(candles).toEqual(expect.arrayContaining(['hidden', '@min-[880px]:table-cell', 'w-[136px]']));
     expect(name?.some((each) => each.startsWith('w-'))).toBe(false);
-    expect(type).toEqual(expect.arrayContaining(['hidden', 'lg:table-cell', 'w-[88px]']));
-    expect(exchange).toEqual(expect.arrayContaining(['hidden', 'md:table-cell', 'w-[104px]']));
-    // from xl, as from lg to xl it would leave the name no room
-    expect(since).toEqual(expect.arrayContaining(['hidden', 'xl:table-cell', 'w-[96px]']));
+    expect(type).toEqual(expect.arrayContaining(['hidden', '@min-[1180px]:table-cell', 'w-[88px]']));
+    expect(exchange).toEqual(expect.arrayContaining(['hidden', '@min-[740px]:table-cell', 'w-[104px]']));
+    // from 1000 px, as below it would leave the name no room
+    expect(since).toEqual(expect.arrayContaining(['hidden', '@min-[1000px]:table-cell', 'w-[96px]']));
     const [btc = ''] = rows(html);
     expect(classes(btc, /<span [^>]*>Bitcoin/)).toContain('truncate');
     expect(classes(btc, /<a [^>]*>BTCUSDT</)).toContain('truncate');

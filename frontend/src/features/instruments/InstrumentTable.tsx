@@ -13,18 +13,19 @@ import type { ListSort } from '@/routes/instrumentsSearch';
 import { MiniCandles } from './MiniCandles';
 import { sortedColumn, type SortedColumn } from './sorting';
 
-// Phones (below md) show three columns, the symbol, the last 7 daily candles and the price; from md
-// the stats get their own columns and the name the rest; from lg the type and the 10 daily candles
-// too, from xl since when there is data. Cells have 12 px at the sides (8 px between the columns of
+// The columns follow the table's own width, not the screen's, since the list sits beside the
+// app's sidebar: below 740 px three columns, the symbol, the last 7 daily candles and the price;
+// from 740 px the stats get their own columns and the name the rest; from 880 px the 10 daily
+// candles too, from 1000 px since when there is data, from 1180 px the type. Cells have 12 px at the sides (8 px between the columns of
 // a phone), 4 px above and below the 32 px icon and the 32 px candles: a row is 41 px high.
 const HEAD = 'py-2 text-xs font-medium text-muted-foreground';
 const CELL = 'py-1';
-const PHONE_FIRST = 'pr-2 pl-3 md:px-3';
-const PHONE_LAST = 'pr-3 pl-2 md:px-3';
-const PHONE_MIDDLE = 'w-[60px] px-2 md:hidden';
-const WIDEST = 'hidden w-[136px] px-3 lg:table-cell';
-const WIDE = 'hidden px-3 md:table-cell';
-const XL = 'hidden px-3 xl:table-cell';
+const PHONE_FIRST = 'pr-2 pl-3 @min-[740px]:px-3';
+const PHONE_LAST = 'pr-3 pl-2 @min-[740px]:px-3';
+const PHONE_MIDDLE = 'w-[60px] px-2 @min-[740px]:hidden';
+const WIDEST = 'hidden w-[136px] px-3 @min-[880px]:table-cell';
+const WIDE = 'hidden px-3 @min-[740px]:table-cell';
+const XL = 'hidden px-3 @min-[1000px]:table-cell';
 const TONES = { up: 'text-up', down: 'text-down', flat: 'text-muted-foreground', none: 'text-muted-foreground' };
 const TYPES: Record<Market, string> = { stock: 'Stock', crypto: 'Crypto' };
 
@@ -64,12 +65,15 @@ function PhoneHeads({ sorted }: { sorted: SortedColumn }) {
   const arrow = <Arrow direction={direction} />;
   return (
     <>
-      <Head className={cn(PHONE_FIRST, 'text-left md:hidden')} sorted={column === 'change' ? undefined : direction}>
+      <Head
+        className={cn(PHONE_FIRST, 'text-left @min-[740px]:hidden')}
+        sorted={column === 'change' ? undefined : direction}
+      >
         <Label arrow={column !== 'change' && arrow}>{column === 'volume' ? 'Symbol · by volume' : 'Symbol'}</Label>
       </Head>
       <Head className={cn(PHONE_MIDDLE, 'text-left')}>7d</Head>
       <Head
-        className={cn(PHONE_LAST, 'w-[100px] text-right md:hidden')}
+        className={cn(PHONE_LAST, 'w-[100px] text-right @min-[740px]:hidden')}
         sorted={column === 'change' ? direction : undefined}
       >
         <Label right arrow={column === 'change' && arrow}>
@@ -106,7 +110,7 @@ function Header({ sort }: { sort: ListSort | undefined }) {
           </Label>
         </Head>
         <Head className={cn(WIDE, 'text-left')}>Name</Head>
-        <Head className="hidden w-[88px] px-3 text-left lg:table-cell">Type</Head>
+        <Head className="hidden w-[88px] px-3 text-left @min-[1180px]:table-cell">Type</Head>
         <Head className={cn(WIDE, 'w-[104px] text-left')}>Exchange</Head>
         <Head className={cn(XL, 'w-[96px] text-left')}>Data since</Head>
       </tr>
@@ -146,11 +150,14 @@ function SymbolCell({ instrument, where }: { instrument: Instrument; where: stri
             to="/instrument/$id"
             params={{ id: instrument.id }}
             title={instrument.symbol}
-            className="block truncate font-mono leading-[18px] outline-none after:absolute after:inset-0 focus-visible:text-primary md:leading-5"
+            className="block truncate font-mono leading-[18px] outline-none after:absolute after:inset-0 focus-visible:text-primary @min-[740px]:leading-5"
           >
             {instrument.symbol}
           </Link>
-          <span title={where} className="block truncate text-xs leading-[14px] text-muted-foreground md:hidden">
+          <span
+            title={where}
+            className="block truncate text-xs leading-[14px] text-muted-foreground @min-[740px]:hidden"
+          >
             {where}
           </span>
         </div>
@@ -163,12 +170,17 @@ function SymbolCell({ instrument, where }: { instrument: Instrument; where: stri
 function PriceCell({ instrument, stats }: { instrument: Instrument; stats: boolean }) {
   return (
     <td className={cn(CELL, PHONE_LAST, 'text-right')}>
-      <span className={cn('block truncate font-mono leading-[18px] md:leading-5', !stats && 'text-muted-foreground')}>
+      <span
+        className={cn(
+          'block truncate font-mono leading-[18px] @min-[740px]:leading-5',
+          !stats && 'text-muted-foreground',
+        )}
+      >
         {formatPrice(instrument.price)}
       </span>
       <span
         className={cn(
-          'block truncate text-xs leading-[14px] md:hidden',
+          'block truncate text-xs leading-[14px] @min-[740px]:hidden',
           stats ? ['font-mono', TONES[changeTone(instrument.change_24h)]] : 'text-muted-foreground',
         )}
       >
@@ -205,7 +217,7 @@ function Row({ instrument }: { instrument: Instrument }) {
           {instrument.name}
         </span>
       </td>
-      <td className={cn(CELL, 'hidden truncate px-3 text-muted-foreground lg:table-cell')}>
+      <td className={cn(CELL, 'hidden truncate px-3 text-muted-foreground @min-[1180px]:table-cell')}>
         {TYPES[instrument.market]}
       </td>
       <td title={exchange} className={cn(CELL, WIDE, 'truncate text-muted-foreground')}>
@@ -233,19 +245,20 @@ function SinceCell({ instrument }: { instrument: Instrument }) {
 // rest) | Type 88 | Exchange 104 | Data since 96 px. The symbol is the row's link, stretched over
 // the whole row, so the row is one click target and one tab stop. The columns have fixed widths
 // and the name takes the rest, so long text truncates instead of widening the table past the
-// screen (the mockup scrolls it sideways instead): Data since shows from xl (1280 px), Type and
-// 10d from lg (1024 px), the stats, name and exchange from md (768 px), each where it would leave
-// the name no room below that; a phone shows the symbol over "exchange · volume", the last 7
+// table (the mockup scrolls it sideways instead): each column shows from the table width (above)
+// where it still leaves the name about 150 px; a phone shows the symbol over "exchange · volume", the last 7
 // candles in 60 px and the price over the change. The sorted column's header is ink with an arrow.
 export function InstrumentTable({ items, sort }: { items: readonly Instrument[]; sort?: ListSort | undefined }) {
   return (
-    <table className="w-full table-fixed border-collapse text-sm">
-      <Header sort={sort} />
-      <tbody>
-        {items.map((instrument) => (
-          <Row key={instrument.id} instrument={instrument} />
-        ))}
-      </tbody>
-    </table>
+    <div className="@container">
+      <table className="w-full table-fixed border-collapse text-sm">
+        <Header sort={sort} />
+        <tbody>
+          {items.map((instrument) => (
+            <Row key={instrument.id} instrument={instrument} />
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
