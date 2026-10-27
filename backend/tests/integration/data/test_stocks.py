@@ -71,10 +71,10 @@ async def test_normal_day_from_1m_and_30m_bars(service: DataService, upstream):
         "bars-AAPL-1Min-2024-06-03-p0.json",
         "bars-AAPL-1Min-2024-06-03-p1.json",
     )
-    # 1h and 4h are built from 30Min bars, a year of them in one chunk.
-    year = upstream.native_bars(
+    # 1h and 4h are built from 30Min bars, a month of them in one chunk.
+    halves_month = upstream.native_bars(
         "30Min",
-        "2024-01-01T00:00:00Z",
+        "2024-06-01T00:00:00Z",
         "bars-AAPL-1Min-2024-06-03-p0.json",
         "bars-AAPL-1Min-2024-06-03-p1.json",
     )
@@ -108,32 +108,34 @@ async def test_normal_day_from_1m_and_30m_bars(service: DataService, upstream):
         "10000",
     )
     assert second["page_token"] == "QUFQTHxNfDE3MTc0NDM2MDAwMDAwMDAwMDA="
-    assert year.call_count == 1  # 1h and 4h share the chunk
-    assert year.calls[0].request.url.params["end"] == "2024-12-31T23:59:59Z"
+    assert halves_month.call_count == 1  # 1h and 4h share the chunk
+    assert halves_month.calls[0].request.url.params["end"] == "2024-06-30T23:59:59Z"
 
 
 @pytest.mark.usefixtures("stocks")
 @pytest.mark.parametrize(
-    ("pages", "day", "count"),
+    ("pages", "month", "day", "count"),
     [
         (
             ["bars-AAPL-1Min-2024-06-03-p0.json", "bars-AAPL-1Min-2024-06-03-p1.json"],
+            "2024-06-01T00:00:00Z",
             JUNE_3,
             13,
         ),
-        (["bars-AAPL-1Min-2024-11-29.json"], NOVEMBER_29, 7),  # early close
+        # early close
+        (["bars-AAPL-1Min-2024-11-29.json"], "2024-11-01T00:00:00Z", NOVEMBER_29, 7),
     ],
 )
 async def test_30m_candles_are_two_15m_candles(
-    service: DataService, upstream, pages: list[str], day, count: int
+    service: DataService, upstream, pages: list[str], month: str, day, count: int
 ):
-    halves_bars = upstream.native_bars("30Min", "2024-01-01T00:00:00Z", *pages)
-    quarters_bars = upstream.native_bars("15Min", "2024-01-01T00:00:00Z", *pages)
+    halves_bars = upstream.native_bars("30Min", month, *pages)
+    quarters_bars = upstream.native_bars("15Min", month, *pages)
 
     halves = await service.candles(AAPL, Timeframe.M30, *period(day))
     quarters = await service.candles(AAPL, Timeframe.M15, *period(day))
 
-    # Each from Alpaca's bars of its own timeframe, a year at a time.
+    # Each from Alpaca's bars of its own timeframe, a month at a time.
     assert (halves_bars.call_count, quarters_bars.call_count) == (1, 1)
 
     assert halves.frame.height == count
@@ -167,7 +169,7 @@ async def test_5m_candles_come_from_a_month_of_5min_bars(service: DataService, u
 
 @pytest.mark.usefixtures("stocks")
 async def test_early_close_day(service: DataService, upstream):
-    upstream.native_bars("30Min", "2024-01-01T00:00:00Z", "bars-AAPL-1Min-2024-11-29.json")
+    upstream.native_bars("30Min", "2024-11-01T00:00:00Z", "bars-AAPL-1Min-2024-11-29.json")
     upstream.bars_json(
         "1Day",
         "2024-01-01T00:00:00Z",

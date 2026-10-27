@@ -353,7 +353,7 @@ and cached (see [Cache](#cache)); the chunks are joined, resampled for stocks an
 
 | Chunk | Crypto | Stock |
 | --- | --- | --- |
-| closed month (1m, 5m) or year (15m, 30m, 1d) | monthly archive; while it is not published yet, built from the daily archives | one request per 10000 bars with extended hours (a month of 1Min bars is about 20000, so 2 or 3; a month of 5Min about 4000; a year of 15Min about 16000, of 30Min about 8000) |
+| closed month (intraday) or year (1d) | monthly archive; while it is not published yet, built from the daily archives | about 2 requests a month of any intraday timeframe (Alpaca pages them by time, see [Limits](#limits)); 1 a year of `1Day` |
 | current month or year before today | one chunk per day: daily archive, `GET /api/v3/klines` while it is not published | one chunk for all days so far |
 | today up to the request (live tail) | `GET /api/v3/klines` | one request, up to 15 minutes before the request |
 
@@ -482,22 +482,24 @@ requested timeframe.
   within 5 s; otherwise it gets 503 `source-unavailable` with `Retry-After`.
 - Alpaca allows 200 requests per minute per key. Prod and stage have one each; our 180 leaves
   about a tenth for retries and the skew between our minute and Alpaca's.
-- Alpaca requests of a cold load of SPY (extended hours make the pages; less liquid stocks
-  need fewer). One load (a chart request or a backtest) holds at most `CANDLES_MAX` candles
-  (50000), so the longest load of 1m is about 6 months, of 5m about 2.5 years and of 15m about
-  7.5 years; 30m and longer reach all of SIP's history (2016 on, about 11 years).
+- Alpaca pages intraday bars by time, about 17 days a page whatever the timeframe (see
+  [Facts](#alpaca)): any intraday timeframe costs about 2 requests a month, 21-24 a year, the
+  same as `1Min`. Native `5Min`, `15Min` and `30Min` bars cut the bars fetched, parsed and
+  cached (up to 30 times fewer), not the requests.
+- One load (a chart request or a backtest) holds at most `CANDLES_MAX` candles (50000): the
+  longest load of 1m is about 6 months, of 5m about 2.5 years, of 15m about 7.5 years; 30m and
+  longer reach all of SIP's history (2016 on, about 11 years). Cold loads of SPY:
 
-  | Timeframe | Alpaca bars, chunk | Requests per year | Longest load | Its requests, cold | Before #317 (all from 1Min) |
-  | --- | --- | --- | --- | --- | --- |
-  | 1m | `1Min`, month | about 36 | about 6 months | about 21 | the same |
-  | 5m | `5Min`, month | 12 | about 2.5 years | about 32 | about 95 |
-  | 15m | `15Min`, year | 2 | about 7.5 years | about 18 | about 275 |
-  | 30m, 1h, 4h | `30Min`, year | 1 | all, about 11 years | about 11 | about 390 |
-  | 1d | `1Day`, year | 1 | all, about 11 years | about 11 | the same |
+  | Timeframe | Alpaca bars, chunk | Longest load | Its requests, cold | Minutes of the background loads' share (90) |
+  | --- | --- | --- | --- | --- |
+  | 1m | `1Min`, month | about 6 months | 12-14 | under 1 |
+  | 5m | `5Min`, month | about 2.5 years | about 55 | under 1 |
+  | 15m | `15Min`, month | about 7.5 years | about 165 | about 2 |
+  | 30m, 1h, 4h | `30Min`, month | all, about 11 years | about 230 | about 2.5 |
+  | 1d | `1Day`, year | all, about 11 years | about 11 | under 1 |
 
-  Every load now fits in one minute of the background loads' share (90), so a backtest waits
-  only when several run at once or the budget is busy; before #317 a cold 30m load of all of
-  SPY's history took about 390 requests.
+  The share counts calendar minutes, so a load alone can be quicker: SPY 30m from 2016-02 to
+  2026-10 loaded cold in 84 s on stage. Backtests at once share the one share and wait longer.
 - A cold chart request that needs more than the budget left this minute gets 503 with
   `Retry-After`; the chunks fetched so far stay cached (each is cached on its own) and the
   retry continues from there.
@@ -523,7 +525,7 @@ requested timeframe.
   twice, and no background load fails because of it.
 - Since #317 each stock timeframe is fetched in Alpaca's bars of its own timeframe (1h and 4h
   share the `30Min` chunks), so the timeframes no longer share cached 1m chunks: 5m, 15m, 30m,
-  1h and 4h are cached under their base timeframe (`...:5m:2024-06`, `...:30m:2024`), and the
+  1h and 4h are cached under their base timeframe (`...:5m:2024-06`, `...:30m:2024-06`), and the
   1m chunks cached before are read only by 1m requests.
 - Binance limits request weight to 6000 per minute per IP, and all environments on the VM
   share one IP. When `X-MBX-USED-WEIGHT-1M` reaches 5000, REST calls pause until the minute
@@ -843,6 +845,20 @@ recorded responses the tests use are in `backend/tests/fixtures/` (see its READM
   10000 and counts across symbols; pages follow `next_page_token`. `end` is inclusive. A month of
   AAPL IEX 1m bars is 7235 bars, one request. 1Hour bars are aligned to the clock, not the
   session open (the 09:00 bar holds 09:30-09:59), so 1h and 4h are built from 30Min bars.
+- **SIP intraday bars are paged by time.** Measured on stage for SPY with `feed=sip`,
+  `adjustment=all`, `limit=10000`: a page of intraday bars holds about 17 calendar days, so a
+  year of any intraday timeframe is about 21 pages; only a month of 1Min reaches the `limit`.
+  The multi-symbol and single-symbol endpoints page the same, and `limit` changes nothing.
+
+  | Request | Bars | Pages | First page |
+  | --- | --- | --- | --- |
+  | 1Min, 1 month | 19623 | 2 | 10000 |
+  | 5Min, 1 month | 4297 | 2 | 2182 |
+  | 15Min, 1 year | 15824 | 21 | 748 |
+  | 30Min, 1 year | 7918 | 21 | 375 |
+  | 1Hour, 1 year | 3965 | 21 | 188 |
+  | 1Day, 1 year | 250 | 1 | 250 |
+
 - **SIP 5Min, 15Min and 30Min = resampled 1Min (#317).** Measured on stage with `feed=sip`,
   `adjustment=all`, regular session only: the 1Min bars resampled into bins from the session
   open against Alpaca's own bars. 5Min, 15Min and 30Min match exactly (the same bins, open,
@@ -900,7 +916,7 @@ recorded responses the tests use are in `backend/tests/fixtures/` (see its READM
 | Binance current period | Closed month: monthly archive, else daily archives. Current month: daily archive per complete day, REST on 404; REST for today. |
 | End of range | Both sources treat `end` as inclusive; the adapters send end minus one unit. |
 | Long stock loads | A backtest's candles wait for their share of the Alpaca budget instead of failing (#317, see [Limits](#limits)); chart requests still fail fast. |
-| Stock cache | Closed stock chunks live 1 day (history is rewritten after corporate actions; 30 days for crypto). Stocks are fetched in whole months (1Min, 5Min) or years (15Min, 30Min, 1Day), one to three requests each, because Alpaca requests are budgeted; per-day chunks would multiply the requests. |
+| Stock cache | Closed stock chunks live 1 day (history is rewritten after corporate actions; 30 days for crypto). Stocks are fetched in whole months (intraday, about 2 requests each) or years (`1Day`, one request): Alpaca pages intraday bars by time, so a yearly chunk of them would save no request, only wait longer; per-day chunks would multiply the requests. |
 | Unknown instruments | Recognised by the catalog: Alpaca answers 200 with no bars. Error bodies are never assumed to be JSON. |
 | Gaps | Minutes without trades are gaps like any other, reported as capped ranges and a total. |
 
