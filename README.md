@@ -79,8 +79,8 @@ account there and put its publishable key (`pk_...`) into `.env` as `LOGO_DEV_KE
 `docker compose up --build` again.
 
 More: [architecture](docs/architecture.md), [market data](docs/data.md),
-[backtest engine](docs/engine.md), [frontend](frontend/README.md), [contributing](CONTRIBUTING.md),
-[infrastructure](infra/README.md).
+[the API from a script](docs/api-guide.md), [backtest engine](docs/engine.md),
+[frontend](frontend/README.md), [contributing](CONTRIBUTING.md), [infrastructure](infra/README.md).
 
 ## License
 
