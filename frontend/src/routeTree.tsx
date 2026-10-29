@@ -52,10 +52,16 @@ const publicRoute = createRoute({
   component: Layout,
 });
 
-// The public start page.
+// The public start page. Before #199 it was the instrument list: an old link with the list's
+// search (/?q=btc&market=crypto&page=2) goes on to /instruments with it, in place of itself.
 const homeRoute = createRoute({
   getParentRoute: () => publicRoute,
   path: '/',
+  beforeLoad: ({ location }) => {
+    // The route declares no search of its own, so the raw params are read as the list's input.
+    const search = validateInstrumentsSearch(location.search as Parameters<typeof validateInstrumentsSearch>[0]);
+    if (Object.keys(search).length > 0) throw redirect({ to: '/instruments', search, replace: true });
+  },
   component: HomePage,
 });
 
