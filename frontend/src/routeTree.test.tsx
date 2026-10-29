@@ -294,6 +294,39 @@ describe('the home page', () => {
     expect(markets.getByText('Sample figures, not market data')).toBeDefined();
     expect(requests(fetch)).toEqual(['/api/v1/me']);
   });
+
+  it('sends an old link to the list with its search on to /instruments, in place of itself', async () => {
+    stubApi(session(ARSEN));
+    const { router } = await renderApp('/?q=btc&market=crypto&exchange=BINANCE&sort=gainers&page=2');
+    expect(router.state.location.pathname).toBe('/instruments');
+    expect(router.state.location.search).toEqual({
+      q: 'btc',
+      market: 'crypto',
+      exchange: 'BINANCE',
+      sort: 'gainers',
+      page: 2,
+    });
+    expect(heading()).toBe('Instruments');
+  });
+
+  it('replaces the old link in the history, so Back skips it', async () => {
+    stubApi(session(ARSEN));
+    const { router } = await renderApp('/dashboard');
+    await router.navigate({ href: '/?q=btc' });
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe('/instruments'));
+    router.history.back();
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe('/dashboard'));
+  });
+
+  it('stays the home page without the search of the list, or with only broken or other params', async () => {
+    for (const url of ['/', '/?market=bonds&page=-3', '/?utm_source=mail']) {
+      stubApi(session(null));
+      const { router } = await renderApp(url);
+      expect(router.state.location.pathname).toBe('/');
+      expect(heading()).toBe('Backtest your models and compare every experiment');
+      cleanup();
+    }
+  });
 });
 
 describe('an unknown address', () => {
