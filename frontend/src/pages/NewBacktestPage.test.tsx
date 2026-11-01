@@ -204,6 +204,12 @@ describe('the backtest builder', () => {
     expect(next()).toHaveProperty('disabled', true);
   });
 
+  it('starts a position at the whole capital, in Advanced', async () => {
+    const { user } = await openBuilder();
+    await goTo(user, 'Decision');
+    expect(screen.getByRole('slider', { name: 'Position size' }).getAttribute('aria-valuetext')).toBe('100 %');
+  });
+
   it('offers buy and hold as the benchmark, the others as coming soon', async () => {
     const { user } = await openBuilder();
     await goTo(user, 'Execution');
@@ -254,7 +260,14 @@ describe('the backtest builder', () => {
         confirm: null,
         min_hold: null,
       },
-      execution: { fill: 'next_open', stop_loss: 0.07, drawdown_stop: null, fee_bps: 10, slippage_bps: 2 },
+      execution: {
+        fill: 'next_open',
+        stop_loss: 0.07,
+        drawdown_stop: null,
+        position_size: 1,
+        fee_bps: 10,
+        slippage_bps: 2,
+      },
       benchmarks: [{ id: 'bh', kind: 'buy_and_hold', instrument: 'crypto:BTCUSDT' }],
     });
   });

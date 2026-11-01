@@ -60,7 +60,11 @@ function addSeries(type: string, options: Options = {}, pane = 0) {
     setData: (data: Point[]) => (series.data = data),
     applyOptions: (more: Options) => Object.assign(series.options, more),
     priceScale: () => ({ applyOptions: vi.fn() }),
-    createPriceLine: () => lines.push({ applyOptions: vi.fn() }),
+    createPriceLine: () => {
+      const line = { applyOptions: vi.fn() };
+      lines.push(line);
+      return line;
+    },
     priceLines: () => lines,
   };
 }
@@ -118,6 +122,10 @@ export function createChart(box: HTMLElement, options: Options) {
   const axis = timeAxis();
   charts.scroll = axis.scroll;
   return {
+    removeSeries: vi.fn(),
+    setCrosshairPosition: vi.fn(),
+    clearCrosshairPosition: vi.fn(),
+    paneSize: () => ({ width: 100, height: 100 }),
     applyOptions: vi.fn(),
     addSeries: (type: string, options?: Options, pane?: number) => {
       const series = addSeries(type, options, pane);

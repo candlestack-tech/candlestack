@@ -64,12 +64,13 @@ describe('the Backtests page', () => {
       'Sharpe',
       'Max drawdown',
       'When',
+      'Compare',
     ]);
     // A failed return is a dash, with the badge for phones, where the Status column is hidden.
     expect(rows().map(cells)).toEqual([
-      ['☆#12', 'AAPL+1', 'blesk-novol-8.keras', 'Finished', '+24.6 %', '0.79', '−19.7 %', 'Today 10:05'],
-      ['☆#11', 'AAPL+1', 'blesk-novol-8.keras', 'Failed', 'Failed–', '–', '–', 'Yesterday 18:10'],
-      ['★#10', 'BTCUSDT+2', 'blesk-novol-8.keras', 'Finished', '−24.1 %', '−0.18', '−19.7 %', '12 Oct 19:44'],
+      ['☆#12', 'AAPL+1', 'blesk-novol-8.keras', 'Finished', '+24.6 %', '0.79', '−19.7 %', 'Today 10:05', ''],
+      ['☆#11', 'AAPL+1', 'blesk-novol-8.keras', 'Failed', 'Failed–', '–', '–', 'Yesterday 18:10', ''],
+      ['★#10', 'BTCUSDT+2', 'blesk-novol-8.keras', 'Finished', '−24.1 %', '−0.18', '−19.7 %', '12 Oct 19:44', ''],
     ]);
     expect(within(rows()[0]!).getByRole('img', { name: 'Keras' })).toBeDefined();
   });
@@ -185,7 +186,7 @@ describe('the Backtests page', () => {
     });
     const { router } = await renderApp('/backtests?page=2');
     const field = await screen.findByRole('searchbox', { name: 'Search backtests' });
-    expect(field.getAttribute('placeholder')).toBe('Number, instrument or model, e.g. aapl');
+    expect(field.getAttribute('placeholder')).toBe('Name, number, instrument or model, e.g. aapl');
     await userEvent.type(field, 'btc');
     await vi.waitFor(() => expect(router.state.location.search).toEqual({ q: 'btc' }));
     expect(await screen.findByText('1 of 3')).toBeDefined();
@@ -329,6 +330,13 @@ describe('the Backtests page', () => {
       .filter((head) => head.className.split(' ').includes('font-mono'))
       .map((head) => head.textContent);
     expect(mono).toEqual(['Return', 'Sharpe', 'Max drawdown']);
+  });
+
+  it("shows a backtest's name under its number", async () => {
+    const named = backtest({ name: 'Half size' });
+    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer({ ...PAGE, backtests: [named] }) });
+    await renderApp('/backtests');
+    expect(await screen.findByText('Half size')).toBeDefined();
   });
 
   it('opens a row from the keyboard, ringing the row while its link has the focus', async () => {

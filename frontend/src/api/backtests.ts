@@ -64,7 +64,7 @@ export function dashboardQueryOptions() {
   });
 }
 
-// PATCH /api/v1/backtests/{id}: stars or unstars the backtest.
+// PATCH /api/v1/backtests/{id}: stars, unstars or renames the backtest.
 export function updateBacktest(id: string, update: components['schemas']['BacktestUpdate']): Promise<Backtest> {
   return patch<Backtest>(backtestPath(id), update);
 }

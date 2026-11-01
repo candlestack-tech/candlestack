@@ -2,6 +2,7 @@ import { Outlet, useRouterState } from '@tanstack/react-router';
 
 import { PageFrame } from '@/components/Layout';
 import { SignedInUserContext, useMe } from '@/features/account';
+import { ComparePanel } from '@/features/backtests';
 import { cn } from '@/lib/utils';
 
 import { AppHeader } from './AppHeader';
@@ -47,6 +48,7 @@ export function AppLayout() {
     <SignedInUserContext value={user}>
       <PageFrame header={<AppHeader />} app>
         <Workspace />
+        <ComparePanel userId={user.id} />
       </PageFrame>
     </SignedInUserContext>
   );

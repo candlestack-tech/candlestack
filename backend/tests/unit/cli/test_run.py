@@ -367,6 +367,7 @@ def test_a_run_writes_its_settings_engine_version_input_hashes_and_align_report(
             "fill": "next_open",
             "stop_loss": None,
             "drawdown_stop": None,
+            "position_size": 1.0,
             "fee_bps": 0.0,
             "slippage_bps": 0.0,
         },
@@ -389,6 +390,7 @@ def test_run_json_lists_the_post_processing_in_its_order(
     steps = ["--calibrate", "rank", "--calibration-window", "5", "--ema", "3", "--long-only"]
     rule = ["--rule", "hysteresis", "--threshold", "0.1", "--exit", "0.05"]
     held = ["--confirm", "2", "--min-hold", "4", "--drawdown-stop", "0.2"]
+    held += ["--position-size", "0.5"]
 
     assert run(*plain, out, *steps, *rule, *held) == 0
 
@@ -397,6 +399,7 @@ def test_run_json_lists_the_post_processing_in_its_order(
     assert record["settings"]["threshold"] == 0.1
     assert record["settings"]["long_only"] is True
     assert record["settings"]["drawdown_stop"] == 0.2
+    assert record["settings"]["position_size"] == 0.5
     assert record["post_processing"] == {
         "calibrate": {"name": "rank", "window": 5},
         "ema": {"span": 3},

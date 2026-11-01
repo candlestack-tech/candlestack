@@ -36,6 +36,9 @@ def new_backtest_id() -> str:
     return "bt_" + "".join(secrets.choice(_ID_ALPHABET) for _ in range(_ID_LENGTH))
 
 
+BACKTEST_NAME_MAX = 80
+
+
 class Backtest(Base):
     """A backtest of a user: what it ran on and with, and its results. The results are
     fractions (0.246 is 24.6 %), as ``metrics.stats`` gives them, except ``max_drawdown``,
@@ -57,6 +60,8 @@ class Backtest(Base):
     # [{"market": "stock", "symbol": "AAPL"}, ...] in the order chosen.
     instruments: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
     representation: Mapped[str] = mapped_column(String(16))
+    # What the user calls it, beside its number; null until they rename it.
+    name: Mapped[str | None] = mapped_column(String(BACKTEST_NAME_MAX))
     # The model goes, the backtest stays: then its name and framework of when it ran are shown.
     model_id: Mapped[str | None] = mapped_column(
         ForeignKey("models.id", ondelete="SET NULL"), index=True

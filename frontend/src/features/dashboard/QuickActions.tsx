@@ -1,11 +1,28 @@
-import { Plus } from 'lucide-react';
+import { useNavigate, useRouterState } from '@tanstack/react-router';
+import { Plus, Scale } from 'lucide-react';
 
-import { SwapIcon } from '@/components/icons';
 import { QuickAction } from '@/components/QuickAction';
-import { CompareDialog } from '@/features/backtests';
+import { comparedFromOf, useCompareSelection } from '@/features/backtests';
 import { UploadCard, UploadDialog } from '@/features/models';
 
 const LINE = 'text-[12.5px] text-muted-foreground';
+
+// Compare backtests opens the page, which says how to start when nothing is chosen.
+function CompareAction() {
+  const navigate = useNavigate();
+  const { picks } = useCompareSelection();
+  const pathname = useRouterState({ select: ({ location }) => location.pathname });
+  return (
+    <QuickAction
+      icon={Scale}
+      title="Compare backtests"
+      line={<span className={LINE}>{picks.length > 0 ? `${picks.length} of 4 added` : 'Up to 4 side by side'}</span>}
+      onClick={() => {
+        void navigate({ to: '/backtests/compare', state: { comparedFrom: comparedFromOf(pathname) } });
+      }}
+    />
+  );
+}
 
 // The strip under the greeting of an account with backtests (mockups/app, ddActions): New
 // backtest on the accent's tint, Upload model with the frameworks' marks, Compare backtests. Three
@@ -23,13 +40,7 @@ export function QuickActions({ onNewBacktest }: { onNewBacktest: () => void }) {
       <UploadDialog>
         <UploadCard />
       </UploadDialog>
-      <CompareDialog>
-        <QuickAction
-          icon={SwapIcon}
-          title="Compare backtests"
-          line={<span className={LINE}>Two side by side on one chart</span>}
-        />
-      </CompareDialog>
+      <CompareAction />
     </div>
   );
 }

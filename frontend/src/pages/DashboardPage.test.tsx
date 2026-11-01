@@ -137,40 +137,36 @@ describe('the dashboard of an account with backtests', () => {
     ).toEqual([
       'New backtestPick the data, a model and a rule',
       'Upload modelKerasONNX',
-      'Compare backtestsTwo side by side on one chart',
+      'Compare backtestsUp to 4 side by side',
     ]);
     await vi.waitFor(() =>
       expect(widgets()).toEqual(['Last backtests', 'Best backtests', 'Starred backtests', 'Starred models']),
     );
   });
 
-  it('opens the dialogs of the quick actions', async () => {
+  it('opens the compare page and the builder from the quick actions', async () => {
+    await open({ ...dashboardAnswer(FULL), ...modelsAnswer([]) });
+    await userEvent.click(await screen.findByRole('button', { name: /^New backtest\s*Pick/ }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'New backtest' })).toBeDefined();
+    cleanup();
     await open({ ...dashboardAnswer(FULL), ...modelsAnswer([]) });
     await userEvent.click(await screen.findByRole('button', { name: /^Compare backtests/ }));
-    const compare = await screen.findByRole('dialog', { name: 'Compare backtests' });
-    expect(
-      within(compare).getByText(
-        'Change one layer, run again and see which combination holds up across market conditions.',
-      ),
-    ).toBeDefined();
-    await userEvent.keyboard('{Escape}');
-    await userEvent.click(screen.getByRole('button', { name: /^New backtest\s*Pick/ }));
-    expect(await screen.findByRole('heading', { level: 1, name: 'New backtest' })).toBeDefined();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Compare backtests' })).toBeDefined();
   });
 
   it('lists the last backtests, failed ones too, with a link to all of them', async () => {
     await open({ ...dashboardAnswer(FULL), ...modelsAnswer([]) });
     await screen.findByRole('region', { name: 'Last backtests' });
     expect(rowsOf('Last backtests')).toEqual([
-      ['★#12', 'AAPLMSFT', '+24.6 %', '1.34', 'Today 10:05'],
-      ['★#11', 'AAPLMSFT', 'Failed', '–', 'Yesterday 18:10'],
-      ['☆#10', 'AAPL+3', '+96.5 %', '0.50', '12 Oct 19:44'],
+      ['★#12', 'AAPLMSFT', '+24.6 %', '1.34', 'Today 10:05', ''],
+      ['★#11', 'AAPLMSFT', 'Failed', '–', 'Yesterday 18:10', ''],
+      ['☆#10', 'AAPL+3', '+96.5 %', '0.50', '12 Oct 19:44', ''],
     ]);
     // #318: each instrument with its icon, in every widget.
     const icons = (name: string) =>
       [...screen.getByRole('region', { name }).querySelectorAll('img')].map((img) => img.getAttribute('src'));
     expect(icons('Last backtests')).toHaveLength(5);
-    expect(icons('Best backtests')).toHaveLength(3);
+    expect(icons('Best backtests')).toHaveLength(2);
     expect(icons('Starred backtests')).toEqual([
       '/api/v1/data/instruments/stock%3AAAPL/icon',
       '/api/v1/data/instruments/stock%3AMSFT/icon',
@@ -187,14 +183,14 @@ describe('the dashboard of an account with backtests', () => {
     const best = within(await screen.findByRole('region', { name: 'Best backtests' }));
     expect(best.getByText('by Sharpe')).toBeDefined();
     expect(rowsOf('Best backtests')).toEqual([
-      ['1', '#12AAPLMSFT', '1.34', '+24.6 %', '−19.7 %', '51.2 %'],
-      ['2', '#10AAPL+3', '0.50', '+96.5 %', '−8.0 %', '55.6 %'],
+      ['1', '#12AAPL+1', '1.34', '+24.6 %', '−19.7 %', '51.2 %', ''],
+      ['2', '#10AAPL+3', '0.50', '+96.5 %', '−8.0 %', '55.6 %', ''],
     ]);
     expect(best.getByRole('button', { name: 'Sharpe ↓' }).getAttribute('aria-pressed')).toBe('true');
     await userEvent.click(best.getByRole('button', { name: 'Return' }));
     expect(best.getByText('by return')).toBeDefined();
     expect(best.getByRole('button', { name: 'Return ↓' }).getAttribute('aria-pressed')).toBe('true');
-    expect(rowsOf('Best backtests').map((row) => row[1])).toEqual(['#10AAPL+3', '#12AAPLMSFT']);
+    expect(rowsOf('Best backtests').map((row) => row[1])).toEqual(['#10AAPL+3', '#12AAPL+1']);
     await userEvent.click(best.getByRole('button', { name: 'Drawdown' }));
     expect(best.getByText('by drawdown')).toBeDefined();
     await userEvent.click(best.getByRole('button', { name: 'Win rate' }));
@@ -268,10 +264,7 @@ describe('the dashboard of an account with backtests', () => {
     await open({ ...dashboardAnswer(FULL), ...modelsAnswer([]) });
     const user = userEvent.setup();
     await screen.findByRole('region', { name: 'Best backtests' });
-    const openers = [
-      [() => screen.getByRole('button', { name: /^Upload model/ }), 'Add a model'],
-      [() => screen.getByRole('button', { name: /^Compare backtests/ }), 'Compare backtests'],
-    ] as const;
+    const openers = [[() => screen.getByRole('button', { name: /^Upload model/ }), 'Add a model']] as const;
     for (const [opener, dialog] of openers) {
       await user.click(opener());
       await screen.findByRole('dialog', { name: dialog });

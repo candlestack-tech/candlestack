@@ -1,4 +1,4 @@
-import { Link, useRouterState } from '@tanstack/react-router';
+import { Link, useRouter, useRouterState } from '@tanstack/react-router';
 import { Download } from 'lucide-react';
 import { useState } from 'react';
 
@@ -12,7 +12,8 @@ import { formatRecentTime } from '@/lib/dates';
 import { secondsSince, useNow } from '@/lib/useNow';
 import { cn } from '@/lib/utils';
 
-import { CompareDialog } from '../CompareDialog';
+import { CompareButton } from '../compare/CompareToggle';
+import { RenameBacktest } from '../RenameBacktest';
 import { StatusBadge } from '../parts';
 import { durationText, periodText } from './format';
 
@@ -26,6 +27,20 @@ const BACK =
 // "← <the model>" (its links set `from` in the history state).
 export function BackLink({ model }: { model?: BacktestDocument['model'] }) {
   const from = useRouterState({ select: (state) => state.location.state.from });
+  const router = useRouter();
+  if (from === 'compare') {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          router.history.back();
+        }}
+        className={cn(BACK, 'cursor-pointer')}
+      >
+        ← Compare backtests
+      </button>
+    );
+  }
   if (from === 'dashboard') {
     return (
       <Link to="/dashboard" className={BACK}>
@@ -97,7 +112,7 @@ function DownloadButton({ id, number }: { id: string; number: number }) {
   );
 }
 
-// [⤓ Download JSON | ?] as one group, then Compare, which opens its Coming soon dialog.
+// [⤓ Download JSON | ?] as one group.
 function FinishedActions({ id, number }: { id: string; number: number }) {
   return (
     <>
@@ -122,11 +137,6 @@ function FinishedActions({ id, number }: { id: string; number: number }) {
           </a>
         </Button>
       </span>
-      <CompareDialog>
-        <Button type="button" variant="outline" className={SMALL}>
-          Compare
-        </Button>
-      </CompareDialog>
     </>
   );
 }
@@ -170,14 +180,24 @@ export function ResultHeader({ doc }: { doc: BacktestDocument }) {
       <BackLink model={doc.model} />
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5">
-          <h1 className="text-[22px]/7 font-semibold tracking-[-0.02em]">Backtest #{backtest.number}</h1>
+          <h1 className="text-[22px]/7 font-semibold tracking-[-0.02em]">
+            {backtest.name ?? `Backtest #${String(backtest.number)}`}
+          </h1>
+          {backtest.name && <span className="font-mono text-[13px] text-muted-foreground">#{backtest.number}</span>}
           <StatusBadge status={backtest.status} detail={runs} />
         </div>
-        {backtest.status === 'finished' && (
-          <div className="flex flex-wrap gap-2">
-            <FinishedActions id={backtest.id} number={backtest.number} />
-          </div>
-        )}
+        <div className="flex flex-wrap gap-2">
+          <RenameBacktest id={backtest.id} name={backtest.name} />
+          {backtest.status === 'finished' && <FinishedActions id={backtest.id} number={backtest.number} />}
+          <CompareButton
+            target={{
+              id: backtest.id,
+              number: backtest.number,
+              status: backtest.status,
+              symbol: doc.data.instrument.symbol,
+            }}
+          />
+        </div>
       </div>
       <div className="mt-1 mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-muted-foreground">
         <InstrumentSymbol id={doc.data.instrument.id} symbol={doc.data.instrument.symbol} size={20} />

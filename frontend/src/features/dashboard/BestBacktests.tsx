@@ -7,13 +7,17 @@ import {
   BacktestInstruments,
   BacktestNumber,
   CELL,
+  COMPARE_CELL,
+  CompareToggle,
   HEAD,
   NUMBER,
   ROW,
   RowOpener,
   SortButton,
   TABLE,
+  compareTarget,
   returnClass,
+  useComparedRow,
 } from '@/features/backtests';
 import { formatPercent, formatSharpe, formatWinRate } from '@/lib/results';
 import { cn } from '@/lib/utils';
@@ -34,20 +38,24 @@ const METRICS: readonly { metric: BestMetric; label: string; by: string; format:
   { metric: 'win_rate', label: 'Win rate', by: 'win rate', format: (backtest) => formatWinRate(backtest.win_rate) },
 ];
 
+// The results sit closer, so the scale icon fits beside them in the card.
+const TIGHT = 'px-1.5';
+
 type RowProps = { backtest: Backtest; rank: number; by: BestMetric };
 
 // The rank, the number with up to two instruments and their icons, then the four results; the one ranked by in
 // semibold, the return in its colour.
 function Row({ backtest, rank, by }: RowProps) {
+  const compared = useComparedRow(backtest.id);
   return (
-    <tr className={ROW}>
+    <tr className={cn(ROW, compared)}>
       <td className={cn(CELL, 'w-7 font-mono text-xs text-muted-foreground')}>{rank}</td>
       <td className={CELL}>
         <span className="flex items-center gap-1.5">
           <RowOpener backtest={backtest}>
             <BacktestNumber backtest={backtest} />
           </RowOpener>
-          <BacktestInstruments backtest={backtest} max={2} />
+          <BacktestInstruments backtest={backtest} max={1} />
         </span>
       </td>
       {METRICS.map(({ metric, format }) => (
@@ -56,6 +64,7 @@ function Row({ backtest, rank, by }: RowProps) {
           className={cn(
             CELL,
             NUMBER,
+            TIGHT,
             metric === by && 'font-semibold',
             metric === 'total_return' && backtest.total_return !== null && returnClass(backtest.total_return),
           )}
@@ -63,7 +72,42 @@ function Row({ backtest, rank, by }: RowProps) {
           {format(backtest)}
         </td>
       ))}
+      <td className={cn(CELL, COMPARE_CELL, 'w-11')}>
+        <CompareToggle target={compareTarget(backtest)} />
+      </td>
     </tr>
+  );
+}
+
+// The rank, the backtest and the results, which rank the list when clicked.
+function Headings({ by, onPick }: { by: BestMetric; onPick: (metric: BestMetric) => void }) {
+  return (
+    <thead>
+      <tr>
+        <th scope="col" className={HEAD}>
+          <span className="sr-only">Rank</span>
+        </th>
+        <th scope="col" className={HEAD}>
+          Backtest
+        </th>
+        {METRICS.map(({ metric, label }) => (
+          <th key={metric} scope="col" className={cn(HEAD, NUMBER, TIGHT)}>
+            <SortButton
+              on={metric === by}
+              pressed={metric === by}
+              className={cn(metric === by && 'font-semibold')}
+              onClick={() => onPick(metric)}
+            >
+              {label}
+              {metric === by ? ' ↓' : ''}
+            </SortButton>
+          </th>
+        ))}
+        <th scope="col" className={HEAD}>
+          <span className="sr-only">Compare</span>
+        </th>
+      </tr>
+    </thead>
   );
 }
 
@@ -78,29 +122,7 @@ export function BestBacktests({ best }: Props) {
     <Widget icon={TrophyIcon} title="Best backtests" aside={<Hint>by {word}</Hint>}>
       <div className="overflow-x-auto">
         <table className={TABLE}>
-          <thead>
-            <tr>
-              <th scope="col" className={HEAD}>
-                <span className="sr-only">Rank</span>
-              </th>
-              <th scope="col" className={HEAD}>
-                Backtest
-              </th>
-              {METRICS.map(({ metric, label }) => (
-                <th key={metric} scope="col" className={cn(HEAD, NUMBER)}>
-                  <SortButton
-                    on={metric === by}
-                    pressed={metric === by}
-                    className={cn(metric === by && 'font-semibold')}
-                    onClick={() => setBy(metric)}
-                  >
-                    {label}
-                    {metric === by ? ' ↓' : ''}
-                  </SortButton>
-                </th>
-              ))}
-            </tr>
-          </thead>
+          <Headings by={by} onPick={setBy} />
           <tbody>
             {best[by].map((backtest, index) => (
               <Row key={backtest.id} backtest={backtest} rank={index + 1} by={by} />
