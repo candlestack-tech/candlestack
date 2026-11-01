@@ -15,6 +15,7 @@ from candlestack.experiments.schemas import (
     BacktestSort,
     BacktestsPage,
     BacktestStatus,
+    BacktestUpdate,
     BestBacktests,
     DashboardOut,
     EquitySeries,
@@ -55,6 +56,7 @@ def backtest_out(listed: Listed) -> BacktestOut:
     backtest = listed.backtest
     return BacktestOut(
         id=backtest.id,
+        name=backtest.name,
         number=backtest.number,
         status=BacktestStatus(backtest.status),
         instruments=[BacktestInstrument.model_validate(item) for item in backtest.instruments],
@@ -116,8 +118,9 @@ class BacktestsService:
             ],
         )
 
-    async def star(self, user_id: str, backtest_id: str, *, starred: bool) -> BacktestOut:
-        """Stars or unstars the user's backtest.
+    async def update(self, user_id: str, backtest_id: str, changes: BacktestUpdate) -> BacktestOut:
+        """Stars, unstars or renames the user's backtest: the fields of ``changes`` that were
+        sent; a name of null takes the name away.
 
         Raises:
             BacktestNotFound: The user has no backtest with the ID.
@@ -125,7 +128,10 @@ class BacktestsService:
         listed = await self._store.backtest(user_id, backtest_id)
         if listed is None:
             raise BacktestNotFound
-        listed.backtest.starred = starred
+        if changes.starred is not None:
+            listed.backtest.starred = changes.starred
+        if "name" in changes.model_fields_set:
+            listed.backtest.name = changes.name
         await self._store.commit()
         return backtest_out(listed)
 

@@ -117,10 +117,10 @@ async def update_backtest(
     service: BacktestsServiceDep,
     response: Response,
 ) -> BacktestOut:
-    """Stars or unstars the backtest."""
+    """Stars, unstars or renames the backtest; a field left out stays as it is."""
     response.headers.update(NO_STORE)
     try:
-        return await service.star(user.id, backtest_id, starred=body.starred)
+        return await service.update(user.id, backtest_id, body)
     except BacktestNotFound:
         raise ProblemError(
             404, "not-found", "Not Found", "You have no backtest with this ID."

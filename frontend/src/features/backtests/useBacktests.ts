@@ -64,6 +64,20 @@ export function starOnDashboard(dashboard: Dashboard, changed: Backtest): Dashbo
 
 // Stars or unstars at once everywhere it shows, with the counts; everything goes back when the
 // API refuses, and is asked for again either way.
+// Renames the backtest, or takes its name away; what shows it is asked for again.
+export function useRenameBacktest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string | null }) => updateBacktest(id, { name }),
+    onSuccess: (_backtest, { id }) =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: LISTS }),
+        queryClient.invalidateQueries({ queryKey: DASHBOARD }),
+        queryClient.invalidateQueries({ queryKey: ['account', 'backtest', id] }),
+      ]),
+  });
+}
+
 export function useStarBacktest() {
   const queryClient = useQueryClient();
   return useMutation({

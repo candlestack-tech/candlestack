@@ -27,8 +27,8 @@ function List({ query }: { query: string }) {
           >
             <BacktestNumber backtest={backtest} />
             <span className="truncate font-medium">{compareTarget(backtest).symbol}</span>
-            <span title={backtest.model.name} className="truncate text-muted-foreground">
-              {backtest.model.name}
+            <span title={backtest.name ?? backtest.model.name} className="truncate text-muted-foreground">
+              {backtest.name ?? backtest.model.name}
             </span>
             <span className="text-right font-mono">
               {backtest.status === 'finished' ? (

@@ -125,6 +125,7 @@ export const model = (fields: Partial<Model> = {}): Model => ({
 // A finished backtest as the API sends it: #12 on AAPL and MSFT with blesk-novol-8.keras.
 export const backtest = (fields: Partial<Backtest> = {}): Backtest => ({
   id: 'bt_7f3k2m9qx4',
+  name: null,
   number: 12,
   instruments: [
     { symbol: 'AAPL', market: 'stock' },
@@ -371,6 +372,7 @@ export const backtestDocument = (fields: Partial<BacktestDocument> = {}): Backte
   version: 1,
   backtest: {
     id: 'bt_7f3k2m9qx4',
+    name: null,
     number: 12,
     status: 'finished',
     created_at: '2026-10-17T14:05:00Z',

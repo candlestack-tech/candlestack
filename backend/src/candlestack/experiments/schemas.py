@@ -7,6 +7,8 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+BACKTEST_NAME_MAX = 80
+
 # Backtests per page of the list.
 PAGE_SIZE = 10
 # The longest search the list takes.
@@ -160,6 +162,7 @@ class BacktestOut(BaseModel):
     null for a backtest that did not finish."""
 
     id: str = Field(description="Public ID of the backtest", examples=["bt_7f3k2m9qx4"])
+    name: str | None = Field(description="What the user calls it; null until they rename it")
     number: int = Field(description="The user's own number of the backtest, shown as #N", ge=1)
     status: BacktestStatus
     instruments: list[BacktestInstrument] = Field(
@@ -261,9 +264,24 @@ class BacktestsPage(BaseModel):
 
 
 class BacktestUpdate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    """What the star and Rename change; a field left out stays as it is."""
 
-    starred: bool = Field(description="Star or unstar the backtest")
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    starred: bool | None = Field(default=None, description="Star or unstar the backtest")
+    name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=BACKTEST_NAME_MAX,
+        pattern=r"^[^\x00-\x1f\x7f]+$",
+        description="What to call it, without control characters; null takes the name away",
+    )
+
+    @model_validator(mode="after")
+    def _says_something(self) -> "BacktestUpdate":
+        if not self.model_fields_set:
+            raise ValueError("send what to change: starred, name or both")
+        return self
 
 
 class BestBacktests(BaseModel):

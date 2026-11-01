@@ -13,6 +13,7 @@ import { secondsSince, useNow } from '@/lib/useNow';
 import { cn } from '@/lib/utils';
 
 import { CompareButton } from '../compare/CompareToggle';
+import { RenameBacktest } from '../RenameBacktest';
 import { StatusBadge } from '../parts';
 import { durationText, periodText } from './format';
 
@@ -179,10 +180,14 @@ export function ResultHeader({ doc }: { doc: BacktestDocument }) {
       <BackLink model={doc.model} />
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5">
-          <h1 className="text-[22px]/7 font-semibold tracking-[-0.02em]">Backtest #{backtest.number}</h1>
+          <h1 className="text-[22px]/7 font-semibold tracking-[-0.02em]">
+            {backtest.name ?? `Backtest #${String(backtest.number)}`}
+          </h1>
+          {backtest.name && <span className="font-mono text-[13px] text-muted-foreground">#{backtest.number}</span>}
           <StatusBadge status={backtest.status} detail={runs} />
         </div>
         <div className="flex flex-wrap gap-2">
+          <RenameBacktest id={backtest.id} name={backtest.name} />
           {backtest.status === 'finished' && <FinishedActions id={backtest.id} number={backtest.number} />}
           <CompareButton
             target={{

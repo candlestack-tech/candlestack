@@ -818,7 +818,7 @@ The engine's worked example ([Worked example](#worked-example)) with `next_open`
 {
   "version": 1,
   "backtest": {
-    "id": "bt_7f3k2m9qx4", "number": 12, "status": "finished",   // running, finished or failed
+    "id": "bt_7f3k2m9qx4", "name": null, "number": 12, "status": "finished",   // running, finished or failed
     "created_at": "2026-10-25T14:02:11Z", "finished_at": "2026-10-25T14:04:53Z",
     "duration_s": 162.0, "error": null,
     "steps": [                                                    // in their order, while it runs and after

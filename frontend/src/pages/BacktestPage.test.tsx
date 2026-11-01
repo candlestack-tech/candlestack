@@ -124,6 +124,24 @@ describe("a finished backtest's page", () => {
     expect((await screen.findByText('The file did not download. Try again.')).getAttribute('role')).toBe('alert');
   });
 
+  it('renames the backtest from its header and shows the name with its number', async () => {
+    const doc = backtestDocument();
+    let current = doc;
+    await openPage(async () => Promise.resolve({ status: 200, body: current }), {
+      [`PATCH /api/v1/backtests/${ID}`]: async () => {
+        current = { ...doc, backtest: { ...doc.backtest, name: 'Half size' } };
+        return Promise.resolve({ status: 200, body: backtest({ name: 'Half size' }) });
+      },
+    });
+    await userEvent.click(await screen.findByRole('button', { name: 'Rename' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Rename backtest' });
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true);
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Backtest name' }), 'Half size');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Half size' })).toBeDefined();
+    expect(screen.getByText('#12')).toBeDefined();
+  });
+
   it('adds the backtest to compare from its header, and takes it out again', async () => {
     await openPage({ status: 200, body: backtestDocument() });
     await userEvent.click(await screen.findByRole('button', { name: 'Add to compare' }));
