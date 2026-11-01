@@ -5,9 +5,11 @@ import {
   BacktestInstruments,
   BacktestNumber,
   BacktestReturn,
+  CompareToggle,
   ModelName,
   RowOpener,
   RowStar,
+  compareTarget,
   hasResults,
   representationName,
 } from '@/features/backtests';
@@ -27,7 +29,7 @@ function Row({ backtest, onStar }: RowProps) {
   const done = hasResults(backtest);
   const { name, framework } = backtest.model;
   return (
-    <div className={cn(STARRED_ROW, 'grid-cols-[auto_minmax(0,1fr)_64px_86px] gap-y-1')}>
+    <div className={cn(STARRED_ROW, 'grid-cols-[auto_minmax(0,1fr)_64px_86px_32px] gap-y-1')}>
       <span className="row-span-2 self-start">
         <RowStar starred label={`Unstar backtest ${backtest.number}`} onToggle={() => onStar(backtest)} />
       </span>
@@ -40,6 +42,9 @@ function Row({ backtest, onStar }: RowProps) {
       {done && backtest.equity ? <MiniChart strategy={backtest.equity.strategy} /> : <span />}
       <span className="text-right font-mono text-sm/[1.5] font-semibold whitespace-nowrap">
         <BacktestReturn backtest={backtest} />
+      </span>
+      <span className="row-span-2 self-center">
+        <CompareToggle target={compareTarget(backtest)} />
       </span>
       <span
         title={`${name} · ${representationName(backtest.representation)}`}

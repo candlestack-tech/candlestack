@@ -3,9 +3,11 @@ import { formatPercent, formatSharpe } from '@/lib/results';
 import { cn } from '@/lib/utils';
 import type { BacktestsColumn, BacktestsSearch } from '@/routes/backtestsSearch';
 
-import { hasResults } from './format';
+import { CompareToggle } from './compare/CompareToggle';
+import { useComparedRow } from './compare/selection';
+import { compareTarget, hasResults } from './format';
 import { BacktestInstruments, BacktestReturn, BacktestWhen, Missing, StatusBadge } from './parts';
-import { BacktestCell, CELL, HEAD, ModelCell, NUMBER, ROW, SortButton, TABLE } from './table';
+import { BacktestCell, CELL, COMPARE_CELL, HEAD, ModelCell, NUMBER, ROW, SortButton, TABLE } from './table';
 import { WIDTH } from './widths';
 
 // The columns of the approved design (#315) with their fixed widths, and from which width down each
@@ -28,6 +30,7 @@ const COLUMNS: readonly { label: string; sort?: BacktestsColumn; width?: string;
     number: true,
   },
   { label: 'When', sort: 'when', width: WIDTH.when, hide: 'max-[800px]:hidden' },
+  { label: 'Compare', width: WIDTH.compare },
 ];
 const hideOf = (label: string) => COLUMNS.find((column) => column.label === label)?.hide;
 
@@ -53,6 +56,8 @@ function Header({ search, onSort }: HeaderProps) {
                   {label}
                   {arrow}
                 </SortButton>
+              ) : label === 'Compare' ? (
+                <span className="sr-only">{label}</span>
               ) : (
                 label
               )}
@@ -86,8 +91,9 @@ function ReturnCell({ backtest }: { backtest: Backtest }) {
 function Row({ backtest, onStar }: RowProps) {
   const done = hasResults(backtest);
   const result = (text: string) => (done ? text : <Missing />);
+  const compared = useComparedRow(backtest.id);
   return (
-    <tr className={ROW}>
+    <tr className={cn(ROW, compared)}>
       <td className={CELL}>
         <BacktestCell backtest={backtest} onStar={onStar} />
       </td>
@@ -107,6 +113,9 @@ function Row({ backtest, onStar }: RowProps) {
       <td className={cn(CELL, NUMBER, hideOf('Max drawdown'))}>{result(formatPercent(backtest.max_drawdown))}</td>
       <td className={cn(CELL, hideOf('When'), 'whitespace-normal text-muted-foreground')}>
         <BacktestWhen backtest={backtest} />
+      </td>
+      <td className={cn(CELL, COMPARE_CELL)}>
+        <CompareToggle target={compareTarget(backtest)} />
       </td>
     </tr>
   );

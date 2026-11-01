@@ -64,12 +64,13 @@ describe('the Backtests page', () => {
       'Sharpe',
       'Max drawdown',
       'When',
+      'Compare',
     ]);
     // A failed return is a dash, with the badge for phones, where the Status column is hidden.
     expect(rows().map(cells)).toEqual([
-      ['☆#12', 'AAPL+1', 'blesk-novol-8.keras', 'Finished', '+24.6 %', '0.79', '−19.7 %', 'Today 10:05'],
-      ['☆#11', 'AAPL+1', 'blesk-novol-8.keras', 'Failed', 'Failed–', '–', '–', 'Yesterday 18:10'],
-      ['★#10', 'BTCUSDT+2', 'blesk-novol-8.keras', 'Finished', '−24.1 %', '−0.18', '−19.7 %', '12 Oct 19:44'],
+      ['☆#12', 'AAPL+1', 'blesk-novol-8.keras', 'Finished', '+24.6 %', '0.79', '−19.7 %', 'Today 10:05', ''],
+      ['☆#11', 'AAPL+1', 'blesk-novol-8.keras', 'Failed', 'Failed–', '–', '–', 'Yesterday 18:10', ''],
+      ['★#10', 'BTCUSDT+2', 'blesk-novol-8.keras', 'Finished', '−24.1 %', '−0.18', '−19.7 %', '12 Oct 19:44', ''],
     ]);
     expect(within(rows()[0]!).getByRole('img', { name: 'Keras' })).toBeDefined();
   });
