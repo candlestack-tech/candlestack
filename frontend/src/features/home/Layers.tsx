@@ -8,8 +8,8 @@ const LAYERS: Layer[] = [
   {
     eyebrow: 'Layer 1 · Representation',
     title: 'How prices become input',
-    text: 'Turn raw candles into what your model reads: windows, bricks or lines, with normalized indicators.',
-    badges: ['Time windows', 'Renko', 'Kagi', 'Point & Figure', 'Heikin-Ashi', 'Range bars'],
+    text: 'Turn raw candles into what your model reads: windows or bricks, with normalized indicators.',
+    badges: ['Time windows', 'Renko'],
   },
   {
     eyebrow: 'Layer 2 · Model',

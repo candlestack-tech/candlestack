@@ -24,6 +24,7 @@ export const compareTarget = (backtest: Backtest) => ({
   id: backtest.id,
   number: backtest.number,
   status: backtest.status,
+  seeded: backtest.seeded,
   symbol: instrumentList(symbolsOf(backtest)),
 });
 

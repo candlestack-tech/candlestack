@@ -7,14 +7,15 @@ import { cn } from '@/lib/utils';
 
 import { addToCompare, removeFromCompare, useCompareSelection, type ComparePick } from './selection';
 
-type Target = ComparePick & { status: BacktestStatus };
+type Target = ComparePick & { status: BacktestStatus; seeded?: boolean };
 
 // Whether a backtest can go in the comparison, and what its button says.
-function useCompareState({ id, status }: Target) {
+function useCompareState({ id, status, seeded = false }: Target) {
   const { picks, full } = useCompareSelection();
   const added = picks.some((pick) => pick.id === id);
   let why: string | undefined;
-  if (status === 'running') why = 'Still running';
+  if (seeded) why = 'Test data: no results to compare';
+  else if (status === 'running') why = 'Still running';
   else if (status === 'failed') why = 'Failed: no results to compare';
   else if (full && !added) why = 'Up to 4 backtests. Remove one first';
   return { added, why, title: why ?? (added ? 'Remove from compare' : 'Add to compare') };
