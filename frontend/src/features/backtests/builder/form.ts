@@ -263,6 +263,7 @@ export function backtestOf(form: BuilderForm, model: Model, instrument: ChosenIn
       fill: form.honestFill ? 'next_open' : 'signal_close',
       stop_loss: form.stopLoss / 100,
       drawdown_stop: form.drawdownStop > 0 ? form.drawdownStop / 100 : null,
+      position_size: 1,
       fee_bps: bps(percent(form.fees) ?? 0),
       slippage_bps: bps(percent(form.slippage) ?? 0),
     },

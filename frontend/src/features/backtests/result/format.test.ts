@@ -147,7 +147,14 @@ describe('the setup', () => {
 
   it('writes the fill, the stops and the costs, and no benchmark without one', () => {
     const doc = backtestDocument({
-      execution: { fill: 'signal_close', stop_loss: null, drawdown_stop: 0.2, fee_bps: 2.5, slippage_bps: 1 },
+      execution: {
+        fill: 'signal_close',
+        stop_loss: null,
+        drawdown_stop: 0.2,
+        position_size: 1,
+        fee_bps: 2.5,
+        slippage_bps: 1,
+      },
       benchmarks: [],
     });
     expect(group(doc, 'Execution')).toEqual([

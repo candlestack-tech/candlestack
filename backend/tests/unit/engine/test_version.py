@@ -16,10 +16,11 @@ from candlestack.engine import ENGINE_VERSION, Settings, backtest
 # each version produced.
 OUTPUT_SHA256 = {
     # 0.1.0 on the 40-candle example of its time; 0.2.0 extended the example; 0.3.0 added the
-    # two runs with a drawdown stop.
+    # two runs with a drawdown stop; 0.4.0 added the two runs at half the capital.
     "0.1.0": "c5fe0ee75777b3d191cdbad159ff1de43e83766eff772bb7409a723bdc9261c9",
     "0.2.0": "d6ca5c67715702cd7cfafadcf9ab8a361b3083be7ffbb5b9c0d99129df3401b0",
     "0.3.0": "454c3c7c0aa7431e7b15e3aa125781f29367f331ad93c677e50f69be94c1c9d8",
+    "0.4.0": "8bc8dd779aca6f866ddcb5f06a1cbbef7e7f358a2b907b4b7db0a1addb14f3c7",
 }
 
 INPUT_SCHEMA = {
@@ -108,6 +109,8 @@ IDS = ["signal_close", "next_open"]
 # The same two runs with a 2% drawdown stop: it closes the long decided on row 12 on row 14,
 # before the stop would on row 15, and the run stays flat from there.
 DRAWDOWN_SETTINGS = [settings.model_copy(update={"drawdown_stop": 0.02}) for settings in SETTINGS]
+# The first two runs at half the capital.
+HALF_SETTINGS = [settings.model_copy(update={"position_size": 0.5}) for settings in SETTINGS]
 
 
 def as_json(frame: pl.DataFrame) -> dict[str, Any]:
@@ -117,8 +120,8 @@ def as_json(frame: pl.DataFrame) -> dict[str, Any]:
     }
 
 
-def output_json() -> str:
-    """The trades and series of the four runs of EXAMPLE: column names and types, and the rows
+def output_json(settings_list: list[Settings]) -> str:
+    """The trades and series of the given runs of EXAMPLE: column names and types, and the rows
     with each float written as its shortest repr, which reads back exactly. The values come
     from IEEE 754 arithmetic in Python, so the text is the same on every platform.
 
@@ -127,7 +130,7 @@ def output_json() -> str:
     and the test would then ask for a new ENGINE_VERSION without a change to the engine.
     """
     runs = []
-    for settings in [*SETTINGS, *DRAWDOWN_SETTINGS]:
+    for settings in settings_list:
         result = backtest(EXAMPLE, settings)
         runs.append({"trades": as_json(result.trades), "series": as_json(result.series)})
     return json.dumps(runs)
@@ -192,8 +195,15 @@ def test_with_a_drawdown_stop_the_example_halts_on_the_long_before_its_stop(
     assert result.series["equity"][halt] > 0
 
 
+def test_a_position_of_the_whole_capital_gives_the_output_of_engine_0_3_0() -> None:
+    digest = hashlib.sha256(output_json([*SETTINGS, *DRAWDOWN_SETTINGS]).encode()).hexdigest()
+
+    assert digest == OUTPUT_SHA256["0.3.0"]
+
+
 def test_the_output_on_the_example_is_the_one_recorded_for_this_engine_version() -> None:
-    digest = hashlib.sha256(output_json().encode()).hexdigest()
+    runs = [*SETTINGS, *DRAWDOWN_SETTINGS, *HALF_SETTINGS]
+    digest = hashlib.sha256(output_json(runs).encode()).hexdigest()
     recorded = OUTPUT_SHA256.get(ENGINE_VERSION)
 
     assert recorded is not None, (

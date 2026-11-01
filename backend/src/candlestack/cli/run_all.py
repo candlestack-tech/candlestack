@@ -36,6 +36,7 @@ import polars as pl
 from candlestack.cli.options import _at_least, _fraction, _list, _non_negative
 from candlestack.cli.post_processing import (
     add_drawdown_stop,
+    add_position_size,
     add_post_processing,
     check_post_processing,
     post_processing,
@@ -76,6 +77,7 @@ class _Options:
     stop_losses: tuple[float | None, ...]
     fill: Literal["next_open", "signal_close"]
     drawdown_stop: float | None
+    position_size: float
     fee_bps: float
     slippage_bps: float
 
@@ -155,6 +157,7 @@ def _add_engine(parser: argparse.ArgumentParser) -> None:
         "(default: none)",
     )
     add_drawdown_stop(engine)
+    add_position_size(engine)
     engine.add_argument(
         "--fee-bps",
         type=_non_negative,
@@ -230,6 +233,7 @@ def _options(args: argparse.Namespace) -> _Options:
         stop_losses=args.stop_losses,
         fill=args.fill,
         drawdown_stop=args.drawdown_stop,
+        position_size=args.position_size,
         fee_bps=args.fee_bps,
         slippage_bps=args.slippage_bps,
     )
@@ -362,6 +366,7 @@ def _model_runs(
                 fill=options.fill,
                 stop_loss=stop_loss,
                 drawdown_stop=options.drawdown_stop,
+                position_size=options.position_size,
                 fee_bps=options.fee_bps,
                 slippage_bps=options.slippage_bps,
             )
@@ -427,6 +432,7 @@ def _record(
             "fill": options.fill,
             "stop_losses": list(options.stop_losses),
             "drawdown_stop": options.drawdown_stop,
+            "position_size": options.position_size,
             "fee_bps": options.fee_bps,
             "slippage_bps": options.slippage_bps,
         },

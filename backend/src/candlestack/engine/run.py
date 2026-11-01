@@ -19,7 +19,7 @@ TRADES_SCHEMA = pl.Schema(
         "close_price": pl.Float64,
         "stop_price": pl.Float64,  # the stop level; null without a stop
         "exit_reason": pl.String,  # signal, stop, gap, end, ruin or drawdown
-        "return": pl.Float64,  # capital after / capital before - 1, costs included
+        "return": pl.Float64,  # capital after / capital before - 1, costs and size included
         "fees": pl.Float64,  # the fees of both legs, as a fraction of the capital before
         "slippage_cost": pl.Float64,  # what slippage cost, as a fraction of the capital before
     }

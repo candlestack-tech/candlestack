@@ -254,7 +254,14 @@ describe('the backtest builder', () => {
         confirm: null,
         min_hold: null,
       },
-      execution: { fill: 'next_open', stop_loss: 0.07, drawdown_stop: null, fee_bps: 10, slippage_bps: 2 },
+      execution: {
+        fill: 'next_open',
+        stop_loss: 0.07,
+        drawdown_stop: null,
+        position_size: 1,
+        fee_bps: 10,
+        slippage_bps: 2,
+      },
       benchmarks: [{ id: 'bh', kind: 'buy_and_hold', instrument: 'crypto:BTCUSDT' }],
     });
   });

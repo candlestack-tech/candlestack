@@ -839,6 +839,7 @@ export interface components {
              * @default {
              *       "fee_bps": 0,
              *       "fill": "next_open",
+             *       "position_size": 1,
              *       "slippage_bps": 0
              *     }
              */
@@ -1681,6 +1682,11 @@ export interface components {
              * @enum {string}
              */
             fill: "next_open" | "signal_close";
+            /**
+             * Position Size
+             * @default 1
+             */
+            position_size: number;
             /**
              * Slippage Bps
              * @default 0

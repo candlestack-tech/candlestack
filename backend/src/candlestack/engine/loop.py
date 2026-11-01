@@ -1,4 +1,4 @@
-"""The loop: one pass over the candles with at most one position, always fully invested.
+"""The loop: one pass over the candles with at most one position, a fixed share of the capital.
 
 The rules, the same for both fills:
 
@@ -36,6 +36,10 @@ The rules, the same for both fills:
    decided included. Every later row is flat and its equity is the capital, which stays. With
    ``signal_close``, a position does not open at the close of a candle whose capital, after a
    flip's closing leg or a stop, is already at or below the level; the candle halts flat.
+10. Position size: a position takes ``position_size`` of the capital when it opens and keeps
+    that share until it exits; the rest stays as cash that earns nothing. Its return, fees,
+    slippage cost and mark are those of rules 5 and 7 times the share, and the capital is
+    multiplied by ``1 + return`` as ever. The stop level and the side stay as they are.
 """
 
 from candlestack.engine.inputs import Candles
@@ -57,6 +61,7 @@ class Loop:
         self.next_open = settings.fill == "next_open"
         self.stop_loss = settings.stop_loss
         self.drawdown_stop = settings.drawdown_stop
+        self.size = settings.position_size
         self.fee = settings.fee_bps * _BPS
         self.slippage = settings.slippage_bps * _BPS
         self.capital = 1.0  # after the closed trades
@@ -162,10 +167,11 @@ class Loop:
         side = self.side
         exit_price = price * (1.0 - side * self.slippage)
         growth = exit_price / self.entry_price  # exit notional per unit of entry notional
-        fees = self.fee * (1.0 + growth)
-        result = side * (growth - 1.0) - fees
+        fees_of_notional = self.fee * (1.0 + growth)
+        fees = self.size * fees_of_notional
+        result = self.size * (side * (growth - 1.0) - fees_of_notional)
         # + 0.0: a short without slippage costs 0.0, not -0.0, in the stored trades.
-        slippage_cost = side * (price / self.entry_quote - growth) + 0.0
+        slippage_cost = self.size * side * (price / self.entry_quote - growth) + 0.0
         ts = self.candles.ts
         self.trades.append(
             (
@@ -197,7 +203,8 @@ class Loop:
         equity = self.capital
         if self.side:
             close = self.candles.closes[row]
-            equity *= 1.0 + self.side * (close / self.entry_price - 1.0) - self.fee
+            moved = self.side * (close / self.entry_price - 1.0)
+            equity *= 1.0 + self.size * moved - self.size * self.fee
             if equity <= 0.0:
                 # Closing costs at least as much as the mark, so the return is at most -1;
                 # the capital is set to 0 here too, whatever the rounding of the return.
