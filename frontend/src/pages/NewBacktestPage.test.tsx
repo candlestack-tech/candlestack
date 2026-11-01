@@ -204,6 +204,12 @@ describe('the backtest builder', () => {
     expect(next()).toHaveProperty('disabled', true);
   });
 
+  it('starts a position at the whole capital, in Advanced', async () => {
+    const { user } = await openBuilder();
+    await goTo(user, 'Decision');
+    expect(screen.getByRole('slider', { name: 'Position size' }).getAttribute('aria-valuetext')).toBe('100 %');
+  });
+
   it('offers buy and hold as the benchmark, the others as coming soon', async () => {
     const { user } = await openBuilder();
     await goTo(user, 'Execution');
