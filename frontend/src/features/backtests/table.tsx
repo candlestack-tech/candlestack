@@ -58,7 +58,7 @@ export const ROW_OPENER =
 
 // Where a backtest's page goes back to: the dashboard or the model's page it was opened from,
 // else the Backtests page.
-function useOpenedFrom(): 'dashboard' | 'model' | undefined {
+export function useOpenedFrom(): 'dashboard' | 'model' | undefined {
   return useRouterState({
     select: ({ location }) => {
       if (location.pathname.startsWith('/dashboard')) return 'dashboard';

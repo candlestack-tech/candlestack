@@ -48,7 +48,7 @@ export function AppLayout() {
     <SignedInUserContext value={user}>
       <PageFrame header={<AppHeader />} app>
         <Workspace />
-        <ComparePanel />
+        <ComparePanel userId={user.id} />
       </PageFrame>
     </SignedInUserContext>
   );

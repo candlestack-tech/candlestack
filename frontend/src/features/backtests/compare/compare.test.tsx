@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ARSEN, backtest, backtestsAnswer, failedBacktest, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 
-import { addToCompare, clearCompare } from './selection';
+import { addToCompare, claimCompare, clearCompare } from './selection';
 
 const FINISHED = [12, 13, 14, 15, 16].map((number) => backtest({ id: `bt_${String(number)}`, number }));
 const FAILED = failedBacktest({ id: 'bt_failed', number: 11 });
@@ -82,6 +82,15 @@ describe('choosing backtests to compare', () => {
     await user.click(screen.getByRole('button', { name: /^Compare 1 of 4$/ }));
     await user.click(within(panel()).getByRole('button', { name: 'Clear' }));
     expect(screen.queryByRole('complementary', { name: 'Compare' })).toBeNull();
+  });
+
+  it('forgets the choice when another account signs in, not when the same one comes back', () => {
+    claimCompare('usr_a');
+    addToCompare({ id: 'bt_12', number: 12, symbol: 'AAPL' });
+    claimCompare('usr_a');
+    expect(localStorage.getItem('compare-backtests')).toContain('bt_12');
+    claimCompare('usr_b');
+    expect(localStorage.getItem('compare-backtests')).not.toContain('bt_12');
   });
 
   it('remembers the choice in this browser', () => {
