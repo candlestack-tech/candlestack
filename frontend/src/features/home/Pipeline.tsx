@@ -19,7 +19,7 @@ const STEPS: Step[] = [
     eyebrow: 'Layer 2',
     name: 'Model',
     layer: true,
-    items: ['Your trained model', 'Keras, PyTorch, ONNX', 'Input shape check'],
+    items: ['Your trained model', 'Keras, ONNX', 'Input shape check'],
   },
   { eyebrow: 'Layer 3', name: 'Decision', layer: true, items: ['Threshold', 'Stop loss', 'Smoothing'] },
   { eyebrow: 'Output', name: 'Results', items: ['Return, Sharpe', 'Drawdown', 'Trades on the chart'] },
