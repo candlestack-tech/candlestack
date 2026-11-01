@@ -1,12 +1,12 @@
-import { Link } from '@tanstack/react-router';
+import { Link, useRouterState } from '@tanstack/react-router';
 import { ChevronDown, Scale, X } from 'lucide-react';
 import { useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
 
-import { CompareDialog } from '../CompareDialog';
 import { useOpenedFrom } from '../table';
 import { SLOT_COLORS } from './colors';
+import { CompareLink } from './CompareLink';
 import {
   SLOTS,
   claimCompare,
@@ -100,10 +100,11 @@ function PanelHead({ count }: { count: string }) {
 // are any: their slots one under the other, Clear, a fold to a small button, and Compare from 2.
 export function ComparePanel({ userId }: { userId: string }) {
   const { slots, picks, hidden } = useCompareSelection();
+  const comparing = useRouterState({ select: ({ location }) => location.pathname === '/backtests/compare' });
   useEffect(() => {
     claimCompare(userId);
   }, [userId]);
-  if (picks.length === 0) return null;
+  if (picks.length === 0 || comparing) return null;
   const count = `${picks.length} of ${SLOTS}`;
   if (hidden) return <FoldedPanel count={count} />;
   return (
@@ -122,16 +123,15 @@ export function ComparePanel({ userId }: { userId: string }) {
           ),
         )}
       </div>
-      <CompareDialog>
-        <Button
-          type="button"
-          disabled={picks.length < 2}
-          title={picks.length < 2 ? 'Add at least 2 backtests' : undefined}
-          className="w-full"
-        >
+      {picks.length < 2 ? (
+        <Button type="button" disabled title="Add at least 2 backtests" className="w-full">
           Compare
         </Button>
-      </CompareDialog>
+      ) : (
+        <Button asChild className="w-full">
+          <CompareLink>Compare</CompareLink>
+        </Button>
+      )}
     </aside>
   );
 }

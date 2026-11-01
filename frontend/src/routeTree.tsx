@@ -113,6 +113,14 @@ const newBacktestRoute = createRoute({
   component: lazyRouteComponent(() => import('@/pages/NewBacktestPage'), 'NewBacktestPage'),
 });
 
+// /backtests/compare: the chosen backtests side by side, without the sidebar.
+const compareRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/backtests/compare',
+  staticData: { sidebar: false },
+  component: lazyRouteComponent(() => import('@/pages/ComparePage'), 'ComparePage'),
+});
+
 // /backtests/bt_7f3k2m9qx4: one backtest's page, without the sidebar (mockups/app, pageRun). An ID
 // the user has no backtest with says so on the page.
 const backtestRoute = createRoute({
@@ -193,6 +201,7 @@ export const routeTree = rootRoute.addChildren([
     dashboardRoute,
     backtestsRoute,
     newBacktestRoute,
+    compareRoute,
     backtestRoute,
     modelsRoute,
     modelRoute,

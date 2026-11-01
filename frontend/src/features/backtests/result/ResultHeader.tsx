@@ -1,4 +1,4 @@
-import { Link, useRouterState } from '@tanstack/react-router';
+import { Link, useRouter, useRouterState } from '@tanstack/react-router';
 import { Download } from 'lucide-react';
 import { useState } from 'react';
 
@@ -26,6 +26,20 @@ const BACK =
 // "← <the model>" (its links set `from` in the history state).
 export function BackLink({ model }: { model?: BacktestDocument['model'] }) {
   const from = useRouterState({ select: (state) => state.location.state.from });
+  const router = useRouter();
+  if (from === 'compare') {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          router.history.back();
+        }}
+        className={cn(BACK, 'cursor-pointer')}
+      >
+        ← Compare backtests
+      </button>
+    );
+  }
   if (from === 'dashboard') {
     return (
       <Link to="/dashboard" className={BACK}>
