@@ -250,6 +250,7 @@ def _document(
     return document(
         backtest=BacktestHeader(
             id=backtest.id,
+            name=backtest.name,
             number=backtest.number,
             status=BacktestStatus(backtest.status),
             created_at=backtest.created_at,

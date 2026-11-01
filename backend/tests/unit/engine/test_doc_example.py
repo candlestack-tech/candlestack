@@ -114,7 +114,7 @@ def test_the_invalid_input_message() -> None:
 
     assert str(error.value) == (
         "Invalid backtest input: 1 row has a ts not after the previous row, first at row 2; "
-        "1 row has a fractional signal (position sizing is not supported yet), first at row 1."
+        "1 row has a fractional signal (the size is the setting position_size), first at row 1."
     )
 
 
@@ -203,7 +203,7 @@ def test_the_command_writes_the_run_json_of_the_document(
     record = json.loads((OUT / "run.json").read_text(encoding="utf-8"))
     hashes = {name: record["inputs"][name].pop("sha256") for name in record["inputs"]}
     assert record == {
-        "engine_version": "0.3.0",
+        "engine_version": "0.4.0",
         "inputs": {
             "candles": {"path": "candles.parquet"},
             "predictions": {"path": "predictions.parquet"},
@@ -219,6 +219,7 @@ def test_the_command_writes_the_run_json_of_the_document(
             "fill": "signal_close",
             "stop_loss": 0.05,
             "drawdown_stop": None,
+            "position_size": 1.0,
             "fee_bps": 10.0,
             "slippage_bps": 0.0,
         },

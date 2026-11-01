@@ -10,7 +10,7 @@ both as well.
 import argparse
 from typing import Any
 
-from candlestack.cli.options import _at_least, _fraction, _list, _non_negative
+from candlestack.cli.options import _at_least, _fraction, _list, _non_negative, _share
 from candlestack.signals import PostProcessing, Rule
 
 # The options of each rule (by their dest), and the ones it cannot do without: the limit
@@ -171,6 +171,18 @@ def add_drawdown_stop(engine: argparse._ArgumentGroup) -> None:
         metavar="FRACTION",
         help="halt the run once the equity is this fraction below its highest level so far, "
         "0.2 for 20%% (default: no drawdown stop)",
+    )
+
+
+def add_position_size(engine: argparse._ArgumentGroup) -> None:
+    """Adds ``--position-size`` (``Settings.position_size``) to the engine group."""
+    engine.add_argument(
+        "--position-size",
+        type=_share,
+        default=1.0,
+        metavar="SHARE",
+        help="the share of the capital a position takes when it opens, 0.5 for 50%% "
+        "(default: 1, the whole capital)",
     )
 
 

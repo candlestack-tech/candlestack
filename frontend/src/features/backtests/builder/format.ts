@@ -28,6 +28,17 @@ export const periodLine = (form: Pick<BuilderForm, 'from' | 'to'>, write: DateWr
 
 const fixed = (value: number) => value.toFixed(2);
 
+// What Advanced turned on, in the order of its rows.
+const advancedParts = (form: BuilderForm) => [
+  form.calibration === 'zscore' && 'z-score',
+  form.calibration === 'rank' && 'rank',
+  form.ema > 1 && `EMA ${form.ema}`,
+  form.confirm > 1 && `confirm ${form.confirm}`,
+  form.minHold > 1 && `hold ${form.minHold}`,
+  form.positionSize < 100 && `size ${form.positionSize} %`,
+  form.drawdownStop > 0 && `drawdown stop ${form.drawdownStop} %`,
+];
+
 // The decision in one line: the rule, the direction and the stop, then what Advanced turned on.
 export function decisionLine(form: BuilderForm): string {
   const rule =
@@ -40,12 +51,7 @@ export function decisionLine(form: BuilderForm): string {
     rule,
     form.direction === 'long' ? 'long only' : 'long and short',
     `stop ${form.stopLoss} %`,
-    form.calibration === 'zscore' && 'z-score',
-    form.calibration === 'rank' && 'rank',
-    form.ema > 1 && `EMA ${form.ema}`,
-    form.confirm > 1 && `confirm ${form.confirm}`,
-    form.minHold > 1 && `hold ${form.minHold}`,
-    form.drawdownStop > 0 && `drawdown stop ${form.drawdownStop} %`,
+    ...advancedParts(form),
   ]
     .filter(Boolean)
     .join(' · ');

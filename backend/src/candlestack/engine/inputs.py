@@ -27,7 +27,7 @@ _RULES = [
     ("a missing or non-finite signal", _FINITE_SIGNAL.not_().fill_null(value=True)),
     ("a signal beyond -1 or +1", _FINITE_SIGNAL & (_SIGNAL.abs() > 1)),
     (
-        "a fractional signal (position sizing is not supported yet)",
+        "a fractional signal (the size is the setting position_size)",
         _FINITE_SIGNAL & (_SIGNAL.abs() < 1) & (_SIGNAL != 0),
     ),
 ]

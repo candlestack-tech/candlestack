@@ -33,6 +33,7 @@ import polars as pl
 from candlestack.cli.options import _fraction, _non_negative
 from candlestack.cli.post_processing import (
     add_drawdown_stop,
+    add_position_size,
     add_post_processing,
     check_post_processing,
     post_processing,
@@ -138,6 +139,7 @@ def _add_engine(parser: argparse.ArgumentParser) -> None:
         "(default: no stop)",
     )
     add_drawdown_stop(engine)
+    add_position_size(engine)
     engine.add_argument(
         "--fee-bps",
         type=_non_negative,
@@ -179,6 +181,7 @@ def _run(args: argparse.Namespace) -> Stats:
         fill=args.fill,
         stop_loss=args.stop_loss,
         drawdown_stop=args.drawdown_stop,
+        position_size=args.position_size,
         fee_bps=args.fee_bps,
         slippage_bps=args.slippage_bps,
     )

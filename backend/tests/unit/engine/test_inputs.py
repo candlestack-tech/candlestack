@@ -105,7 +105,7 @@ def test_columns_of_the_wrong_type_are_named() -> None:
 TS = "a ts not after the previous row"
 PRICE = "a missing or non-finite price"
 SIGNAL = "a missing or non-finite signal"
-FRACTION = "a fractional signal (position sizing is not supported yet)"
+FRACTION = "a fractional signal (the size is the setting position_size)"
 
 
 @pytest.mark.parametrize(
@@ -146,7 +146,7 @@ def test_every_broken_rule_is_reported_at_once() -> None:
 
     assert str(error.value) == (
         "Invalid backtest input: 1 row has a ts not after the previous row, first at row 2; "
-        "1 row has a fractional signal (position sizing is not supported yet), first at row 2."
+        "1 row has a fractional signal (the size is the setting position_size), first at row 2."
     )
 
 

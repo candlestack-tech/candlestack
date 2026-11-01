@@ -5,9 +5,11 @@ import { HINT } from '@/components/Hint';
 import { formatPercent, formatSharpe } from '@/lib/results';
 import { cn } from '@/lib/utils';
 
-import { hasResults } from './format';
+import { CompareToggle } from './compare/CompareToggle';
+import { useComparedRow } from './compare/selection';
+import { compareTarget, hasResults } from './format';
 import { BacktestInstruments, BacktestReturn, BacktestWhen, Missing } from './parts';
-import { BacktestCell, CELL, HEAD, NUMBER, ROW, TABLE } from './table';
+import { BacktestCell, CELL, COMPARE_CELL, HEAD, NUMBER, ROW, TABLE } from './table';
 import { useBacktestsPage, useStarBacktest } from './useBacktests';
 import { WIDTH } from './widths';
 
@@ -20,6 +22,7 @@ const COLUMNS: readonly { label: string; number?: boolean; width?: string; hide?
   { label: 'Sharpe', number: true, width: WIDTH.sharpe },
   { label: 'Max drawdown', number: true, width: WIDTH.maxDrawdown, hide: 'max-[760px]:hidden' },
   { label: 'When', width: WIDTH.when, hide: 'max-[560px]:hidden' },
+  { label: 'Compare', width: WIDTH.compare },
 ];
 
 const hideOf = (label: string) => COLUMNS.find((column) => column.label === label)?.hide;
@@ -28,8 +31,9 @@ type RowProps = { backtest: Backtest; onStar: (backtest: Backtest) => void };
 
 function Row({ backtest, onStar }: RowProps) {
   const done = hasResults(backtest);
+  const compared = useComparedRow(backtest.id);
   return (
-    <tr className={ROW}>
+    <tr className={cn(ROW, compared)}>
       <td className={CELL}>
         <BacktestCell backtest={backtest} onStar={onStar} />
       </td>
@@ -45,6 +49,9 @@ function Row({ backtest, onStar }: RowProps) {
       </td>
       <td className={cn(CELL, 'text-muted-foreground', hideOf('When'))}>
         <BacktestWhen backtest={backtest} />
+      </td>
+      <td className={cn(CELL, COMPARE_CELL)}>
+        <CompareToggle target={compareTarget(backtest)} />
       </td>
     </tr>
   );
@@ -64,7 +71,7 @@ function Table({ backtests, onStar }: TableProps) {
                 scope="col"
                 className={cn(HEAD, column.width, column.number && NUMBER, column.hide)}
               >
-                {column.label}
+                {column.label === 'Compare' ? <span className="sr-only">{column.label}</span> : column.label}
               </th>
             ))}
           </tr>

@@ -11,4 +11,5 @@ export const WIDTH = {
   sharpe: 'w-[76px]',
   maxDrawdown: 'w-[128px]',
   when: 'w-[128px]',
+  compare: 'w-[44px]',
 } as const;

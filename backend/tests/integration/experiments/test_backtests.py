@@ -35,6 +35,7 @@ def test_a_backtest_as_the_list_shows_it(ada) -> None:
         "backtests": [
             {
                 "id": backtest_id,
+                "name": None,
                 "number": 1,
                 "status": "finished",
                 "instruments": [
@@ -318,6 +319,25 @@ def test_star_and_unstar(ada, sql) -> None:
     ada.star(backtest_id)
     assert sql("SELECT starred FROM backtests") == [(True,)]
     assert ada.backtests().json()["counts"]["starred"] == 1
+
+
+def test_rename_and_take_the_name_away(ada, sql) -> None:
+    backtest_id = ada.backtest(1)
+    ada.star(backtest_id)
+
+    renamed = ada.rename(backtest_id, "  half size ")
+
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "half size"
+    assert renamed.json()["starred"] is True
+    assert sql("SELECT name FROM backtests") == [("half size",)]
+    assert numbers(ada.backtests(q="half")) == [1]
+    assert ada.rename(backtest_id, None).json()["name"] is None
+    assert numbers(ada.backtests(q="half")) == []
+
+
+def test_another_users_backtest_cannot_be_renamed(ada, bob) -> None:
+    assert ada.rename(bob.backtest(1), "mine").status_code == 404
 
 
 def test_another_users_backtest_is_not_found(ada, bob, sql) -> None:
