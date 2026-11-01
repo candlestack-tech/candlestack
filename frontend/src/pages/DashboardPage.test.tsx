@@ -170,7 +170,7 @@ describe('the dashboard of an account with backtests', () => {
     const icons = (name: string) =>
       [...screen.getByRole('region', { name }).querySelectorAll('img')].map((img) => img.getAttribute('src'));
     expect(icons('Last backtests')).toHaveLength(5);
-    expect(icons('Best backtests')).toHaveLength(3);
+    expect(icons('Best backtests')).toHaveLength(2);
     expect(icons('Starred backtests')).toEqual([
       '/api/v1/data/instruments/stock%3AAAPL/icon',
       '/api/v1/data/instruments/stock%3AMSFT/icon',
@@ -187,14 +187,14 @@ describe('the dashboard of an account with backtests', () => {
     const best = within(await screen.findByRole('region', { name: 'Best backtests' }));
     expect(best.getByText('by Sharpe')).toBeDefined();
     expect(rowsOf('Best backtests')).toEqual([
-      ['1', '#12AAPLMSFT', '1.34', '+24.6 %', '−19.7 %', '51.2 %', ''],
+      ['1', '#12AAPL+1', '1.34', '+24.6 %', '−19.7 %', '51.2 %', ''],
       ['2', '#10AAPL+3', '0.50', '+96.5 %', '−8.0 %', '55.6 %', ''],
     ]);
     expect(best.getByRole('button', { name: 'Sharpe ↓' }).getAttribute('aria-pressed')).toBe('true');
     await userEvent.click(best.getByRole('button', { name: 'Return' }));
     expect(best.getByText('by return')).toBeDefined();
     expect(best.getByRole('button', { name: 'Return ↓' }).getAttribute('aria-pressed')).toBe('true');
-    expect(rowsOf('Best backtests').map((row) => row[1])).toEqual(['#10AAPL+3', '#12AAPLMSFT']);
+    expect(rowsOf('Best backtests').map((row) => row[1])).toEqual(['#10AAPL+3', '#12AAPL+1']);
     await userEvent.click(best.getByRole('button', { name: 'Drawdown' }));
     expect(best.getByText('by drawdown')).toBeDefined();
     await userEvent.click(best.getByRole('button', { name: 'Win rate' }));
