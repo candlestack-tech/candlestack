@@ -125,6 +125,7 @@ export const model = (fields: Partial<Model> = {}): Model => ({
 // A finished backtest as the API sends it: #12 on AAPL and MSFT with blesk-novol-8.keras.
 export const backtest = (fields: Partial<Backtest> = {}): Backtest => ({
   id: 'bt_7f3k2m9qx4',
+  name: null,
   number: 12,
   instruments: [
     { symbol: 'AAPL', market: 'stock' },
@@ -356,12 +357,22 @@ const EXAMPLE_RESULTS: NonNullable<BacktestDocument['results']> = {
   },
 };
 
+const EXAMPLE_EXECUTION: BacktestDocument['execution'] = {
+  fill: 'next_open',
+  stop_loss: 0.05,
+  drawdown_stop: null,
+  position_size: 1,
+  fee_bps: 10,
+  slippage_bps: 0,
+};
+
 // The worked example of docs/engine.md as the result document of #12: AAPL, 30-minute candles,
 // one long trade stopped out, 5 % stop and 10 bps fees, against buy and hold.
 export const backtestDocument = (fields: Partial<BacktestDocument> = {}): BacktestDocument => ({
   version: 1,
   backtest: {
     id: 'bt_7f3k2m9qx4',
+    name: null,
     number: 12,
     status: 'finished',
     created_at: '2026-10-17T14:05:00Z',
@@ -392,7 +403,7 @@ export const backtestDocument = (fields: Partial<BacktestDocument> = {}): Backte
     confirm: null,
     min_hold: null,
   },
-  execution: { fill: 'next_open', stop_loss: 0.05, drawdown_stop: null, fee_bps: 10, slippage_bps: 0 },
+  execution: EXAMPLE_EXECUTION,
   benchmarks: [{ id: 'bh', kind: 'buy_and_hold', instrument: 'stock:AAPL' }],
   metrics: { periods_per_year: 252, risk_free_rate: 0 },
   results: EXAMPLE_RESULTS,

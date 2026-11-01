@@ -39,7 +39,7 @@ describe('HomePage', () => {
     expect(headings).toEqual([
       'Three layers you can swap',
       'US stocks and crypto pairs, candles from 1m to 1d',
-      'Every run gets the same metrics',
+      'See which setup holds up',
       'A catalog of published experiments',
     ]);
   });
@@ -69,18 +69,19 @@ describe('HomePage', () => {
 
   it('leads Try Backtest to the sign-in page', async () => {
     const html = await render();
-    expect(html.match(/>Try Backtest</g)).toHaveLength(1);
+    expect(html.match(/>Try Backtest</g)).toHaveLength(2);
     expect(html).toMatch(/<a [^>]*href="\/signin"[^>]*>Try Backtest<\/a>/);
   });
 
-  it('marks compare and experiments as coming soon, over sketches screen readers skip', async () => {
+  it('shows the example of compare, and marks experiments as coming soon over a sketch screen readers skip', async () => {
     const html = await render();
-    for (const id of ['compare', 'experiments']) {
-      const markup = section(html, id);
-      expect(markup.match(/>Coming soon<\/span>/g)).toHaveLength(1);
-      expect(markup).toContain('aria-hidden="true"');
-    }
-    expect(html.match(/Coming soon/g)).toHaveLength(2);
+    const compare = section(html, 'compare');
+    expect(compare).toContain('>EXAMPLE</span>');
+    expect(compare).not.toContain('Coming soon');
+    const experiments = section(html, 'experiments');
+    expect(experiments.match(/>Coming soon<\/span>/g)).toHaveLength(1);
+    expect(experiments).toContain('aria-hidden="true"');
+    expect(html.match(/Coming soon/g)).toHaveLength(1);
   });
 
   it('counts the instruments as the API has them', async () => {

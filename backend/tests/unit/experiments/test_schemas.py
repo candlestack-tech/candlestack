@@ -105,7 +105,18 @@ def test_sixty_points_fit() -> None:
     assert len(series.strategy) == EQUITY_POINTS == 60
 
 
-def test_a_star_has_only_the_star() -> None:
+def test_an_update_has_a_star_or_a_name() -> None:
     assert BacktestUpdate.model_validate({"starred": False}).starred is False
+    assert BacktestUpdate.model_validate({"name": "  half size  "}).name == "half size"
+    assert BacktestUpdate.model_validate({"name": None}).model_fields_set == {"name"}
+    assert BacktestUpdate.model_validate({"starred": True}).model_fields_set == {"starred"}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{}, {"number": 3}, {"name": ""}, {"name": "   "}, {"name": "a\nb"}, {"name": "x" * 81}],
+    ids=["empty", "extra", "blank", "spaces", "control", "long"],
+)
+def test_an_update_refuses(body: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
-        BacktestUpdate.model_validate({"starred": True, "name": "x"})
+        BacktestUpdate.model_validate(body)

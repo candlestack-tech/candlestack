@@ -176,7 +176,7 @@ rel_low, rel_close, is_last_bar`, with `rsi@2`, `tsi@2`, `atr@2`, `adx@2`, `ema@
 
 | Fixed by the manifest | Chosen for each backtest |
 | --- | --- |
-| timeframe, representation, brick size, features and their order, indicator parameters, normalization, window | the instrument (one per backtest), period, how predictions become a signal (calibration, smoothing, threshold, hysteresis or k-means, long only, confirmation, holding period), stop loss, drawdown stop, fill, fees, slippage, benchmark; position sizing later |
+| timeframe, representation, brick size, features and their order, indicator parameters, normalization, window | the instrument (one per backtest), period, how predictions become a signal (calibration, smoothing, threshold, hysteresis or k-means, long only, confirmation, holding period), stop loss, drawdown stop, fill, fees, slippage, benchmark, position size |
 
 A trained model only works on the input it was trained on, so the builder shows the manifest's
 input as read only. Comparing Renko with Kagi, or one architecture with another (TSMixer,

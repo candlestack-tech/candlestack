@@ -109,15 +109,6 @@ export function TrophyIcon(props: IconProps) {
   );
 }
 
-// Compare backtests: two arrows passing each other.
-export function SwapIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M4 7h13l-3-3M20 17H7l3 3" />
-    </Icon>
-  );
-}
-
 // The dark theme: a crescent moon.
 export function MoonIcon(props: IconProps) {
   return (

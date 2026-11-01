@@ -1,4 +1,4 @@
-import { Link, useRouterState } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 
 import type { Backtest } from '@/api';
@@ -6,6 +6,7 @@ import { StarButton } from '@/components/StarButton';
 import { cn } from '@/lib/utils';
 
 import { BacktestNumber, ModelName } from './parts';
+import { useOpenedFrom } from './useOpenedFrom';
 
 // The tables of backtests (mockups/app, .tbl): 13 px, the headers medium and muted over a line,
 // the rows 8 px high around their text with a line under each but the last, 10 px at the sides
@@ -16,6 +17,8 @@ export const HEAD = 'border-b px-2.5 py-2 text-left font-medium whitespace-nowra
 export const CELL = 'border-b px-2.5 py-2 whitespace-nowrap tabular-nums [tr:last-child>&]:border-b-0';
 // The numbers and their headers (.num): mono, at the right.
 export const NUMBER = 'text-right font-mono';
+// The cell of the scale icon: its 32 px button sets the height of no row.
+export const COMPARE_CELL = 'px-1 py-0 text-center';
 export const ROW =
   'relative cursor-pointer [&>td]:transition-colors [&>td]:duration-150 hover:[&>td]:bg-muted motion-reduce:[&>td]:transition-none';
 
@@ -54,17 +57,6 @@ export function SortButton({
 export const ROW_OPENER =
   'cursor-pointer outline-none after:absolute after:inset-0 focus-visible:text-primary focus-visible:after:rounded-md focus-visible:after:ring-2 focus-visible:after:ring-ring/60 focus-visible:after:ring-inset';
 
-// Where a backtest's page goes back to: the dashboard or the model's page it was opened from,
-// else the Backtests page.
-function useOpenedFrom(): 'dashboard' | 'model' | undefined {
-  return useRouterState({
-    select: ({ location }) => {
-      if (location.pathname.startsWith('/dashboard')) return 'dashboard';
-      return location.pathname.startsWith('/models/') ? 'model' : undefined;
-    },
-  });
-}
-
 // The link to a row's backtest page, stretched over the whole row so the row is one click target
 // and the keyboard reaches it; what else the row holds (the star) sits above it.
 export function RowOpener({ backtest, children }: { backtest: Backtest; children: ReactNode }) {
@@ -91,16 +83,23 @@ export function RowStar({ starred, label, onToggle }: { starred: boolean; label:
 // The star and the number of a backtest, the number opening it (the Backtest column).
 export function BacktestCell({ backtest, onStar }: { backtest: Backtest; onStar: (backtest: Backtest) => void }) {
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <RowStar
-        starred={backtest.starred}
-        label={`Star backtest ${backtest.number}`}
-        onToggle={() => onStar(backtest)}
-      />
-      <RowOpener backtest={backtest}>
-        <BacktestNumber backtest={backtest} />
-      </RowOpener>
-    </span>
+    <>
+      <span className="inline-flex items-center gap-1.5">
+        <RowStar
+          starred={backtest.starred}
+          label={`Star backtest ${backtest.number}`}
+          onToggle={() => onStar(backtest)}
+        />
+        <RowOpener backtest={backtest}>
+          <BacktestNumber backtest={backtest} />
+        </RowOpener>
+      </span>
+      {backtest.name && (
+        <span title={backtest.name} className="block truncate text-xs/4 text-muted-foreground">
+          {backtest.name}
+        </span>
+      )}
+    </>
   );
 }
 

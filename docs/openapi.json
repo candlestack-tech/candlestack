@@ -394,6 +394,18 @@
             "title": "Id",
             "type": "string"
           },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the user calls it; null until they rename it",
+            "title": "Name"
+          },
           "number": {
             "description": "The user's own number, shown as #N",
             "examples": [
@@ -417,6 +429,7 @@
         },
         "required": [
           "id",
+          "name",
           "number",
           "status",
           "created_at",
@@ -458,6 +471,7 @@
             "default": {
               "fee_bps": 0.0,
               "fill": "next_open",
+              "position_size": 1.0,
               "slippage_bps": 0.0
             }
           },
@@ -670,6 +684,18 @@
           "model": {
             "$ref": "#/components/schemas/UsedModel"
           },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the user calls it; null until they rename it",
+            "title": "Name"
+          },
           "num_trades": {
             "anyOf": [
               {
@@ -753,6 +779,7 @@
         },
         "required": [
           "id",
+          "name",
           "number",
           "status",
           "instruments",
@@ -1100,16 +1127,36 @@
       },
       "BacktestUpdate": {
         "additionalProperties": false,
+        "description": "What the star and Rename change; a field left out stays as it is.",
         "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What to call it, without control characters; null takes the name away",
+            "title": "Name"
+          },
           "starred": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Star or unstar the backtest",
-            "title": "Starred",
-            "type": "boolean"
+            "title": "Starred"
           }
         },
-        "required": [
-          "starred"
-        ],
         "title": "BacktestUpdate",
         "type": "object"
       },
@@ -2146,6 +2193,13 @@
             ],
             "title": "Fill",
             "type": "string"
+          },
+          "position_size": {
+            "default": 1.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Position Size",
+            "type": "number"
           },
           "slippage_bps": {
             "default": 0.0,
@@ -5453,7 +5507,7 @@
         ]
       },
       "patch": {
-        "description": "Stars or unstars the backtest.",
+        "description": "Stars, unstars or renames the backtest; a field left out stays as it is.",
         "operationId": "update_backtest_api_v1_backtests__backtest_id__patch",
         "parameters": [
           {

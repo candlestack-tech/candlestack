@@ -190,7 +190,7 @@ export interface paths {
         head?: never;
         /**
          * Update Backtest
-         * @description Stars or unstars the backtest.
+         * @description Stars, unstars or renames the backtest; a field left out stays as it is.
          */
         patch: operations["update_backtest_api_v1_backtests__backtest_id__patch"];
         trace?: never;
@@ -801,6 +801,11 @@ export interface components {
              */
             id: string;
             /**
+             * Name
+             * @description What the user calls it; null until they rename it
+             */
+            name: string | null;
+            /**
              * Number
              * @description The user's own number, shown as #N
              * @example 12
@@ -839,6 +844,7 @@ export interface components {
              * @default {
              *       "fee_bps": 0,
              *       "fill": "next_open",
+             *       "position_size": 1,
              *       "slippage_bps": 0
              *     }
              */
@@ -948,6 +954,11 @@ export interface components {
              */
             max_drawdown: number | null;
             model: components["schemas"]["UsedModel"];
+            /**
+             * Name
+             * @description What the user calls it; null until they rename it
+             */
+            name: string | null;
             /**
              * Num Trades
              * @description Number of trades
@@ -1142,13 +1153,21 @@ export interface components {
          * @enum {string}
          */
         BacktestTimeframe: "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d";
-        /** BacktestUpdate */
+        /**
+         * BacktestUpdate
+         * @description What the star and Rename change; a field left out stays as it is.
+         */
         BacktestUpdate: {
+            /**
+             * Name
+             * @description What to call it, without control characters; null takes the name away
+             */
+            name?: string | null;
             /**
              * Starred
              * @description Star or unstar the backtest
              */
-            starred: boolean;
+            starred?: boolean | null;
         };
         /** BacktestsPage */
         BacktestsPage: {
@@ -1681,6 +1700,11 @@ export interface components {
              * @enum {string}
              */
             fill: "next_open" | "signal_close";
+            /**
+             * Position Size
+             * @default 1
+             */
+            position_size: number;
             /**
              * Slippage Bps
              * @default 0

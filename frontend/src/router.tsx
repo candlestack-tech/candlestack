@@ -37,7 +37,9 @@ declare module '@tanstack/react-router' {
   // the builder's back link; a link to a backtest from the dashboard or a model's page sets
   // 'dashboard' or 'model'.
   interface HistoryState {
-    from?: 'dashboard' | 'backtests' | 'models' | 'model';
+    from?: 'dashboard' | 'backtests' | 'models' | 'model' | 'compare';
+    // What the back link of the compare page calls the page it was opened from.
+    comparedFrom?: string;
   }
   // A page of the signed-in app without the sidebar sets sidebar: false (the builder); one that
   // fills the height left under the header sets fill: true (the instrument page, for its chart).

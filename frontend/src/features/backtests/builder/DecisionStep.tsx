@@ -206,8 +206,28 @@ function DrawdownRow({ form, onChange }: Pick<Props, 'form' | 'onChange'>) {
   );
 }
 
-// Advanced (.b-extra): calibration, smoothing, the rule, confirmation, the minimum hold and the
-// drawdown stop, each off until set.
+// The share of the capital a position takes when it opens.
+function PositionSizeRow({ form, onChange }: Pick<Props, 'form' | 'onChange'>) {
+  return (
+    <BuilderRow label="Position size">
+      <div className="min-w-[180px] flex-1">
+        <ValueSlider
+          className={WIDE}
+          label="Position size"
+          value={form.positionSize}
+          min={5}
+          max={100}
+          step={5}
+          format={percent}
+          onChange={(positionSize) => onChange({ positionSize })}
+        />
+      </div>
+    </BuilderRow>
+  );
+}
+
+// Advanced (.b-extra): calibration, smoothing, the rule, confirmation, the minimum hold, the
+// position size and the drawdown stop, each off or whole until set.
 function AdvancedRows(props: Omit<Props, 'problem'>) {
   const { form, onChange } = props;
   return (
@@ -222,6 +242,7 @@ function AdvancedRows(props: Omit<Props, 'problem'>) {
         <CandlesInput label="Minimum hold" value={form.minHold} onChange={(minHold) => onChange({ minHold })} />
         <Hint>candles</Hint>
       </BuilderRow>
+      <PositionSizeRow form={form} onChange={onChange} />
       <DrawdownRow form={form} onChange={onChange} />
     </div>
   );

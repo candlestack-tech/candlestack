@@ -190,6 +190,24 @@ def test_each_combination_gives_the_trades_and_stats_of_run(data: Path, tmp_path
     assert trades.height >= 20
 
 
+def test_the_position_size_reaches_every_combination_as_in_run(data: Path, tmp_path: Path) -> None:
+    size = ["--position-size", "0.5"]
+    out = tmp_path / "all"
+
+    code = run_all(data, out, *LABELS, *size, "--thresholds", "0,0.3")
+
+    assert code == 0
+    combinations: list[Keys] = [
+        (name, model, limit, None)
+        for name in ["AAPL", "MSFT"]
+        for model in ["A", "B"]
+        for limit in [0.0, 0.3]
+    ]
+    assert_combinations_give_runs(data, out, tmp_path, combinations, size)
+    record = json.loads((out / "run.json").read_text(encoding="utf-8"))
+    assert record["settings"]["position_size"] == 0.5
+
+
 def test_the_post_processing_and_the_drawdown_stop_reach_every_combination_as_in_run(
     data: Path, tmp_path: Path
 ) -> None:
@@ -372,6 +390,7 @@ def test_run_json_holds_the_settings_models_hashes_and_align_reports(
             "fill": "next_open",
             "stop_losses": [0.05, None],
             "drawdown_stop": None,
+            "position_size": 1.0,
             "fee_bps": 2.0,
             "slippage_bps": 0.0,
         },
