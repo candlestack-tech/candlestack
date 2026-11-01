@@ -15,7 +15,7 @@ const LAYERS: Layer[] = [
     eyebrow: 'Layer 2 · Model',
     title: 'What predicts',
     text: 'Bring your own trained model. We check that it fits the input before it runs.',
-    badges: ['Keras', 'TensorFlow', 'PyTorch', 'ONNX', 'scikit-learn'],
+    badges: ['Keras', 'ONNX'],
   },
   {
     eyebrow: 'Layer 3 · Decision',
