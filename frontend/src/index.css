@@ -30,6 +30,10 @@
   --accent: #0f766e;
   --warn: #a15c07;
   --down: #b42318;
+  --compare-1: #1d5fd1;
+  --compare-2: #b86e00;
+  --compare-3: #7a4fd0;
+  --compare-4: #3a3a3a;
   /* Not 1:1: the home page design (#199) shows the grid stronger than the website's 0.045, in
      both themes. */
   --grid: rgb(28 25 23 / 0.09);
@@ -66,6 +70,10 @@
   --accent: #3cc7a6;
   --warn: #e8b45a;
   --down: #f0616d;
+  --compare-1: #5b9cf6;
+  --compare-2: #f2a33c;
+  --compare-3: #b794f6;
+  --compare-4: #e8e8e8;
   --grid: rgb(230 232 234 / 0.075);
 
   /* 6.8:1 on the dark background. */

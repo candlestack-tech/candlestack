@@ -16,6 +16,8 @@ export const HEAD = 'border-b px-2.5 py-2 text-left font-medium whitespace-nowra
 export const CELL = 'border-b px-2.5 py-2 whitespace-nowrap tabular-nums [tr:last-child>&]:border-b-0';
 // The numbers and their headers (.num): mono, at the right.
 export const NUMBER = 'text-right font-mono';
+// The cell of the scale icon: its 32 px button sets the height of no row.
+export const COMPARE_CELL = 'px-1 py-0 text-center';
 export const ROW =
   'relative cursor-pointer [&>td]:transition-colors [&>td]:duration-150 hover:[&>td]:bg-muted motion-reduce:[&>td]:transition-none';
 

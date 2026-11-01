@@ -6,13 +6,17 @@ import {
   BacktestReturn,
   BacktestWhen,
   CELL,
+  COMPARE_CELL,
+  CompareToggle,
   HEAD,
+  compareTarget,
   hasResults,
   Missing,
   NUMBER,
   ROW,
   TABLE,
   WIDTH,
+  useComparedRow,
 } from '@/features/backtests';
 import { formatSharpe } from '@/lib/results';
 import { cn } from '@/lib/utils';
@@ -29,14 +33,16 @@ const COLUMNS: readonly { label: string; number: boolean; width?: string; hide?:
   { label: 'Instruments', number: false },
   { label: 'Return', number: true, width: WIDTH.return },
   { label: 'Sharpe', number: true, width: WIDTH.sharpe },
-  { label: 'When', number: false, width: WIDTH.when, hide: WHEN },
+  { label: 'When', number: false, width: 'w-[108px]', hide: WHEN },
+  { label: 'Compare', number: false, width: WIDTH.compare },
 ];
 
 type RowProps = { backtest: Backtest; onStar: (backtest: Backtest) => void };
 
 function Row({ backtest, onStar }: RowProps) {
+  const compared = useComparedRow(backtest.id);
   return (
-    <tr className={ROW}>
+    <tr className={cn(ROW, compared)}>
       <td className={CELL}>
         <BacktestCell backtest={backtest} onStar={onStar} />
       </td>
@@ -47,8 +53,11 @@ function Row({ backtest, onStar }: RowProps) {
         <BacktestReturn backtest={backtest} />
       </td>
       <td className={cn(CELL, NUMBER)}>{hasResults(backtest) ? formatSharpe(backtest.sharpe) : <Missing />}</td>
-      <td className={cn(CELL, WHEN, 'text-muted-foreground')}>
+      <td className={cn(CELL, WHEN, 'whitespace-normal text-muted-foreground')}>
         <BacktestWhen backtest={backtest} />
+      </td>
+      <td className={cn(CELL, COMPARE_CELL)}>
+        <CompareToggle target={compareTarget(backtest)} />
       </td>
     </tr>
   );
@@ -68,7 +77,7 @@ export function LastBacktests({ backtests, onStar }: Props) {
             <tr>
               {COLUMNS.map(({ label, number, width, hide }) => (
                 <th key={label} scope="col" className={cn(HEAD, width, hide, number && NUMBER)}>
-                  {label}
+                  {label === 'Compare' ? <span className="sr-only">{label}</span> : label}
                 </th>
               ))}
             </tr>

@@ -19,6 +19,14 @@ export const returnClass = (fraction: number) => (returnTone(fraction) === 'up' 
 
 export const symbolsOf = (backtest: Backtest) => backtest.instruments.map((instrument) => instrument.symbol);
 
+// What the comparison needs of a backtest: a backtest has one instrument now, older ones more.
+export const compareTarget = (backtest: Backtest) => ({
+  id: backtest.id,
+  number: backtest.number,
+  status: backtest.status,
+  symbol: instrumentList(symbolsOf(backtest)),
+});
+
 // The id of an instrument of a backtest, `<market>:<symbol>`, which its icon is asked for by.
 export const instrumentId = ({ market, symbol }: Backtest['instruments'][number]) => `${market}:${symbol}`;
 

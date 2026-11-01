@@ -162,9 +162,9 @@ describe('the dashboard of an account with backtests', () => {
     await open({ ...dashboardAnswer(FULL), ...modelsAnswer([]) });
     await screen.findByRole('region', { name: 'Last backtests' });
     expect(rowsOf('Last backtests')).toEqual([
-      ['★#12', 'AAPLMSFT', '+24.6 %', '1.34', 'Today 10:05'],
-      ['★#11', 'AAPLMSFT', 'Failed', '–', 'Yesterday 18:10'],
-      ['☆#10', 'AAPL+3', '+96.5 %', '0.50', '12 Oct 19:44'],
+      ['★#12', 'AAPLMSFT', '+24.6 %', '1.34', 'Today 10:05', ''],
+      ['★#11', 'AAPLMSFT', 'Failed', '–', 'Yesterday 18:10', ''],
+      ['☆#10', 'AAPL+3', '+96.5 %', '0.50', '12 Oct 19:44', ''],
     ]);
     // #318: each instrument with its icon, in every widget.
     const icons = (name: string) =>
@@ -187,8 +187,8 @@ describe('the dashboard of an account with backtests', () => {
     const best = within(await screen.findByRole('region', { name: 'Best backtests' }));
     expect(best.getByText('by Sharpe')).toBeDefined();
     expect(rowsOf('Best backtests')).toEqual([
-      ['1', '#12AAPLMSFT', '1.34', '+24.6 %', '−19.7 %', '51.2 %'],
-      ['2', '#10AAPL+3', '0.50', '+96.5 %', '−8.0 %', '55.6 %'],
+      ['1', '#12AAPLMSFT', '1.34', '+24.6 %', '−19.7 %', '51.2 %', ''],
+      ['2', '#10AAPL+3', '0.50', '+96.5 %', '−8.0 %', '55.6 %', ''],
     ]);
     expect(best.getByRole('button', { name: 'Sharpe ↓' }).getAttribute('aria-pressed')).toBe('true');
     await userEvent.click(best.getByRole('button', { name: 'Return' }));

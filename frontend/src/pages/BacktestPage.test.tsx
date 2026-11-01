@@ -124,10 +124,12 @@ describe("a finished backtest's page", () => {
     expect((await screen.findByText('The file did not download. Try again.')).getAttribute('role')).toBe('alert');
   });
 
-  it('opens Compare as Coming soon', async () => {
+  it('adds the backtest to compare from its header, and takes it out again', async () => {
     await openPage({ status: 200, body: backtestDocument() });
-    await userEvent.click(await screen.findByRole('button', { name: 'Compare' }));
-    expect((await screen.findByRole('dialog')).textContent).toContain('Compare backtests');
+    await userEvent.click(await screen.findByRole('button', { name: 'Add to compare' }));
+    expect(screen.getByRole('complementary', { name: 'Compare' }).textContent).toContain('#12');
+    await userEvent.click(screen.getByRole('button', { name: 'Added to compare' }));
+    expect(screen.queryByRole('complementary', { name: 'Compare' })).toBeNull();
   });
 
   it('shows the first results in a strip and every metric beside the charts', async () => {
