@@ -66,10 +66,13 @@ def get(
 def download(
     api: httpx.Client, instrument: str, timeframe: str, since: int | None
 ) -> pl.DataFrame:
-    """The candles from `since` (the instrument's first candle without it) to now, paged back
-    from now: each page is the `PAGE` candles before the start of the one after it."""
+    """The candles from `since` (all of them without it) to now, paged back from now: each page
+    is the `PAGE` candles before the start of the one after it. Paging stops at the instrument's
+    first candle: a request that ends at or before it is refused (422 `period-out-of-range`)."""
     first = get(api, f"/api/v1/data/instruments/{instrument}")["available_from"]
-    since = max(since or 0, first or 0)
+    # `available_from` is the first 1m candle; a longer timeframe's first candle opens at the
+    # start of its bin, before it, so it only stops the paging and filters nothing.
+    stop = max(since or 0, first or 0)
     pages = [pl.DataFrame(schema=SCHEMA)]
     params: dict[str, str | int] = {"timeframe": timeframe, "limit": PAGE}
     while True:
@@ -78,11 +81,11 @@ def download(
         pages.append(pl.DataFrame({name: page[name] for name in SCHEMA}, schema=SCHEMA))
         sys.stderr.write(f"{meta['count']} candles from {meta['start']}\n")
         # Missing candles (gaps) count towards `limit`: a shorter page is where the data starts.
-        if meta["start"] <= since or meta["count"] + meta["gaps_total"] < PAGE:
+        if meta["start"] <= stop or meta["count"] + meta["gaps_total"] < PAGE:
             break
         params["end"] = meta["start"]
     candles = pl.concat(reversed(pages)).rename(COLUMNS)
-    return candles.filter(pl.col("ts") >= since)
+    return candles.filter(pl.col("ts") >= (since or 0))
 
 
 def epoch(text: str) -> int:

@@ -16,6 +16,7 @@ BASE = "https://app.candlestack.tech"
 DETAIL = f"{BASE}/api/v1/data/instruments/crypto:BTCUSDT"
 CANDLES = f"{DETAIL}/candles"
 HOUR = 3600
+DAY = 86_400
 FIRST = 1_717_200_000  # the instrument's first candle, 2024-06-01T00:00Z
 PROBLEM = {"Content-Type": "application/problem+json"}
 
@@ -33,10 +34,11 @@ def script(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     return module
 
 
-def candles(start: int, count: int, gaps: int = 0) -> httpx.Response:
-    """A page of ``count`` hourly candles from ``start`` that ends ``gaps`` candles later."""
-    times = [start + i * HOUR for i in range(count)]
-    meta = {"start": start, "end": start + (count + gaps) * HOUR, "count": count}
+def candles(start: int, count: int, gaps: int = 0, step: int = HOUR) -> httpx.Response:
+    """A page of ``count`` candles ``step`` seconds apart from ``start`` that ends ``gaps``
+    candles later."""
+    times = [start + i * step for i in range(count)]
+    meta = {"start": start, "end": start + (count + gaps) * step, "count": count}
     return httpx.Response(
         200,
         json={
@@ -85,6 +87,22 @@ def test_stops_at_since_and_drops_the_candles_before_it(script: ModuleType, tmp_
 
     assert route.call_count == 1
     assert pl.read_parquet(out).get_column("ts").to_list() == [FIRST + 4 * HOUR, FIRST + 5 * HOUR]
+
+
+@respx.mock
+def test_keeps_the_first_candle_that_opens_before_the_first_minute(
+    script: ModuleType, tmp_path: Path
+) -> None:
+    # The first 1m candle at 04:00 is in the 1d candle that opens at 00:00.
+    respx.get(DETAIL).respond(json={"available_from": FIRST + 4 * HOUR})
+    respx.get(CANDLES).mock(
+        side_effect=[candles(FIRST + DAY, 3, step=DAY), candles(FIRST, 1, step=DAY)]
+    )
+    out = tmp_path / "candles.parquet"
+
+    assert script.main(["crypto:BTCUSDT", "1d", "--out", str(out)]) == 0
+
+    assert pl.read_parquet(out).get_column("ts").to_list() == [FIRST + i * DAY for i in range(4)]
 
 
 @respx.mock

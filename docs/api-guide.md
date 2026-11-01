@@ -11,8 +11,9 @@ polars); this guide explains what it does.
 ## Sign in
 
 The market data is for signed-in accounts: without a session the instrument list, an instrument
-and its candles answer 401 `not-signed-in`. The API has no keys; a script sends the session
-cookie of your browser:
+and its candles answer 401 `not-signed-in`. An account exists only for someone on the beta list,
+so ask the team to add you if signing in is refused. The API has no keys; a script sends the
+session cookie of your browser:
 
 1. Sign in at https://app.candlestack.tech.
 2. In the browser's developer tools (Application, then Cookies, in Chrome; Storage in Firefox)
@@ -20,9 +21,20 @@ cookie of your browser:
 3. Put it into the environment variable `CANDLESTACK_SESSION` of the shell that runs the script.
 
 The cookie is your account: never commit it, paste it into an issue or share it. A session lasts
-30 days from its last use; signing out ends it. On a local stack (`docker compose up`, see the
-[README](../README.md)) sign in with the dev login on http://localhost:5173, copy the cookie
-`session` and pass `--base-url http://localhost:8000` to the example.
+30 days from its last use; signing out ends it.
+
+The stock data comes from Alpaca, whose terms allow it for personal, noncommercial use only: keep
+the files you download to yourself, do not publish them or pass them on.
+
+On a local stack (`docker compose up`, see the [README](../README.md)) sign in as the dev user
+from the shell instead. The request must come from the app's origin:
+
+```sh
+curl -si -X POST -H 'Origin: http://localhost:5173' http://localhost:8000/api/v1/auth/dev
+```
+
+Copy the value of `session` from its `Set-Cookie` header into `CANDLESTACK_SESSION` and pass
+`--base-url http://localhost:8000` to the example.
 
 ```sh
 export CANDLESTACK_SESSION='...'
@@ -46,6 +58,7 @@ import httpx
 api = httpx.Client(
     base_url="https://app.candlestack.tech",
     cookies={"__Host-session": os.environ["CANDLESTACK_SESSION"]},
+    timeout=60,  # a cold request can take longer than httpx's default of 5 seconds
 )
 page = api.get("/api/v1/data/instruments", params={"q": "apple", "market": "stock"}).json()
 for item in page["items"]:
@@ -54,7 +67,8 @@ for item in page["items"]:
 
 `total` counts every match; `unavailable` names a market whose catalog could not be loaded yet,
 so the page holds the other one only. `GET /api/v1/data/instruments/{id}` returns one instrument
-with its `timeframes` and `available_from`, the open time of its first candle.
+with its `timeframes` and `available_from`, the open time of its first 1m candle (a longer
+timeframe's first candle opens at the start of the bin that holds it).
 
 ## Page through candles
 
@@ -64,19 +78,25 @@ columns: index `i` of `t`, `o`, `h`, `l`, `c` and `v` is one candle, `t` its ope
 epoch seconds.
 
 To get more than 5000 candles, page back in time: the next request's `end` is `meta.start` of
-the page you got, the open time of its earliest candle (`end` is exclusive, so no candle comes
-twice). Stop when `meta.start` reaches the time you want, or when a page is shorter than
-`limit`: that is where the data starts. Missing candles (`meta.gaps`, `meta.gaps_total`) count
-towards `limit`, so compare `meta.count + meta.gaps_total`, not `meta.count` alone:
+the page you got, where the page starts (`end` is exclusive, so no candle comes twice). Stop when
+`meta.start` reaches the time you want, or when a page is shorter than `limit`: that is where
+the data starts. Missing candles (`meta.gaps`, `meta.gaps_total`) count towards `limit`, so
+compare `meta.count + meta.gaps_total`, not `meta.count` alone. Start `stop` at
+`available_from` at the earliest: when the history is an exact multiple of `limit`, no page is
+short, and a request that ends at the first candle is refused with 422 `period-out-of-range`.
+The pages can hold candles before `since`; the next section drops them:
 
 ```python
+instrument, since = "stock:AAPL", 1_704_067_200  # 2024-01-01T00:00Z
+first = api.get(f"/api/v1/data/instruments/{instrument}").json()["available_from"]
+stop = max(since, first or 0)
 params = {"timeframe": "1h", "limit": 5000}
 pages = []
 while True:
     page = api.get(f"/api/v1/data/instruments/{instrument}/candles", params=params).json()
     pages.append(page)
     meta = page["meta"]
-    if meta["start"] <= since or meta["count"] + meta["gaps_total"] < 5000:
+    if meta["start"] <= stop or meta["count"] + meta["gaps_total"] < 5000:
         break
     params["end"] = meta["start"]
 ```
@@ -98,7 +118,7 @@ columns = {"t": "ts", "o": "open", "h": "high", "l": "low", "c": "close", "v": "
 candles = pl.concat(
     pl.DataFrame({name: page[name] for name in columns}) for page in reversed(pages)
 ).rename(columns)
-candles.write_parquet("candles.parquet")
+candles.filter(pl.col("ts") >= since).write_parquet("candles.parquet")
 ```
 
 The times are open times, the default of `--labels open`. The predictions file of the run needs
@@ -106,11 +126,11 @@ the same `ts` ([engine.md](engine.md)).
 
 ## Rate limit
 
-The API takes 60 candle and instrument requests a minute from one IP address. Past that it
-answers 429 `rate-limited` with a `Retry-After` header: the seconds until the next minute.
-A cold request for a long stock history can also answer 503 `source-unavailable` with
-`Retry-After` while the source's budget is spent; what it fetched so far stays cached, so the
-same request continues from there. In both cases wait `Retry-After` seconds and send it again:
+The API takes 60 candle and instrument detail requests a minute from one IP address (the
+instrument search is not counted). Past that it answers 429 `rate-limited` with a `Retry-After`
+header: the seconds until the next minute. A cold request for a long stock history can also
+answer 503 `source-unavailable` with `Retry-After` while the source's budget is spent; what it
+fetched so far stays cached, so the same request continues from there. In both cases wait `Retry-After` seconds and send it again:
 
 ```python
 import time
@@ -149,7 +169,7 @@ change. Some add fields, such as `errors` of a 422 `validation`:
 | 401 | `not-signed-in` | the cookie is missing, wrong or its session ended: copy it again |
 | 404 | `instrument-not-found` | check the id with the instrument search |
 | 422 | `validation` | fix the parameters `errors` names |
-| 422 | `period-out-of-range` | `start` before the first candle or `end` in the future: `available_from` and `available_to` say what fits |
+| 422 | `period-out-of-range` | `start` before the first candle, `end` at or before it (paging past the start of the data) or `end` in the future: `available_from` and `available_to` say what fits |
 | 422 | `too-many-candles` | a shorter period, a longer timeframe or paging (`suggestion`) |
 | 429 | `rate-limited` | wait `Retry-After` seconds |
 | 502 | `source-data-invalid` | the source sent bad data: try later, or report it |
