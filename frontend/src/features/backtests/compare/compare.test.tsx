@@ -10,9 +10,10 @@ import { addToCompare, claimCompare, clearCompare } from './selection';
 
 const FINISHED = [12, 13, 14, 15, 16].map((number) => backtest({ id: `bt_${String(number)}`, number }));
 const FAILED = failedBacktest({ id: 'bt_failed', number: 11 });
+const SEEDED = backtest({ id: 'bt_seeded', number: 9, seeded: true });
 const RUNNING = backtest({ id: 'bt_running', number: 10, status: 'running', total_return: null, sharpe: null });
 const PAGE = {
-  backtests: [...FINISHED, FAILED, RUNNING],
+  backtests: [...FINISHED, FAILED, RUNNING, SEEDED],
   counts: { all: 7, starred: 0, failed: 1 },
   models: [],
 };
@@ -53,6 +54,8 @@ describe('choosing backtests to compare', () => {
     expect(toggle(/: backtest 11$/)).toHaveProperty('disabled', true);
     expect(toggle(/: backtest 11$/).title).toBe('Failed: no results to compare');
     expect(toggle(/: backtest 10$/).title).toBe('Still running');
+    expect(toggle(/: backtest 9$/)).toHaveProperty('disabled', true);
+    expect(toggle(/: backtest 9$/).title).toBe('Test data: no results to compare');
     for (const number of [12, 13, 14, 15]) {
       await user.click(toggle(new RegExp(`^Add to compare: backtest ${String(number)}$`)));
     }

@@ -59,6 +59,7 @@ def backtest_out(listed: Listed) -> BacktestOut:
         name=backtest.name,
         number=backtest.number,
         status=BacktestStatus(backtest.status),
+        seeded=backtest.seeded,
         instruments=[BacktestInstrument.model_validate(item) for item in backtest.instruments],
         representation=Representation(backtest.representation),
         model=UsedModel(

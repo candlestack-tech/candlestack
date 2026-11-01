@@ -126,6 +126,7 @@ export const model = (fields: Partial<Model> = {}): Model => ({
 export const backtest = (fields: Partial<Backtest> = {}): Backtest => ({
   id: 'bt_7f3k2m9qx4',
   name: null,
+  seeded: false,
   number: 12,
   instruments: [
     { symbol: 'AAPL', market: 'stock' },
