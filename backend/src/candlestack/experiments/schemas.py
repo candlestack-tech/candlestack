@@ -165,6 +165,7 @@ class BacktestOut(BaseModel):
     name: str | None = Field(description="What the user calls it; null until they rename it")
     number: int = Field(description="The user's own number of the backtest, shown as #N", ge=1)
     status: BacktestStatus
+    seeded: bool = Field(description="Test data of the seed command, with no result document")
     instruments: list[BacktestInstrument] = Field(
         description="The instruments, in the order chosen"
     )

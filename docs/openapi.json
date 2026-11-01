@@ -720,6 +720,11 @@
           "representation": {
             "$ref": "#/components/schemas/Representation"
           },
+          "seeded": {
+            "description": "Test data of the seed command, with no result document",
+            "title": "Seeded",
+            "type": "boolean"
+          },
           "setup": {
             "$ref": "#/components/schemas/BacktestSetup"
           },
@@ -782,6 +787,7 @@
           "name",
           "number",
           "status",
+          "seeded",
           "instruments",
           "representation",
           "model",

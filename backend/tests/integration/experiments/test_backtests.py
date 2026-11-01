@@ -38,6 +38,7 @@ def test_a_backtest_as_the_list_shows_it(ada) -> None:
                 "name": None,
                 "number": 1,
                 "status": "finished",
+                "seeded": False,
                 "instruments": [
                     {"market": "stock", "symbol": "MSFT"},
                     {"market": "stock", "symbol": "GOOGL"},

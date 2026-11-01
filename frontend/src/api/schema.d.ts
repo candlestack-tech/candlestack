@@ -971,6 +971,11 @@ export interface components {
              */
             number: number;
             representation: components["schemas"]["Representation"];
+            /**
+             * Seeded
+             * @description Test data of the seed command, with no result document
+             */
+            seeded: boolean;
             setup: components["schemas"]["BacktestSetup"];
             /**
              * Sharpe
