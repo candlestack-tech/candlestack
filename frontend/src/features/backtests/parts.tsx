@@ -36,7 +36,11 @@ export function BacktestInstruments({ backtest, max, size = 20 }: { backtest: Ba
 
 // "#12", the user's own number of the backtest (.rid).
 export function BacktestNumber({ backtest, className }: { backtest: Backtest; className?: string }) {
-  return <span className={cn('font-mono text-[13px]/[normal] font-medium', className)}>#{backtest.number}</span>;
+  return (
+    <span title={backtest.name ?? undefined} className={cn('font-mono text-[13px]/[normal] font-medium', className)}>
+      #{backtest.number}
+    </span>
+  );
 }
 
 const BADGES: Record<BacktestStatus, { text: string; tone: string }> = {

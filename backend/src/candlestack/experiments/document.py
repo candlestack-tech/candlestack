@@ -280,6 +280,7 @@ class BacktestStep(BaseModel):
 
 class BacktestHeader(BaseModel):
     id: str = Field(examples=["bt_7f3k2m9qx4"])
+    name: str | None = Field(description="What the user calls it; null until they rename it")
     number: int = Field(ge=1, description="The user's own number, shown as #N", examples=[12])
     status: BacktestStatus
     created_at: datetime = Field(description="When it started (UTC)")

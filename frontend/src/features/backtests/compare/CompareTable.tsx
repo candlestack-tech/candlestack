@@ -38,8 +38,8 @@ function Heading({ doc, color }: CompareColumn) {
             </Link>
             <span className="truncate font-semibold">{doc.data.instrument.symbol}</span>
           </div>
-          <div title={doc.model.name} className="mt-0.5 truncate text-xs text-muted-foreground">
-            {doc.model.name}
+          <div title={doc.backtest.name ?? doc.model.name} className="mt-0.5 truncate text-xs text-muted-foreground">
+            {doc.backtest.name ?? doc.model.name}
           </div>
         </div>
         <button

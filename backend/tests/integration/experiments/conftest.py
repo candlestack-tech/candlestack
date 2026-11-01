@@ -349,6 +349,9 @@ class BacktestsUser:
     def star(self, backtest_id: str, starred: bool = True) -> httpx2.Response:
         return self.request("PATCH", f"/api/v1/backtests/{backtest_id}", json={"starred": starred})
 
+    def rename(self, backtest_id: str, name: str | None) -> httpx2.Response:
+        return self.request("PATCH", f"/api/v1/backtests/{backtest_id}", json={"name": name})
+
     def dashboard(self) -> httpx2.Response:
         return self.request("GET", "/api/v1/dashboard")
 

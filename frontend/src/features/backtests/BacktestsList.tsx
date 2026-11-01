@@ -38,7 +38,7 @@ function Tools({ search, data }: Omit<Props, 'loading'>) {
       <SearchBox
         query={search.q ?? ''}
         onSearch={onSearch}
-        placeholder="Number, instrument or model, e.g. aapl"
+        placeholder="Name, number, instrument or model, e.g. aapl"
         label="Search backtests"
         maxLength={100}
         debounceMs={200}

@@ -83,16 +83,23 @@ export function RowStar({ starred, label, onToggle }: { starred: boolean; label:
 // The star and the number of a backtest, the number opening it (the Backtest column).
 export function BacktestCell({ backtest, onStar }: { backtest: Backtest; onStar: (backtest: Backtest) => void }) {
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <RowStar
-        starred={backtest.starred}
-        label={`Star backtest ${backtest.number}`}
-        onToggle={() => onStar(backtest)}
-      />
-      <RowOpener backtest={backtest}>
-        <BacktestNumber backtest={backtest} />
-      </RowOpener>
-    </span>
+    <>
+      <span className="inline-flex items-center gap-1.5">
+        <RowStar
+          starred={backtest.starred}
+          label={`Star backtest ${backtest.number}`}
+          onToggle={() => onStar(backtest)}
+        />
+        <RowOpener backtest={backtest}>
+          <BacktestNumber backtest={backtest} />
+        </RowOpener>
+      </span>
+      {backtest.name && (
+        <span title={backtest.name} className="block truncate text-xs/4 text-muted-foreground">
+          {backtest.name}
+        </span>
+      )}
+    </>
   );
 }
 

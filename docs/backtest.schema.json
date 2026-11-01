@@ -73,6 +73,18 @@
           "title": "Id",
           "type": "string"
         },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the user calls it; null until they rename it",
+          "title": "Name"
+        },
         "number": {
           "description": "The user's own number, shown as #N",
           "examples": [
@@ -96,6 +108,7 @@
       },
       "required": [
         "id",
+        "name",
         "number",
         "status",
         "created_at",

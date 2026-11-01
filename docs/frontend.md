@@ -430,7 +430,8 @@ so its back link returns there (else "← Backtests").
   the period's first and last UTC day, when it ran and how long. A finished one has
   `[Download JSON | ?]` (the download is `GET /api/v1/backtests/{id}/download`, which the browser
   saves as `candlestack-backtest-<N>.json`; `?` opens https://candlestack.tech/docs/backtest-json)
-  and Add to compare.
+  and Add to compare. Rename (any status) names it with `PATCH /api/v1/backtests/{id}`: the name
+  replaces the title, with the number beside it, and shows under the number in the lists.
 - Finished: the six first results in a strip (`src/components/FactsStrip.tsx`, the model page's
   too), then the charts and the trades beside every metric of the engine and the setup (one column
   up to 980 px). Running: a moving bar and the setup. Failed: the error and the setup. A 404 says

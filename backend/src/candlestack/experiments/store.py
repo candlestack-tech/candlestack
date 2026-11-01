@@ -105,7 +105,8 @@ def search(query: str) -> ColumnElement[bool] | None:
         .where(instrument.c.value["symbol"].astext.ilike(pattern, escape="\\"))
     )
     number = (literal("#") + cast(Backtest.number, String)).ilike(pattern, escape="\\")
-    return number | symbol | MODEL_NAME.ilike(pattern, escape="\\")
+    name = Backtest.name.ilike(pattern, escape="\\")
+    return number | name | symbol | MODEL_NAME.ilike(pattern, escape="\\")
 
 
 def filters(

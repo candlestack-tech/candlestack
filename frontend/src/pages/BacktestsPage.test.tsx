@@ -186,7 +186,7 @@ describe('the Backtests page', () => {
     });
     const { router } = await renderApp('/backtests?page=2');
     const field = await screen.findByRole('searchbox', { name: 'Search backtests' });
-    expect(field.getAttribute('placeholder')).toBe('Number, instrument or model, e.g. aapl');
+    expect(field.getAttribute('placeholder')).toBe('Name, number, instrument or model, e.g. aapl');
     await userEvent.type(field, 'btc');
     await vi.waitFor(() => expect(router.state.location.search).toEqual({ q: 'btc' }));
     expect(await screen.findByText('1 of 3')).toBeDefined();
@@ -330,6 +330,13 @@ describe('the Backtests page', () => {
       .filter((head) => head.className.split(' ').includes('font-mono'))
       .map((head) => head.textContent);
     expect(mono).toEqual(['Return', 'Sharpe', 'Max drawdown']);
+  });
+
+  it("shows a backtest's name under its number", async () => {
+    const named = backtest({ name: 'Half size' });
+    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer({ ...PAGE, backtests: [named] }) });
+    await renderApp('/backtests');
+    expect(await screen.findByText('Half size')).toBeDefined();
   });
 
   it('opens a row from the keyboard, ringing the row while its link has the focus', async () => {

@@ -30,7 +30,7 @@ function NoBacktest({ error }: { error: Error }) {
 export function BacktestPage() {
   const { backtestId } = useParams({ from: '/_app/backtests/$backtestId' });
   const { data, error } = useBacktestResult(backtestId);
-  usePageTitle(data ? `Backtest #${data.backtest.number}` : 'Backtest');
+  usePageTitle(data ? (data.backtest.name ?? `Backtest #${data.backtest.number}`) : 'Backtest');
   if (data) return <BacktestResult doc={data} />;
   return error ? <NoBacktest error={error} /> : <BackLink />;
 }
