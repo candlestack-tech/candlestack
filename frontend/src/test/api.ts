@@ -356,6 +356,15 @@ const EXAMPLE_RESULTS: NonNullable<BacktestDocument['results']> = {
   },
 };
 
+const EXAMPLE_EXECUTION: BacktestDocument['execution'] = {
+  fill: 'next_open',
+  stop_loss: 0.05,
+  drawdown_stop: null,
+  position_size: 1,
+  fee_bps: 10,
+  slippage_bps: 0,
+};
+
 // The worked example of docs/engine.md as the result document of #12: AAPL, 30-minute candles,
 // one long trade stopped out, 5 % stop and 10 bps fees, against buy and hold.
 export const backtestDocument = (fields: Partial<BacktestDocument> = {}): BacktestDocument => ({
@@ -392,14 +401,7 @@ export const backtestDocument = (fields: Partial<BacktestDocument> = {}): Backte
     confirm: null,
     min_hold: null,
   },
-  execution: {
-    fill: 'next_open',
-    stop_loss: 0.05,
-    drawdown_stop: null,
-    position_size: 1,
-    fee_bps: 10,
-    slippage_bps: 0,
-  },
+  execution: EXAMPLE_EXECUTION,
   benchmarks: [{ id: 'bh', kind: 'buy_and_hold', instrument: 'stock:AAPL' }],
   metrics: { periods_per_year: 252, risk_free_rate: 0 },
   results: EXAMPLE_RESULTS,
