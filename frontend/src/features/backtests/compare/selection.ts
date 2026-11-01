@@ -63,11 +63,14 @@ function publish(next: Selection) {
 }
 
 // Another tab changed the choice, or cleared the storage (no key then).
-window.addEventListener('storage', ({ key }) => {
-  if (key !== STORAGE_KEY && key !== null) return;
-  selection = read();
-  notify();
-});
+// (Tests of plain functions run without a window.)
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', ({ key }) => {
+    if (key !== STORAGE_KEY && key !== null) return;
+    selection = read();
+    notify();
+  });
+}
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
