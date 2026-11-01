@@ -21,6 +21,14 @@ def _fraction(text: str) -> float:
     return value
 
 
+def _share(text: str) -> float:
+    """A number above 0, at most 1 (an argparse type)."""
+    value = _number(text)
+    if not 0 < value <= 1:
+        raise argparse.ArgumentTypeError(f"must be above 0 and at most 1 (0.5 is 50%), got {text}")
+    return value
+
+
 def _number(text: str) -> float:
     try:
         value = float(text)

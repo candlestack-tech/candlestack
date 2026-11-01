@@ -170,7 +170,14 @@ describe('the request', () => {
         confirm: null,
         min_hold: null,
       },
-      execution: { fill: 'next_open', stop_loss: 0.07, drawdown_stop: null, fee_bps: 10, slippage_bps: 2 },
+      execution: {
+        fill: 'next_open',
+        stop_loss: 0.07,
+        drawdown_stop: null,
+        position_size: 1,
+        fee_bps: 10,
+        slippage_bps: 2,
+      },
       benchmarks: [{ id: 'bh', kind: 'buy_and_hold', instrument: 'crypto:BTCUSDT' }],
     });
   });
@@ -210,6 +217,7 @@ describe('the request', () => {
       fill: 'signal_close',
       stop_loss: 0.07,
       drawdown_stop: 0.25,
+      position_size: 1,
       fee_bps: 7,
       slippage_bps: 0,
     });

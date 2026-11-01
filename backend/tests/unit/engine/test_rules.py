@@ -740,3 +740,125 @@ def test_a_drawdown_on_the_last_row_closes_by_drawdown_not_end(settings: Setting
         position=[0, 1 if settings is CLOSE else 0, 0],
         equity=[1, 1, 0.75],
     )
+
+
+HALF = CLOSE.model_copy(update={"position_size": 0.5})
+
+
+def test_a_position_of_half_the_capital_makes_half_the_return_and_compounds() -> None:
+    frame = candles(
+        (100, 100, 100, 100, 0),
+        (100, 100, 100, 100, 1),  # long at 100 with 0.5 of 1.0
+        (100, 110, 100, 110, 1),  # marked: half of +10%
+        (110, 120, 110, 120, 0),  # out at 120: half of +20%, the capital 1.1
+        (120, 120, 100, 100, 1),  # long at 100 with 0.55 of 1.1
+        (100, 120, 100, 120, 0),  # out at 120: half of +20% again, the capital 1.21
+    )
+
+    check(
+        backtest(frame, HALF),
+        [
+            trade(1, 1, 3, 1, 100, 120, "signal", 0.1),
+            trade(4, 4, 5, 1, 100, 120, "signal", 0.1),
+        ],
+        position=[0, 1, 1, 0, 1, 0],
+        equity=[1, 1, 1.05, 1.1, 1.1, 1.21],
+    )
+
+
+def test_a_position_size_scales_the_fees_the_slippage_and_the_mark() -> None:
+    frame = candles(
+        (100, 100, 100, 100, 0),
+        (100, 100, 100, 100, 1),  # long at 100 * 1.01 = 101
+        (101, 111, 101, 111, 1),  # marked at 111, the exit's costs not paid
+        (111, 111, 111, 111, 0),  # out at 111 * 0.99 = 109.89
+    )
+    settings = HALF.model_copy(update={"fee_bps": 100, "slippage_bps": 100})
+    growth = 109.89 / 101
+    fees = 0.5 * 0.01 * (1 + growth)
+    result = 0.5 * (growth - 1) - fees
+
+    check(
+        backtest(frame, settings),
+        [
+            trade(
+                1,
+                1,
+                3,
+                1,
+                101,
+                109.89,
+                "signal",
+                result,
+                fees=fees,
+                slippage_cost=0.5 * (111 / 100 - growth),
+            )
+        ],
+        position=[0, 1, 1, 0],
+        equity=[
+            1,
+            1 + 0.5 * (100 / 101 - 1) - 0.005,
+            1 + 0.5 * (111 / 101 - 1) - 0.005,
+            1 + result,
+        ],
+    )
+
+
+def test_a_stop_is_set_by_price_and_costs_the_share_of_the_capital() -> None:
+    frame = candles(
+        (100, 100, 100, 100, 0),
+        (100, 100, 100, 100, 1),  # long at 100, the stop at 90
+        (100, 100, 85, 95, 1),  # out at 90: half of -10%
+        (95, 96, 94, 95, 1),  # the signal has not changed: stays flat
+    )
+
+    check(
+        backtest(frame, HALF.model_copy(update={"stop_loss": 0.1})),
+        [trade(1, 1, 2, 1, 100, 90, "stop", -0.05, stop=90)],
+        position=[0, 1, 0, 0],
+        equity=[1, 1, 0.95, 0.95],
+    )
+
+
+@pytest.mark.parametrize(("close", "ruined"), [(299, False), (300, True)], ids=["299", "300"])
+def test_a_short_of_half_the_capital_is_ruined_at_three_times_its_entry(
+    close: float, ruined: bool
+) -> None:
+    frame = candles(
+        (100, 100, 100, 100, 0),
+        (100, 100, 100, 100, -1),  # short at 100 with half the capital
+        (100, 250, 100, 250, -1),  # would have ruined a short of the whole capital: here 0.25
+        (250, close, 250, close, -1),
+        (close, close, close, close, 0),
+    )
+
+    result = backtest(frame, HALF)
+
+    assert result.series["equity"][2] == 0.25
+    if ruined:
+        check(
+            result,
+            [trade(1, 1, 3, -1, 100, 300, "ruin", -1.0)],
+            position=[0, -1, -1, 0, 0],
+            equity=[1, 1, 0.25, 0, 0],
+        )
+    else:
+        assert result.trades["exit_reason"].to_list() == ["signal"]
+        assert result.series["equity"][4] == pytest.approx(1 - 0.5 * 1.99)
+
+
+def test_a_drawdown_stop_reads_the_equity_of_the_share() -> None:
+    frame = candles(
+        (100, 100, 100, 100, 0),
+        (100, 100, 100, 100, 1),  # long at 100 with half the capital
+        (100, 100, 85, 85, 1),  # the price -15%, the equity only -7.5%: no halt at 10%
+        (85, 85, 80, 80, 1),  # the price -20%, the equity -10%: out at the close
+        (80, 90, 80, 90, 1),
+    )
+
+    check(
+        backtest(frame, HALF.model_copy(update={"drawdown_stop": 0.1})),
+        [trade(1, 1, 3, 1, 100, 80, "drawdown", -0.1)],
+        position=[0, 1, 1, 0, 0],
+        equity=[1, 1, 0.925, 0.9, 0.9],
+    )

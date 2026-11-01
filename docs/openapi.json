@@ -458,6 +458,7 @@
             "default": {
               "fee_bps": 0.0,
               "fill": "next_open",
+              "position_size": 1.0,
               "slippage_bps": 0.0
             }
           },
@@ -2146,6 +2147,13 @@
             ],
             "title": "Fill",
             "type": "string"
+          },
+          "position_size": {
+            "default": 1.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Position Size",
+            "type": "number"
           },
           "slippage_bps": {
             "default": 0.0,

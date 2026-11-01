@@ -220,6 +220,24 @@ def halt_row(equity: list[float], drawdown_stop: float) -> int | None:
     return None
 
 
+@pytest.mark.parametrize("settings", SETTINGS[:2] + SETTINGS[3:5], ids=IDS[:2] + IDS[3:5])
+@pytest.mark.parametrize("seed", SEEDS)
+@pytest.mark.parametrize("size", [0.3, 0.5])
+def test_a_position_size_scales_every_trade_and_changes_no_entry_or_exit(
+    settings: Settings, seed: int, size: float
+) -> None:
+    frame = random_candles(random.Random(seed))
+    whole = backtest(frame, settings)
+    sized = backtest(frame, settings.model_copy(update={"position_size": size}))
+    keys = ["signal_ts", "open_ts", "close_ts", "side", "open_price", "close_price", "stop_price"]
+
+    assert sized.trades.select(keys).equals(whole.trades.select(keys))
+    assert sized.series["position"].equals(whole.series["position"])
+    for column in ("return", "fees", "slippage_cost"):
+        assert sized.trades[column].to_list() == [size * value for value in whole.trades[column]]
+    assert sized.series["equity"][-1] == pytest.approx((1 + sized.trades["return"]).product())
+
+
 @pytest.mark.parametrize("settings", DRAWDOWN, ids=["signal_close", "next_open"])
 @pytest.mark.parametrize("seed", SEEDS)
 def test_a_drawdown_stop_halts_at_the_first_equity_at_or_below_the_level_and_not_before(

@@ -45,8 +45,8 @@ through `signals` or `metrics`, not by changing the loop.
 
 Not modelled in this version:
 
-- position sizing: one position at a time, always the whole capital; a fractional signal is
-  refused ("position sizing is not supported yet");
+- a size that changes with the signal or during a trade: one position at a time, of the share
+  `position_size` of the capital, fixed at its entry (rule 10); a fractional signal is refused;
 - leverage, margin and liquidation: the limits are ruin (rule 8: once the whole capital is
   lost it is 0 and the run stays flat) and the drawdown stop (rule 9, off by default);
 - volume and liquidity: every order fills in full at its price; `volume` is ignored;
@@ -70,7 +70,7 @@ Not modelled in this version:
   message names every broken rule, how many rows break it and the first one, for example:
 
   ```text
-  Invalid backtest input: 1 row has a ts not after the previous row, first at row 2; 1 row has a fractional signal (position sizing is not supported yet), first at row 1.
+  Invalid backtest input: 1 row has a ts not after the previous row, first at row 2; 1 row has a fractional signal (the size is the setting position_size), first at row 1.
   ```
 
 ## Settings
@@ -83,6 +83,7 @@ unknown field or a value out of range raises a validation error (a `ValueError`)
 | `fill` | `"next_open"` or `"signal_close"` | `"next_open"` | when a decision fills: at the open of the next candle, what a live run can do, or at the close of the candle that made it, the convention of the supervisor's results (optimistic: the decision and its fill see the same close) |
 | `stop_loss` | number above 0 and below 1, or `None` | `None` | the loss that closes a position, as a fraction of its entry price: 0.05 is 5%; `None` for no stop |
 | `drawdown_stop` | number above 0 and below 1, or `None` | `None` | the fall of the equity from its highest level so far that halts the run (rule 9), as a fraction of that level: 0.2 is 20%; `None` for no drawdown stop |
+| `position_size` | number above 0, at most 1 | `1.0` | the share of the capital a position takes when it opens, kept until it exits (rule 10): 0.5 is 50% |
 | `fee_bps` | finite number, 0 or more | `0.0` | the fee of each leg, in basis points of its notional |
 | `slippage_bps` | finite number, 0 or more | `0.0` | how far each fill lands from its price, against the trade, in basis points |
 
@@ -118,7 +119,7 @@ All numbers are float64 as computed, never rounded.
 | `position` | Float64 | -1, 0 or +1: the side held after the candle's fills |
 | `equity` | Float64 | the capital after the candle's fills, an open position marked at the candle's close; the run starts with 1.0 |
 
-`engine_version` is `ENGINE_VERSION`, now `"0.3.0"` (see [ENGINE_VERSION](#engine_version)).
+`engine_version` is `ENGINE_VERSION`, now `"0.4.0"` (see [ENGINE_VERSION](#engine_version)).
 
 ## Rules
 
@@ -175,7 +176,7 @@ The rules, the same for both fills:
    and slippage, unless rule 9 closes it on that row. A `next_open` order from the row before the last still fills at the last open;
    its stop is checked on the last row like on any entry candle (only a touch counts there), so
    it can still exit by `stop`, and otherwise it ends at the last close.
-7. **Equity.** Capital starts at 1.0, is always fully invested and compounds: after each trade
+7. **Equity.** Capital starts at 1.0 and compounds: after each trade
    it is multiplied by `1 + return`. A candle's `equity` is the capital after all its fills,
    with the open position marked at the candle's close:
    `capital * (1 + side * (close / entry - 1) - fee)`, where the entry fee is already paid and
@@ -186,12 +187,13 @@ The rules, the same for both fills:
      below 0, the position closes at that close, with its exit fee and slippage, and reason
      `ruin`;
    - when a closing trade's `return` is at or below -1, for example a gap through the stop or a
-     short closed by the signal after its price doubled, nothing is left of the capital.
+     short of the whole capital closed by the signal after its price doubled, nothing is left of
+     the capital.
 
    Either way the capital becomes 0 (the trade's `return` stays as computed, at or below -1),
    no position opens again, not even the second leg of a flip or a `next_open` order already
-   decided, and the `equity` of every later row is 0. Without a stop, a short is ruined once
-   its price about doubles.
+   decided, and the `equity` of every later row is 0. Without a stop, a short of the whole
+   capital is ruined once its price about doubles, a smaller one later (rule 10).
 9. **Drawdown stop.** A risk limit on the run, off by default (`drawdown_stop=None`).
    - The peak is the highest `equity` recorded so far, the starting capital 1.0 included, so
      it is at least 1.0. It is taken from the recorded series, marked at the closes (rule 7):
@@ -210,6 +212,16 @@ The rules, the same for both fills:
      after a flip's closing leg or a stop, is already at or below the level; the candle halts
      flat. It would only be closed again at the same close, paying both legs for nothing.
    - Ruin comes first: a candle that ruins the run (rule 8) is a `ruin`, not a `drawdown`.
+10. **Position size.** A position takes `position_size` of the capital when it opens and keeps
+    that share until it exits; the rest stays as cash that earns nothing. Everything in rules 5
+    and 7 about the position is multiplied by the share `f`:
+    `return = f * (side * (exit / entry - 1) - fee * (1 + exit / entry))`, `fees` and
+    `slippage_cost` likewise, and a candle's `equity` is
+    `capital * (1 + f * side * (close / entry - 1) - f * fee)`. So at `f = 0.5`, a 10% move
+    makes 5% on the capital and a 5% stop loses about 2.5%, and a short is ruined once its
+    price reaches `1 + 1 / f` times its entry. The stop level is still set by price, `side` and
+    `position` still say only the direction, and the drawdown stop reads the equity as ever.
+    At `f = 1` the output is the one of engine 0.3.0, bit for bit.
 
 | `exit_reason` | When | Exit price before slippage |
 | --- | --- | --- |
@@ -286,10 +298,11 @@ statistics, the `InvalidInput` message under [Input](#input) and the command bel
 
 The two costs work differently:
 
-- **Fee: a commission, nothing else.** Each leg pays `fee_bps` of its notional: the entry leg
-  pays `fee * capital`, the exit leg `fee * capital * exit / entry` (the position's value at
-  the exit). The trade's `fees` column is their sum as a fraction of the capital before the
-  trade, `fee * (1 + exit / entry)`. The fee never changes a price.
+- **Fee: a commission, nothing else.** Each leg pays `fee_bps` of its notional. With the share
+  `f = position_size`, the entry leg pays `fee * f * capital`, the exit leg
+  `fee * f * capital * exit / entry` (the position's value at the exit). The trade's `fees`
+  column is their sum as a fraction of the capital before the trade,
+  `f * fee * (1 + exit / entry)`. The fee never changes a price.
 - **Slippage: a worse price, nothing else.** With `s = slippage_bps * 0.0001` and `side` +1 or
   -1, an entry fills at `price * (1 + side * s)`, an exit (`signal`, `gap` or `end`) at
   `price * (1 - side * s)`, and a stop exit at `level * (1 - side * s)`. The stop level comes
@@ -585,6 +598,7 @@ files, rename their time column to `ts`, `relabel` both with `--labels close`, `
 | `--fill next_open\|signal_close` | `next_open` | `Settings.fill` |
 | `--stop-loss FRACTION` | no stop | `Settings.stop_loss`, between 0 and 1 (0.05 is 5%) |
 | `--drawdown-stop FRACTION` | no drawdown stop | `Settings.drawdown_stop`, between 0 and 1 (0.2 is 20%) |
+| `--position-size SHARE` | `1` | `Settings.position_size`, above 0 and at most 1 (0.5 is 50%) |
 | `--fee-bps BPS` | `0` | `Settings.fee_bps` |
 | `--slippage-bps BPS` | `0` | `Settings.slippage_bps` |
 
@@ -644,7 +658,7 @@ Its `run.json` (hashes shortened):
 
 ```json
 {
-  "engine_version": "0.3.0",
+  "engine_version": "0.4.0",
   "inputs": {
     "candles": {"path": "candles.parquet", "sha256": "509ac6b5..."},
     "predictions": {"path": "predictions.parquet", "sha256": "efe0645e..."}
@@ -660,6 +674,7 @@ Its `run.json` (hashes shortened):
     "fill": "signal_close",
     "stop_loss": 0.05,
     "drawdown_stop": null,
+    "position_size": 1.0,
     "fee_bps": 10.0,
     "slippage_bps": 0.0
   },
@@ -721,6 +736,7 @@ uv run candlestack-bt run-all --data <folder> --ts-column unix --labels close --
 | `--fill next_open\|signal_close` | `next_open` | `Settings.fill`, for every combination |
 | `--stop-losses FRACTIONS` | `none` | comma-separated stop losses, each as `run`'s `--stop-loss`, or `none` for no stop |
 | `--drawdown-stop FRACTION` | no drawdown stop | `Settings.drawdown_stop`, for every combination |
+| `--position-size SHARE` | `1` | `Settings.position_size`, for every combination |
 | `--fee-bps BPS` | `0` | `Settings.fee_bps`, for every combination |
 | `--slippage-bps BPS` | `0` | `Settings.slippage_bps`, for every combination |
 | `--jobs N` | `1` | run N stocks at a time in their own processes; the output does not depend on N |
@@ -743,7 +759,7 @@ What it writes to `--out`:
 | --- | --- |
 | `stats.parquet` | one row per stock × model × threshold × stop loss, stocks by folder name: the keys `stock`, `model`, `threshold`, `stop_loss` (null for no stop); the shared settings `long_only`, `fill`, `fee_bps`, `slippage_bps`; then every statistic of [Metrics](#metrics) in its order, null when `run` writes `null` |
 | `trades.parquet` | the engine's `trades` of every combination (all their columns, `slippage_cost` and the exit reason `ruin` included), in the same order, after the four keys |
-| `run.json` | `engine_version`; `data`; `settings`: the time label options, `allow_gaps`, `models`, `thresholds` (`[null]` with `kmeans`), `long_only`, `fill`, `stop_losses`, `drawdown_stop`, `fee_bps`, `slippage_bps`; `post_processing`: as in `run`, but the rule's `limit` (or `enter`) is the list of `--thresholds`, as each run takes one of them; `models`: the models run, by name; `stocks`: for each stock whose files were read, its name, `inputs` (path and SHA-256 of both files) and `align` (the `AlignReport` of each model that ran); `failed`: each failure as `stock`, `model` (null when the whole stock failed) and `error` |
+| `run.json` | `engine_version`; `data`; `settings`: the time label options, `allow_gaps`, `models`, `thresholds` (`[null]` with `kmeans`), `long_only`, `fill`, `stop_losses`, `drawdown_stop`, `position_size`, `fee_bps`, `slippage_bps`; `post_processing`: as in `run`, but the rule's `limit` (or `enter`) is the list of `--thresholds`, as each run takes one of them; `models`: the models run, by name; `stocks`: for each stock whose files were read, its name, `inputs` (path and SHA-256 of both files) and `align` (the `AlignReport` of each model that ran); `failed`: each failure as `stock`, `model` (null when the whole stock failed) and `error` |
 
 It prints how many stocks ran and failed, how many models ran and failed on a stock, and how
 many runs and trades it wrote.
@@ -821,7 +837,7 @@ The engine's worked example ([Worked example](#worked-example)) with `next_open`
     ]
   },
   "software": {
-    "engine_version": "0.3.0", "app_version": "2026.10.24-3f2a1c9",
+    "engine_version": "0.4.0", "app_version": "2026.10.24-3f2a1c9",
     "runner": {"format": "keras", "keras": "3.15.1", "backend": "jax 0.7.2"}
   },
   "model": {
@@ -844,7 +860,7 @@ The engine's worked example ([Worked example](#worked-example)) with `next_open`
   "decision": {"calibrate": null, "ema": null, "rule": {"name": "threshold", "limit": 0.05},
                "long_only": false, "confirm": null, "min_hold": null},
   "execution": {"fill": "next_open", "stop_loss": 0.05, "drawdown_stop": null,
-                "fee_bps": 10.0, "slippage_bps": 0.0},
+                "position_size": 1.0, "fee_bps": 10.0, "slippage_bps": 0.0},
   "benchmarks": [{"id": "bh", "kind": "buy_and_hold", "instrument": "stock:AAPL"}],
   "metrics": {"periods_per_year": 252, "risk_free_rate": 0.0},
   "results": {                                                    // null unless finished
@@ -1031,6 +1047,7 @@ fixed seeds, both fills, with and without a stop, costs and a drawdown stop):
 | `test_next_open_opens_after_its_decision_at_the_open_of_the_fill_candle` | every `next_open` trade opens after its decision, on the next candle, at that candle's open |
 | `test_the_fill_candle_apart_from_its_open_does_not_change_the_entry` | changing the high, low and close of the fill candle does not change the entries up to it |
 | `test_without_stop_and_costs_next_open_is_signal_close_one_row_later` | without stop and costs, `next_open` makes the trades of `signal_close`, each one candle later at the open |
+| `test_a_position_size_scales_every_trade_and_changes_no_entry_or_exit` | without a ruin or a drawdown stop, at a share of the capital the trades open and close as with the whole capital, each with that share of its return, fees and slippage cost, and the capital compounds them |
 | `test_a_drawdown_stop_halts_at_the_first_equity_at_or_below_the_level_and_not_before` | with a drawdown stop, the run is the one without it up to the first candle whose equity is at or below the level; there a position still open leaves by `drawdown`, and every later candle is flat with the capital as its equity |
 
 `test_rules.py` adds the order within a candle by hand:
@@ -1044,7 +1061,7 @@ that row stays the same.
 
 ## ENGINE_VERSION
 
-`ENGINE_VERSION` (in `candlestack/engine/version.py`, now `"0.3.0"`) names the rules that
+`ENGINE_VERSION` (in `candlestack/engine/version.py`, now `"0.4.0"`) names the rules that
 produced a run: it is in every `Result` and in the command's `run.json`. It goes up with every
 change to the loop that can change a run's trades or equity, so a stored run says which rules
 made it.
@@ -1052,13 +1069,14 @@ made it.
 `backend/tests/unit/engine/test_version.py` keeps the two together:
 
 - It runs a fixed example of 50 half-hour candles, written out in the file, with both fills, a
-  5% stop, a 5 bps fee and 2 bps of slippage, and both again with a 2% drawdown stop. Guard
+  5% stop, a 5 bps fee and 2 bps of slippage, both again with a 2% drawdown stop, and both
+  again at half the capital. Guard
   tests check that the example still has flips, a stop, a gap and a change on the last row,
   all with fees and slippage, with `next_open` an order that closes a position at an open
   beyond its stop (rule 2), a stop on an entry candle (rule 4) and an `end` exit, and with the
   drawdown stop a `drawdown` exit on a long before its stop, after which the run stays flat
   (rule 9).
-- It writes the four runs' `trades` and `series` as JSON (column names and types, and the rows with
+- It writes the six runs' `trades` and `series` as JSON (column names and types, and the rows with
   each float as its shortest exact `repr`) and hashes it with SHA-256. Not the Parquet bytes:
   they depend on how Polars writes the file, which a Polars update may change while the output
   stays the same.
@@ -1082,7 +1100,7 @@ Parquet bytes, and `uv run pytest -m slow -s` times the engine by hand (CI skips
 | decision | a change of the signal from one candle to the next; only a decision trades |
 | fill | the execution of a decision at a price: the candle's close (`signal_close`) or the next open (`next_open`) |
 | leg | one side of a trade, the entry or the exit; a flip has two legs on one candle |
-| notional | the money value a leg trades: the capital at the entry, the position's value at the exit |
+| notional | the money value a leg trades: the position's share of the capital at the entry, the position's value at the exit |
 | stop-loss | a price level that closes a position once it has lost a set fraction of its entry price |
 | gap | a candle that opens at or beyond the stop level, so the position exits at the open, worse than the level |
 | ruin | a loss of the whole capital; the run stays flat at an equity of 0 afterwards |
