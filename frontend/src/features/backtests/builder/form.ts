@@ -41,6 +41,8 @@ export type BuilderForm = {
   minHold: number;
   // In whole percent; 0 is off.
   drawdownStop: number;
+  // In whole percent of the capital.
+  positionSize: number;
   // Buy at the next candle's open (on) or at the close of the candle that decided.
   honestFill: boolean;
   // In percent, as typed.
@@ -72,6 +74,7 @@ export function formOf(defaults: BacktestDefaults, modelId: string | undefined):
     confirm: 1,
     minHold: 1,
     drawdownStop: 0,
+    positionSize: 100,
     honestFill: true,
     fees: String(defaults.fees_pct),
     slippage: String(defaults.slippage_pct),
@@ -263,7 +266,7 @@ export function backtestOf(form: BuilderForm, model: Model, instrument: ChosenIn
       fill: form.honestFill ? 'next_open' : 'signal_close',
       stop_loss: form.stopLoss / 100,
       drawdown_stop: form.drawdownStop > 0 ? form.drawdownStop / 100 : null,
-      position_size: 1,
+      position_size: form.positionSize / 100,
       fee_bps: bps(percent(form.fees) ?? 0),
       slippage_bps: bps(percent(form.slippage) ?? 0),
     },

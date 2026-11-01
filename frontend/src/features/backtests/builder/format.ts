@@ -45,6 +45,7 @@ export function decisionLine(form: BuilderForm): string {
     form.ema > 1 && `EMA ${form.ema}`,
     form.confirm > 1 && `confirm ${form.confirm}`,
     form.minHold > 1 && `hold ${form.minHold}`,
+    form.positionSize < 100 && `size ${form.positionSize} %`,
     form.drawdownStop > 0 && `drawdown stop ${form.drawdownStop} %`,
   ]
     .filter(Boolean)

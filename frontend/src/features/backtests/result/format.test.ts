@@ -151,7 +151,7 @@ describe('the setup', () => {
         fill: 'signal_close',
         stop_loss: null,
         drawdown_stop: 0.2,
-        position_size: 1,
+        position_size: 0.5,
         fee_bps: 2.5,
         slippage_bps: 1,
       },
@@ -160,6 +160,7 @@ describe('the setup', () => {
     expect(group(doc, 'Execution')).toEqual([
       ['Fills at', "Signal candle's close"],
       ['Drawdown stop', '20 %'],
+      ['Position size', '50 %'],
       ['Fees', '0.025 %'],
       ['Slippage', '0.01 %'],
     ]);

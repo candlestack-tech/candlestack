@@ -33,8 +33,11 @@ describe('how the builder writes its choices', () => {
         confirm: 2,
         minHold: 3,
         drawdownStop: 20,
+        positionSize: 50,
       }),
-    ).toBe('in 0.30, out 0.10 · long and short · stop 7 % · z-score · EMA 5 · confirm 2 · hold 3 · drawdown stop 20 %');
+    ).toBe(
+      'in 0.30, out 0.10 · long and short · stop 7 % · z-score · EMA 5 · confirm 2 · hold 3 · size 50 % · drawdown stop 20 %',
+    );
     expect(decisionLine({ ...form, rule: 'kmeans', k: 4 })).toBe('k-means, 4 groups · long only · stop 7 %');
   });
 

@@ -182,11 +182,12 @@ const BENCHMARKS: Record<string, string> = { buy_and_hold: 'Buy and hold' };
 
 // The fill, the stops and the costs, then what it is compared with.
 function executionRows(doc: BacktestDocument): SetupRow[] {
-  const { fill, stop_loss, drawdown_stop, fee_bps, slippage_bps } = doc.execution;
+  const { fill, stop_loss, drawdown_stop, position_size, fee_bps, slippage_bps } = doc.execution;
   const rows: (SetupRow | false)[] = [
     ['Fills at', FILLS[fill]],
     stop_loss != null && ['Stop loss', percent(stop_loss)],
     drawdown_stop != null && ['Drawdown stop', percent(drawdown_stop)],
+    position_size < 1 && ['Position size', percent(position_size)],
     ['Fees', bps(fee_bps)],
     ['Slippage', bps(slippage_bps)],
     ...doc.benchmarks.map((benchmark): SetupRow => ['Benchmark', BENCHMARKS[benchmark.kind] ?? benchmark.kind]),
