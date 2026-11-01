@@ -115,3 +115,13 @@ export function useCompareSelection() {
   const picks = slots.filter((slot) => slot !== null);
   return { slots, picks, hidden, full: picks.length >= SLOTS };
 }
+
+// What the compare page's back link calls the page it was opened from.
+export function comparedFromOf(pathname: string): string {
+  if (pathname === '/dashboard') return 'Dashboard';
+  if (pathname === '/backtests') return 'Backtests';
+  if (pathname === '/models') return 'Models';
+  if (pathname.startsWith('/models/')) return 'Model';
+  if (pathname === '/backtests/new') return 'Back';
+  return pathname.startsWith('/backtests/') ? 'Backtest' : 'Back';
+}

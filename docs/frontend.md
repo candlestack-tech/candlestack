@@ -430,7 +430,7 @@ so its back link returns there (else "← Backtests").
   the period's first and last UTC day, when it ran and how long. A finished one has
   `[Download JSON | ?]` (the download is `GET /api/v1/backtests/{id}/download`, which the browser
   saves as `candlestack-backtest-<N>.json`; `?` opens https://candlestack.tech/docs/backtest-json)
-  and Compare, which does nothing yet.
+  and Add to compare.
 - Finished: the six first results in a strip (`src/components/FactsStrip.tsx`, the model page's
   too), then the charts and the trades beside every metric of the engine and the setup (one column
   up to 980 px). Running: a moving bar and the setup. Failed: the error and the setup. A 404 says
@@ -478,6 +478,24 @@ so its back link returns there (else "← Backtests").
 - Limits: the returns are daily for runs of more than 10 000 rows (the light view), and the
   candles carry the data API's adjustment of today (`adjustment=all`), so a stock's prices can
   differ from those the run traded at after a later split or dividend.
+
+## Compare backtests
+
+`/backtests/compare` (#355, #356, `src/pages/ComparePage.tsx`, the parts in
+`src/features/backtests/compare/`), from the approved design (`design/mockups/compare-backtests`).
+
+- The choice: up to 4 finished backtests in slots, kept in `localStorage` (`selection.ts`), so it
+  stays after a reload in this browser. A slot gives a backtest its colour, and removing another
+  moves nothing. One that no longer exists leaves the choice when the page gets a 404.
+- Adding: a scale icon on every list of backtests, off with the reason in its title for a running
+  or failed one or at 4, and a button on a backtest's page. The Compare panel in the bottom right
+  corner of the signed-in pages lists them; Compare opens the page from 2. It can fold to a small
+  button and is not on the compare page.
+- The page: Equity and Drawdown on two TradingView Lightweight Charts with one crosshair and one
+  view of time, a line per backtest from its own start, on the light view of each document; then a
+  table. In each row of the results the best value is green and the worst red, the others plain,
+  and all plain when they read the same or when no value is better (Trades, Time in market, Buy
+  and hold). The setup follows, with a dash where a backtest has no such row.
 
 ## Instrument icons
 

@@ -1,4 +1,4 @@
-import { Link, useRouterState } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 
 import type { Backtest } from '@/api';
@@ -6,6 +6,7 @@ import { StarButton } from '@/components/StarButton';
 import { cn } from '@/lib/utils';
 
 import { BacktestNumber, ModelName } from './parts';
+import { useOpenedFrom } from './useOpenedFrom';
 
 // The tables of backtests (mockups/app, .tbl): 13 px, the headers medium and muted over a line,
 // the rows 8 px high around their text with a line under each but the last, 10 px at the sides
@@ -55,17 +56,6 @@ export function SortButton({
 // inside its edge; a click shows none, as in the mockup.
 export const ROW_OPENER =
   'cursor-pointer outline-none after:absolute after:inset-0 focus-visible:text-primary focus-visible:after:rounded-md focus-visible:after:ring-2 focus-visible:after:ring-ring/60 focus-visible:after:ring-inset';
-
-// Where a backtest's page goes back to: the dashboard or the model's page it was opened from,
-// else the Backtests page.
-export function useOpenedFrom(): 'dashboard' | 'model' | undefined {
-  return useRouterState({
-    select: ({ location }) => {
-      if (location.pathname.startsWith('/dashboard')) return 'dashboard';
-      return location.pathname.startsWith('/models/') ? 'model' : undefined;
-    },
-  });
-}
 
 // The link to a row's backtest page, stretched over the whole row so the row is one click target
 // and the keyboard reaches it; what else the row holds (the star) sits above it.

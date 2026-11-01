@@ -44,7 +44,7 @@ describe('choosing backtests to compare', () => {
     expect(within(panel()).getByRole('link', { name: '#12' })).toBeDefined();
     expect(within(panel()).getByRole('button', { name: 'Compare' })).toHaveProperty('disabled', true);
     await user.click(toggle(/^Add to compare: backtest 13$/));
-    expect(within(panel()).getByRole('button', { name: 'Compare' })).toHaveProperty('disabled', false);
+    expect(within(panel()).getByRole('link', { name: 'Compare' }).getAttribute('href')).toBe('/backtests/compare');
     expect(toggle(/^Remove from compare: backtest 12$/).getAttribute('aria-pressed')).toBe('true');
   });
 
@@ -70,7 +70,8 @@ describe('choosing backtests to compare', () => {
     await user.click(toggle(/^Add to compare: backtest 15$/));
     const order = within(panel())
       .getAllByRole('link')
-      .map((link) => link.textContent);
+      .map((link) => link.textContent)
+      .filter((text) => text.startsWith('#'));
     expect(order).toEqual(['#12', '#15', '#14']);
   });
 
