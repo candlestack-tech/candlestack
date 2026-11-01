@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
 
-import { useOpenedFrom } from '../table';
+import { useOpenedFrom } from '../useOpenedFrom';
 import { SLOT_COLORS } from './colors';
 import { CompareLink } from './CompareLink';
 import {

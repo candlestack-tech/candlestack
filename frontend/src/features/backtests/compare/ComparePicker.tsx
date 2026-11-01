@@ -47,21 +47,28 @@ function List({ query }: { query: string }) {
   );
 }
 
+// The title with how many are chosen.
+function PickerHead() {
+  const { picks } = useCompareSelection();
+  return (
+    <DialogHeader>
+      <DialogTitle>
+        Add backtests{' '}
+        <span className="ml-1 font-mono text-xs font-medium text-muted-foreground">
+          {picks.length} of {SLOTS}
+        </span>
+      </DialogTitle>
+    </DialogHeader>
+  );
+}
+
 // Adding backtests without leaving the page: the newest, or the ones a search finds.
 export function ComparePicker({ open, onOpenChange }: Props) {
-  const { picks } = useCompareSelection();
   const [query, setQuery] = useState('');
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[640px]">
-        <DialogHeader>
-          <DialogTitle>
-            Add backtests{' '}
-            <span className="ml-1 font-mono text-xs font-medium text-muted-foreground">
-              {picks.length} of {SLOTS}
-            </span>
-          </DialogTitle>
-        </DialogHeader>
+        <PickerHead />
         <DialogBody>
           <div className="flex flex-col gap-3">
             <SearchBox
