@@ -14,8 +14,8 @@ The rules, the same for both fills:
    of the same candle, and after a stop only the next change opens a position again.
 5. Slippage ``s`` moves each fill against the trade: an entry to ``price * (1 + side * s)``,
    an exit to ``price * (1 - side * s)``, a stop exit from its level. The fee is ``fee_bps``
-   of each leg's notional: the capital on entry, the position's value on exit. A trade's
-   return is capital after / capital before - 1, so
+   of each leg's notional: the position's capital on entry, its value on exit. A trade's
+   return is capital after / capital before - 1, at the whole capital (rule 10)
    ``side * (exit / entry - 1) - fee * (1 + exit / entry)``. Its slippage cost is the return
    with the prices before slippage minus that return, the same fees in both:
    ``side * (price_exit / price_entry - exit / entry)``.

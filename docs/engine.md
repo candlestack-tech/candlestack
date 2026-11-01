@@ -187,7 +187,8 @@ The rules, the same for both fills:
      below 0, the position closes at that close, with its exit fee and slippage, and reason
      `ruin`;
    - when a closing trade's `return` is at or below -1, for example a gap through the stop or a
-     short closed by the signal after its price doubled, nothing is left of the capital.
+     short of the whole capital closed by the signal after its price doubled, nothing is left of
+     the capital.
 
    Either way the capital becomes 0 (the trade's `return` stays as computed, at or below -1),
    no position opens again, not even the second leg of a flip or a `next_open` order already
@@ -297,10 +298,11 @@ statistics, the `InvalidInput` message under [Input](#input) and the command bel
 
 The two costs work differently:
 
-- **Fee: a commission, nothing else.** Each leg pays `fee_bps` of its notional: the entry leg
-  pays `fee * capital`, the exit leg `fee * capital * exit / entry` (the position's value at
-  the exit). The trade's `fees` column is their sum as a fraction of the capital before the
-  trade, `fee * (1 + exit / entry)`. The fee never changes a price.
+- **Fee: a commission, nothing else.** Each leg pays `fee_bps` of its notional. With the share
+  `f = position_size`, the entry leg pays `fee * f * capital`, the exit leg
+  `fee * f * capital * exit / entry` (the position's value at the exit). The trade's `fees`
+  column is their sum as a fraction of the capital before the trade,
+  `f * fee * (1 + exit / entry)`. The fee never changes a price.
 - **Slippage: a worse price, nothing else.** With `s = slippage_bps * 0.0001` and `side` +1 or
   -1, an entry fills at `price * (1 + side * s)`, an exit (`signal`, `gap` or `end`) at
   `price * (1 - side * s)`, and a stop exit at `level * (1 - side * s)`. The stop level comes
@@ -757,7 +759,7 @@ What it writes to `--out`:
 | --- | --- |
 | `stats.parquet` | one row per stock × model × threshold × stop loss, stocks by folder name: the keys `stock`, `model`, `threshold`, `stop_loss` (null for no stop); the shared settings `long_only`, `fill`, `fee_bps`, `slippage_bps`; then every statistic of [Metrics](#metrics) in its order, null when `run` writes `null` |
 | `trades.parquet` | the engine's `trades` of every combination (all their columns, `slippage_cost` and the exit reason `ruin` included), in the same order, after the four keys |
-| `run.json` | `engine_version`; `data`; `settings`: the time label options, `allow_gaps`, `models`, `thresholds` (`[null]` with `kmeans`), `long_only`, `fill`, `stop_losses`, `drawdown_stop`, `fee_bps`, `slippage_bps`; `post_processing`: as in `run`, but the rule's `limit` (or `enter`) is the list of `--thresholds`, as each run takes one of them; `models`: the models run, by name; `stocks`: for each stock whose files were read, its name, `inputs` (path and SHA-256 of both files) and `align` (the `AlignReport` of each model that ran); `failed`: each failure as `stock`, `model` (null when the whole stock failed) and `error` |
+| `run.json` | `engine_version`; `data`; `settings`: the time label options, `allow_gaps`, `models`, `thresholds` (`[null]` with `kmeans`), `long_only`, `fill`, `stop_losses`, `drawdown_stop`, `position_size`, `fee_bps`, `slippage_bps`; `post_processing`: as in `run`, but the rule's `limit` (or `enter`) is the list of `--thresholds`, as each run takes one of them; `models`: the models run, by name; `stocks`: for each stock whose files were read, its name, `inputs` (path and SHA-256 of both files) and `align` (the `AlignReport` of each model that ran); `failed`: each failure as `stock`, `model` (null when the whole stock failed) and `error` |
 
 It prints how many stocks ran and failed, how many models ran and failed on a stock, and how
 many runs and trades it wrote.
@@ -1045,7 +1047,7 @@ fixed seeds, both fills, with and without a stop, costs and a drawdown stop):
 | `test_next_open_opens_after_its_decision_at_the_open_of_the_fill_candle` | every `next_open` trade opens after its decision, on the next candle, at that candle's open |
 | `test_the_fill_candle_apart_from_its_open_does_not_change_the_entry` | changing the high, low and close of the fill candle does not change the entries up to it |
 | `test_without_stop_and_costs_next_open_is_signal_close_one_row_later` | without stop and costs, `next_open` makes the trades of `signal_close`, each one candle later at the open |
-| `test_a_position_size_scales_every_trade_and_changes_no_entry_or_exit` | at a share of the capital the trades open and close as with the whole capital, each with that share of its return, fees and slippage cost, and the capital compounds them |
+| `test_a_position_size_scales_every_trade_and_changes_no_entry_or_exit` | without a ruin or a drawdown stop, at a share of the capital the trades open and close as with the whole capital, each with that share of its return, fees and slippage cost, and the capital compounds them |
 | `test_a_drawdown_stop_halts_at_the_first_equity_at_or_below_the_level_and_not_before` | with a drawdown stop, the run is the one without it up to the first candle whose equity is at or below the level; there a position still open leaves by `drawdown`, and every later candle is flat with the capital as its equity |
 
 `test_rules.py` adds the order within a candle by hand:
@@ -1098,7 +1100,7 @@ Parquet bytes, and `uv run pytest -m slow -s` times the engine by hand (CI skips
 | decision | a change of the signal from one candle to the next; only a decision trades |
 | fill | the execution of a decision at a price: the candle's close (`signal_close`) or the next open (`next_open`) |
 | leg | one side of a trade, the entry or the exit; a flip has two legs on one candle |
-| notional | the money value a leg trades: the capital at the entry, the position's value at the exit |
+| notional | the money value a leg trades: the position's share of the capital at the entry, the position's value at the exit |
 | stop-loss | a price level that closes a position once it has lost a set fraction of its entry price |
 | gap | a candle that opens at or beyond the stop level, so the position exits at the open, worse than the level |
 | ruin | a loss of the whole capital; the run stays flat at an equity of 0 afterwards |
