@@ -93,8 +93,9 @@ describe('HomePage', () => {
   it('lists the model frameworks a user can bring', async () => {
     const html = await render();
     const badges = [...section(html, 'layers').matchAll(/<li [^>]*>([^<]*)<\/li>/g)].map((match) => match[1]);
-    expect(badges).toEqual(expect.arrayContaining(['Keras', 'TensorFlow', 'PyTorch', 'ONNX', 'scikit-learn']));
-    expect(badges).toHaveLength(12);
+    expect(badges).toEqual(expect.arrayContaining(['Keras', 'ONNX']));
+    expect(badges).not.toContain('PyTorch');
+    expect(badges).toHaveLength(9);
   });
 
   it('stops the dashes on the pipeline when the user asks for less motion', async () => {
