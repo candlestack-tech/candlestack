@@ -3,9 +3,9 @@ import { cleanup, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { InstrumentDetail } from '@/api';
 import { ARSEN, dashboardAnswer, modelsAnswer, session, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
+import { BTC } from '@/test/instruments';
 
 // The instrument page's chart draws on a canvas jsdom has not.
 vi.mock('lightweight-charts', () => import('@/test/lightweightCharts'));
@@ -19,22 +19,6 @@ const heading = () => screen.getByRole('heading', { level: 1 }).textContent;
 
 // What the stubbed fetch was asked for, in order.
 const requests = (fetch: ReturnType<typeof stubApi>) => fetch.mock.calls.map(([path]) => path);
-
-const BTC: InstrumentDetail = {
-  id: 'crypto:BTCUSDT',
-  symbol: 'BTCUSDT',
-  name: 'Bitcoin / TetherUS',
-  market: 'crypto',
-  exchange: 'BINANCE',
-  source: 'binance',
-  feed: 'spot',
-  base: 'BTC',
-  quote: 'USDT',
-  available_from: 1_502_942_400,
-  available_to: 1_790_812_800,
-  max_candles: 1000,
-  timeframes: ['1h', '1d'],
-};
 
 describe('the signed-in pages', () => {
   it('send a visitor without a session to sign in, to come back to the page asked for', async () => {
