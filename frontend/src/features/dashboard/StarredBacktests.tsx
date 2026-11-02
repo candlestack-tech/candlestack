@@ -1,12 +1,14 @@
 import type { Backtest, Dashboard } from '@/api';
 import { Hint } from '@/components/Hint';
 import { BacktestsIcon } from '@/components/icons';
+import { MiniChart } from '@/components/MiniChart';
 import {
   BacktestInstruments,
   BacktestNumber,
   BacktestReturn,
   CompareToggle,
   ModelName,
+  PublicMark,
   RowOpener,
   RowStar,
   compareTarget,
@@ -16,7 +18,6 @@ import {
 import { formatSharpe } from '@/lib/results';
 import { cn } from '@/lib/utils';
 
-import { MiniChart } from './MiniChart';
 import { MoreRow, STARRED_ROW, Widget } from './widgets';
 
 type RowProps = { backtest: Backtest; onStar: (backtest: Backtest) => void };
@@ -38,6 +39,7 @@ function Row({ backtest, onStar }: RowProps) {
           <BacktestNumber backtest={backtest} />
         </RowOpener>
         <BacktestInstruments backtest={backtest} max={2} size={16} />
+        {backtest.public && <PublicMark />}
       </span>
       {done && backtest.equity ? <MiniChart strategy={backtest.equity.strategy} /> : <span />}
       <span className="text-right font-mono text-sm/[1.5] font-semibold whitespace-nowrap">

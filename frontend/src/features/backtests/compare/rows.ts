@@ -10,7 +10,8 @@ import { setupOf } from '../result/format';
 type Stats = NonNullable<BacktestDocument['results']>['stats'];
 
 export type Mark = 'best' | 'worst' | undefined;
-export type Cell = { text: string; mark: Mark };
+// `avatar`: whose initials go before the text (the Author row).
+export type Cell = { text: string; mark: Mark; avatar?: string };
 export type CompareRow = { label: string; cells: Cell[] };
 
 type Metric = {
@@ -84,12 +85,25 @@ const plain = (label: string, texts: readonly string[]): CompareRow => ({
   cells: texts.map((text) => ({ text, mark: undefined })),
 });
 
+// Whose each backtest is, by initials and name, "You" for the user's own; only with another
+// account's in the comparison (public-experiments, C_SETUP).
+function authorRows(docs: readonly BacktestDocument[]): CompareRow[] {
+  if (docs.every((doc) => doc.backtest.author.mine)) return [];
+  const cells = docs.map(({ backtest: { author } }) => ({
+    text: author.mine ? 'You' : author.name,
+    mark: undefined,
+    avatar: author.name,
+  }));
+  return [{ label: 'Author', cells }];
+}
+
 // The setup as a backtest's page writes it. A row only some of them have (a rule's own settings,
 // the steps that are on) has a dash for the others, and stays where it first came up.
 export function setupRows(docs: readonly BacktestDocument[], style: Pick<DateStyle, 'dateFormat'>): CompareRow[] {
   const each = docs.map((doc) => new Map(setupOf(doc, style).flatMap(({ rows }) => rows)));
   const labels = [...new Set(each.flatMap((rows) => [...rows.keys()]))];
   return [
+    ...authorRows(docs),
     plain(
       'Instrument',
       docs.map((doc) => doc.data.instrument.symbol),

@@ -17,7 +17,8 @@ export const hasResults = (backtest: Backtest) => backtest.status === 'finished'
 // The colour of a return, the only result with one: green from zero, red below.
 export const returnClass = (fraction: number) => (returnTone(fraction) === 'up' ? 'text-up' : 'text-down');
 
-export const symbolsOf = (backtest: Backtest) => backtest.instruments.map((instrument) => instrument.symbol);
+export const symbolsOf = (backtest: Pick<Backtest, 'instruments'>) =>
+  backtest.instruments.map((instrument) => instrument.symbol);
 
 // What the comparison needs of a backtest: a backtest has one instrument now, older ones more.
 export const compareTarget = (backtest: Backtest) => ({

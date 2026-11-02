@@ -2,13 +2,14 @@ import { Link } from '@tanstack/react-router';
 import { LayoutGrid } from 'lucide-react';
 
 import { HINT } from '@/components/Hint';
-import { BacktestsIcon, InstrumentsIcon, ModelsIcon, SettingsIcon } from '@/components/icons';
+import { BacktestsIcon, ExperimentsIcon, InstrumentsIcon, ModelsIcon, SettingsIcon } from '@/components/icons';
 import { useDashboard } from '@/features/backtests';
 import { SidebarStorage, useModels } from '@/features/models';
 
 const SECTIONS = [
   { to: '/dashboard', label: 'Dashboard', Icon: LayoutGrid },
   { to: '/backtests', label: 'Backtests', Icon: BacktestsIcon },
+  { to: '/experiments', label: 'Experiments', Icon: ExperimentsIcon },
   { to: '/models', label: 'Models', Icon: ModelsIcon },
   { to: '/instruments', label: 'Instruments', Icon: InstrumentsIcon },
   { to: '/settings', label: 'Settings', Icon: SettingsIcon },
@@ -20,12 +21,12 @@ const SECTIONS = [
 const ITEM =
   'flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm/[normal] whitespace-nowrap text-muted-foreground transition-colors duration-150 hover:text-foreground hover:not-data-[status=active]:bg-muted data-[status=active]:bg-surface-2 data-[status=active]:font-medium data-[status=active]:text-foreground motion-reduce:transition-none max-[980px]:w-auto max-[980px]:flex-none';
 
-// How many there are in a section, at the row's right (.dd-n): the backtests and the models, each
-// once the API has said.
+// How many there are in a section, at the row's right (.dd-n): the backtests, the published ones
+// of the beta (public-experiments) and the models, each once the API has said.
 function useCounts(): Partial<Record<(typeof SECTIONS)[number]['to'], number>> {
-  const backtests = useDashboard().data?.counts.all;
+  const dashboard = useDashboard().data;
   const models = useModels().data?.models.length;
-  return { '/backtests': backtests, '/models': models };
+  return { '/backtests': dashboard?.counts.all, '/experiments': dashboard?.experiments.total, '/models': models };
 }
 
 // The workspace's sections beside the page (mockups/app, direction D): a 200 px card, the storage

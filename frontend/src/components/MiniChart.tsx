@@ -1,6 +1,7 @@
 import {
   BaselineSeries,
   ColorType,
+  LineSeries,
   LineStyle,
   createChart,
   type LineWidth,
@@ -8,6 +9,7 @@ import {
 } from 'lightweight-charts';
 import { useEffect, useRef } from 'react';
 
+import { cn } from '@/lib/utils';
 import { useTheme } from '@/theme';
 
 // The points sit a day apart: the series has no dates, and the time axis is hidden anyway.
@@ -40,10 +42,28 @@ const PICTURE = {
   handleScale: false,
 } as const;
 
-// Draws the return in percent on a baseline at zero, in the theme's colours, and the zero line.
-function draw(container: HTMLElement, strategy: readonly number[]) {
+const points = (values: readonly number[]) =>
+  values.map((value, index) => ({ time: (index * DAY) as UTCTimestamp, value: value * 100 }));
+
+// The benchmark under the strategy: 1 px dashed in the muted colour (public-experiments, .mc-b).
+function drawBenchmark(chart: ReturnType<typeof createChart>, benchmark: readonly number[], muted: string) {
+  const series = chart.addSeries(LineSeries, {
+    color: withAlpha(muted, 0.7),
+    lineWidth: 1,
+    lineStyle: LineStyle.Dashed,
+    lastValueVisible: false,
+    priceLineVisible: false,
+    crosshairMarkerVisible: false,
+  });
+  series.setData(points(benchmark));
+}
+
+// Draws the return in percent on a baseline at zero, in the theme's colours, and the zero line;
+// with `benchmark`, its return too.
+function draw(container: HTMLElement, strategy: readonly number[], benchmark: readonly number[] | undefined) {
   const colors = themeColors();
   const chart = createChart(container, PICTURE);
+  if (benchmark) drawBenchmark(chart, benchmark, colors.zero);
   const series = chart.addSeries(BaselineSeries, {
     baseValue: { type: 'price', price: 0 },
     // The type lists whole pixels only; the canvas draws 1.5 as the mockup has it.
@@ -58,7 +78,7 @@ function draw(container: HTMLElement, strategy: readonly number[]) {
     bottomFillColor1: withAlpha(colors.down, 0),
     bottomFillColor2: withAlpha(colors.down, 0.18),
   });
-  series.setData(strategy.map((value, index) => ({ time: (index * DAY) as UTCTimestamp, value: value * 100 })));
+  series.setData(points(strategy));
   series.createPriceLine({
     price: 0,
     color: withAlpha(colors.zero, 0.6),
@@ -73,23 +93,32 @@ function draw(container: HTMLElement, strategy: readonly number[]) {
 // A tiny TradingView chart of a backtest's return, 64 × 28 px in a soft border: green above zero
 // and red below, as the return is coloured. It is a picture and takes no clicks (its canvases would
 // cover the row's link), so the row around it opens the backtest.
-// Buy and hold is left out: on one scale with it, a strategy that lost everything while the stock
-// rose tenfold is a flat line.
-export function MiniChart({ strategy }: { strategy: readonly number[] }) {
+// Buy and hold is left out of the dashboard's rows: on one scale with it, a strategy that lost
+// everything while the stock rose tenfold is a flat line. A card of Experiments, as wide as the
+// card and 44 px high (`className`), adds its benchmark (public-experiments, .xc-ch).
+export function MiniChart({
+  strategy,
+  benchmark,
+  className = 'h-7 w-16',
+}: {
+  strategy: readonly number[];
+  benchmark?: readonly number[];
+  className?: string;
+}) {
   const box = useRef<HTMLDivElement>(null);
   const theme = useTheme();
 
   useEffect(() => {
     if (!box.current) return;
-    const chart = draw(box.current, strategy);
+    const chart = draw(box.current, strategy, benchmark);
     return () => chart.remove();
-  }, [strategy, theme]);
+  }, [strategy, benchmark, theme]);
 
   return (
     <div
       ref={box}
       aria-hidden="true"
-      className="pointer-events-none h-7 w-16 overflow-hidden rounded-[5px] border border-border/70"
+      className={cn('pointer-events-none overflow-hidden rounded-[5px] border border-border/70', className)}
     />
   );
 }

@@ -55,7 +55,7 @@ describe('the signed-in pages', () => {
   });
 
   it('show the app shell to a signed-in user: header, sidebar, title, footer', async () => {
-    stubApi({ ...session(ARSEN), ...dashboardAnswer({ counts: { all: 1, starred: 0, failed: 0 } }) });
+    stubApi({ ...session(ARSEN), ...dashboardAnswer({ counts: { all: 1, starred: 0, failed: 0, public: 0 } }) });
     await renderApp('/dashboard');
     await vi.waitFor(() => expect(heading()).toBe('Welcome back, Arsen Labovich'));
     expect(screen.getByRole('link', { name: 'CandleStack dashboard' }).getAttribute('href')).toBe('/dashboard');
@@ -73,11 +73,12 @@ describe('the signed-in pages', () => {
     expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
       ['Dashboard', '/dashboard'],
       ['Backtests', '/backtests'],
+      ['Experiments', '/experiments'],
       ['Models', '/models'],
       ['Instruments', '/instruments'],
       ['Settings', '/settings'],
     ]);
-    expect(links.map((link) => link.getAttribute('aria-current'))).toEqual([null, null, 'page', null, null]);
+    expect(links.map((link) => link.getAttribute('aria-current'))).toEqual([null, null, null, 'page', null, null]);
     expect(heading()).toBe('Models');
   });
 

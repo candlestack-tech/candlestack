@@ -19,6 +19,10 @@ describe('validateBacktestsSearch', () => {
     ).toEqual({ q: 'aapl', show: 'starred', model: 'lstm.keras', sort: 'sharpe', order: 'asc', page: 2 });
   });
 
+  it('keeps Public only, the backtests in Experiments', () => {
+    expect(validate({ show: 'public' })).toEqual({ show: 'public' });
+  });
+
   it('drops defaults and broken values', () => {
     expect(validate({ q: '  ', show: 'all', model: '', sort: 'default', page: '1' })).toEqual({});
     expect(validate({ show: 'mine', sort: 'drawdown', order: 'up', page: '-3' })).toEqual({});

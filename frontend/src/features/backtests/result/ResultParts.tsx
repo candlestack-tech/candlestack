@@ -1,3 +1,4 @@
+import { Lock } from 'lucide-react';
 import type { ReactNode, Ref } from 'react';
 
 import type { BacktestDocument } from '@/api';
@@ -6,6 +7,7 @@ import { FrameworkTile, frameworkOf } from '@/features/models';
 import { useDateStyle } from '@/features/preferences';
 import { cn } from '@/lib/utils';
 
+import { firstName } from '../experiments/format';
 import { durationText, setupOf, STEP_NAMES, stepTime, TONE, type Metric } from './format';
 
 // The boxes of a backtest's page (mockups/app, .r7-box and the parts in them).
@@ -99,12 +101,23 @@ function InstrumentName({ instrument }: { instrument: BacktestDocument['data']['
   );
 }
 
+// Under another account's model: what it reads is all there is of it (public-experiments, .priv).
+function ModelStays({ author }: { author: string }) {
+  return (
+    <p className="flex items-start gap-[7px] rounded-md bg-muted px-[9px] py-[7px] text-xs text-muted-foreground">
+      <Lock aria-hidden="true" className="mt-0.5 size-[13px] flex-none" />
+      <span>The model file stays with {firstName(author)}. You see what it reads, not the file.</span>
+    </p>
+  );
+}
+
 // The setup it ran with (#309): the builder's steps as groups between rules, one value per row.
 // The model starts with its name and mark, the data with the instrument. A finished run adds how
 // long it took.
 export function SetupBox({ doc }: { doc: BacktestDocument }) {
   const dateStyle = useDateStyle();
   const { backtest } = doc;
+  const others = !backtest.author.mine;
   return (
     <ResultBox title="Setup">
       <div className="flex flex-col text-[13px]">
@@ -121,6 +134,7 @@ export function SetupBox({ doc }: { doc: BacktestDocument }) {
                 </div>
               ))}
             </dl>
+            {name === 'Model' && others && <ModelStays author={backtest.author.name} />}
           </div>
         ))}
         {backtest.status === 'finished' && backtest.steps.length > 0 && <RunTimes backtest={backtest} />}

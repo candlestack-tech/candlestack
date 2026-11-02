@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 
 import { addToCompare, removeFromCompare, useCompareSelection, type ComparePick } from './selection';
 
-type Target = ComparePick & { status: BacktestStatus; seeded?: boolean };
+type Target = Omit<ComparePick, 'gone'> & { status: BacktestStatus; seeded?: boolean };
 
 // Whether a backtest can go in the comparison, and what its button says.
 function useCompareState({ id, status, seeded = false }: Target) {
@@ -23,7 +23,7 @@ function useCompareState({ id, status, seeded = false }: Target) {
 
 function toggle(target: Target, added: boolean) {
   if (added) removeFromCompare(target.id);
-  else addToCompare({ id: target.id, number: target.number, symbol: target.symbol });
+  else addToCompare({ id: target.id, number: target.number, symbol: target.symbol, author: target.author });
 }
 
 // The scale icon of a row in a list of backtests: muted, the accent on hover, filled once added,

@@ -1,49 +1,47 @@
 import { useQueries } from '@tanstack/react-query';
 import { useCanGoBack, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
-import { Scale } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { Scale, X } from 'lucide-react';
+import { useMemo, useState } from 'react';
 
-import { ApiError, backtestQueryOptions, type BacktestDocument } from '@/api';
+import { backtestQueryOptions, type BacktestDocument } from '@/api';
 import { ErrorNote } from '@/components/ErrorNote';
 import { PageTitle } from '@/components/PageTitle';
 import { Button } from '@/components/ui/button';
 import {
+  AuthorAvatar,
   CompareCharts,
   ComparePicker,
   CompareTable,
   SLOTS,
   SLOT_COLORS,
   clearCompare,
+  isMissing,
   lineOf,
   removeFromCompare,
   useCompareSelection,
+  useLeaveMissing,
   type CompareColumn,
+  type ComparePick,
 } from '@/features/backtests';
 import { usePageTitle } from '@/lib/usePageTitle';
 
-const isMissing = (error: unknown) => error instanceof ApiError && error.status === 404;
-
 // The chosen backtests in the order of their slots, each with its colour. A chosen one that no
-// longer exists leaves the choice.
+// longer exists leaves the choice; another account's that was unpublished says so (leaveCompare).
 function useColumns() {
-  const { slots, picks } = useCompareSelection();
+  const { slots, picks, full } = useCompareSelection();
   const results = useQueries({ queries: picks.map((pick) => backtestQueryOptions(pick.id)) });
-  const gone = picks.filter((_, index) => isMissing(results[index]?.error)).map((pick) => pick.id);
-  const goneKey = gone.join();
-  useEffect(() => {
-    if (goneKey) goneKey.split(',').forEach(removeFromCompare);
-  }, [goneKey]);
+  useLeaveMissing(picks, results);
   const docs = new Map<string, BacktestDocument>();
   picks.forEach((pick, index) => {
     const data = results[index]?.data;
     if (data) docs.set(pick.id, data);
   });
   const columns: CompareColumn[] = slots.flatMap((slot, index) => {
-    const doc = slot && docs.get(slot.id);
+    const doc = slot && !slot.gone && docs.get(slot.id);
     return doc ? [{ doc, color: SLOT_COLORS[index] ?? 'currentColor' }] : [];
   });
   const failed = results.some((result) => result.error && !isMissing(result.error));
-  return { columns, count: picks.length, failed };
+  return { columns, picks, full, failed };
 }
 
 // "← Dashboard": back where the page was opened from, the Backtests page when it was opened
@@ -74,7 +72,7 @@ function Empty({ onAdd }: { onAdd: () => void }) {
         <Scale aria-hidden="true" className="size-[22px]" />
       </span>
       <h2 className="text-lg font-semibold">Nothing to compare yet</h2>
-      <p className="text-muted-foreground">Add 2 to 4 finished backtests.</p>
+      <p className="text-muted-foreground">Add 2 to 4 finished backtests, yours or from Experiments.</p>
       <Button type="button" className="mt-1" onClick={onAdd}>
         Add backtests
       </Button>
@@ -82,44 +80,82 @@ function Empty({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-const countLine = (count: number) =>
-  count === 1 ? `1 of ${SLOTS} backtests. Add one more to compare` : `${count} of ${SLOTS} backtests`;
+// Another account's backtest that its author unpublished, until the user dismisses it
+// (public-experiments, .cmp-note).
+function UnpublishedNote({ pick }: { pick: ComparePick }) {
+  return (
+    <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-dashed border-[color-mix(in_srgb,var(--warn)_45%,var(--rule))] bg-background py-2 pr-2 pl-3 text-[13px] text-muted-foreground">
+      {pick.author !== undefined && <AuthorAvatar name={pick.author} size="md" />}
+      <span className="min-w-0 flex-1">
+        <b className="font-medium text-foreground">{pick.author}</b> unpublished #{pick.number}, so it left your
+        Compare.
+      </span>
+      <button
+        type="button"
+        aria-label="Dismiss"
+        title="Dismiss"
+        onClick={() => {
+          removeFromCompare(pick.id);
+        }}
+        className="grid size-7 flex-none cursor-pointer place-items-center rounded-md text-muted-foreground outline-none hover:bg-surface-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+      >
+        <X aria-hidden="true" className="size-4" />
+      </button>
+    </div>
+  );
+}
 
-// /backtests/compare: up to four backtests side by side, on the charts and in the table.
+// The charts and the table, once the documents are in.
+function Compared({ columns, canAdd, onAdd }: { columns: CompareColumn[]; canAdd: boolean; onAdd: () => void }) {
+  const lines = useMemo(() => columns.flatMap(({ doc, color }) => lineOf(doc, color) ?? []), [columns]);
+  if (columns.length === 0) return null;
+  return (
+    <>
+      <CompareCharts lines={lines} />
+      <CompareTable columns={columns} canAdd={canAdd} onAdd={onAdd} />
+    </>
+  );
+}
+
+// "4 of 4 backtests · 2 yours, 2 from Experiments"; with one, the way on.
+function countLine(picks: readonly ComparePick[]): string {
+  const count = picks.length;
+  const theirs = picks.filter((pick) => pick.author !== undefined).length;
+  const mix = theirs > 0 ? ` · ${count - theirs} yours, ${theirs} from Experiments` : '';
+  return `${count} of ${SLOTS} backtests${mix}${count === 1 ? '. Add one more to compare' : ''}`;
+}
+
+// /backtests/compare: up to four backtests side by side, on the charts and in the table, the
+// user's and those of others from Experiments.
 export function ComparePage() {
   usePageTitle('Compare backtests');
-  const { columns, count, failed } = useColumns();
+  const { columns, picks, full, failed } = useColumns();
+  const { gone } = useCompareSelection();
   const [adding, setAdding] = useState(false);
   const open = () => {
     setAdding(true);
   };
-  const lines = useMemo(() => columns.flatMap(({ doc, color }) => lineOf(doc, color) ?? []), [columns]);
+  const count = picks.length;
   return (
     <>
       <Back />
       <PageTitle
         variant="workspace"
         title="Compare backtests"
-        description={countLine(count)}
+        description={countLine(picks)}
         action={
-          count > 0 && (
+          count + gone.length > 0 && (
             <Button type="button" variant="outline" onClick={clearCompare}>
               Clear all
             </Button>
           )
         }
       />
+      {gone.map((pick) => (
+        <UnpublishedNote key={pick.id} pick={pick} />
+      ))}
       {failed && <ErrorNote className="mb-3">Could not load every backtest. Try again.</ErrorNote>}
-      {count === 0 ? (
-        <Empty onAdd={open} />
-      ) : (
-        columns.length > 0 && (
-          <>
-            <CompareCharts lines={lines} />
-            <CompareTable columns={columns} canAdd={count < SLOTS} onAdd={open} />
-          </>
-        )
-      )}
+      {count === 0 ? <Empty onAdd={open} /> : <Compared columns={columns} canAdd={!full} onAdd={open} />}
       <ComparePicker open={adding} onOpenChange={setAdding} />
     </>
   );

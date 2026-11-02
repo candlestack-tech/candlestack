@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 
 type Props = {
   // The list page whose ?page= the links change.
-  from: '/instruments' | '/backtests';
+  from: '/instruments' | '/backtests' | '/experiments';
   page: number;
   hasNext: boolean;
   // How many pages there are; undefined when the API does not say.
@@ -34,8 +34,8 @@ function PageLink({ from, page, enabled, children }: LinkProps) {
   );
 }
 
-// "Page 2 of 31" with previous and next (mockups/app, .pg), under the instrument list and the
-// backtests. The page is in the URL, so Back steps through pages. While a page loads, the
+// "Page 2 of 31" with previous and next (mockups/app, .pg), under the instrument list, the
+// backtests and the table of Experiments. The page is in the URL, so Back steps through pages. While a page loads, the
 // previous one stays on screen with its own `hasNext` and `pages`, so both links wait: two quick
 // clicks on Next would otherwise skip a page or run past the end.
 export function Pager({ from, page, hasNext, pages, loading }: Props) {
