@@ -197,7 +197,7 @@ class BacktestOut(BaseModel):
     )
     num_trades: int | None = Field(description="Number of trades", examples=[1712])
     equity: EquitySeries | None = Field(
-        description="A short equity series of the strategy and of buy and hold, for a small "
+        description="A short equity series of the strategy and of its benchmark, for a small "
         "chart; null for a backtest that did not finish or has none"
     )
     duration_s: float | None = Field(

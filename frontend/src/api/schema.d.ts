@@ -990,7 +990,7 @@ export interface components {
              * @example 162
              */
             duration_s: number | null;
-            /** @description A short equity series of the strategy and of buy and hold, for a small chart; null for a backtest that did not finish or has none */
+            /** @description A short equity series of the strategy and of its benchmark, for a small chart; null for a backtest that did not finish or has none */
             equity: components["schemas"]["EquitySeries"] | null;
             /**
              * Error
