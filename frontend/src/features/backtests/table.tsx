@@ -5,7 +5,7 @@ import type { Backtest } from '@/api';
 import { StarButton } from '@/components/StarButton';
 import { cn } from '@/lib/utils';
 
-import { BacktestNumber, ModelName } from './parts';
+import { BacktestNumber, ModelName, PublicMark } from './parts';
 import { useOpenedFrom } from './useOpenedFrom';
 
 // The tables of backtests (mockups/app, .tbl): 13 px, the headers medium and muted over a line,
@@ -58,15 +58,24 @@ export const ROW_OPENER =
   'cursor-pointer outline-none after:absolute after:inset-0 focus-visible:text-primary focus-visible:after:rounded-md focus-visible:after:ring-2 focus-visible:after:ring-ring/60 focus-visible:after:ring-inset';
 
 // The link to a row's backtest page, stretched over the whole row so the row is one click target
-// and the keyboard reaches it; what else the row holds (the star) sits above it.
-export function RowOpener({ backtest, children }: { backtest: Backtest; children: ReactNode }) {
+// and the keyboard reaches it; what else the row holds (the star) sits above it. `label` names it
+// for screen readers when the number alone is not enough (a card of Experiments).
+export function RowOpener({
+  backtest,
+  label,
+  children,
+}: {
+  backtest: Pick<Backtest, 'id' | 'number'>;
+  label?: string;
+  children: ReactNode;
+}) {
   const from = useOpenedFrom();
   return (
     <Link
       to="/backtests/$backtestId"
       params={{ backtestId: backtest.id }}
       state={from && { from }}
-      aria-label={`Backtest #${backtest.number}`}
+      aria-label={label ?? `Backtest #${backtest.number}`}
       className={ROW_OPENER}
     >
       {children}
@@ -80,7 +89,8 @@ export function RowStar({ starred, label, onToggle }: { starred: boolean; label:
   return <StarButton starred={starred} label={label} onToggle={onToggle} className="relative z-10" />;
 }
 
-// The star and the number of a backtest, the number opening it (the Backtest column).
+// The star and the number of a backtest, the number opening it (the Backtest column), and the globe
+// once it is in Experiments.
 export function BacktestCell({ backtest, onStar }: { backtest: Backtest; onStar: (backtest: Backtest) => void }) {
   return (
     <>
@@ -93,6 +103,7 @@ export function BacktestCell({ backtest, onStar }: { backtest: Backtest; onStar:
         <RowOpener backtest={backtest}>
           <BacktestNumber backtest={backtest} />
         </RowOpener>
+        {backtest.public && <PublicMark />}
       </span>
       {backtest.name && (
         <span title={backtest.name} className="block truncate text-xs/4 text-muted-foreground">

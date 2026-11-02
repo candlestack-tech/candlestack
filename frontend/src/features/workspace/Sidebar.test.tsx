@@ -22,11 +22,21 @@ describe('the sidebar', () => {
   });
 
   it('counts the backtests beside Backtests', async () => {
-    stubApi({ ...session(ARSEN), ...dashboardAnswer({ counts: { all: 15, starred: 5, failed: 2 } }) });
+    stubApi({ ...session(ARSEN), ...dashboardAnswer({ counts: { all: 15, starred: 5, failed: 2, public: 0 } }) });
     await renderApp('/models');
     const link = within(sidebar()).getByRole('link', { name: /^Backtests/ });
     await vi.waitFor(() => expect(link.textContent).toBe('Backtests15'));
     expect(link.lastElementChild?.textContent).toBe('15');
+  });
+
+  it('puts Experiments after Backtests, with how many backtests the beta published', async () => {
+    stubApi({ ...session(ARSEN), ...dashboardAnswer({ experiments: { backtests: [], total: 25 } }) });
+    await renderApp('/models');
+    const links = within(sidebar()).getAllByRole('link');
+    expect(links.map((link) => link.getAttribute('href')).slice(1, 3)).toEqual(['/backtests', '/experiments']);
+    const link = within(sidebar()).getByRole('link', { name: /^Experiments/ });
+    await vi.waitFor(() => expect(link.textContent).toBe('Experiments25'));
+    expect(link.querySelector('svg')).not.toBeNull();
   });
 
   it('shows the storage the models take above the data note', async () => {

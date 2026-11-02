@@ -20,11 +20,13 @@ import { useViewerDateStyle } from '@/features/preferences';
 import { formatDate } from '@/lib/dates';
 import { useTheme } from '@/theme';
 
+import { AuthorAvatar } from '../experiments/AuthorAvatar';
 import { valueAt, type Line } from './chartLines';
 
 // The Equity and Drawdown charts of the comparison, on TradingView Lightweight Charts: one line per
 // backtest in its slot's colour, one crosshair and one view of time across both, and a box with
-// each backtest's value at the crosshair.
+// each backtest's value at the crosshair. The legend gives another account's its author's initials
+// (public-experiments, lgLabel).
 
 type Field = 'equity' | 'drawdown';
 const FIELDS: readonly { field: Field; title: string }[] = [
@@ -229,10 +231,12 @@ function ChartBox({ lines, hover, field, title, box }: BoxProps) {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-[15px] font-semibold">{title}</h2>
         <div className="flex flex-wrap gap-x-3 gap-y-1">
-          {lines.map(({ id, number, color }) => (
+          {lines.map(({ id, number, author, color }) => (
             <span key={id} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               <span aria-hidden="true" className="h-[3px] w-3.5 rounded-sm" style={{ background: color }} />
-              <span className="font-mono">#{number}</span>
+              <span className="inline-flex items-center gap-1 font-mono">
+                {author && <AuthorAvatar name={author} size="xxs" />}#{number}
+              </span>
             </span>
           ))}
         </div>

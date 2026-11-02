@@ -147,6 +147,8 @@ export const backtest = (fields: Partial<Backtest> = {}): Backtest => ({
   },
   status: 'finished',
   starred: false,
+  public: false,
+  published_at: null,
   total_return: 0.246,
   buy_and_hold_return: 0.682,
   sharpe: 0.79,
@@ -187,7 +189,7 @@ export const backtestsAnswer = (page: Partial<BacktestsPage>, query = ''): Recor
         total: backtests.length,
         page: 1,
         pages: 1,
-        counts: { all: backtests.length, starred: 0, failed: 0 },
+        counts: { all: backtests.length, starred: 0, failed: 0, public: 0 },
         models: [],
         ...page,
       },
@@ -195,15 +197,17 @@ export const backtestsAnswer = (page: Partial<BacktestsPage>, query = ''): Recor
   };
 };
 
-// GET /api/v1/dashboard of an account; without fields, one without backtests.
+// GET /api/v1/dashboard of an account; without fields, one without backtests, and nothing
+// published in Experiments.
 export const dashboardAnswer = (dashboard: Partial<Dashboard> = {}): Record<string, Answer> => ({
   'GET /api/v1/dashboard': {
     status: 200,
     body: {
-      counts: { all: 0, starred: 0, failed: 0 },
+      counts: { all: 0, starred: 0, failed: 0, public: 0 },
       last: [],
       best: { sharpe: [], total_return: [], max_drawdown: [], win_rate: [] },
       starred: { backtests: [], total: 0 },
+      experiments: { backtests: [], total: 0 },
       ...dashboard,
     },
   },
@@ -375,6 +379,9 @@ export const backtestDocument = (fields: Partial<BacktestDocument> = {}): Backte
     id: 'bt_7f3k2m9qx4',
     name: null,
     number: 12,
+    author: { id: ARSEN.id, name: ARSEN.display_name, mine: true },
+    public: false,
+    published_at: null,
     status: 'finished',
     created_at: '2026-10-17T14:05:00Z',
     finished_at: '2026-10-17T14:07:42Z',

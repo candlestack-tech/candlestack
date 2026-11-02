@@ -14,7 +14,7 @@ const page = (backtests = [A, B, C]): BacktestsPage => ({
   total: backtests.length,
   page: 1,
   pages: 1,
-  counts: { all: 3, starred: 2, failed: 1 },
+  counts: { all: 3, starred: 2, failed: 1, public: 0 },
   models: [],
 });
 
@@ -41,10 +41,11 @@ describe('starOnPage', () => {
 
 describe('starOnDashboard', () => {
   const dashboard: Dashboard = {
-    counts: { all: 3, starred: 2, failed: 1 },
+    counts: { all: 3, starred: 2, failed: 1, public: 0 },
     last: [A, B, C],
     best: { sharpe: [A, B], total_return: [A, B], max_drawdown: [B, A], win_rate: [A, B] },
     starred: { backtests: [B, C], total: 2 },
+    experiments: { backtests: [], total: 0 },
   };
 
   it('puts a new star in its place by Sharpe and counts it', () => {

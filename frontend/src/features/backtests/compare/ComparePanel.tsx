@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
 
+import { AuthorAvatar } from '../experiments/AuthorAvatar';
 import { useOpenedFrom } from '../useOpenedFrom';
 import { SLOT_COLORS } from './colors';
 import { CompareLink } from './CompareLink';
@@ -16,9 +17,14 @@ import {
   useCompareSelection,
   type ComparePick,
 } from './selection';
+import { useUnpublishedPicks } from './unpublished';
 
 const COUNT = 'font-mono text-xs font-medium text-muted-foreground';
+const DISMISS =
+  'grid size-6 flex-none cursor-pointer place-items-center rounded-md text-muted-foreground outline-none hover:bg-surface-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50';
 
+// A chosen backtest: its colour, its number opening it, the instrument, another account's author
+// by initials (public-experiments, .tray-r), and the cross.
 function Chosen({ pick, color }: { pick: ComparePick; color: string }) {
   const from = useOpenedFrom();
   return (
@@ -33,6 +39,7 @@ function Chosen({ pick, color }: { pick: ComparePick; color: string }) {
         #{pick.number}
       </Link>
       <span className="min-w-0 flex-1 overflow-hidden text-ellipsis">{pick.symbol}</span>
+      {pick.author !== undefined && <AuthorAvatar name={pick.author} size="xxs" />}
       <button
         type="button"
         aria-label={`Remove backtest ${pick.number} from compare`}
@@ -40,7 +47,32 @@ function Chosen({ pick, color }: { pick: ComparePick; color: string }) {
         onClick={() => {
           removeFromCompare(pick.id);
         }}
-        className="grid size-6 flex-none cursor-pointer place-items-center rounded-md text-muted-foreground outline-none hover:bg-surface-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+        className={DISMISS}
+      >
+        <X aria-hidden="true" className="size-3" />
+      </button>
+    </div>
+  );
+}
+
+// A slot whose backtest its author unpublished (.tray-r.gone): dashed in the warning colour, the
+// author's initials, and the cross that dismisses it.
+function Unpublished({ pick }: { pick: ComparePick }) {
+  return (
+    <div
+      title={`${pick.author ?? 'Its author'} unpublished it`}
+      className="flex h-[30px] items-center gap-2 rounded-md border border-dashed border-[color-mix(in_srgb,var(--warn)_45%,var(--rule))] pr-0.5 pl-1.5 text-xs whitespace-nowrap text-muted-foreground"
+    >
+      {pick.author !== undefined && <AuthorAvatar name={pick.author} size="xxs" />}
+      <span className="min-w-0 flex-1 overflow-hidden text-ellipsis">#{pick.number} was unpublished</span>
+      <button
+        type="button"
+        aria-label="Dismiss"
+        title="Dismiss"
+        onClick={() => {
+          removeFromCompare(pick.id);
+        }}
+        className={DISMISS}
       >
         <X aria-hidden="true" className="size-3" />
       </button>
@@ -99,12 +131,13 @@ function PanelHead({ count }: { count: string }) {
 // The backtests chosen to compare, in the bottom right corner of the signed-in pages while there
 // are any: their slots one under the other, Clear, a fold to a small button, and Compare from 2.
 export function ComparePanel({ userId }: { userId: string }) {
-  const { slots, picks, hidden } = useCompareSelection();
+  const { slots, picks, gone, hidden } = useCompareSelection();
   const comparing = useRouterState({ select: ({ location }) => location.pathname === '/backtests/compare' });
   useEffect(() => {
     claimCompare(userId);
   }, [userId]);
-  if (picks.length === 0 || comparing) return null;
+  useUnpublishedPicks();
+  if ((picks.length === 0 && gone.length === 0) || comparing) return null;
   const count = `${picks.length} of ${SLOTS}`;
   if (hidden) return <FoldedPanel count={count} />;
   return (
@@ -115,7 +148,9 @@ export function ComparePanel({ userId }: { userId: string }) {
       <PanelHead count={count} />
       <div className="flex flex-col gap-1">
         {slots.map((slot, index) =>
-          slot ? (
+          slot?.gone ? (
+            <Unpublished key={slot.id} pick={slot} />
+          ) : slot ? (
             <Chosen key={slot.id} pick={slot} color={SLOT_COLORS[index] ?? 'currentColor'} />
           ) : (
             // eslint-disable-next-line react/no-array-index-key -- an empty slot has only its place

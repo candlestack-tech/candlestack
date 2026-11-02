@@ -6,11 +6,15 @@ import { BacktestsList, useBacktestsPage } from '@/features/backtests';
 import { plural } from '@/lib/plural';
 import { usePageTitle } from '@/lib/usePageTitle';
 
-// The line under the title (mockups/app, btCount): how many backtests there are, or how many of
-// them match ("4 of 15"); why they could not load; an empty line while they load.
+// The line under the title (mockups/app, btCount): how many backtests there are and how many of
+// them are public ("13 backtests · 2 public", public-experiments), or how many of them match
+// ("4 of 15"); why they could not load; an empty line while they load.
 function description(data: Page | undefined, error: Error | null): string {
-  if (data)
-    return data.total === data.counts.all ? plural(data.counts.all, 'backtest') : `${data.total} of ${data.counts.all}`;
+  if (data) {
+    const { all, public: published } = data.counts;
+    if (data.total !== all) return `${data.total} of ${all}`;
+    return published > 0 ? `${plural(all, 'backtest')} · ${published} public` : plural(all, 'backtest');
+  }
   // A no-break space while they load keeps the line, so the title row does not move.
   return error ? errorMessage(error, 'Could not load the backtests.') : '\u00a0';
 }

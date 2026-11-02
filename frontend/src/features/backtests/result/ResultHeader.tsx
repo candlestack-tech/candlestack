@@ -1,5 +1,5 @@
 import { Link, useRouter, useRouterState } from '@tanstack/react-router';
-import { Download } from 'lucide-react';
+import { Download, Globe } from 'lucide-react';
 import { useState } from 'react';
 
 import { getBacktestFile, type BacktestDocument } from '@/api';
@@ -8,14 +8,16 @@ import { InstrumentSymbol } from '@/components/InstrumentSymbol';
 import { Button } from '@/components/ui/button';
 import { FrameworkTile, frameworkOf } from '@/features/models';
 import { useViewerDateStyle } from '@/features/preferences';
-import { formatRecentTime } from '@/lib/dates';
+import { formatRecentDayInline, formatRecentTime, formatTime } from '@/lib/dates';
 import { secondsSince, useNow } from '@/lib/useNow';
 import { cn } from '@/lib/utils';
 
 import { CompareButton } from '../compare/CompareToggle';
+import { AuthorAvatar } from '../experiments/AuthorAvatar';
 import { RenameBacktest } from '../RenameBacktest';
 import { StatusBadge } from '../parts';
 import { durationText, periodText } from './format';
+import { PublicPill, PublishActions } from './PublishActions';
 
 // What every field of the downloaded file means, on the main website.
 export const RESULT_DOCS = 'https://candlestack.tech/docs/backtest-json';
@@ -23,24 +25,29 @@ export const RESULT_DOCS = 'https://candlestack.tech/docs/backtest-json';
 const BACK =
   'mb-3.5 inline-flex items-center gap-1.5 text-[13px] text-muted-foreground outline-none hover:text-foreground focus-visible:text-foreground focus-visible:underline';
 
-// "← Backtests" above the page; opened from the dashboard "← Dashboard", from a model's page
-// "← <the model>" (its links set `from` in the history state).
-export function BackLink({ model }: { model?: BacktestDocument['model'] }) {
-  const from = useRouterState({ select: (state) => state.location.state.from });
+// A way back through the history, to the page as it was left (its search and filters).
+function BackButton({ children }: { children: string }) {
   const router = useRouter();
-  if (from === 'compare') {
-    return (
-      <button
-        type="button"
-        onClick={() => {
-          router.history.back();
-        }}
-        className={cn(BACK, 'cursor-pointer')}
-      >
-        ← Compare backtests
-      </button>
-    );
-  }
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        router.history.back();
+      }}
+      className={cn(BACK, 'cursor-pointer')}
+    >
+      ← {children}
+    </button>
+  );
+}
+
+// "← Backtests" above the page; opened from the dashboard "← Dashboard", from a model's page
+// "← <the model>" (its links set `from` in the history state), from Experiments or the comparison
+// back to them as they were. Another account's backtest opened from a link goes to Experiments.
+export function BackLink({ model, others = false }: { model?: BacktestDocument['model']; others?: boolean }) {
+  const from = useRouterState({ select: (state) => state.location.state.from });
+  if (from === 'compare') return <BackButton>Compare backtests</BackButton>;
+  if (from === 'experiments') return <BackButton>Experiments</BackButton>;
   if (from === 'dashboard') {
     return (
       <Link to="/dashboard" className={BACK}>
@@ -55,7 +62,11 @@ export function BackLink({ model }: { model?: BacktestDocument['model'] }) {
       </Link>
     );
   }
-  return (
+  return others ? (
+    <Link to="/experiments" className={BACK}>
+      ← Experiments
+    </Link>
+  ) : (
     <Link to="/backtests" className={BACK}>
       ← Backtests
     </Link>
@@ -88,8 +99,11 @@ function useDownload(id: string, number: number) {
   return { save, saving, failed };
 }
 
-// Download JSON, and why it did not work when it failed.
-function DownloadButton({ id, number }: { id: string; number: number }) {
+type ActionProps = { id: string; number: number; others: boolean };
+
+// Download JSON, and why it did not work when it failed. Another account's file holds what its
+// page shows, never the model.
+function DownloadButton({ id, number, others }: ActionProps) {
   const download = useDownload(id, number);
   return (
     <>
@@ -101,6 +115,7 @@ function DownloadButton({ id, number }: { id: string; number: number }) {
       <Button
         type="button"
         variant="outline"
+        title={others ? 'Results, trades and setup. No model file.' : undefined}
         className={cn(SMALL, 'rounded-r-none')}
         disabled={download.saving}
         onClick={() => void download.save()}
@@ -113,11 +128,11 @@ function DownloadButton({ id, number }: { id: string; number: number }) {
 }
 
 // [⤓ Download JSON | ?] as one group.
-function FinishedActions({ id, number }: { id: string; number: number }) {
+function FinishedActions(props: ActionProps) {
   return (
     <>
       <span className="inline-flex">
-        <DownloadButton id={id} number={number} />
+        <DownloadButton {...props} />
         <Button
           asChild
           variant="outline"
@@ -141,7 +156,8 @@ function FinishedActions({ id, number }: { id: string; number: number }) {
   );
 }
 
-// The model it ran with beside its framework's mark, a link to its page while it exists.
+// The model it ran with beside its framework's mark, a link to its page while it exists. Another
+// account's is its name only, in ink: the file stays with its author.
 function ModelLink({ model }: { model: BacktestDocument['model'] }) {
   const framework = frameworkOf(model.framework);
   return (
@@ -165,48 +181,92 @@ function ModelName({ model }: { model: BacktestDocument['model'] }) {
   );
 }
 
+// The buttons: the user's own has Rename and Publish too; another account's only looks
+// (public-experiments, pageBt).
+function Actions({ doc }: { doc: BacktestDocument }) {
+  const { backtest } = doc;
+  const others = !backtest.author.mine;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {!others && <RenameBacktest id={backtest.id} name={backtest.name} />}
+      {backtest.status === 'finished' && <FinishedActions id={backtest.id} number={backtest.number} others={others} />}
+      {!others && <PublishActions doc={doc} />}
+      <CompareButton
+        target={{
+          id: backtest.id,
+          number: backtest.number,
+          status: backtest.status,
+          symbol: doc.data.instrument.symbol,
+          author: others ? backtest.author.name : undefined,
+        }}
+      />
+    </div>
+  );
+}
+
+// When it ran and how long, or for another account's when it was published; then since when the
+// user's own is in Experiments, by a green globe.
+function When({ backtest }: { backtest: BacktestDocument['backtest'] }) {
+  const dateStyle = useViewerDateStyle();
+  const { published_at: publishedAt } = backtest;
+  const published = publishedAt === null ? null : new Date(publishedAt);
+  if (!backtest.author.mine) {
+    return <span>{published && `Published ${formatRecentDayInline(published, dateStyle, undefined, true)}`}</span>;
+  }
+  return (
+    <>
+      <span>
+        {formatRecentTime(new Date(backtest.created_at), dateStyle)}
+        {backtest.duration_s !== null && ` · ${durationText(backtest.duration_s)}`}
+      </span>
+      {backtest.public && published && (
+        <span className="inline-flex items-center gap-[7px]">
+          <Globe aria-hidden="true" className="size-3.5 text-up" />
+          In Experiments since {formatRecentDayInline(published, dateStyle, undefined, true)}{' '}
+          {formatTime(published, dateStyle)}
+        </span>
+      )}
+    </>
+  );
+}
+
 // The title with the status and the buttons, then what it ran on (the instrument with its icon),
 // with what, over which days and when (mockups/app, runHead). A running backtest's status counts
-// how long it runs.
+// how long it runs. Published, a green Public pill follows the status; another account's starts
+// the line under it with its author (public-experiments, pageBt).
 export function ResultHeader({ doc }: { doc: BacktestDocument }) {
   const dateStyle = useViewerDateStyle();
   const { backtest } = doc;
-  const running = backtest.status === 'running';
-  const now = useNow(running);
-  const when = formatRecentTime(new Date(backtest.created_at), dateStyle);
-  const runs = running ? durationText(secondsSince(backtest.created_at, now) ?? 0) : undefined;
+  const others = !backtest.author.mine;
+  const now = useNow(backtest.status === 'running');
+  const runs = backtest.status === 'running' ? durationText(secondsSince(backtest.created_at, now) ?? 0) : undefined;
   return (
     <>
-      <BackLink model={doc.model} />
+      <BackLink model={doc.model} others={others} />
       <div className="flex flex-wrap items-center justify-between gap-2.5">
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
           <h1 className="text-[22px]/7 font-semibold tracking-[-0.02em]">
             {backtest.name ?? `Backtest #${String(backtest.number)}`}
           </h1>
           {backtest.name && <span className="font-mono text-[13px] text-muted-foreground">#{backtest.number}</span>}
           <StatusBadge status={backtest.status} detail={runs} />
+          {!others && backtest.public && <PublicPill />}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <RenameBacktest id={backtest.id} name={backtest.name} />
-          {backtest.status === 'finished' && <FinishedActions id={backtest.id} number={backtest.number} />}
-          <CompareButton
-            target={{
-              id: backtest.id,
-              number: backtest.number,
-              status: backtest.status,
-              symbol: doc.data.instrument.symbol,
-            }}
-          />
-        </div>
+        <Actions doc={doc} />
       </div>
       <div className="mt-1 mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-muted-foreground">
+        {others && (
+          <span className="inline-flex items-center gap-[7px] font-medium text-foreground">
+            <AuthorAvatar name={backtest.author.name} size="xs" />
+            {backtest.author.name}
+          </span>
+        )}
         <InstrumentSymbol id={doc.data.instrument.id} symbol={doc.data.instrument.symbol} size={20} />
-        <ModelLink model={doc.model} />
-        <span>{periodText(doc.data.period, dateStyle)}</span>
-        <span>
-          {when}
-          {backtest.duration_s !== null && ` · ${durationText(backtest.duration_s)}`}
+        <span className={cn(others && 'text-foreground')}>
+          <ModelLink model={doc.model} />
         </span>
+        <span>{periodText(doc.data.period, dateStyle)}</span>
+        <When backtest={backtest} />
       </div>
     </>
   );

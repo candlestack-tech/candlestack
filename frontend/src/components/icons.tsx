@@ -37,6 +37,27 @@ export function BacktestsIcon(props: IconProps) {
   );
 }
 
+// Experiments (public-experiments): a flask with its liquid's line.
+export function ExperimentsIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M9 3h6" />
+      <path d="M10 3v6.5L4.6 18.4A1.8 1.8 0 0 0 6.1 21h11.8a1.8 1.8 0 0 0 1.5-2.6L14 9.5V3" />
+      <path d="M7.5 15h9" />
+    </Icon>
+  );
+}
+
+// Experiments as a table (public-experiments, Cards · Table): a frame of rows with a first column.
+export function RowsIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 9.5h18M3 14.5h18M9 9.5V20" />
+    </Icon>
+  );
+}
+
 // Models: a box with sharp corners.
 export function ModelsIcon(props: IconProps) {
   return (

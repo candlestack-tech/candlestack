@@ -1,3 +1,5 @@
+import { Globe } from 'lucide-react';
+
 import type { Backtest, BacktestStatus } from '@/api';
 import { InstrumentSymbol } from '@/components/InstrumentSymbol';
 import { FrameworkMini, frameworkOf } from '@/features/models';
@@ -14,7 +16,15 @@ import { hasResults, instrumentId, instrumentList, instrumentsShown, returnClass
 // for the rest, all of them in the title then. On one line: where the column is narrower than
 // them, the symbols give way with an ellipsis. `size` 16 is the slimmer row of the dashboard's
 // starred backtests.
-export function BacktestInstruments({ backtest, max, size = 20 }: { backtest: Backtest; max: number; size?: 16 | 20 }) {
+export function BacktestInstruments({
+  backtest,
+  max,
+  size = 20,
+}: {
+  backtest: Pick<Backtest, 'instruments'>;
+  max: number;
+  size?: 16 | 20;
+}) {
   const { shown, more } = instrumentsShown(backtest.instruments, max);
   return (
     <span
@@ -35,7 +45,13 @@ export function BacktestInstruments({ backtest, max, size = 20 }: { backtest: Ba
 }
 
 // "#12", the user's own number of the backtest (.rid).
-export function BacktestNumber({ backtest, className }: { backtest: Backtest; className?: string }) {
+export function BacktestNumber({
+  backtest,
+  className,
+}: {
+  backtest: Pick<Backtest, 'number' | 'name'>;
+  className?: string;
+}) {
   return (
     <span title={backtest.name ?? undefined} className={cn('font-mono text-[13px]/[normal] font-medium', className)}>
       #{backtest.number}
@@ -61,6 +77,18 @@ export function StatusBadge({ status, detail }: { status: BacktestStatus; detail
       )}
     >
       {detail ? `${text} · ${detail}` : text}
+    </span>
+  );
+}
+
+// The 14 px globe after the number of a backtest the user published (public-experiments, .glb),
+// named for screen readers as FrameworkMini is.
+const PUBLIC = { role: 'img', 'aria-label': 'Public, in Experiments' };
+
+export function PublicMark() {
+  return (
+    <span title="Public, in Experiments" className="inline-grid flex-none place-items-center text-primary">
+      <Globe {...PUBLIC} className="size-3.5" />
     </span>
   );
 }

@@ -34,10 +34,10 @@ declare module '@tanstack/react-router' {
     router: typeof router;
   }
   // New backtest sets the part of the app it was opened in (dashboard, backtests, models), for
-  // the builder's back link; a link to a backtest from the dashboard or a model's page sets
-  // 'dashboard' or 'model'.
+  // the builder's back link; a link to a backtest from the dashboard, a model's page or Experiments
+  // sets 'dashboard', 'model' or 'experiments'.
   interface HistoryState {
-    from?: 'dashboard' | 'backtests' | 'models' | 'model' | 'compare';
+    from?: 'dashboard' | 'backtests' | 'models' | 'model' | 'compare' | 'experiments';
     // What the back link of the compare page calls the page it was opened from.
     comparedFrom?: string;
   }
