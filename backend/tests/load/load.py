@@ -1,13 +1,20 @@
-"""Load test of the data API: virtual users who search, open an instrument and scroll its chart.
+"""Load test of the API: virtual users who use the chart (``--scenario market``, the default) or
+their own account's pages (``--scenario account``).
 
-Each user repeats one session: types a crypto base asset letter by letter into the search
-(``/instruments?q=``), opens a result (``/instruments/{id}``), loads the candles the chart shows
-first (``/instruments/{id}/candles``) and scrolls back a few windows, with a pause between steps.
+In the market scenario each user repeats one session: types a crypto base asset letter by
+letter into the search (``/instruments?q=``), opens a result (``/instruments/{id}``), loads the
+candles the chart shows first (``/instruments/{id}/candles``) and scrolls back a few windows,
+with a pause between steps.
 Every user sends its own ``CF-Connecting-IP``, so the per-client rate limit counts it as one
 person, as it would behind Cloudflare. All share one session of the dev sign-in, as the market
 data is for signed-in accounts, so the backend must run with ``APP_ENV`` ``local``. With
 ``--rate-limit-probe``, one more client sends detail requests without pause until it gets 429,
 and the backend must still answer afterwards.
+
+In the account scenario every user is the same dev account, as the pages read one user's rows:
+it opens the Dashboard (``/dashboard``), the backtest list (``/backtests``) with a search, a sort
+and a page, and the Models page (``/models``). ``fill.py`` next to this file gives the account
+about 1000 backtests and 100 models first.
 
 The report is Markdown on stdout: requests per second, latency percentiles and the answers
 per endpoint, the peak memory of ``--container`` (sampled with ``docker stats``) and the probe.
@@ -15,6 +22,7 @@ See README.md next to this file for how to run it; never against stage or prod w
 tech lead's OK.
 
     uv run python tests/load/load.py --users 50 --duration 120 --container candlestack-dev-backend-1
+    uv run python tests/load/load.py --scenario account --users 50 --duration 120
 """
 
 import argparse
@@ -28,6 +36,7 @@ import time
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from typing import override
 
 import httpx
 
@@ -37,6 +46,12 @@ TIMEFRAMES = ("15m", "1h", "4h", "1d")
 SECONDS = {"15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
 WINDOW = 300
 SCROLLS = 3
+# What the account scenario searches the backtest list for: symbols and model names of fill.py's
+# backtests, a number, and words that match nothing.
+SEARCHES = ("aapl", "nvda", "load-0", "load-42", "#12", "5", "keras", "zzz")
+SORTS = ("default", "number", "model", "return", "sharpe", "max_drawdown", "trades", "when")
+SHOWS = ("all", "starred", "failed")
+PAGES = 100  # 1000 backtests, 10 a page
 _MEMORY = re.compile(r"([\d.]+)\s*([KMG]i?B)")
 _UNITS = {"KB": 1e3, "MB": 1e6, "GB": 1e9, "KiB": 2**10, "MiB": 2**20, "GiB": 2**30}
 
@@ -175,6 +190,33 @@ class User:
             await self.pause()
 
 
+class AccountUser(User):
+    """A user who goes through the pages of their account."""
+
+    @override
+    async def session(self, bases: Sequence[str]) -> None:
+        """Dashboard, the backtest list as it opens, searched, sorted and on a later page, then
+        the Models page."""
+        del bases
+        await self.get("dashboard", "/api/v1/dashboard")
+        await self.pause()
+        await self.get("backtests", "/api/v1/backtests")
+        await self.pause()
+        await self.get("backtests search", "/api/v1/backtests", q=random.choice(SEARCHES))
+        await self.pause()
+        await self.get(
+            "backtests sort",
+            "/api/v1/backtests",
+            sort=random.choice(SORTS),
+            order=random.choice(("asc", "desc")),
+            show=random.choice(SHOWS),
+        )
+        await self.pause()
+        await self.get("backtests page", "/api/v1/backtests", page=random.randint(2, PAGES))
+        await self.pause()
+        await self.get("models", "/api/v1/models")
+
+
 async def probe_rate_limit(client: httpx.AsyncClient, instrument: str) -> str:
     """Sends detail requests from one address until 429, then checks that the API answers."""
     headers = {"CF-Connecting-IP": "203.0.113.250"}
@@ -222,7 +264,9 @@ async def main(args: argparse.Namespace) -> str:
         # The market data is for signed-in accounts: one session of the dev sign-in for all.
         signed_in = await client.post("/api/v1/auth/dev", headers={"Sec-Fetch-Site": "same-origin"})
         signed_in.raise_for_status()
-        bases = await crypto_bases(client)
+        account = args.scenario == "account"
+        bases = [] if account else await crypto_bases(client)
+        kind = AccountUser if account else User
         stats = Stats()
         stop = asyncio.Event()
         peak = [0.0]
@@ -231,7 +275,7 @@ async def main(args: argparse.Namespace) -> str:
             sampler = asyncio.create_task(sample_memory(args.container, peak, stop))
         began = time.monotonic()
         users = [
-            User(client, stats, f"198.18.{n // 250}.{n % 250 + 1}", args.think)
+            kind(client, stats, f"198.18.{n // 250}.{n % 250 + 1}", args.think)
             for n in range(args.users)
         ]
         async with asyncio.TaskGroup() as group:
@@ -248,8 +292,14 @@ async def main(args: argparse.Namespace) -> str:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Load test of the data API.")
+    parser = argparse.ArgumentParser(description="Load test of the API.")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
+    parser.add_argument(
+        "--scenario",
+        choices=("market", "account"),
+        default="market",
+        help="the chart's market data, or the pages of the signed-in account",
+    )
     parser.add_argument("--users", type=int, default=20, help="virtual users at once")
     parser.add_argument("--duration", type=float, default=60, help="seconds of load")
     parser.add_argument("--ramp", type=float, default=10, help="seconds until all users are in")
