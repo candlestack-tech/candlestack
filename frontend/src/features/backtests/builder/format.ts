@@ -59,5 +59,6 @@ export function decisionLine(form: BuilderForm): string {
 
 export const fillLine = (honest: boolean) => (honest ? "Next candle's open" : 'Same close');
 
+// The costs, then the benchmark: buy and hold or the ETF's symbol ("vs SPY").
 export const costsLine = (form: BuilderForm) =>
-  `fees ${form.fees.trim()} % · slippage ${form.slippage.trim()} % · vs buy and hold`;
+  `fees ${form.fees.trim()} % · slippage ${form.slippage.trim()} % · vs ${form.benchmark === 'bh' ? 'buy and hold' : form.benchmark}`;

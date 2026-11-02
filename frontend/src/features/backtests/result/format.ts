@@ -6,8 +6,20 @@ import { formatCount, formatPercent, formatSharpe, formatWinRate, MISSING, retur
 // How a backtest's page writes its document (mockups/app: runHead, runStats, resA, runSetupOf).
 // Results are fractions, market time is UTC epoch seconds of a candle's open.
 
-type Stats = NonNullable<BacktestDocument['results']>['stats'];
+type Results = NonNullable<BacktestDocument['results']>;
+type Stats = Results['stats'];
+type Benchmark = BacktestDocument['benchmarks'][number];
 type Tone = 'up' | 'down' | undefined;
+
+// A benchmark of the backtest's own instrument is buy and hold, any other an ETF.
+const ownInstrument = (doc: BacktestDocument, benchmark: Benchmark) =>
+  benchmark.instrument.toLowerCase() === doc.data.instrument.id.toLowerCase();
+
+// What the page calls a benchmark: "Buy and hold", or the symbol of the ETF ("stock:SPY" is SPY).
+export function benchmarkName(doc: BacktestDocument, benchmark: Benchmark): string {
+  const { instrument } = benchmark;
+  return ownInstrument(doc, benchmark) ? 'Buy and hold' : instrument.slice(instrument.indexOf(':') + 1);
+}
 
 // A metric as the page shows it: its name, the value written out and its colour, if any.
 export type Metric = { name: string; value: string; tone: Tone };
@@ -35,7 +47,14 @@ export function basicMetrics(stats: Stats): Metric[] {
 
 // Every statistic of the engine (docs/engine.md, Metrics), in its order. Fees are the sum of each
 // trade's fees as a share of its capital, so they read as a percent like the time in the market.
-export function allMetrics(stats: Stats): Metric[] {
+// An ETF it was compared with follows buy and hold, by its symbol.
+export function allMetrics(doc: BacktestDocument, { stats, benchmarks }: Results): Metric[] {
+  const etfs = doc.benchmarks
+    .filter((benchmark) => !ownInstrument(doc, benchmark))
+    .map((benchmark) => {
+      const value = benchmarks[benchmark.id]?.total_return ?? null;
+      return metric(benchmarkName(doc, benchmark), formatPercent(value), toneOf(value));
+    });
   return [
     metric('Total return', formatPercent(stats.total_return), toneOf(stats.total_return)),
     metric('Max drawdown', formatPercent(stats.max_drawdown), fallTone(stats.max_drawdown)),
@@ -49,6 +68,7 @@ export function allMetrics(stats: Stats): Metric[] {
     metric('Time in market', formatWinRate(stats.exposure)),
     metric('Fees paid', formatWinRate(stats.fees_paid)),
     metric('Buy and hold', formatPercent(stats.buy_and_hold_return), toneOf(stats.buy_and_hold_return)),
+    ...etfs,
   ];
 }
 
@@ -178,8 +198,6 @@ const FILLS: Record<BacktestDocument['execution']['fill'], string> = {
   signal_close: "Signal candle's close",
 };
 
-const BENCHMARKS: Record<string, string> = { buy_and_hold: 'Buy and hold' };
-
 // The fill, the stops and the costs, then what it is compared with.
 function executionRows(doc: BacktestDocument): SetupRow[] {
   const { fill, stop_loss, drawdown_stop, position_size, fee_bps, slippage_bps } = doc.execution;
@@ -190,7 +208,7 @@ function executionRows(doc: BacktestDocument): SetupRow[] {
     position_size < 1 && ['Position size', percent(position_size)],
     ['Fees', bps(fee_bps)],
     ['Slippage', bps(slippage_bps)],
-    ...doc.benchmarks.map((benchmark): SetupRow => ['Benchmark', BENCHMARKS[benchmark.kind] ?? benchmark.kind]),
+    ...doc.benchmarks.map((benchmark): SetupRow => ['Benchmark', benchmarkName(doc, benchmark)]),
   ];
   return rows.filter((row) => row !== false);
 }

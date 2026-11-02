@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { backtestDocument } from '@/test/api';
+import { backtestDocument, spyDocument } from '@/test/api';
 import { step } from '@/test/steps';
 
 import {
   allMetrics,
   basicMetrics,
+  benchmarkName,
   candlesText,
   durationText,
   loadedText,
@@ -32,7 +33,7 @@ describe('the metrics', () => {
   });
 
   it("lists all twelve of the engine's in its order", () => {
-    expect(allMetrics(STATS).map(({ name, value }) => `${name} ${value}`)).toEqual([
+    expect(allMetrics(DOC, DOC.results!).map(({ name, value }) => `${name} ${value}`)).toEqual([
       'Total return −5.2 %',
       'Max drawdown −6.0 %',
       'Sharpe –',
@@ -49,9 +50,29 @@ describe('the metrics', () => {
   });
 
   it('colours a best trade that made money green and leaves a drawdown of nothing plain', () => {
-    const metrics = allMetrics({ ...STATS, best_trade_return: 0.12, max_drawdown: 0 });
+    const metrics = allMetrics(DOC, { ...DOC.results!, stats: { ...STATS, best_trade_return: 0.12, max_drawdown: 0 } });
     expect(metrics.find((metric) => metric.name === 'Best trade')?.tone).toBe('up');
     expect(metrics.find((metric) => metric.name === 'Max drawdown')?.tone).toBeUndefined();
+  });
+
+  it('adds the return of an ETF benchmark by its symbol after buy and hold, coloured like it', () => {
+    const doc = spyDocument();
+    expect(allMetrics(doc, doc.results!).slice(-2)).toEqual([
+      { name: 'Buy and hold', value: '−2.0 %', tone: 'down' },
+      { name: 'SPY', value: '+1.3 %', tone: 'up' },
+    ]);
+    const missing = { ...doc.results!, benchmarks: { spy: { total_return: null } } };
+    expect(allMetrics(doc, missing).at(-1)).toEqual({ name: 'SPY', value: '–', tone: undefined });
+    // The strip stays as it is.
+    expect(basicMetrics(doc.results!.stats)).toEqual(basicMetrics(STATS));
+  });
+});
+
+describe('the name of a benchmark', () => {
+  it("is buy and hold for the backtest's own instrument, in any case, and the symbol for an ETF", () => {
+    expect(benchmarkName(DOC, { id: 'bh', kind: 'buy_and_hold', instrument: 'stock:AAPL' })).toBe('Buy and hold');
+    expect(benchmarkName(DOC, { id: 'bh', kind: 'buy_and_hold', instrument: 'STOCK:aapl' })).toBe('Buy and hold');
+    expect(benchmarkName(DOC, { id: 'spy', kind: 'buy_and_hold', instrument: 'stock:SPY' })).toBe('SPY');
   });
 });
 
@@ -143,6 +164,10 @@ describe('the setup', () => {
       ['Positions', 'Long and short'],
     ]);
     expect(decision({ calibrate: { name: 'zscore', window: 200 } })?.[0]).toEqual(['Calibration', 'Z-score 200']);
+  });
+
+  it('names an ETF benchmark by its symbol', () => {
+    expect(group(spyDocument(), 'Execution')?.at(-1)).toEqual(['Benchmark', 'SPY']);
   });
 
   it('writes the fill, the stops and the costs, and no benchmark without one', () => {

@@ -61,7 +61,7 @@ function Finished({ doc, results }: Props) {
         <Charts doc={doc} results={results} />
         <aside className="flex min-w-0 flex-col gap-4">
           <ResultBox title="All metrics">
-            <MetricList metrics={allMetrics(results.stats)} />
+            <MetricList metrics={allMetrics(doc, results)} />
           </ResultBox>
           <SetupBox doc={doc} />
         </aside>

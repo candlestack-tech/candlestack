@@ -8,14 +8,24 @@ adjusted old prices), ``data.changed`` says so and the results come from the can
 are now.
 """
 
+from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from functools import partial
 from typing import Any
 
 import anyio
+import polars as pl
 from redis.exceptions import RedisError
 
-from candlestack.data import CandleSet, DataService, InstrumentId, InstrumentInfo, Timeframe
+from candlestack.data import (
+    CandleSet,
+    DataService,
+    InstrumentId,
+    InstrumentInfo,
+    InvalidRequest,
+    Market,
+    Timeframe,
+)
 from candlestack.engine import ENGINE_VERSION
 from candlestack.experiments.assembly import (
     PERIODS_PER_YEAR,
@@ -31,6 +41,7 @@ from candlestack.experiments.assembly import (
     run,
 )
 from candlestack.experiments.document import (
+    BENCHMARK_ETFS,
     BacktestHeader,
     BacktestIn,
     BacktestModel,
@@ -97,7 +108,9 @@ class BacktestRuns:
             instrument and the period (``data.DataError``).
         """
         instrument_id = InstrumentId.parse(body.data.instrument.id)
-        _check_benchmarks(body.benchmarks, instrument_id)
+        body = body.model_copy(
+            update={"benchmarks": _check_benchmarks(body.benchmarks, instrument_id)}
+        )
         model = await self._store.run_model(user_id, body.model.id)
         if model is None:
             raise ModelNotFound
@@ -142,7 +155,8 @@ class BacktestRuns:
         self, model: Model, manifest: Manifest, instrument_id: InstrumentId, body: BacktestIn
     ) -> RunSpec:
         """The setup to store: the model with its manifest, the instrument as the catalog has
-        it and where the load with the warm-up starts (the period checked against the data)."""
+        it and where the load with the warm-up starts (the period checked against the data, of
+        the index fund a benchmark holds too)."""
         timeframe = Timeframe(manifest.input.timeframe)
         needed = warm_up(manifest)
         period = body.data.period
@@ -150,7 +164,7 @@ class BacktestRuns:
         load_start = await self._data.warm_up_start(
             instrument_id, timeframe, period.start, period.end, needed.candles
         )
-        return RunSpec(
+        spec = RunSpec(
             model=SpecModel(
                 name=model.name,
                 framework=model.framework,
@@ -176,6 +190,10 @@ class BacktestRuns:
             ),
             app_version=self._app_version,
         )
+        # A fund without candles in the period fails the start, not the run minutes later.
+        for etf in spec.etf_benchmarks().values():
+            await self._data.warm_up_start(etf, timeframe, period.start, period.end, 0)
+        return spec
 
     async def document(self, user_id: str, backtest_id: str, *, light: bool) -> tuple[int, bytes]:
         """The user's backtest's number and its result document: the light view, or with
@@ -201,17 +219,23 @@ class BacktestRuns:
         assert blob is not None  # a finished run stored them
         # The reads end here, so no connection waits on the data module and the build.
         await self._store.commit()
+        timeframe = Timeframe(spec.data.timeframe)
         candles = await self._data.candles(
             InstrumentId.parse(spec.data.instrument.id),
-            Timeframe(spec.data.timeframe),
+            timeframe,
             report.loaded.start,
             report.loaded.end,
         )
-        build = partial(_finished, backtest, spec, report, candles, blob, light=light)
+        period = spec.data.period
+        held = {
+            benchmark: (await self._data.candles(etf, timeframe, period.start, period.end)).frame
+            for benchmark, etf in spec.etf_benchmarks().items()
+        }
+        build = partial(_finished, backtest, spec, report, candles, blob, light=light, held=held)
         return backtest.number, await anyio.to_thread.run_sync(build)
 
 
-def _finished(
+def _finished(  # noqa: PLR0913 (what a build of the document is made of)
     backtest: Backtest,
     spec: RunSpec,
     report: RunReport,
@@ -219,8 +243,10 @@ def _finished(
     blob: bytes,
     *,
     light: bool,
+    held: Mapping[str, pl.DataFrame],
 ) -> bytes:
-    """The document of a finished backtest, its results built again (CPU work, in a thread)."""
+    """The document of a finished backtest, its results built again (CPU work, in a thread).
+    ``held`` has the candles of the index fund of each benchmark that holds one, by its ID."""
     changed = candles.fingerprint != report.loaded.fingerprint
     try:
         done = run(
@@ -234,7 +260,7 @@ def _finished(
     except NothingToTest:
         # The candles changed so much that no prediction lands on one any more.
         return dumps(_document(backtest, spec, report, changed=changed))
-    shown = results(done, spec.benchmarks, light=light)
+    shown = results(done, spec.benchmarks, light=light, held=held)
     return dumps(_document(backtest, spec, report, done, shown, changed=changed))
 
 
@@ -304,13 +330,33 @@ def _data(
     )
 
 
-def _check_benchmarks(benchmarks: list[BenchmarkIn], instrument_id: InstrumentId) -> None:
+def _check_benchmarks(
+    benchmarks: list[BenchmarkIn], instrument_id: InstrumentId
+) -> list[BenchmarkIn]:
+    """The benchmarks with their instrument's ID as the catalog writes it: buy and hold of the
+    backtest's instrument, or of an index fund for a stock, each sent in any case.
+
+    Raises:
+        InvalidBacktest: a benchmark holds another instrument, or a fund on a crypto backtest.
+    """
+    checked = []
     for benchmark in benchmarks:
-        if benchmark.instrument.strip().lower() != str(instrument_id).lower():
+        try:
+            held = InstrumentId.parse(benchmark.instrument)
+        except InvalidRequest:
+            held = None
+        etf = held is not None and held.market == Market.STOCK and held.symbol in BENCHMARK_ETFS
+        if held != instrument_id and not etf:
             raise InvalidBacktest(
-                f"Buy and hold compares with the backtest's own instrument: set the benchmark's "
-                f"instrument to {instrument_id}."
+                f"A benchmark is buy and hold of the backtest's instrument ({instrument_id}), "
+                "or of SPY, QQQ or DIA for a stock."
             )
+        if held != instrument_id and instrument_id.market != Market.STOCK:
+            raise InvalidBacktest(
+                "SPY, QQQ and DIA compare stock backtests only. Choose buy and hold of the pair."
+            )
+        checked.append(benchmark.model_copy(update={"instrument": str(held)}))
+    return checked
 
 
 def _manifest(model: Model, instrument_id: InstrumentId) -> Manifest:
@@ -359,13 +405,15 @@ def _day(ts: int) -> date:
 def _setup(spec: RunSpec) -> dict[str, Any]:
     """The summary the Backtests list shows of the setup (``BacktestSetup``, the fields of
     Settings, Backtest defaults), rounded where its fields are: the stop loss in whole percent
-    (0 without one), the threshold 0 for k-means. The document has the setup as it is."""
+    (0 without one), the threshold 0 for k-means, the index fund a benchmark holds, else buy
+    and hold (also without a benchmark). The document has the setup as it is."""
     rule, execution = spec.decision.rule, spec.execution
     limit = 0.0
     if isinstance(rule, ThresholdRule):
         limit = rule.limit
     elif isinstance(rule, HysteresisRule):
         limit = rule.enter
+    etfs = [SetupBenchmark(etf.symbol) for etf in spec.etf_benchmarks().values()]
     setup = BacktestSetup(
         timeframe=SetupTimeframe(spec.data.timeframe),
         period_start=_day(spec.data.period.start),
@@ -375,6 +423,6 @@ def _setup(spec: RunSpec) -> dict[str, Any]:
         stop_loss_pct=0 if execution.stop_loss is None else round(execution.stop_loss * 100),
         fees_pct=execution.fee_bps / 100,
         slippage_pct=execution.slippage_bps / 100,
-        benchmark=SetupBenchmark.buy_and_hold,
+        benchmark=etfs[0] if etfs else SetupBenchmark.buy_and_hold,
     )
     return setup.model_dump(mode="json")

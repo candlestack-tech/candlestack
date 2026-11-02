@@ -1,6 +1,6 @@
 """What a new backtest stores for the Backtests list from its setup (the rounded summary of
-``BacktestSetup``) and its model's manifest (the representation), and which models and
-instruments go together."""
+``BacktestSetup``) and its model's manifest (the representation), which models and
+instruments go together, and which benchmarks a backtest takes."""
 
 import json
 from pathlib import Path
@@ -153,10 +153,66 @@ def test_a_model_runs_with_its_manifest_on_an_instrument_of_its_hours() -> None:
         _manifest(model(with_input(session="24/7")), AAPL)
 
 
-def test_buy_and_hold_is_of_the_backtests_own_instrument() -> None:
-    own = BenchmarkIn(id="bh", kind="buy_and_hold", instrument=" STOCK:aapl ")
-    other = BenchmarkIn(id="bh", kind="buy_and_hold", instrument="stock:MSFT")
+def benchmark(instrument: str, benchmark_id: str = "bh") -> BenchmarkIn:
+    return BenchmarkIn(id=benchmark_id, kind="buy_and_hold", instrument=instrument)
 
-    _check_benchmarks([own], AAPL)
-    with pytest.raises(InvalidBacktest, match="stock:AAPL"):
-        _check_benchmarks([other], AAPL)
+
+def test_buy_and_hold_is_of_the_backtests_own_instrument() -> None:
+    btc = InstrumentId.parse("crypto:BTCUSDT")
+
+    assert _check_benchmarks([benchmark(" STOCK:aapl ")], AAPL) == [benchmark("stock:AAPL")]
+    assert _check_benchmarks([benchmark("crypto:btcusdt")], btc) == [benchmark("crypto:BTCUSDT")]
+    assert _check_benchmarks([], AAPL) == []
+
+
+@pytest.mark.parametrize(
+    ("instrument", "stored"),
+    [("stock:SPY", "stock:SPY"), ("stock:qqq", "stock:QQQ"), (" STOCK:Dia ", "stock:DIA")],
+)
+def test_a_stock_backtest_may_hold_an_index_fund(instrument: str, stored: str) -> None:
+    assert _check_benchmarks([benchmark(instrument, "etf")], AAPL) == [benchmark(stored, "etf")]
+
+
+@pytest.mark.parametrize("instrument", ["stock:MSFT", "stock:VOO", "crypto:SPY", "SPY", ""])
+def test_a_benchmark_of_another_instrument_is_refused(instrument: str) -> None:
+    with pytest.raises(InvalidBacktest) as refused:
+        _check_benchmarks([benchmark(instrument)], AAPL)
+
+    assert refused.value.detail == (
+        "A benchmark is buy and hold of the backtest's instrument (stock:AAPL), or of SPY, QQQ "
+        "or DIA for a stock."
+    )
+
+
+def test_a_crypto_backtest_holds_no_index_fund() -> None:
+    btc = InstrumentId.parse("crypto:BTCUSDT")
+
+    with pytest.raises(InvalidBacktest) as refused:
+        _check_benchmarks([benchmark("stock:SPY", "spy")], btc)
+
+    assert refused.value.detail == (
+        "SPY, QQQ and DIA compare stock backtests only. Choose buy and hold of the pair."
+    )
+
+
+@pytest.mark.parametrize(
+    ("benchmarks", "shown"),
+    [
+        ([], "bh"),
+        ([benchmark("stock:AAPL")], "bh"),
+        # Stored before the index funds, as the user spelled it.
+        ([benchmark(" STOCK:aapl ")], "bh"),
+        ([benchmark("stock:SPY", "spy")], "SPY"),
+        ([benchmark("stock:QQQ", "qqq")], "QQQ"),
+        ([benchmark("stock:DIA", "dia")], "DIA"),
+    ],
+)
+def test_the_list_shows_the_index_fund_a_benchmark_holds(
+    benchmarks: list[BenchmarkIn], shown: str
+) -> None:
+    held = spec({}, {}).model_copy(update={"benchmarks": benchmarks})
+
+    assert _setup(held)["benchmark"] == shown
+    assert list(held.etf_benchmarks().values()) == (
+        [] if shown == "bh" else [InstrumentId.parse(f"stock:{shown}")]
+    )

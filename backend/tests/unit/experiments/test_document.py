@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from candlestack.experiments.assembly import (
     NothingToTest,
+    benchmark_equity,
     document,
     dumps,
     equity_points,
@@ -324,6 +325,112 @@ def test_no_benchmark_no_benchmark_series() -> None:
 
     assert shown["benchmarks"] == {}
     assert shown["series"]["benchmarks"] == {}
+
+
+# --- Benchmarks ---------------------------------------------------------------------------
+
+SPY = BenchmarkIn(id="spy", kind="buy_and_hold", instrument="stock:SPY")
+FUND = pl.DataFrame({"ts": TS, "close": [400.0, 404.0, 402.0, 410.0, 420.0]})
+
+
+def test_buy_and_hold_of_the_own_instrument_is_as_before() -> None:
+    """A backtest stored before the index funds came gets the results it had: the return of
+    ``stats`` and the closes over the first one, per day the last."""
+    candles, predictions = long_run(LIGHT_ROWS + 1)
+    done = run(
+        candles,
+        predictions,
+        period=Period(start=0, end=2**40),
+        decision=Decision(),
+        execution=Execution(),
+        periods_per_year=365,
+    )
+    close = done.rows.select("ts", equity=pl.col("close") / pl.col("close").first())
+    per_day = close.group_by(pl.col("ts") // 86_400, maintain_order=True).agg(
+        pl.col("equity").last()
+    )
+
+    for light, before in ((False, close["equity"]), (True, per_day["equity"])):
+        shown = results(done, [BH], light=light)
+        assert shown["benchmarks"] == {"bh": {"total_return": done.stats["buy_and_hold_return"]}}
+        np.testing.assert_array_equal(shown["series"]["benchmarks"]["bh"], before.to_numpy())
+
+
+def test_an_index_fund_on_the_rows_is_its_closes_over_the_first() -> None:
+    equity, total_return = benchmark_equity(pl.Series(TS), FUND)
+
+    assert equity.to_list() == pytest.approx([1.0, 1.01, 1.005, 1.025, 1.05])
+    assert total_return == pytest.approx(0.05)
+
+
+def test_a_candle_the_fund_lacks_repeats_the_one_before() -> None:
+    equity, total_return = benchmark_equity(pl.Series(TS), FUND.filter(pl.col("ts") != TS[3]))
+
+    assert equity.to_list() == pytest.approx([1.0, 1.01, 1.005, 1.005, 1.05])
+    assert total_return == pytest.approx(0.05)
+
+
+def test_rows_before_the_funds_first_price_hold_one() -> None:
+    equity, total_return = benchmark_equity(pl.Series(TS), FUND.slice(2))
+
+    assert equity.to_list() == pytest.approx([1.0, 1.0, 1.0, 410 / 402, 420 / 402])
+    assert total_return == pytest.approx(420 / 402 - 1)
+
+
+@pytest.mark.parametrize("fund", [FUND.clear(), FUND.with_columns(pl.col("ts") + 86_400)])
+def test_a_fund_without_a_price_by_the_last_row_has_no_return(fund: pl.DataFrame) -> None:
+    equity, total_return = benchmark_equity(pl.Series(TS), fund)
+
+    assert equity.to_list() == [1.0] * 5
+    assert total_return is None
+
+
+def test_the_results_compare_with_the_fund_and_the_stats_keep_buy_and_hold() -> None:
+    done = run(
+        CANDLES,
+        PREDICTIONS,
+        period=PERIOD,
+        decision=DECISION,
+        execution=EXECUTION,
+        periods_per_year=252,
+    )
+
+    shown = orjson.loads(dumps(results(done, [SPY], light=True, held={"spy": FUND})))
+    own = orjson.loads(dumps(results(done, [BH], light=True)))
+
+    assert shown["benchmarks"] == {"spy": {"total_return": pytest.approx(0.05)}}
+    assert shown["series"]["benchmarks"] == {"spy": pytest.approx([1.0, 1.01, 1.005, 1.025, 1.05])}
+    # The statistics, buy and hold of the run's own instrument among them, stay as they were.
+    assert shown["stats"] == own["stats"]
+    assert shown["stats"]["buy_and_hold_return"] == pytest.approx(-0.02)
+    assert shown["series"]["columns"] == own["series"]["columns"]
+    assert shown["trades"] == own["trades"]
+
+
+def test_a_long_series_has_the_funds_last_equity_of_each_day() -> None:
+    candles, predictions = long_run(LIGHT_ROWS + 1)
+    done = run(
+        candles,
+        predictions,
+        period=Period(start=0, end=2**40),
+        decision=Decision(),
+        execution=Execution(),
+        periods_per_year=365,
+    )
+    # A fund that misses every 5th candle and moves otherwise than the instrument.
+    fund = candles.select("ts", close=pl.col("close").reverse()).gather_every(5)
+    full, _ = benchmark_equity(done.rows["ts"], fund)
+
+    light = orjson.loads(dumps(results(done, [SPY], light=True, held={"spy": fund})))
+
+    per_day = (
+        done.rows.select("ts", equity=full)
+        .group_by(pl.col("ts") // 86_400, maintain_order=True)
+        .agg(pl.col("equity").last())
+    )
+    assert light["series"]["resolution"] == "day"
+    assert light["series"]["benchmarks"]["spy"] == per_day["equity"].to_list()
+    assert light["benchmarks"]["spy"]["total_return"] == pytest.approx(full[-1] - 1)
 
 
 # --- The rows the engine runs on ----------------------------------------------------------

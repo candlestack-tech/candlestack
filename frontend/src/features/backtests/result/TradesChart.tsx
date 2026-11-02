@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { ChartBar, type Kind } from './ChartBar';
 import { candleAt, DENSE_MOST, marksIn, tradeAt, tradeView, valueAt, type Series, type TradeRow } from './chartData';
 import { useChartNavigation } from './chartNavigation';
+import { benchmarkName } from './format';
 import { levelLabel } from './priceLevels';
 import { ResultBox } from './ResultParts';
 import { PriceLegend, ReturnsLegend, TradesNote } from './TradesLegend';
@@ -156,6 +157,8 @@ function Legends({ doc, chart, controls, trades, highlighted, inView }: LegendsP
   const exchange = instrument.exchange
     ? exchangeLabel(instrument.exchange)
     : instrument.source.charAt(0).toUpperCase() + instrument.source.slice(1);
+  // The line drawn is the first benchmark's (returnsOn).
+  const benchmark = doc.benchmarks[0];
   const line = (name: 'strategy' | 'benchmark', value: number | undefined) => ({
     value,
     on: controls.lines[name],
@@ -183,6 +186,7 @@ function Legends({ doc, chart, controls, trades, highlighted, inView }: LegendsP
         top={chart.events.paneHeight + 5}
         strategy={line('strategy', legend.strategy)}
         benchmark={chart.returns?.benchmark ? line('benchmark', legend.benchmark) : null}
+        benchmarkName={benchmark ? benchmarkName(doc, benchmark) : 'Buy and hold'}
         drawdown={legend.drawdown}
       />
     </>

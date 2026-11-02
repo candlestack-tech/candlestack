@@ -44,6 +44,7 @@ const LATER_STEPS: Record<number, (builder: Ready) => ReactNode> = {
   3: (builder) => (
     <ExecutionStep
       form={builder.form}
+      market={builder.market}
       invalid={builder.invalid.execution}
       problem={builder.stepProblem(3)}
       onChange={builder.change}

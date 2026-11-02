@@ -24,7 +24,8 @@ function Tag({ children }: { children: string }) {
 type Props = {
   value: Benchmark;
   onChange: (value: Benchmark) => void;
-  // The ones that can be chosen, every one when left out; the others are shown as coming soon.
+  // The ones that can be chosen, every one when left out; the others are the ETFs, which only a
+  // stock backtest can have.
   available?: readonly Benchmark[];
 };
 
@@ -52,7 +53,7 @@ export function BenchmarkSelect({ value, onChange, available = ORDER }: Props) {
               <Tag>{tag}</Tag>
               <span className="flex min-w-0 flex-col">
                 <SelectItemText>{name}</SelectItemText>
-                <span className="text-[11.5px] text-muted-foreground">{usable ? about : 'Coming soon'}</span>
+                <span className="text-[11.5px] text-muted-foreground">{usable ? about : 'For stocks only'}</span>
               </span>
             </SelectItem>
           );

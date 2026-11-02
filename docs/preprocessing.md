@@ -11,7 +11,8 @@ Built so far: the `preprocessing` module (the manifest and its checks, the catal
 first blocks: `candles@1`, `renko-triples@1` and `@2` ([below](#renko-triples)), `open@1` to
 `volume@1`, `rel-open@1` to `rel-close@1` ([below](#the-relative-prices)), `session-last-candle@1`, the indicators of the BLESK models
 with the `@2` versions of the recursive ones
-([below](#the-indicators-of-the-blesk-models)), `renko-direction@1`, `none@1`, `blesk-norm@1`
+([below](#the-indicators-of-the-blesk-models)), `renko-direction@1`, `kagi@1` with
+`kagi-direction@1`, `kagi-length@1` and `kagi-yang@1` ([below](#kagi)), `none@1`, `blesk-norm@1`
 ([below](#the-normalization-of-the-blesk-models)), `window@1` with
 `last` `closed` and `current`), the
 catalog endpoint `GET /api/v1/preprocessing/catalog`, the manifest's JSON Schema,
@@ -69,7 +70,7 @@ is our own, and each manifest carries its version (`"version": 1`). It borrows f
 | `input.timeframe`, `input.session` | the candles the model expects: a timeframe of the market data (`30m`), and `regular` (US trading hours) or `24/7` (around the clock, as crypto trades) |
 | `input.representation` | which rows the model sees: a catalog block and its parameters (`candles@1`, `renko@1`, ...) |
 | `input.features` | the columns in their exact order: each a name (not `ts`, the time of a row, nor `row_id`, the id of a row still forming), a catalog block (`rsi@1`), its parameters and its normalization (`none@1` when left out) |
-| `input.window` | the parameters of `window@1`: `length`, how many rows make one sample (1 to 1000), and `last`, the rule for the last row (`closed`, the default, for rows finished at their candle such as `candles@1`; `current` for rows that span several candles such as `renko-triples@1`) |
+| `input.window` | the parameters of `window@1`: `length`, how many rows make one sample (1 to 1000), and `last`, the rule for the last row (`closed`, the default, for rows finished at their candle such as `candles@1`; `current` for rows that span several candles such as `renko-triples@1` and `kagi@1`) |
 | `signature.input`, `signature.output` | shape without the batch axis, and dtype (`float32` only); must equal what the model file says |
 | `signature.output.meaning` | `score`: the sign is the direction, the size is compared with the threshold |
 | `example` | optional: samples of the model's input with the output the model must give for each ([below](#the-example-field)) |
@@ -232,7 +233,7 @@ Every block is a plain function on Polars frames, like the backtest modules: it 
 other module of the project and no server library. It is registered in the catalog under its
 versioned name, with its step, a Pydantic model of its parameters, its warm-up (how many
 earlier candles it needs; rows, for the window) and a short description. A feature also has a
-display group (`Candle`, `Bands`, `Momentum`, `Trend`, `Volume`, `Brick`; `open@1` to
+display group (`Candle`, `Bands`, `Momentum`, `Trend`, `Volume`, `Brick`, `Line`; `open@1` to
 `volume@1`, `rel-open@1` to `rel-close@1` and `session-last-candle@1` are `Candle`), and each block names its `tunable` parameters (none yet).
 `GET /api/v1/preprocessing/catalog` serves the catalog, so the app builds its forms from it
 and a new block needs no frontend change: each block with its id, step, description, `group`
@@ -242,10 +243,10 @@ warm-up as a short expression of its parameters (`"0"`, `"length - 1"`) and its 
 
 | Step | In, out | Blocks, in the order they come |
 | --- | --- | --- |
-| representation | candles, rows: each row with `ts`, the candle at whose close it is known (labelled by its open time, [data.md](data.md#time)), and the row's own columns; rows that span several candles also give `row_id`, the same on the rows of one row still forming | `candles@1` (every candle a row); `renko-triples@1` and `renko-triples@2` (rows of three Renko bricks, one a candle, [below](#renko-triples)); then `kagi@1`; later Heikin-Ashi, range bars, volume bars |
-| features | rows, the same rows with one column per feature, computed on the candles and taken at each row's candle, or for a feature of the rows read from the rows | `open@1` ... `volume@1`; `rel-open@1` ... `rel-close@1` ([below](#the-relative-prices)); `session-last-candle@1` (1 on the last candle of its session, [below](#the-last-candle-of-a-session)); the indicators of the BLESK models ([below](#the-indicators-of-the-blesk-models)); `renko-direction@1`, a feature of the rows of `renko-triples@1` and `@2` |
+| representation | candles, rows: each row with `ts`, the candle at whose close it is known (labelled by its open time, [data.md](data.md#time)), and the row's own columns; rows that span several candles also give `row_id`, the same on the rows of one row still forming | `candles@1` (every candle a row); `renko-triples@1` and `renko-triples@2` (rows of three Renko bricks, one a candle, [below](#renko-triples)); `kagi@1` (the current segment of a Kagi line, one a candle, [below](#kagi)); later Heikin-Ashi, range bars, volume bars |
+| features | rows, the same rows with one column per feature, computed on the candles and taken at each row's candle, or for a feature of the rows read from the rows | `open@1` ... `volume@1`; `rel-open@1` ... `rel-close@1` ([below](#the-relative-prices)); `session-last-candle@1` (1 on the last candle of its session, [below](#the-last-candle-of-a-session)); the indicators of the BLESK models ([below](#the-indicators-of-the-blesk-models)); `renko-direction@1`, a feature of the rows of `renko-triples@1` and `@2`; `kagi-direction@1`, `kagi-length@1` and `kagi-yang@1`, features of the rows of `kagi@1` |
 | normalization | a feature's column of the rows, the close of each row's candle (the candle its features are taken at) and the feature's block; the column scaled. The close goes to the normalization only, never into the rows, so it takes no feature's name and the window never sees it | `none@1`; `blesk-norm@1` (the BLESK models' scaling, a rule per feature, [below](#the-normalization-of-the-blesk-models)); then a rolling z-score, price-relative; fitted numbers come only from the manifest, never from the backtest's own data |
-| window | rows, a `float32` array `(samples, length, features)` and the `ts` of each sample | `window@1`: the last `length` rows up to each row. `last: closed` (the default) takes the `length` rows up to each row, each finished at its own candle, and needs rows that are (`candles@1`). `last: current` takes the `length - 1` most recent finished rows before each row and then the row, which may still be forming, and needs rows that span several candles (`renko-triples@1`); a manifest with the other rule is refused |
+| window | rows, a `float32` array `(samples, length, features)` and the `ts` of each sample | `window@1`: the last `length` rows up to each row. `last: closed` (the default) takes the `length` rows up to each row, each finished at its own candle, and needs rows that are (`candles@1`). `last: current` takes the `length - 1` most recent finished rows before each row and then the row, which may still be forming, and needs rows that span several candles (`renko-triples@1`, `kagi@1`); a manifest with the other rule is refused |
 
 - With `candles@1` every candle has a sample. With an event representation (Renko, Kagi) a
   candle without a new row repeats the last prediction: `signals.align(strict=False)` does
@@ -448,6 +449,83 @@ of both candles). Two kinds of exception, each handled narrowly and the same wit
 187 closes on 136 stocks that lie on a line of the brick's grid within float rounding (at most
 5 a stock), where the BLESK arithmetic picked the cell on the other side (research #263, R10);
 and 65 stocks whose bricks have no row for their first candle (R9).
+
+### Kagi
+
+`kagi@1` makes the rows of a Kagi line on the close: one row per candle, the line's current
+segment as it stands at that candle's close, as the Renko triples are one row per candle
+([above](#renko-triples)).
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `reversal` | `atr` | how the reversal amount is measured: `atr`, in ATRs of the candle that starts a segment; `percent`, in percent of the segment's extreme |
+| `amount` | 1 | the reversal amount, above 0 and at most 10 |
+| `atr_window` | 14 | the candles of the ATR, `atr@1`'s window, 2 to 1000; for `atr` only |
+
+- **The line** is built on the close of each candle, in float64. It starts at the close of its
+  first candle without a direction: the first candle out of the ATR's warm-up for `atr`, the
+  first candle for `percent`.
+- **The amount** is `amount` times the ATR (`atr@1`) of the candle that starts the segment,
+  fixed for the segment, or `amount` percent of the segment's extreme as it stands. A candle
+  whose amount is not a positive number (an ATR of 0, of candles that never moved) reverses
+  nothing.
+- **The first segment** gets its direction on the first candle whose close is at least the
+  amount away from the start price, up or down, with that candle's amount: it runs from the
+  start price to that close and starts at that candle.
+- **A segment**: on each later candle the close is compared with the current segment's extreme
+  `x`, its top going up and its bottom going down. A close beyond `x` extends the segment (`x`
+  becomes the close). A close at least the amount back from `x` reverses the line: a new
+  segment from `x` to the close, started at this candle. A close in between changes nothing.
+  One candle makes at most one reversal, and an overnight or weekend gap is a move like any
+  other.
+- **Yang and yin**: the line is thick (yang, 1) or thin (yin, 0). The first segment is yang
+  going up and yin going down. A finished segment going up leaves its top as the last
+  shoulder, one going down its bottom as the last waist. The line turns yang when a segment
+  going up rises above the last shoulder and yin when one going down falls below the last
+  waist; otherwise it keeps its thickness, across a reversal too.
+- **A row** is the current segment at a candle's close, one row per candle from the first
+  segment on, known at that candle's close. Its columns: `ts`, `row_id` (the number of the
+  segment, from 0), `start` (the `ts` of the candle that started it), `direction` (1 or -1),
+  `from` and `to` (the price it starts from and its extreme at the candle) and `yang` (the
+  line's thickness at the candle).
+- **Its features**, in the group `Line`, each needing `kagi@1`: `kagi-direction@1` is the
+  row's `direction`, `kagi-length@1` how far the segment has gone, `to / from - 1` (negative
+  going down, free of the price level), and `kagi-yang@1` the row's `yang`. A feature of the
+  candles takes its value at the row's candle. `blesk-norm@1` has no rule for the three.
+- **Finished rows**: as for the Renko triples, the rows of one `row_id` are one segment at
+  successive candles, and the last of them is finished, which is known only at the next
+  candle. So a manifest of `kagi@1` takes the window `last: current`, and `closed` is refused.
+
+The **warm-up** is an `estimate`. In ATRs the line starts on the first candle whose ATR is out
+of its warm-up (`15 * atr_window - 1`, 209 candles for 14), so an amount is `amount` times the
+`atr` feature of its candle whatever candle the load starts on; in percent it starts on the
+first candle. The first row waits for the first segment, and a sample for 24 finished rows. A
+segment of m ATRs takes about `4 + 4 m + 5 m^2` candles, a percent counting as two ATRs (the
+ATR(14) of a 30-minute candle of the BLESK stocks is 0.5 % of the close, the median of the
+stocks): segments grow with the square of the amount, as a random walk takes four times as
+long to go twice as far. On the 30-minute candles of the 521 stocks of the BLESK data (2016 to
+2026):
+
+| Amount | Candles a segment, on average | 95 % of the stocks under | 95 % of the runs of 24 segments under | The rule |
+| --- | --- | --- | --- | --- |
+| 0.5 ATR | 4.4 | 4.6 | 5.8 | 7.25 |
+| 1 ATR | 8.5 | 8.9 | 11.1 | 13 |
+| 2 ATR | 20 | 21.2 | 26.7 | 32 |
+| 3 ATR | 36.2 | 39.4 | 49.5 | 61 |
+| 0.5 % | 8.6 | 10.4 | 12.6 | 13 |
+| 1 % | 20.3 | 23.2 | 28.8 | 32 |
+| 2 % | 50.4 | 58.6 | 73.3 | 100 |
+
+The rule is above the 95 % of the runs of 24 segments for every amount from 0.25 to 10 ATRs
+and from 0.25 to 5 percent, so the estimate is rather too long than too short. In percent how
+long a segment takes depends on how much the instrument moves a candle, so the numbers hold
+for 30-minute stock candles. With the defaults the warm-up is 222 candles (the ATR's 209, then
+13 for the first segment) and then 312 for the 24 rows: 534 candles, about 41 trading days.
+
+**The line depends on the whole history** the build sees, as the Renko bricks do: each
+segment starts at the extreme of the one before, back to the first candle. The same candles
+always give the same line, but a backtest of another period may see another one; two runs of
+one period are the same.
 
 ### The normalization of the BLESK models
 

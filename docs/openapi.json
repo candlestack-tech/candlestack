@@ -445,7 +445,7 @@
         "description": "A new backtest: the setup groups of the result document. The document of a backtest can\nbe sent back as it is to run it again; its other groups are ignored.",
         "properties": {
           "benchmarks": {
-            "description": "Buy and hold of the instrument, or nothing",
+            "description": "Buy and hold of the instrument, or of SPY, QQQ or DIA for a stock backtest, or nothing",
             "items": {
               "$ref": "#/components/schemas/BenchmarkIn"
             },
@@ -1237,7 +1237,7 @@
       },
       "BenchmarkIn": {
         "additionalProperties": false,
-        "description": "What the run is compared with. Version 1 has buy and hold of the run's instrument only.",
+        "description": "What the run is compared with: buy and hold of the backtest's instrument, or of SPY,\nQQQ or DIA for a stock backtest.",
         "properties": {
           "id": {
             "examples": [
@@ -1248,7 +1248,7 @@
             "type": "string"
           },
           "instrument": {
-            "description": "The run's instrument",
+            "description": "The backtest's instrument, or `stock:SPY`, `stock:QQQ` or `stock:DIA` for a stock backtest",
             "examples": [
               "stock:AAPL"
             ],
@@ -1270,6 +1270,7 @@
         "type": "object"
       },
       "BenchmarkOut": {
+        "description": "Buy and hold of the backtest's instrument, or of SPY, QQQ or DIA for a stock backtest.",
         "properties": {
           "id": {
             "examples": [
@@ -1279,6 +1280,7 @@
             "type": "string"
           },
           "instrument": {
+            "description": "The instrument held: the backtest's own, or `stock:SPY`, `stock:QQQ` or `stock:DIA`",
             "examples": [
               "stock:AAPL"
             ],
@@ -1381,7 +1383,7 @@
                 "type": "null"
               }
             ],
-            "description": "Where the app shows a feature when it draws the input: Candle, Bands, Momentum, Trend, Volume or Brick; null for the other steps",
+            "description": "Where the app shows a feature when it draws the input: Candle, Bands, Momentum, Trend, Volume, Brick or Line; null for the other steps",
             "examples": [
               "Candle"
             ],
