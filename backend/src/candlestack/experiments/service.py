@@ -19,8 +19,12 @@ from candlestack.experiments.schemas import (
     BestBacktests,
     DashboardOut,
     EquitySeries,
+    ExperimentSort,
+    ExperimentsPage,
+    InstrumentMarket,
     ModelCount,
     Representation,
+    SetupTimeframe,
     SortOrder,
     StarredBacktests,
     UsedModel,
@@ -41,6 +45,22 @@ class ListQuery:
     show: BacktestShow = BacktestShow.all
     model: str | None = None
     sort: BacktestSort = BacktestSort.default
+    order: SortOrder = SortOrder.desc
+    page: int = 1
+
+
+@dataclass(frozen=True)
+class ExperimentsQuery:
+    """The search, scope, filters, sort and page of Experiments."""
+
+    query: str = ""
+    mine: bool = False
+    author: str | None = None
+    market: InstrumentMarket | None = None
+    symbol: str | None = None
+    representation: Representation | None = None
+    timeframe: SetupTimeframe | None = None
+    sort: ExperimentSort = ExperimentSort.newest
     order: SortOrder = SortOrder.desc
     page: int = 1
 
@@ -135,6 +155,11 @@ class BacktestsService:
             listed.backtest.name = changes.name
         await self._store.commit()
         return backtest_out(listed)
+
+    async def experiments(self, user_id: str, query: ExperimentsQuery) -> ExperimentsPage:
+        """A page of the published backtests that match the query, with the counts and what
+        the filters offer (scaffold: built in this pull request)."""
+        raise NotImplementedError
 
     async def dashboard(self, user_id: str) -> DashboardOut:
         """What the Dashboard shows of the user's backtests."""
