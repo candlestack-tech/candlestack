@@ -185,6 +185,81 @@ def test_the_direction_of_a_triple_needs_the_triples(raw: dict[str, Any]) -> Non
     }
 
 
+def kagi(last: str = "current") -> dict[str, Any]:
+    """A manifest of a Kagi line: its three columns and the close of each row's candle."""
+    features = [
+        {"name": "direction", "id": "kagi-direction@1"},
+        {"name": "length", "id": "kagi-length@1"},
+        {"name": "yang", "id": "kagi-yang@1"},
+        {"name": "close", "id": "close@1"},
+    ]
+    return {
+        "version": 1,
+        "input": {
+            "timeframe": "30m",
+            "session": "regular",
+            "representation": {"id": "kagi@1", "params": {"reversal": "atr", "amount": 1.0}},
+            "features": features,
+            "window": {"length": 25, "last": last},
+        },
+        "signature": {
+            "input": {"shape": [25, 4], "dtype": "float32"},
+            "output": {"shape": [1], "dtype": "float32", "meaning": "score"},
+        },
+    }
+
+
+def test_a_kagi_line_with_the_current_window_can_run() -> None:
+    manifest = parse_manifest(kagi())
+
+    assert unknown_blocks(manifest) == []
+    assert check_manifest(manifest) == []
+
+
+def test_a_kagi_line_needs_the_current_window() -> None:
+    assert problems(kagi(last="closed")) == {
+        "catalog": "The rows of kagi@1 span several candles, so the window needs last "
+        '"current": the last finished rows and the row still forming. "closed" is not '
+        "supported with it."
+    }
+
+
+def test_the_kagi_columns_need_the_kagi_line(raw: dict[str, Any]) -> None:
+    raw["input"]["features"][3] = {"name": "yang", "id": "kagi-yang@1"}
+
+    assert problems(raw) == {
+        "catalog": "input.features[3] is kagi-yang@1, a column of the rows of kagi@1, but the "
+        "representation is candles@1."
+    }
+
+
+def test_the_kagi_columns_and_the_direction_of_a_triple_do_not_mix() -> None:
+    document = kagi()
+    document["input"]["features"][3] = {"name": "triple", "id": "renko-direction@1"}
+    renko = blesk_without_normalization()
+    renko["input"]["features"][2] = {"name": "length", "id": "kagi-length@1"}
+
+    assert problems(document) == {
+        "catalog": "input.features[3] is renko-direction@1, a column of the rows of "
+        "renko-triples@1 or renko-triples@2, but the representation is kagi@1."
+    }
+    assert problems(renko) == {
+        "catalog": "input.features[2] is kagi-length@1, a column of the rows of kagi@1, but the "
+        "representation is renko-triples@1."
+    }
+
+
+def test_the_kagi_parameters_are_checked() -> None:
+    document = kagi()
+    document["input"]["representation"]["params"] = {"reversal": "points", "amount": 0}
+
+    assert problems(document) == {
+        "params": "input.representation.params.reversal: Input should be 'atr' or 'percent' "
+        "(kagi@1). input.representation.params.amount: Input should be greater than 0 "
+        "(kagi@1)."
+    }
+
+
 def test_the_renko_parameters_are_checked() -> None:
     document = blesk_without_normalization()
     document["input"]["representation"]["params"] = {"atr_multiple": 0, "atr_at": "brick_end"}

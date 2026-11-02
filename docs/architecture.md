@@ -86,7 +86,7 @@ flowchart LR
 | `POST /api/v1/models?name=<file name>` | uploads a model: the body is the file (`application/octet-stream`); checked before it is kept ([Models](#models)); a name the user has already gets a number (`lstm (2).keras`); one upload at a time per user, 100 models at most |
 | `PATCH /api/v1/models/{model_id}` | renames a model (the extension stays; `409 model-name-taken`) or stars and unstars it |
 | `DELETE /api/v1/models/{model_id}` | deletes a model and its file |
-| `GET /api/v1/preprocessing/catalog` | the blocks a model's manifest can name, by step: id, description, the display group of a feature (`Candle`, `Bands`, `Momentum`, `Trend`, `Volume`, `Brick`), warm-up and parameters (type, range, default, `tunable`); public, served by `ml` ([preprocessing.md](preprocessing.md#the-blocks)) |
+| `GET /api/v1/preprocessing/catalog` | the blocks a model's manifest can name, by step: id, description, the display group of a feature (`Candle`, `Bands`, `Momentum`, `Trend`, `Volume`, `Brick`, `Line`), warm-up and parameters (type, range, default, `tunable`); public, served by `ml` ([preprocessing.md](preprocessing.md#the-blocks)) |
 | `POST /api/v1/backtests` | starts a backtest of one of the user's models: the body is the setup groups of the result document (`model`, `data`, `decision`, `execution`, `benchmarks`); checked first, then stored `running` and run after the response; 201 with its result document ([Backtests](#backtests)) |
 | `GET /api/v1/backtests/{backtest_id}` | the backtest's result document in the light view, whatever its status ([engine.md](engine.md#the-result-document)) |
 | `GET /api/v1/backtests/{backtest_id}/download` | the result document of a finished backtest with every row and trade, as an attachment |
@@ -657,7 +657,7 @@ A module is a subpackage of `candlestack` under `backend/src/candlestack/`.
 | `core` | now | settings, logging, problem errors, Redis, Postgres and HTTP clients, CSRF protection, health endpoint |
 | `data` | now | instrument catalog, candles, sessions, cache, source adapters, rate limits |
 | `accounts` | now | users, GitHub and Google sign-in, sessions, the beta list, Settings (name, sign-in methods, preferences, deleting the account); `CurrentUserDep` for the routes of the signed-in user, `AccountDeletionHook` for what other modules delete with an account |
-| `preprocessing` | started | the model's input from its manifest: the manifest's schema and checks, the catalog of blocks, and the input built from candles: representation (candles and Renko triples now; Kagi later), features, normalization, windows ([preprocessing.md](preprocessing.md)) |
+| `preprocessing` | started | the model's input from its manifest: the manifest's schema and checks, the catalog of blocks, and the input built from candles: representation (candles, Renko triples and a Kagi line), features, normalization, windows ([preprocessing.md](preprocessing.md)) |
 | `ml` | now | the models users upload: the upload and its static check, the file storage, the list, rename, star, delete, the manifest; the worker runs them and checks them with their manifests ([Worker](#worker)) |
 | `signals` | started | turn predictions into signals: align them with the candles, thresholds, long only; later smoothing, holding period, sizing, risk limits |
 | `engine` | started | the backtest loop: candles and signals in, trades and an equity series out; `ENGINE_VERSION` names its rules ([engine.md](engine.md)) |
