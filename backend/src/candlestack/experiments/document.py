@@ -30,6 +30,9 @@ CALIBRATION_WINDOW_MAX = 1_000
 KMEANS_WINDOW_MAX = 5_000
 # A k-means fit is used for at least ``window / 20`` rows.
 KMEANS_WINDOW_PER_REFIT = 20
+# The index funds a stock backtest can be compared with, besides its own instrument: the
+# S&P 500, the Nasdaq-100 and the Dow Jones (symbols of the stock market).
+BENCHMARK_ETFS = ("SPY", "QQQ", "DIA")
 
 Number = Annotated[float, Field(allow_inf_nan=False)]
 
@@ -182,11 +185,16 @@ class Execution(Settings):
 
 
 class BenchmarkIn(_Strict):
-    """What the run is compared with. Version 1 has buy and hold of the run's instrument only."""
+    """What the run is compared with: buy and hold of the backtest's instrument, or of SPY,
+    QQQ or DIA for a stock backtest."""
 
     id: str = Field(pattern=r"^[a-z0-9_-]{1,16}$", examples=["bh"])
     kind: Literal["buy_and_hold"]
-    instrument: str = Field(description="The run's instrument", examples=["stock:AAPL"])
+    instrument: str = Field(
+        description="The backtest's instrument, or `stock:SPY`, `stock:QQQ` or `stock:DIA` for "
+        "a stock backtest",
+        examples=["stock:AAPL"],
+    )
 
 
 class BacktestIn(BaseModel):
@@ -200,7 +208,8 @@ class BacktestIn(BaseModel):
     benchmarks: list[BenchmarkIn] = Field(
         default_factory=list,
         max_length=1,
-        description="Buy and hold of the instrument, or nothing",
+        description="Buy and hold of the instrument, or of SPY, QQQ or DIA for a stock backtest, "
+        "or nothing",
     )
 
 
@@ -386,9 +395,15 @@ class DataOut(BaseModel):
 
 
 class BenchmarkOut(BaseModel):
+    """Buy and hold of the backtest's instrument, or of SPY, QQQ or DIA for a stock backtest."""
+
     id: str = Field(examples=["bh"])
     kind: str = Field(description="`buy_and_hold`; later more", examples=["buy_and_hold"])
-    instrument: str = Field(examples=["stock:AAPL"])
+    instrument: str = Field(
+        description="The instrument held: the backtest's own, or `stock:SPY`, `stock:QQQ` or "
+        "`stock:DIA`",
+        examples=["stock:AAPL"],
+    )
 
 
 class MetricsArgs(BaseModel):

@@ -215,8 +215,30 @@ class BacktestRunner:
             raise RunFailed("candles", _source_unavailable(error)) from error
         except DataError as error:
             raise RunFailed("candles", error.detail) from error
+        await self._benchmark_candles(spec)
         await steps.loaded(candles.frame.height)
         return candles
+
+    async def _benchmark_candles(self, spec: RunSpec) -> None:
+        """Loads the candles of the index fund each benchmark holds, of the period, in the
+        background. The run stores nothing of them, but a fund that cannot be loaded fails the
+        run here rather than every view of its document, which then finds them in the cache."""
+        data = spec.data
+        for etf in spec.etf_benchmarks().values():
+            failed = f"The candles of the benchmark {etf.symbol} could not be loaded."
+            try:
+                await self._data.candles(
+                    etf,
+                    Timeframe(data.timeframe),
+                    data.period.start,
+                    data.period.end,
+                    background=True,
+                )
+            except SourceUnavailable as error:
+                source = f"The market data source ({error.source.capitalize()}) is unavailable."
+                raise RunFailed("benchmark-candles", f"{failed} {source} {error.detail}") from error
+            except DataError as error:
+                raise RunFailed("benchmark-candles", f"{failed} {error.detail}") from error
 
     async def _predict(
         self,

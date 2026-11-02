@@ -5,6 +5,7 @@ preferences are, so a field added later reads as its default."""
 
 from pydantic import BaseModel, Field
 
+from candlestack.data import InstrumentId
 from candlestack.experiments.document import (
     AlignOut,
     BenchmarkIn,
@@ -59,6 +60,16 @@ class RunSpec(BaseModel):
     benchmarks: list[BenchmarkIn]
     metrics: MetricsArgs
     app_version: str
+
+    def etf_benchmarks(self) -> dict[str, InstrumentId]:
+        """The benchmarks that hold an index fund instead of the backtest's own instrument, by
+        their ID. Compared as parsed IDs: a backtest stored before them may spell its own
+        instrument in another case."""
+        own = InstrumentId.parse(self.data.instrument.id)
+        held = {
+            benchmark.id: InstrumentId.parse(benchmark.instrument) for benchmark in self.benchmarks
+        }
+        return {benchmark: etf for benchmark, etf in held.items() if etf != own}
 
 
 class RunReport(BaseModel):
