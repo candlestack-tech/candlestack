@@ -72,12 +72,19 @@ class Backtest(Base):
     setup: Mapped[dict[str, Any]] = mapped_column(JSONB)
     total_return: Mapped[float | None] = mapped_column(Float)
     buy_and_hold_return: Mapped[float | None] = mapped_column(Float)
+    # The return of its benchmark (setup.benchmark): buy and hold of its instrument, or of the
+    # index fund it was compared with, which only the run can work out. Null for a backtest
+    # that compared with a fund before this was stored.
+    benchmark_return: Mapped[float | None] = mapped_column(Float)
     sharpe: Mapped[float | None] = mapped_column(Float)
     max_drawdown: Mapped[float | None] = mapped_column(Float)
     win_rate: Mapped[float | None] = mapped_column(Float)
     num_trades: Mapped[int | None] = mapped_column(Integer)
-    # A short equity series of the strategy and of buy and hold (schemas.EquitySeries).
+    # A short equity series of the strategy and of its benchmark (schemas.EquitySeries).
     equity: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # The model's input, rows by features, from the signature of the manifest it ran with: what
+    # Experiments shows of the model without reading the deferred spec. Null for test data.
+    input_shape: Mapped[list[int] | None] = mapped_column(JSONB)
     duration_s: Mapped[float | None] = mapped_column(Float)
     engine_version: Mapped[str | None] = mapped_column(String(16))
     # What the user sees of a failed backtest: what went wrong and what to do.
@@ -111,9 +118,12 @@ class Backtest(Base):
     seeded: Mapped[bool] = mapped_column(Boolean, server_default=false(), default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the user last published it to Experiments, where every account of the beta sees it;
+    # null while it is not published.
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     def set_equity(self, strategy: Sequence[float], benchmark: Sequence[float]) -> None:
-        """Keeps the equity series of the strategy and of buy and hold (cumulative returns as
+        """Keeps the equity series of the strategy and of its benchmark (cumulative returns as
         fractions at the same evenly spaced times); what writes a backtest sets it this way.
 
         Raises:
@@ -126,3 +136,10 @@ class Backtest(Base):
 
 # The list and the Dashboard read a user's backtests newest first.
 Index("ix_backtests_user_id_created_at", Backtest.user_id, Backtest.created_at)
+# Experiments and the Dashboard read the published backtests of everyone, newest first: a few
+# among all the rows.
+Index(
+    "ix_backtests_published_at",
+    Backtest.published_at,
+    postgresql_where=Backtest.published_at.is_not(None),
+)

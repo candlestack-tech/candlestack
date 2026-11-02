@@ -123,10 +123,11 @@ def stats_out(values: dict[str, float | int | None]) -> dict[str, float | int | 
 
 
 def equity_points(
-    result: Result, rows: pl.DataFrame, points: int
+    result: Result, rows: pl.DataFrame, points: int, benchmark: pl.Series | None = None
 ) -> tuple[list[float], list[float]] | None:
-    """The short equity series of the Backtests list and the Dashboard: the cumulative return
-    of the strategy and of buy and hold (0 at the start) at ``points`` evenly spaced times from
+    """The short equity series of the Backtests list, the Dashboard and Experiments: the
+    cumulative return of the strategy and of the ``benchmark`` equity on the rows (buy and hold
+    of the rows' closes without one), 0 at the start, at ``points`` evenly spaced times from
     the first row to the last (at most one per row), each the last row at or before its time.
     None with fewer than 2 rows."""
     ts = result.series["ts"].to_numpy()
@@ -135,10 +136,27 @@ def equity_points(
     times = np.linspace(ts[0], ts[-1], min(points, ts.size))
     picked = np.clip(np.searchsorted(ts, times, side="right") - 1, 0, ts.size - 1)
     equity = result.series["equity"].to_numpy()
-    close = rows["close"].to_numpy()
+    if benchmark is None:
+        close = rows["close"]
+        benchmark = close / close.first()
     strategy = equity[picked] - 1.0
-    benchmark = close[picked] / close[0] - 1.0
-    return [float(value) for value in strategy], [float(value) for value in benchmark]
+    held = benchmark.to_numpy()[picked] - 1.0
+    return [float(value) for value in strategy], [float(value) for value in held]
+
+
+def main_benchmark(
+    done: Run, held: Mapping[str, pl.DataFrame] = {}
+) -> tuple[pl.Series, float | None]:
+    """The equity on the run's rows and the total return of the backtest's benchmark, the one
+    the list shows (``setup.benchmark``): the index fund of the first benchmark that holds one
+    (``held``, its candles by the benchmark's ID, as ``results`` takes them), else buy and hold
+    of the run's own instrument (also without a benchmark)."""
+    prices = next(iter(held.values()), None)
+    if prices is not None:
+        return benchmark_equity(done.rows["ts"], prices)
+    close = done.rows["close"]
+    own = done.stats["buy_and_hold_return"]
+    return close / close.first(), None if own is None else float(own)
 
 
 def benchmark_equity(ts: pl.Series, prices: pl.DataFrame) -> tuple[pl.Series, float | None]:

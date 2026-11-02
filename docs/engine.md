@@ -818,7 +818,10 @@ The engine's worked example ([Worked example](#worked-example)) with `next_open`
 {
   "version": 1,
   "backtest": {
-    "id": "bt_7f3k2m9qx4", "name": null, "number": 12, "status": "finished",   // running, finished or failed
+    "id": "bt_7f3k2m9qx4", "name": null, "number": 12,
+    "author": {"id": "usr_7f3k2m9qx4", "name": "Tymur Tkach", "mine": true},   // never the email
+    "public": false, "published_at": null,                        // published in Experiments, and when
+    "status": "finished",                                         // running, finished or failed
     "created_at": "2026-10-25T14:02:11Z", "finished_at": "2026-10-25T14:04:53Z",
     "duration_s": 162.0, "error": null,
     "steps": [                                                    // in their order, while it runs and after
@@ -907,9 +910,9 @@ compares it with what is printed here; change both together.
 
 | Group | Fields | From |
 | --- | --- | --- |
-| `backtest` | ID, the user's number, status, when it was created and finished (ISO 8601 UTC), seconds it took, the error of a failed run, the steps of the run ([architecture.md](architecture.md#backtests)) | the stored backtest |
+| `backtest` | ID, the user's number, the author (their public user ID and display name, and whether it is the signed-in user's own), whether it is published in Experiments and since when, status, when it was created and finished (ISO 8601 UTC), seconds it took, the error of a failed run, the steps of the run ([architecture.md](architecture.md#backtests)) | the stored backtest, the author's account |
 | `software` | `ENGINE_VERSION`, the app's version, the versions of the model runner | the engine, the app, the worker |
-| `model` | ID (null once the model is deleted), file name, framework, SHA-256, size, the manifest copy | the model at run time |
+| `model` | ID (null once the model is deleted, and for another account's published backtest), file name, framework, SHA-256, size, the manifest copy | the model at run time |
 | `data` | the instrument, timeframe and session; `period`: the user's dates; `loaded`: the candles asked for, warm-up included, with their fingerprint; `changed`; `warm_up` as the preprocessing reports it; `rows`: what the engine ran on; the predictions' count and SHA-256; the `AlignReport` | the data module, the preprocessing, `align` |
 | `decision` | each post-processing step in the order applied, null when off: exactly what `run.json` records | the steps ([Signals](#signals)) |
 | `execution` | the engine's `Settings` | [Settings](#settings) |
@@ -946,8 +949,12 @@ for is refused as the backtest's own period is.
   `candles` step, in the background (a fund that cannot be loaded fails it), and each build of
   the document loads them again.
 
-`stats.buy_and_hold_return`, the Backtests list's buy and hold and the short equity series stay
-buy and hold of the backtest's own instrument, whatever the benchmark.
+`stats.buy_and_hold_return` and the Backtests list's buy and hold stay buy and hold of the
+backtest's own instrument, whatever the benchmark. The run also stores its benchmark's return
+(`benchmark_return`, which Experiments shows) and the short equity series of the list, the
+Dashboard and Experiments against that benchmark: the fund's equity on the rows for a fund, at
+the same times as the strategy's. A backtest that compared with a fund before these were
+stored keeps buy and hold of its instrument in its short series and has no benchmark return.
 
 ### Conventions
 
@@ -965,7 +972,8 @@ buy and hold of the backtest's own instrument, whatever the benchmark.
   crypto, which trades every day. (The command always uses 252.)
 - **Numbers are not rounded.** A value that is not finite is `null`, never NaN, so the document
   is always valid JSON.
-- No field or value names a person, and the document holds no user ID, email or key.
+- The only person the document names is its author, by the public user ID and the display name
+  (`backtest.author`); it holds no email or key.
 
 ### The light view
 

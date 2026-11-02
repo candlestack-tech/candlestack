@@ -20,6 +20,7 @@ from candlestack.experiments.assembly import (
     document,
     dumps,
     equity_points,
+    main_benchmark,
     predictions_parquet,
     read_predictions,
     results,
@@ -535,6 +536,52 @@ def test_a_long_run_has_60_evenly_spaced_equity_points_ending_at_its_returns() -
     assert strategy[0] == benchmark[0] == 0.0
     assert strategy[-1] == pytest.approx(done.stats["total_return"])
     assert benchmark[-1] == pytest.approx(done.stats["buy_and_hold_return"])
+
+
+def test_the_equity_points_of_an_index_fund_are_its_equity_at_the_same_times() -> None:
+    candles, predictions = long_run(3000)
+    done = run(
+        candles,
+        predictions,
+        period=Period(start=0, end=2**40),
+        decision=Decision(),
+        execution=Execution(),
+        periods_per_year=365,
+    )
+    fund = candles.select("ts", close=pl.col("close").reverse())
+    equity, total_return = main_benchmark(done, {"spy": fund})
+
+    points = equity_points(done.result, done.rows, 60, equity)
+    own = equity_points(done.result, done.rows, 60)
+
+    assert points is not None
+    assert own is not None
+    strategy, benchmark = points
+    assert strategy == own[0]
+    assert len(benchmark) == 60
+    assert benchmark[0] == 0.0
+    assert benchmark[-1] == pytest.approx(total_return)
+    assert benchmark != own[1]
+    assert total_return == benchmark_equity(done.rows["ts"], fund)[1]
+
+
+def test_without_a_fund_the_benchmark_is_buy_and_hold_of_the_instrument() -> None:
+    done = run(
+        CANDLES,
+        PREDICTIONS,
+        period=PERIOD,
+        decision=DECISION,
+        execution=EXECUTION,
+        periods_per_year=252,
+    )
+
+    equity, total_return = main_benchmark(done)
+
+    assert equity.to_list() == pytest.approx([1.0, 1.01, 1.03, 0.97, 0.98])
+    assert total_return == pytest.approx(-0.02)
+    assert equity_points(done.result, done.rows, 60, equity) == equity_points(
+        done.result, done.rows, 60
+    )
 
 
 def test_one_row_has_no_equity_points() -> None:

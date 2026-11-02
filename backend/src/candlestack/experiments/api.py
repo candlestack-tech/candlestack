@@ -1,6 +1,7 @@
 """HTTP API of the experiments module: the signed-in user's backtests under
-``/api/v1/backtests`` (the list, starting one, its result document and its download) and the
-Dashboard under ``/api/v1/dashboard``.
+``/api/v1/backtests`` (the list, starting one, its result document and its download), the
+backtests every account published under ``/api/v1/experiments`` and the Dashboard under
+``/api/v1/dashboard``.
 """
 
 from collections.abc import Iterator
@@ -137,6 +138,21 @@ async def update_backtest(
     except BacktestNotFound:
         raise ProblemError(
             404, "not-found", "Not Found", "You have no backtest with this ID."
+        ) from None
+    except NoDocument:
+        raise ProblemError(
+            409,
+            "no-document",
+            "No result document",
+            "This backtest is test data from before backtests ran in the app, so it cannot be "
+            "published.",
+        ) from None
+    except BacktestNotFinished:
+        raise ProblemError(
+            409,
+            "backtest-not-finished",
+            "Backtest not finished",
+            "Only a finished backtest can be published.",
         ) from None
 
 

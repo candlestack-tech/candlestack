@@ -66,6 +66,8 @@ def test_a_backtest_as_the_list_shows_it(ada) -> None:
                 "duration_s": 20.0,
                 "error": None,
                 "starred": False,
+                "public": False,
+                "published_at": None,
                 "created_at": "2026-10-01T13:00:00Z",
                 "finished_at": "2026-10-01T13:00:20Z",
             }
@@ -73,7 +75,7 @@ def test_a_backtest_as_the_list_shows_it(ada) -> None:
         "total": 1,
         "page": 1,
         "pages": 1,
-        "counts": {"all": 1, "starred": 0, "failed": 0},
+        "counts": {"all": 1, "starred": 0, "failed": 0, "public": 0},
         "models": [{"name": "blesk-novol-8.keras", "framework": "keras", "count": 1}],
     }
 
@@ -84,7 +86,7 @@ def test_no_backtests_yet(ada) -> None:
         "total": 0,
         "page": 1,
         "pages": 1,
-        "counts": {"all": 0, "starred": 0, "failed": 0},
+        "counts": {"all": 0, "starred": 0, "failed": 0, "public": 0},
         "models": [],
     }
 
@@ -172,7 +174,12 @@ def test_show(ada) -> None:
     assert numbers(ada.backtests(show="all")) == [4, 3, 2, 1]
     assert numbers(ada.backtests(show="starred")) == [2, 1]
     assert numbers(ada.backtests(show="failed")) == [3, 2]
-    assert ada.backtests(show="failed").json()["counts"] == {"all": 4, "starred": 2, "failed": 2}
+    assert ada.backtests(show="failed").json()["counts"] == {
+        "all": 4,
+        "starred": 2,
+        "failed": 2,
+        "public": 0,
+    }
 
 
 def test_the_model_filter_and_the_models_list(ada) -> None:
@@ -381,7 +388,7 @@ def test_the_dashboard(ada, bob) -> None:
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
     dashboard = response.json()
-    assert dashboard["counts"] == {"all": 10, "starred": 6, "failed": 2}
+    assert dashboard["counts"] == {"all": 10, "starred": 6, "failed": 2, "public": 0}
     assert [backtest["number"] for backtest in dashboard["last"]] == [10, 9, 8, 7, 6, 5]
 
     def best(result: str) -> list[int]:
@@ -407,10 +414,11 @@ def test_the_starred_without_a_sharpe_ratio_come_last(ada) -> None:
 
 def test_an_empty_dashboard(ada) -> None:
     assert ada.dashboard().json() == {
-        "counts": {"all": 0, "starred": 0, "failed": 0},
+        "counts": {"all": 0, "starred": 0, "failed": 0, "public": 0},
         "last": [],
         "best": {"sharpe": [], "total_return": [], "max_drawdown": [], "win_rate": []},
         "starred": {"backtests": [], "total": 0},
+        "experiments": {"backtests": [], "total": 0},
     }
 
 

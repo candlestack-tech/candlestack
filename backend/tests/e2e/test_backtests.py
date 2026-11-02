@@ -1,5 +1,5 @@
-"""The Backtests page, the Dashboard and starting a backtest over HTTP with the built image and
-its migrated table; the dev user has no backtests."""
+"""The Backtests page, Experiments, the Dashboard and starting a backtest over HTTP with the built
+image and its migrated table; the dev user has no backtests and nobody published one."""
 
 from pathlib import Path
 
@@ -9,7 +9,7 @@ import pytest
 pytestmark = pytest.mark.e2e
 
 ORIGIN = {"Origin": "http://testserver"}
-NO_BACKTESTS = {"all": 0, "starred": 0, "failed": 0}
+NO_BACKTESTS = {"all": 0, "starred": 0, "failed": 0, "public": 0}
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "keras"
 
 
@@ -30,6 +30,25 @@ def test_the_backtests_list(http: httpx.Client) -> None:
     }
 
 
+def test_experiments(http: httpx.Client) -> None:
+    http.post("/api/v1/auth/dev", headers=ORIGIN)
+
+    response = http.get(
+        "/api/v1/experiments", params={"q": "nvda", "market": "stock", "sort": "sharpe"}
+    )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "experiments": [],
+        "total": 0,
+        "page": 1,
+        "pages": 1,
+        "counts": {"all": 0, "mine": 0, "people": 0},
+        "facets": {"markets": [], "instruments": [], "representations": [], "timeframes": []},
+    }
+
+
 def test_the_dashboard(http: httpx.Client) -> None:
     http.post("/api/v1/auth/dev", headers=ORIGIN)
 
@@ -38,12 +57,14 @@ def test_the_dashboard(http: httpx.Client) -> None:
     assert response.status_code == 200
     assert response.json()["counts"] == NO_BACKTESTS
     assert response.json()["last"] == []
+    assert response.json()["experiments"] == {"backtests": [], "total": 0}
 
 
-def test_starring_an_unknown_backtest(http: httpx.Client) -> None:
+@pytest.mark.parametrize("change", [{"starred": True}, {"public": True}])
+def test_changing_an_unknown_backtest(http: httpx.Client, change: dict[str, bool]) -> None:
     http.post("/api/v1/auth/dev", headers=ORIGIN)
 
-    response = http.patch("/api/v1/backtests/bt_zzzzzzzzzz", json={"starred": True}, headers=ORIGIN)
+    response = http.patch("/api/v1/backtests/bt_zzzzzzzzzz", json=change, headers=ORIGIN)
 
     assert response.status_code == 404
     assert response.json()["type"] == "https://candlestack.tech/problems/not-found"

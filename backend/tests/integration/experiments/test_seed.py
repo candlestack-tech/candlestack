@@ -36,7 +36,7 @@ def test_the_seed_adds_the_mockups_backtests(ada, bob, run_seed) -> None:
 
     page = ada.backtests(sort="number", order="asc").json()
     assert page["total"] == 15
-    assert page["counts"] == {"all": 15, "starred": 5, "failed": 2}
+    assert page["counts"] == {"all": 15, "starred": 5, "failed": 2, "public": 0}
     assert page["models"] == [
         {"name": "Blesk-Novol-8.keras", "framework": "keras", "count": 10},
         {"name": "blesk-novol-9.keras", "framework": "keras", "count": 2},
