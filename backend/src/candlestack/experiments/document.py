@@ -287,10 +287,28 @@ class BacktestStep(BaseModel):
     )
 
 
+class DocumentAuthor(BaseModel):
+    """Who the backtest belongs to: their display name, never their email."""
+
+    id: str = Field(description="Public ID of the account", examples=["usr_7f3k2m9qx4"])
+    name: str = Field(description="The account's display name", examples=["Tymur Tkach"])
+    mine: bool = Field(description="The signed-in user's own backtest")
+
+
 class BacktestHeader(BaseModel):
     id: str = Field(examples=["bt_7f3k2m9qx4"])
     name: str | None = Field(description="What the user calls it; null until they rename it")
     number: int = Field(ge=1, description="The user's own number, shown as #N", examples=[12])
+    author: DocumentAuthor = Field(
+        description=(
+            "Whose backtest it is. Another account's backtest is shown only while it is "
+            "published, read only, and its `model.id` is null"
+        )
+    )
+    public: bool = Field(description="Published in Experiments")
+    published_at: datetime | None = Field(
+        description="When it was published (UTC); null while it is not"
+    )
     status: BacktestStatus
     created_at: datetime = Field(description="When it started (UTC)")
     finished_at: datetime | None = Field(description="When it finished or failed (UTC)")
