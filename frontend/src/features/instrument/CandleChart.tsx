@@ -220,10 +220,11 @@ export function CandleChart({ bars, market, dateStyle, daily, onNearLeftEdge }: 
   // the facts or the status take: the page is a flex column (Layout.tsx) and the chart its part
   // that grows, up to where its section stops (InstrumentCandles.tsx). Never under 16rem on a phone
   // (a long name takes three lines there) and 20rem from sm up (phones in landscape): then the
-  // page scrolls.
+  // page scrolls. The library's canvases and layout table say nothing to a screen reader, so they
+  // are hidden from it: the section names the chart and the legend reads out the candle.
   return (
     <div className="relative min-h-64 flex-1 sm:min-h-80">
-      <div ref={container} className="absolute inset-0" />
+      <div ref={container} aria-hidden className="absolute inset-0" />
       {legend && <ChartLegend legend={legend} />}
       {awayFromLatest && (
         <Button

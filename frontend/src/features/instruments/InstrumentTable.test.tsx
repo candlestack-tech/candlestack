@@ -237,6 +237,22 @@ describe('InstrumentTable', () => {
       expect(links.filter((link) => !link.includes('tabindex="-1"'))).toHaveLength(1);
     }
   });
+
+  it('rings the whole row while its link has the keyboard focus', async () => {
+    const [btc = ''] = rows(await render());
+    expect(classes(btc, /<a [^>]*>BTCUSDT/)).toEqual(
+      expect.arrayContaining([
+        'after:absolute',
+        'after:inset-0',
+        'focus-visible:after:ring-2',
+        'focus-visible:after:ring-ring',
+      ]),
+    );
+  });
+
+  it('names the table for a screen reader', async () => {
+    expect(await render()).toMatch(/<table [^>]*aria-label="Instruments"/);
+  });
 });
 
 describe('InstrumentTable candles', () => {

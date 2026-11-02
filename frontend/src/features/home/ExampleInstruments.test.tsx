@@ -19,6 +19,10 @@ const text = (html: string) =>
 const headers = (html: string) => [...html.matchAll(/<th [^>]*>.*?<\/th>/g)].map((match) => match[0]);
 
 describe('ExampleInstruments', () => {
+  it('names the table for a screen reader', () => {
+    expect(render()).toMatch(/<table [^>]*aria-label="Example instruments"/);
+  });
+
   it('shows the five sample rows: icon, symbol, exchange, 10 days of candles, price and 24 h change', () => {
     const all = rows(render());
     expect(all.map((row) => cells(row).map(text))).toEqual([

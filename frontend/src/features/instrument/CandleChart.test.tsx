@@ -46,6 +46,16 @@ function crosshairText(): string | undefined {
 }
 
 describe('the candle chart', () => {
+  it("hides the library's canvases from a screen reader but keeps the legend", () => {
+    const { container } = render(
+      <CandleChart bars={BARS} market="stock" dateStyle={STYLE} daily={false} onNearLeftEdge={() => undefined} />,
+    );
+    expect(container.querySelector('.absolute.inset-0')?.getAttribute('aria-hidden')).toBe('true');
+    const legend = container.querySelector('.font-mono');
+    expect(legend?.textContent).toContain('C 1.5000');
+    expect(legend?.closest('[aria-hidden]')).toBeNull();
+  });
+
   it("writes the crosshair's date and time in the user's zone and formats, and follows a change", () => {
     const chart = (timeZone: string, dateFormat: 'dmy' | 'iso', timeFormat: '24' | '12') => (
       <CandleChart
