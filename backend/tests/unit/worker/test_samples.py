@@ -90,3 +90,20 @@ def test_a_manifest_of_renko_triples_makes_samples(manifest: dict[str, Any]) -> 
     assert made.samples.shape[1:] == (25, 5)
     assert len(made.samples) >= SAMPLES
     assert set(made.samples[:, :, -1].ravel().tolist()) <= {-0.75, -0.25, 0.25, 0.75}
+
+
+@pytest.mark.parametrize("params", [{}, {"reversal": "percent", "amount": 2.0}])
+def test_a_manifest_of_a_kagi_line_makes_samples(
+    manifest: dict[str, Any], params: dict[str, Any]
+) -> None:
+    """The warm-up of a Kagi line is an estimate too: twice its candles leave samples."""
+    manifest["input"]["representation"] = {"id": "kagi@1", "params": params}
+    manifest["input"]["window"]["last"] = "current"
+    manifest["input"]["features"][-1] = {"name": "yang", "id": "kagi-yang@1"}
+    parsed = parse_manifest(manifest)
+
+    made = build_input(sample_candles(parsed), parsed)
+
+    assert made.samples.shape[1:] == (25, 5)
+    assert len(made.samples) >= SAMPLES
+    assert set(made.samples[:, :, -1].ravel().tolist()) <= {0.0, 1.0}

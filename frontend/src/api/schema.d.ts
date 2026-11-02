@@ -1288,7 +1288,7 @@ export interface components {
             description: string;
             /**
              * Group
-             * @description Where the app shows a feature when it draws the input: Candle, Bands, Momentum, Trend, Volume or Brick; null for the other steps
+             * @description Where the app shows a feature when it draws the input: Candle, Bands, Momentum, Trend, Volume, Brick or Line; null for the other steps
              * @example Candle
              */
             group: string | null;

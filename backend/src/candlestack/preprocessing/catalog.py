@@ -16,19 +16,20 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from candlestack.preprocessing import blocks, renko
+from candlestack.preprocessing import blocks, kagi, renko
 from candlestack.preprocessing import indicators as ind
 from candlestack.preprocessing.manifest import Window
 
 Step = Literal["representation", "feature", "normalization", "window"]
 # How the app groups the features of a model when it draws the input as rows by columns.
-Group = Literal["Candle", "Bands", "Momentum", "Trend", "Volume", "Brick"]
+Group = Literal["Candle", "Bands", "Momentum", "Trend", "Volume", "Brick", "Line"]
 
 # The manifest's `input.window` holds the parameters of this block, the only window for now.
 WINDOW = "window@1"
 RENKO_TRIPLES = "renko-triples@1"
 # The same rows with the bricks sized by TA-Lib's ATR (atr@2), as the BLESK data has them.
 TALIB_RENKO_TRIPLES = "renko-triples@2"
+KAGI = "kagi@1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,6 +308,51 @@ _RELATIVE = (
 )
 
 
+def _kagi_segment(atrs_per_amount: float) -> str:
+    """The candles of the first segment for an amount of ``atrs_per_amount`` ATRs each."""
+    return (
+        f"ceil({kagi.CANDLES_PER_SEGMENT:g} + "
+        f"{kagi.CANDLES_PER_ATR * atrs_per_amount:g} * amount + "
+        f"{kagi.CANDLES_PER_ATR_SQUARED * atrs_per_amount**2:g} * amount ** 2)"
+    )
+
+
+# In ATRs the line waits for the ATR's warm-up, in percent it starts on the first candle.
+_KAGI_WARM_UP = (
+    f"{ind.WILDER_WINDOWS + 1} * atr_window - 1 + {_kagi_segment(1)} if reversal == 'atr' "
+    f"else {_kagi_segment(kagi.ATRS_PER_PERCENT)}"
+)
+
+# The columns of a Kagi line's rows, each a feature of the rows of kagi@1.
+_KAGI_FEATURES = tuple(
+    Block(
+        id=block_id,
+        step="feature",
+        description=description,
+        run=run,
+        group="Line",
+        of_rows=(KAGI,),
+    )
+    for block_id, description, run in (
+        (
+            "kagi-direction@1",
+            "The direction of the Kagi line's current segment: 1 up, -1 down",
+            kagi.direction,
+        ),
+        (
+            "kagi-length@1",
+            "How far the Kagi line's current segment has gone: its extreme over its start, minus 1",
+            kagi.length,
+        ),
+        (
+            "kagi-yang@1",
+            "1 where the Kagi line is thick (yang), 0 where it is thin (yin)",
+            kagi.yang,
+        ),
+    )
+)
+
+
 CATALOG: Mapping[str, Block] = MappingProxyType(
     {
         block.id: block
@@ -352,6 +398,19 @@ CATALOG: Mapping[str, Block] = MappingProxyType(
                 ),
                 candles_per_row=renko.candles_per_row,
             ),
+            Block(
+                id=KAGI,
+                step="representation",
+                description=(
+                    "A Kagi line on the close that reverses after amount ATRs (or percent): one "
+                    "row per candle, the current segment"
+                ),
+                run=kagi.kagi,
+                params=kagi.Kagi,
+                warm_up=kagi.warm_up,
+                warm_up_rule=_KAGI_WARM_UP,
+                candles_per_row=kagi.candles_per_row,
+            ),
             *(_candle_column(name) for name in blocks.CANDLE_COLUMNS),
             *_RELATIVE,
             Block(
@@ -377,6 +436,7 @@ CATALOG: Mapping[str, Block] = MappingProxyType(
                 group="Brick",
                 of_rows=(RENKO_TRIPLES, TALIB_RENKO_TRIPLES),
             ),
+            *_KAGI_FEATURES,
             Block(
                 id="none@1",
                 step="normalization",
@@ -441,7 +501,7 @@ class BlockOut(BaseModel):
     group: str | None = Field(
         description=(
             "Where the app shows a feature when it draws the input: Candle, Bands, Momentum, "
-            "Trend, Volume or Brick; null for the other steps"
+            "Trend, Volume, Brick or Line; null for the other steps"
         ),
         examples=["Candle"],
     )
