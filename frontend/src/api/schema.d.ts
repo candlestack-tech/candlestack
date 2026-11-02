@@ -826,7 +826,7 @@ export interface components {
         BacktestIn: {
             /**
              * Benchmarks
-             * @description Buy and hold of the instrument, or nothing
+             * @description Buy and hold of the instrument, or of SPY, QQQ or DIA for a stock backtest, or nothing
              */
             benchmarks?: components["schemas"]["BenchmarkIn"][];
             data: components["schemas"]["DataIn"];
@@ -1215,7 +1215,8 @@ export interface components {
         Benchmark: "bh" | "SPY" | "QQQ" | "DIA";
         /**
          * BenchmarkIn
-         * @description What the run is compared with. Version 1 has buy and hold of the run's instrument only.
+         * @description What the run is compared with: buy and hold of the backtest's instrument, or of SPY,
+         *     QQQ or DIA for a stock backtest.
          */
         BenchmarkIn: {
             /**
@@ -1225,7 +1226,7 @@ export interface components {
             id: string;
             /**
              * Instrument
-             * @description The run's instrument
+             * @description The backtest's instrument, or `stock:SPY`, `stock:QQQ` or `stock:DIA` for a stock backtest
              * @example stock:AAPL
              */
             instrument: string;
@@ -1235,7 +1236,10 @@ export interface components {
              */
             kind: "buy_and_hold";
         };
-        /** BenchmarkOut */
+        /**
+         * BenchmarkOut
+         * @description Buy and hold of the backtest's instrument, or of SPY, QQQ or DIA for a stock backtest.
+         */
         BenchmarkOut: {
             /**
              * Id
@@ -1244,6 +1248,7 @@ export interface components {
             id: string;
             /**
              * Instrument
+             * @description The instrument held: the backtest's own, or `stock:SPY`, `stock:QQQ` or `stock:DIA`
              * @example stock:AAPL
              */
             instrument: string;

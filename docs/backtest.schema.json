@@ -423,6 +423,7 @@
       "type": "object"
     },
     "BenchmarkOut": {
+      "description": "Buy and hold of the backtest's instrument, or of SPY, QQQ or DIA for a stock backtest.",
       "properties": {
         "id": {
           "examples": [
@@ -432,6 +433,7 @@
           "type": "string"
         },
         "instrument": {
+          "description": "The instrument held: the backtest's own, or `stock:SPY`, `stock:QQQ` or `stock:DIA`",
           "examples": [
             "stock:AAPL"
           ],

@@ -8,6 +8,7 @@ orjson straight from the Polars columns (``dumps``), never as Python lists of ev
 
 import hashlib
 import io
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -140,23 +141,76 @@ def equity_points(
     return [float(value) for value in strategy], [float(value) for value in benchmark]
 
 
-def results(done: Run, benchmarks: list[BenchmarkIn], *, light: bool) -> dict[str, Any]:
+def benchmark_equity(ts: pl.Series, prices: pl.DataFrame) -> tuple[pl.Series, float | None]:
+    """The equity of buying another instrument at a run's first row and holding it, on the
+    run's rows ``ts``, and its total return.
+
+    On each row it is the instrument's last close at or before the row over the first such
+    close: an as-of join, so a candle the instrument lacks repeats the one before. Rows before
+    its first price are 1.0. Without a price at or before the last row the equity is 1.0
+    throughout and the return None.
+
+    Args:
+        ts: The rows' ``ts``, in time order.
+        prices: The instrument's candles in time order (``ts`` and ``close`` are read), of the
+            run's timeframe and session, so their ``ts`` are normally the rows'.
+    """
+    closes = (
+        ts.cast(pl.Int64)
+        .to_frame("ts")
+        .join_asof(
+            prices.select(pl.col("ts").cast(pl.Int64), pl.col("close").cast(pl.Float64)),
+            on="ts",
+            strategy="backward",
+        )
+        .get_column("close")
+    )
+    first = closes.drop_nulls().first()
+    if first is None:
+        return pl.repeat(1.0, ts.len(), dtype=pl.Float64, eager=True), None
+    equity = (closes / first).fill_null(1.0)
+    last = equity.last()
+    assert isinstance(last, float)  # the last row has a price, as the first does
+    return equity, last - 1.0
+
+
+def results(
+    done: Run,
+    benchmarks: list[BenchmarkIn],
+    *,
+    light: bool,
+    held: Mapping[str, pl.DataFrame] = {},
+) -> dict[str, Any]:
     """The ``results`` group: the statistics, each benchmark's return, the series and the
     trades, the long columns as NumPy arrays for ``dumps``. ``light`` is the view of the page
-    and the API (docs/engine.md, "The light view"); the download has every row and trade."""
-    ids = [benchmark.id for benchmark in benchmarks]
+    and the API (docs/engine.md, "The light view"); the download has every row and trade.
+
+    ``held`` has the candles of each benchmark that holds an index fund, by its ID
+    (``benchmark_equity``); the others are buy and hold of the run's own instrument."""
+    equities: dict[str, pl.Series] = {}
+    returns: dict[str, float | int | None] = {}
+    for benchmark in benchmarks:
+        prices = held.get(benchmark.id)
+        if prices is None:
+            close = done.rows["close"]
+            equities[benchmark.id] = close / close.first()
+            returns[benchmark.id] = done.stats["buy_and_hold_return"]
+        else:
+            equities[benchmark.id], returns[benchmark.id] = benchmark_equity(
+                done.rows["ts"], prices
+            )
     return {
         "stats": stats_out(done.stats),
-        "benchmarks": {
-            benchmark: {"total_return": done.stats["buy_and_hold_return"]} for benchmark in ids
-        },
-        "series": _series(done, ids, light=light),
+        "benchmarks": {benchmark: {"total_return": value} for benchmark, value in returns.items()},
+        "series": _series(done, equities, light=light),
         "trades": _trades(done, light=light),
     }
 
 
-def _series(done: Run, benchmarks: list[str], *, light: bool) -> dict[str, Any]:
+def _series(done: Run, benchmarks: Mapping[str, pl.Series], *, light: bool) -> dict[str, Any]:
     rows, series = done.rows, done.result.series
+    # A benchmark's ID may be the name of a column: its equity goes by another.
+    named = {f"benchmark:{benchmark}": equity for benchmark, equity in benchmarks.items()}
     frame = pl.DataFrame(
         {
             "ts": series["ts"],
@@ -166,7 +220,7 @@ def _series(done: Run, benchmarks: list[str], *, light: bool) -> dict[str, Any]:
             "position": series["position"],
             "equity": series["equity"],
             "drawdown": drawdown(series),
-            "benchmark": rows["close"] / rows["close"].first(),
+            **named,
         }
     )
     resolution = "candle"
@@ -176,7 +230,7 @@ def _series(done: Run, benchmarks: list[str], *, light: bool) -> dict[str, Any]:
         resolution = "day"
         frame = frame.group_by(pl.col("ts") // _DAY, maintain_order=True).agg(
             pl.col("ts").last().alias("last_ts"),
-            *(pl.col(name).last() for name in ("close", "position", "equity", "benchmark")),
+            *(pl.col(name).last() for name in ("close", "position", "equity", *named)),
             pl.col("drawdown").min(),
         )
         frame = frame.drop("ts").rename({"last_ts": "ts"})
@@ -187,7 +241,9 @@ def _series(done: Run, benchmarks: list[str], *, light: bool) -> dict[str, Any]:
         "resolution": resolution,
         "count": frame.height,
         "columns": {name: frame[name].to_numpy() for name in shown},
-        "benchmarks": {benchmark: frame["benchmark"].to_numpy() for benchmark in benchmarks},
+        "benchmarks": {
+            benchmark: frame[f"benchmark:{benchmark}"].to_numpy() for benchmark in benchmarks
+        },
     }
 
 

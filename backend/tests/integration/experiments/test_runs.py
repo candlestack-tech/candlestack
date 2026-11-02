@@ -35,6 +35,7 @@ DAY = 86_400
 START = 1_704_067_200 + 10 * DAY  # 2024-01-11, ten days after the fake market's first candle
 END = START + 5 * DAY
 BH = {"id": "bh", "kind": "buy_and_hold", "instrument": "stock:AAPL"}
+SPY = {"id": "spy", "kind": "buy_and_hold", "instrument": "stock:SPY"}
 KERAS = Path(__file__).parents[2] / "fixtures" / "keras"
 
 
@@ -229,6 +230,43 @@ def test_a_crypto_backtest_annualizes_over_every_day(ada, worker) -> None:
 
 
 @pytest.mark.usefixtures("worker")
+def test_a_stock_backtest_compares_with_an_index_fund(ada, market) -> None:
+    started = ada.start(body(ada.runnable_model(), benchmarks=[{**SPY, "instrument": "STOCK:spy"}]))
+    backtest_id = started.json()["backtest"]["id"]
+    document = ada.ended(backtest_id)
+    (listed,) = ada.backtests().json()["backtests"]
+
+    assert document["backtest"]["status"] == "finished", document["backtest"]["error"]
+    assert document["benchmarks"] == [SPY]  # as the catalog writes it
+    assert step(document, "candles")["candles"] == 24 + 240  # the backtest's own
+    results = document["results"]
+    spy = results["series"]["benchmarks"]["spy"]
+    assert len(spy) == results["series"]["count"] == 240
+    assert spy[0] == pytest.approx(1.0)
+    assert results["benchmarks"]["spy"]["total_return"] == pytest.approx(spy[-1] - 1)
+    # The statistics and the list keep buy and hold of the backtest's own instrument.
+    assert results["benchmarks"]["spy"]["total_return"] != pytest.approx(
+        results["stats"]["buy_and_hold_return"]
+    )
+    assert listed["buy_and_hold_return"] == results["stats"]["buy_and_hold_return"]
+    assert listed["setup"]["benchmark"] == "SPY"
+    # The run loads the fund's candles of the period in the background after its own, and
+    # the document loads both again.
+    own = ("stock:AAPL", (START - 24 * 1800, END))
+    fund = ("stock:SPY", (START, END))
+    assert list(zip(market.instruments, market.loads, market.background, strict=True)) == [
+        (*own, True),
+        (*fund, True),
+        (*own, False),
+        (*fund, False),
+    ]
+    # Its errors are the document's, as those of the backtest's own candles.
+    market.refuse_candles_of["SPY"] = SourceUnavailable("alpaca", "Alpaca is not answering.")
+    refused = ada.document(backtest_id)
+    assert (refused.status_code, refused.json()["type"]) == (503, PROBLEMS + "source-unavailable")
+
+
+@pytest.mark.usefixtures("worker")
 def test_the_document_says_when_the_candles_changed_since(ada, market) -> None:
     model_id = ada.runnable_model()
     backtest_id = ada.start(body(model_id)).json()["backtest"]["id"]
@@ -367,6 +405,37 @@ def test_candles_that_fail_their_checks_fail_the_backtest_with_their_detail(ada,
 
     assert document["backtest"]["status"] == "failed"
     assert document["backtest"]["error"] == "Alpaca bars cannot be read: bad"
+
+
+@pytest.mark.usefixtures("worker")
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (
+            SourceUnavailable("alpaca", "Alpaca failed with HTTP 503. Try again in a minute."),
+            (
+                "The candles of the benchmark SPY could not be loaded. The market data source "
+                "(Alpaca) is unavailable. Alpaca failed with HTTP 503. Try again in a minute."
+            ),
+        ),
+        (
+            DataIntegrityError("Alpaca bars cannot be read: bad", source="alpaca"),
+            "The candles of the benchmark SPY could not be loaded. Alpaca bars cannot be read: bad",
+        ),
+    ],
+)
+def test_candles_of_the_index_fund_that_fail_fail_the_backtest_naming_it(
+    ada, market, error: Exception, message: str
+) -> None:
+    market.refuse_candles_of["SPY"] = error
+
+    document = ada.ended(
+        ada.start(body(ada.runnable_model(), benchmarks=[SPY])).json()["backtest"]["id"]
+    )
+
+    assert document["backtest"]["status"] == "failed"
+    assert document["backtest"]["error"] == message
+    assert states(document) == ["failed", "pending", "pending", "pending"]
 
 
 @pytest.mark.usefixtures("market")
@@ -584,6 +653,12 @@ def period(start: int = START, end: int = END, instrument: str = "stock:AAPL") -
         ({"benchmarks": [{**BH, "instrument": "stock:MSFT"}]}, "validation", 422),
         ({"benchmarks": [BH, BH]}, "validation", 422),
         ({"benchmarks": [{**BH, "kind": "spy"}]}, "validation", 422),
+        ({"benchmarks": [{**SPY, "instrument": "stock:VOO"}]}, "validation", 422),
+        (
+            {"data": period(instrument="crypto:BTCUSDT"), "benchmarks": [SPY]},
+            "validation",
+            422,
+        ),
         ({"execution": {"stop_loss": 1.5}}, "validation", 422),
         (
             {"decision": {"rule": {"name": "hysteresis", "enter": 0.1, "exit": 0.2}}},
@@ -621,6 +696,19 @@ def test_the_period_must_fit_the_data(ada, market, error: Exception, slug: str) 
     response = ada.start(body(ada.runnable_model()))
 
     assert response.json()["type"] == PROBLEMS + slug
+    assert ada.backtests().json()["total"] == 0
+
+
+def test_the_period_must_fit_the_index_funds_data_too(ada, market) -> None:
+    market.refuse_of["SPY"] = PeriodOutOfRange("stock:SPY", "30m", START + DAY, END, start=START)
+
+    response = ada.start(body(ada.runnable_model(), benchmarks=[SPY]))
+
+    assert (response.status_code, response.json()["type"]) == (
+        422,
+        PROBLEMS + "period-out-of-range",
+    )
+    assert response.json()["detail"].startswith("stock:SPY has 30m candles from ")
     assert ada.backtests().json()["total"] == 0
 
 

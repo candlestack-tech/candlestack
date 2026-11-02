@@ -92,11 +92,13 @@ def _walk(ts: np.ndarray, scale: float) -> np.ndarray:
 class FakeMarket:
     """Stands in for the ``DataService`` of the backtests: stock:AAPL and crypto:BTCUSDT, a
     smooth walk of candles from ``FIRST`` on, each value a function of its ``ts`` (so every load
-    of a period gives the same candles). ``scale`` changes the prices, as a source that adjusted
-    them would; ``refuse`` makes the checks of a new backtest raise, ``refuse_candles`` the
-    loads. ``slow`` seconds pass in each check of a new backtest, and ``held`` has how many
-    connections of the app's pool (``pool``) were in use at each check and load. ``loads`` has
-    the period of each load, ``background`` whether it was a background load.
+    of a period gives the same candles), and the index funds' candles, another walk. ``scale``
+    changes the prices, as a source that adjusted them would; ``refuse`` makes the checks of a
+    new backtest raise, ``refuse_candles`` the loads, ``refuse_of`` and ``refuse_candles_of``
+    the same for the symbols they have. ``slow`` seconds pass in each check of a new backtest,
+    and ``held`` has how many connections of the app's pool (``pool``) were in use at each
+    check and load. ``loads`` has the period of each load, ``background`` whether it was a
+    background load and ``instruments`` what it loaded.
 
     With ``chunks``, a load reports its progress as the data module does (``data.watch_load``):
     that many chunks, the first half from the cache, then a wait of a minute for the source
@@ -106,8 +108,11 @@ class FakeMarket:
         self.scale = 1.0
         self.refuse: DataError | None = None
         self.refuse_candles: DataError | None = None
+        self.refuse_of: dict[str, DataError] = {}
+        self.refuse_candles_of: dict[str, DataError] = {}
         self.loads: list[tuple[int, int]] = []
         self.background: list[bool] = []
+        self.instruments: list[str] = []
         self.slow = 0.0
         self.pool: Any = None
         self.held: list[int] = []
@@ -142,7 +147,7 @@ class FakeMarket:
 
     async def warm_up_start(
         self,
-        _instrument_id: InstrumentId,
+        instrument_id: InstrumentId,
         timeframe: Timeframe,
         start: int,
         _end: int,
@@ -152,6 +157,8 @@ class FakeMarket:
         await anyio.sleep(self.slow)
         if self.refuse is not None:
             raise self.refuse
+        if instrument_id.symbol in self.refuse_of:
+            raise self.refuse_of[instrument_id.symbol]
         return start - candles * timeframe.seconds
 
     async def candles(
@@ -166,12 +173,17 @@ class FakeMarket:
         self._hold()
         if self.refuse_candles is not None:
             raise self.refuse_candles
+        if instrument_id.symbol in self.refuse_candles_of:
+            raise self.refuse_candles_of[instrument_id.symbol]
         self.loads.append((start, end))
         self.background.append(background)
+        self.instruments.append(str(instrument_id))
         await self._progress(start, end)
         step = timeframe.seconds
         ts = np.arange(-(-start // step) * step, end, step, dtype=np.int64)
-        close, opens = _walk(ts, self.scale), _walk(ts - step, self.scale)
+        # An index fund moves otherwise than the instruments.
+        shift = 0 if instrument_id.symbol in {"AAPL", "BTCUSDT"} else 100_000
+        close, opens = _walk(ts + shift, self.scale), _walk(ts + shift - step, self.scale)
         frame = pl.DataFrame(
             {
                 "ts": ts,
