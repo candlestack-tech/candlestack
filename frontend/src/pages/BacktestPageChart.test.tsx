@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, screen, within } from '@testing-library/react'
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ARSEN, backtestDocument, problem, sessionWithPreferences, stubApi } from '@/test/api';
+import { ARSEN, backtestDocument, problem, sessionWithPreferences, spyDocument, stubApi } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
 import { candles, times } from '@/test/candles';
 import { charts } from '@/test/lightweightCharts';
@@ -83,6 +83,15 @@ describe("a finished backtest's chart", () => {
     expect(card.getByText(/1 trade in view/)).toBeDefined();
     expect(card.getByRole('button', { name: /Buy and hold/ })).toBeDefined();
     expect(card.getByRole('button', { name: '1M' }).getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('names the line of an ETF benchmark by its symbol', async () => {
+    await openChart(spyDocument());
+    const [benchmark] = charts.of('Line').filter((series) => series.pane === 1);
+    expect(benchmark?.data.at(-1)).toEqual({ time: TIMES[4], value: expect.closeTo(1.3, 5) });
+    const card = box('Price and trades');
+    expect(card.getByRole('button', { name: 'SPY' })).toBeDefined();
+    expect(card.queryByRole('button', { name: /Buy and hold/ })).toBeNull();
   });
 
   it('leaves buy and hold out without a benchmark', async () => {

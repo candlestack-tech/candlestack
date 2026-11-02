@@ -4,6 +4,7 @@ import { DEFAULT_PREFERENCES, model, rawCandlesSummary } from '@/test/api';
 
 import {
   backtestOf,
+  benchmarksOf,
   decisionProblems,
   earliestStart,
   executionProblems,
@@ -12,6 +13,7 @@ import {
   periodProblem,
   quickPeriods,
   withCalibration,
+  withMarket,
   type ChosenInstrument,
 } from './form';
 
@@ -64,8 +66,17 @@ describe('the builder form', () => {
     });
   });
 
-  it('starts with buy and hold when the default benchmark cannot run yet', () => {
-    expect(formOf({ ...DEFAULTS, benchmark: 'SPY' }, undefined).benchmark).toBe('bh');
+  it('offers the ETFs as benchmarks of stock backtests only', () => {
+    expect(benchmarksOf('stock')).toEqual(['bh', 'SPY', 'QQQ', 'DIA']);
+    expect(benchmarksOf('crypto')).toEqual(['bh']);
+  });
+
+  it('keeps the default benchmark where the market has it, else falls back to buy and hold', () => {
+    const form = formOf({ ...DEFAULTS, benchmark: 'SPY' }, undefined);
+    expect(withMarket(form, 'stock').benchmark).toBe('SPY');
+    expect(withMarket(form, 'crypto').benchmark).toBe('bh');
+    // Until the model's market is known.
+    expect(withMarket(form, undefined).benchmark).toBe('SPY');
   });
 
   it('moves the threshold to the scale of a new calibration', () => {
@@ -181,6 +192,15 @@ describe('the request', () => {
       },
       benchmarks: [{ id: 'bh', kind: 'buy_and_hold', instrument: 'crypto:BTCUSDT' }],
     });
+  });
+
+  it('compares with buy and hold of an ETF by its stock ID', () => {
+    expect(backtestOf({ ...form, benchmark: 'SPY' }, STOCK_MODEL, AAPL, NOW).benchmarks).toEqual([
+      { id: 'spy', kind: 'buy_and_hold', instrument: 'stock:SPY' },
+    ]);
+    expect(backtestOf({ ...form, benchmark: 'DIA' }, STOCK_MODEL, AAPL, NOW).benchmarks).toEqual([
+      { id: 'dia', kind: 'buy_and_hold', instrument: 'stock:DIA' },
+    ]);
   });
 
   it('ends a period that ends today now', () => {

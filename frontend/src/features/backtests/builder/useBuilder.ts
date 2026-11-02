@@ -18,6 +18,7 @@ import {
   marketOf,
   periodProblem,
   secondsOf,
+  withMarket,
   type BuilderForm,
   type ChosenInstrument,
   type DateWriter,
@@ -39,18 +40,25 @@ function chosenModel(models: readonly Model[] | undefined, id: string | undefine
 
 // The choices, starting from the account's Backtest defaults, and what the API said about them;
 // any change clears that, as the user is fixing it. The model and the instrument fall back to the
-// first that fits: the first model that can run, the most traded instrument of its market.
+// first that fits: the first model that can run, the most traded instrument of its market. The
+// benchmark falls back to buy and hold where the market does not have it, and stays there.
 function useChoices(modelId: string | undefined) {
   const defaults = useSuspenseQuery(preferencesQueryOptions()).data.backtest_defaults;
-  const [form, setForm] = useState<BuilderForm>(() => formOf(defaults, modelId));
+  const [stored, setStored] = useState<BuilderForm>(() => formOf(defaults, modelId));
   const [problem, setProblem] = useState<BuilderProblem | null>(null);
-  const model = chosenModel(useModels().data?.models, form.modelId);
+  const models = useModels().data?.models;
+  const marketFor = (id: string | undefined) => {
+    const found = chosenModel(models, id);
+    return found && marketOf(found);
+  };
+  const model = chosenModel(models, stored.modelId);
   const market = model && marketOf(model);
+  const form = withMarket(stored, market);
   const list = useQuery({ ...pickerQuery('', market ?? 'stock'), enabled: market !== undefined });
   const instrument: ChosenInstrument | undefined =
     form.instrument?.market === market ? form.instrument : list.data?.items.find((item) => item.market === market);
   const replace = (next: BuilderForm) => {
-    setForm(next);
+    setStored(withMarket(next, marketFor(next.modelId)));
     setProblem(null);
   };
   const change = (part: Partial<BuilderForm>) => replace({ ...form, ...part });
