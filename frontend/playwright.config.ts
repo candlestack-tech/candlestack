@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// Smoke tests of the public pages in a real browser, against the local stack: the backend from
+// Smoke tests in a real browser, against the local stack: the public pages, then the instrument
+// list and an instrument's page signed in as the dev user. The backend comes from
 // `docker compose up` at the repository root, behind the dev server, which `npm run e2e` starts
 // pointed at it. See README.md, End-to-end tests.
 const APP = 'http://localhost:5173';
@@ -11,7 +12,6 @@ export default defineConfig({
   // The candles of a cold instrument come from Binance through the local backend.
   timeout: 60_000,
   expect: { timeout: 15_000 },
-  fullyParallel: true,
   // One worker: the tests share the backend's limit of 60 candle requests a minute.
   workers: 1,
   reporter: [['list'], ['html', { open: 'never' }]],
@@ -21,7 +21,7 @@ export default defineConfig({
     command: 'npm run dev -- --strictPort',
     url: APP,
     env: { API_TARGET: process.env.API_TARGET ?? 'http://localhost:8000' },
-    reuseExistingServer: true,
+    reuseExistingServer: !process.env.CI,
     timeout: 60_000,
   },
 });
