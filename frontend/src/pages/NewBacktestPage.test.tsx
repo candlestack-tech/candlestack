@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Instrument } from '@/api';
 import {
   ARSEN,
+  DEFAULT_PREFERENCES,
   model,
   modelsAnswer,
   problem,
@@ -71,6 +72,11 @@ const LISTS = {
   'GET /api/v1/data/instruments?limit=20&offset=0&q=eth&market=crypto': search([ETH]),
   'GET /api/v1/data/instruments?limit=20&offset=0&market=stock': search([AAPL]),
 };
+// A user whose default benchmark is SPY.
+const SPY_DEFAULT = sessionWithPreferences(ARSEN, {
+  ...DEFAULT_PREFERENCES,
+  backtest_defaults: { ...DEFAULT_PREFERENCES.backtest_defaults, benchmark: 'SPY' },
+});
 const RUN = 'POST /api/v1/backtests';
 const started = runningDocument();
 const STARTED = {
@@ -210,7 +216,7 @@ describe('the backtest builder', () => {
     expect(screen.getByRole('slider', { name: 'Position size' }).getAttribute('aria-valuetext')).toBe('100 %');
   });
 
-  it('offers buy and hold as the benchmark, the others as coming soon', async () => {
+  it('offers buy and hold as the benchmark of a crypto backtest, the ETFs for stocks only', async () => {
     const { user } = await openBuilder();
     await goTo(user, 'Execution');
     expect(screen.getByRole('switch', { name: 'Honest fill' }).getAttribute('aria-checked')).toBe('true');
@@ -219,10 +225,53 @@ describe('the backtest builder', () => {
     const options = await screen.findAllByRole('option');
     expect(options.map((option) => [option.textContent, option.getAttribute('aria-disabled')])).toEqual([
       ['B&HBuy and holdThe same instruments, bought and kept', null],
-      ['SPYSPDR S&P 500 ETFComing soon', 'true'],
-      ['QQQInvesco QQQComing soon', 'true'],
-      ['DIASPDR Dow Jones ETFComing soon', 'true'],
+      ['SPYSPDR S&P 500 ETFFor stocks only', 'true'],
+      ['QQQInvesco QQQFor stocks only', 'true'],
+      ['DIASPDR Dow Jones ETFFor stocks only', 'true'],
     ]);
+  });
+
+  it('starts a stock backtest with the default ETF, sums it up and sends it', async () => {
+    const { user, fetch, router } = await openBuilder(`/backtests/new?model=${STOCKS.id}`, SPY_DEFAULT);
+    await goTo(user, 'Execution');
+    await user.click(screen.getByRole('combobox', { name: 'Benchmark: SPDR S&P 500 ETF' }));
+    const options = await screen.findAllByRole('option');
+    expect(options.map((option) => option.getAttribute('aria-disabled'))).toEqual([null, null, null, null]);
+    await user.keyboard('{Escape}');
+    await goTo(user, 'Run');
+    expect(screen.getByText('Execution', { selector: 'dt' }).nextSibling?.textContent).toBe(
+      "Next candle's openfees 0.1 % · slippage 0.02 % · vs SPY",
+    );
+    await user.click(screen.getByRole('button', { name: 'Run backtest' }));
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe('/backtests/bt_n3w8a9c4k2'));
+    expect(sentBody(fetch, RUN)).toMatchObject({
+      data: { instrument: { id: 'stock:AAPL' } },
+      benchmarks: [{ id: 'spy', kind: 'buy_and_hold', instrument: 'stock:SPY' }],
+    });
+  });
+
+  it('falls back to buy and hold on a crypto model, and keeps it', async () => {
+    const { user } = await openBuilder('/backtests/new', SPY_DEFAULT);
+    // The first model is crypto: the default ETF cannot run.
+    await goTo(user, 'Execution');
+    expect(screen.getByRole('combobox', { name: 'Benchmark: Buy and hold' })).toBeDefined();
+
+    await user.click(screen.getByRole('button', { name: 'Model' }));
+    await user.click(modelRow('stocks-30m.keras'));
+    await goTo(user, 'Execution');
+    await user.click(screen.getByRole('combobox', { name: 'Benchmark: Buy and hold' }));
+    await user.click(await screen.findByRole('option', { name: 'Invesco QQQ' }));
+    expect(screen.getByRole('combobox', { name: 'Benchmark: Invesco QQQ' })).toBeDefined();
+
+    // Back to crypto, then stocks again: buy and hold stays.
+    await user.click(screen.getByRole('button', { name: 'Model' }));
+    await user.click(modelRow('btc-1h.keras'));
+    await goTo(user, 'Execution');
+    expect(screen.getByRole('combobox', { name: 'Benchmark: Buy and hold' })).toBeDefined();
+    await user.click(screen.getByRole('button', { name: 'Model' }));
+    await user.click(modelRow('stocks-30m.keras'));
+    await goTo(user, 'Execution');
+    expect(screen.getByRole('combobox', { name: 'Benchmark: Buy and hold' })).toBeDefined();
   });
 
   it('sums the steps up with Edit, runs the backtest and opens its page', async () => {

@@ -11,6 +11,7 @@ import {
   problem,
   runningDocument,
   sessionWithPreferences,
+  spyDocument,
   stubApi,
 } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
@@ -164,6 +165,27 @@ describe("a finished backtest's page", () => {
     ]);
     expect(box('All metrics').getAllByRole('term')).toHaveLength(12);
     expect(box('All metrics').getByText('Time in market').nextElementSibling?.textContent).toBe('20.0 %');
+  });
+
+  it('names an ETF benchmark by its symbol in the setup and adds its return after buy and hold', async () => {
+    await openPage({ status: 200, body: spyDocument() });
+    await screen.findByRole('heading', { level: 1 });
+    const strip = screen.getAllByRole('term').slice(0, 6);
+    expect(strip.map((term) => term.textContent)).toEqual([
+      'Return',
+      'Buy and hold',
+      'Sharpe',
+      'Max drawdown',
+      'Trades',
+      'Win rate',
+    ]);
+    const metrics = box('All metrics').getAllByRole('term');
+    expect(metrics.slice(-2).map((term) => `${term.textContent} ${term.nextElementSibling?.textContent}`)).toEqual([
+      'Buy and hold −2.0 %',
+      'SPY +1.3 %',
+    ]);
+    expect(metrics.at(-1)?.nextElementSibling?.className).toContain('text-up');
+    expect(box('Setup').getByText('Benchmark').nextElementSibling?.textContent).toBe('SPY');
   });
 
   it('lists the trades with the setup and the manifest it ran with', async () => {
