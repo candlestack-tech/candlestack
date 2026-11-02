@@ -169,11 +169,18 @@ function LineToggle({ label, swatch, tone, line }: { label: string; swatch: stri
   );
 }
 
-type ReturnsProps = { top: number; strategy: Line; benchmark: Line | null; drawdown: number | undefined };
+type ReturnsProps = {
+  top: number;
+  strategy: Line;
+  benchmark: Line | null;
+  // "Buy and hold", or the ETF's symbol.
+  benchmarkName: string;
+  drawdown: number | undefined;
+};
 
-// Under the price: the strategy's return and buy and hold's at the candle, each a button that
+// Under the price: the strategy's return and the benchmark's at the candle, each a button that
 // hides its line, then the drawdown.
-export function ReturnsLegend({ top, strategy, benchmark, drawdown }: ReturnsProps) {
+export function ReturnsLegend({ top, strategy, benchmark, benchmarkName, drawdown }: ReturnsProps) {
   return (
     <div
       style={{ top }}
@@ -182,7 +189,7 @@ export function ReturnsLegend({ top, strategy, benchmark, drawdown }: ReturnsPro
       <LineToggle label="Strategy" swatch="h-0.5 rounded-xs bg-primary" tone="text-primary" line={strategy} />
       {benchmark && (
         <LineToggle
-          label="Buy and hold"
+          label={benchmarkName}
           swatch="h-0 border-t-2 border-dashed border-muted-foreground"
           tone={MUTED}
           line={benchmark}

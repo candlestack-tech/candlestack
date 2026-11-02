@@ -1,8 +1,9 @@
+import type { Market } from '@/api';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
 import { BenchmarkSelect, UnitInput } from '@/features/settings';
 
-import { BENCHMARKS_AVAILABLE, type BuilderForm, type ExecutionField } from './form';
+import { benchmarksOf, type BuilderForm, type ExecutionField } from './form';
 import { fillLine } from './format';
 import { BuilderRow, StepError } from './parts';
 
@@ -11,6 +12,7 @@ const NARROW = 'w-[180px]';
 
 type Props = {
   form: BuilderForm;
+  market: Market;
   invalid: ReadonlySet<ExecutionField>;
   problem: string | undefined;
   onChange: (change: Partial<BuilderForm>) => void;
@@ -68,7 +70,7 @@ function FillInfo() {
 }
 
 // The fees and the slippage, in percent as in Settings.
-function CostRows({ form, invalid, onChange }: Omit<Props, 'problem'>) {
+function CostRows({ form, invalid, onChange }: Omit<Props, 'market' | 'problem'>) {
   return (
     <>
       <BuilderRow label="Fees">
@@ -95,8 +97,8 @@ function CostRows({ form, invalid, onChange }: Omit<Props, 'problem'>) {
   );
 }
 
-// Step 4 (stepExecution): the fill, fees, slippage and the benchmark.
-export function ExecutionStep({ form, invalid, problem, onChange }: Props) {
+// Step 4 (stepExecution): the fill, fees, slippage and the benchmark, from those of the market.
+export function ExecutionStep({ form, market, invalid, problem, onChange }: Props) {
   return (
     <>
       <BuilderRow label="Honest fill">
@@ -112,7 +114,7 @@ export function ExecutionStep({ form, invalid, problem, onChange }: Props) {
       <BuilderRow label="Benchmark">
         <BenchmarkSelect
           value={form.benchmark}
-          available={BENCHMARKS_AVAILABLE}
+          available={benchmarksOf(market)}
           onChange={(benchmark) => onChange({ benchmark })}
         />
       </BuilderRow>

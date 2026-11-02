@@ -51,9 +51,22 @@ export type BuilderForm = {
   benchmark: Benchmark;
 };
 
-// The benchmarks a backtest can have so far: buy and hold of its own instrument.
-export const BENCHMARKS_AVAILABLE: readonly Benchmark[] = ['bh'];
+// The benchmarks a backtest of each market can have: buy and hold of its own instrument, and for
+// stocks the ETFs too (the API takes them for stock backtests only).
+const MARKET_BENCHMARKS: Record<Market, readonly Benchmark[]> = {
+  stock: ['bh', 'SPY', 'QQQ', 'DIA'],
+  crypto: ['bh'],
+};
 
+export const benchmarksOf = (market: Market) => MARKET_BENCHMARKS[market];
+
+// The form with a benchmark its market has: the one chosen, else buy and hold. Unchanged while
+// the market is not known yet.
+export function withMarket(form: BuilderForm, market: Market | undefined): BuilderForm {
+  return market === undefined || benchmarksOf(market).includes(form.benchmark) ? form : { ...form, benchmark: 'bh' };
+}
+
+// The benchmark starts as the default; withMarket keeps it only where the market has it.
 export function formOf(defaults: BacktestDefaults, modelId: string | undefined): BuilderForm {
   return {
     modelId,
@@ -78,7 +91,7 @@ export function formOf(defaults: BacktestDefaults, modelId: string | undefined):
     honestFill: true,
     fees: String(defaults.fees_pct),
     slippage: String(defaults.slippage_pct),
-    benchmark: BENCHMARKS_AVAILABLE.includes(defaults.benchmark) ? defaults.benchmark : 'bh',
+    benchmark: defaults.benchmark,
   };
 }
 
@@ -270,6 +283,16 @@ export function backtestOf(form: BuilderForm, model: Model, instrument: ChosenIn
       fee_bps: bps(percent(form.fees) ?? 0),
       slippage_bps: bps(percent(form.slippage) ?? 0),
     },
-    benchmarks: form.benchmark === 'bh' ? [{ id: 'bh', kind: 'buy_and_hold', instrument: instrument.id }] : [],
+    benchmarks: [benchmarkOf(form.benchmark, instrument)],
   };
+}
+
+// Buy and hold of the instrument itself, or of an ETF, its ID the symbol in lower case.
+function benchmarkOf(
+  benchmark: Benchmark,
+  instrument: ChosenInstrument,
+): NonNullable<BacktestIn['benchmarks']>[number] {
+  return benchmark === 'bh'
+    ? { id: 'bh', kind: 'buy_and_hold', instrument: instrument.id }
+    : { id: benchmark.toLowerCase(), kind: 'buy_and_hold', instrument: `stock:${benchmark}` };
 }

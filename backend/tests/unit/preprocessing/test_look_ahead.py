@@ -32,6 +32,7 @@ STEP = 1800
 # The parameters the blocks run with here. A block whose parameters have no defaults needs an
 # entry, or its test fails.
 PARAMS: dict[str, list[dict[str, Any]]] = {
+    "kagi@1": [{}, {"reversal": "percent", "amount": 1.0}],
     "window@1": [
         {"length": 1},
         {"length": 5},

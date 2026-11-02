@@ -44,5 +44,6 @@ describe('how the builder writes its choices', () => {
   it('writes the period and the costs', () => {
     expect(periodLine(form, (day) => day.slice(0, 4))).toBe('2021 – 2024');
     expect(costsLine(form)).toBe('fees 0.1 % · slippage 0.02 % · vs buy and hold');
+    expect(costsLine({ ...form, benchmark: 'QQQ' })).toBe('fees 0.1 % · slippage 0.02 % · vs QQQ');
   });
 });

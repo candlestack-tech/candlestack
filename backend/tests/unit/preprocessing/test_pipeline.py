@@ -152,11 +152,11 @@ def test_candles_without_session_marks_cannot_give_the_last_candle(raw: dict[str
 
 
 def test_a_manifest_that_cannot_run_is_refused(raw: dict[str, Any]) -> None:
-    raw["input"]["representation"]["id"] = "kagi@1"
+    raw["input"]["representation"]["id"] = "heikin-ashi@1"
 
     with pytest.raises(
         ValueError,
-        match=r"^The manifest cannot run: The catalog has no block kagi@1 yet",
+        match=r"^The manifest cannot run: The catalog has no block heikin-ashi@1 yet",
     ):
         build_input(candles(30), parse_manifest(raw))
 
@@ -435,6 +435,82 @@ def test_the_current_window_of_triples_ends_at_each_candle() -> None:
         earlier = [row for row in finished if row < index][-2:]
         expected = rows["close"].gather([*earlier, index]).cast(pl.Float32).to_list()
         assert sample[:, 0].tolist() == expected
+
+
+# A Kagi line's own columns and a feature of the candles, taken at each row's candle.
+KAGI_FEATURES = [
+    ("direction", "kagi-direction@1"),
+    ("length", "kagi-length@1"),
+    ("yang", "kagi-yang@1"),
+    ("close", "close@1"),
+]
+
+
+def kagi(params: dict[str, Any], length: int = 25) -> Manifest:
+    return parse_manifest(
+        {
+            "version": 1,
+            "input": {
+                "timeframe": "30m",
+                "session": "regular",
+                "representation": {"id": "kagi@1", "params": params},
+                "features": [{"name": name, "id": block} for name, block in KAGI_FEATURES],
+                "window": {"length": length, "last": "current"},
+            },
+            "signature": {
+                "input": {"shape": [length, len(KAGI_FEATURES)], "dtype": "float32"},
+                "output": {"shape": [1], "dtype": "float32", "meaning": "score"},
+            },
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("params", "candles"),
+    [
+        # ATR(14) out of its warm-up at 209, the first segment in 13, 24 more of 13 each.
+        ({"reversal": "atr", "amount": 1.0}, 209 + 13 + 24 * 13),
+        # A percent counts as two ATRs: segments of 32 candles from the first candle.
+        ({"reversal": "percent", "amount": 1.0}, 32 + 24 * 32),
+    ],
+)
+def test_a_kagi_line_is_25_rows_of_segments(params: dict[str, Any], candles: int) -> None:
+    frame = walk(2000)
+    manifest = kagi(params)
+
+    built = build_input(frame, manifest)
+
+    line = CATALOG["kagi@1"].run(frame, CATALOG["kagi@1"].params.model_validate(params))
+    at_candle = line.join(frame.select("ts", "close"), on="ts", how="left")
+    assert built.samples.shape[1:] == (25, 4)
+    assert len(built.samples) > 0
+    assert np.isfinite(built.samples).all()
+    assert built.rows.columns == ["ts", "row_id", "direction", "length", "yang", "close"]
+    assert built.rows["row_id"].equals(line["row_id"])
+    assert built.rows["direction"].equals(line["direction"])
+    assert built.rows["length"].equals(line["to"] / line["from"] - 1, check_names=False)
+    assert built.rows["yang"].equals(line["yang"])
+    assert built.rows["close"].equals(at_candle["close"])
+    assert warm_up(manifest) == WarmUp(candles=candles, kind="estimate")
+    # The estimate is long enough: the first sample comes before it.
+    assert built.dropped <= warm_up(manifest).candles
+
+
+def test_the_current_window_of_a_kagi_line_ends_at_each_candle() -> None:
+    frame = walk(800)
+
+    built = build_input(frame, kagi({}, 3))
+
+    rows = built.rows.with_row_index()
+    finished = rows.filter(pl.col("row_id") != pl.col("row_id").shift(-1))["index"].to_list()
+    # Each sample is the two finished segments before its candle, then the segment as it
+    # stands at its candle.
+    for sample, ts in zip(built.samples, built.ts, strict=True):
+        index = int(rows.filter(pl.col("ts") == ts)["index"][0])
+        earlier = [row for row in finished if row < index][-2:]
+        expected = rows["length"].gather([*earlier, index]).cast(pl.Float32).to_list()
+        assert sample[:, 1].tolist() == expected
+    assert built.ts.to_list() == rows["ts"].slice(rows.height - len(built.samples)).to_list()
 
 
 class Lag(BaseModel):

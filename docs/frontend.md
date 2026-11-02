@@ -400,8 +400,10 @@ adds `?model=<id>`.
   where it leaves, k-means with its groups, window and refit), confirm and minimum hold in candles
   and the drawdown stop. The windows are checked against the API's limits as they are typed.
 - Execution: honest fill (the next candle's open, on by default, with what it means behind the
-  i), fees and slippage in percent, and the benchmark: buy and hold of the instrument, the index
-  funds of Settings shown as coming soon (`BacktestIn` takes buy and hold only).
+  i), fees and slippage in percent, and the benchmark: buy and hold of the instrument, or for a
+  stock backtest of SPY, QQQ or DIA (crypto shows them as "For stocks only"). It starts as the
+  default of Settings where the market has it, else buy and hold, and falls back to buy and hold
+  when the model changes to a market without it.
 - Run: the four steps in a line each with Edit (the instrument with its icon and name), a warning when filling at the signal's close, and
   Run backtest, which sends the setup groups (`POST /api/v1/backtests`, `BacktestIn`: the days
   as `[first day, the day after the last)` in UTC, ending now at the latest, percent as basis
@@ -476,6 +478,9 @@ so its back link returns there (else "← Backtests").
   candles), the decision (calibration and smoothing, the rule's settings, confirm and minimum
   hold when on, the positions) and the execution (the fill, the stops, fees, slippage and the
   benchmark), then how long the run took.
+- A benchmark of the backtest's own instrument is "Buy and hold", an ETF its symbol ("SPY"), in
+  the setup and in the returns' legend. All metrics then adds the ETF's return after Buy and hold,
+  which stays buy and hold of the instrument.
 - Limits: the returns are daily for runs of more than 10 000 rows (the light view), and the
   candles carry the data API's adjustment of today (`adjustment=all`), so a stock's prices can
   differ from those the run traded at after a later split or dividend.

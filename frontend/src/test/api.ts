@@ -411,6 +411,17 @@ export const backtestDocument = (fields: Partial<BacktestDocument> = {}): Backte
   ...fields,
 });
 
+// The same backtest compared with SPY: buy and hold of AAPL stays in the stats.
+export const spyDocument = (): BacktestDocument =>
+  backtestDocument({
+    benchmarks: [{ id: 'spy', kind: 'buy_and_hold', instrument: 'stock:SPY' }],
+    results: {
+      ...EXAMPLE_RESULTS,
+      benchmarks: { spy: { total_return: 0.013 } },
+      series: { ...EXAMPLE_RESULTS.series, benchmarks: { spy: [1, 1.002, 1.005, 1.01, 1.013] } },
+    },
+  });
+
 // The same document while it runs: the setup only, the candles loading (or the steps given).
 export const runningDocument = (
   steps: BacktestStep[] = [

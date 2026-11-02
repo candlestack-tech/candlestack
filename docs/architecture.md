@@ -86,7 +86,7 @@ flowchart LR
 | `POST /api/v1/models?name=<file name>` | uploads a model: the body is the file (`application/octet-stream`); checked before it is kept ([Models](#models)); a name the user has already gets a number (`lstm (2).keras`); one upload at a time per user, 100 models at most |
 | `PATCH /api/v1/models/{model_id}` | renames a model (the extension stays; `409 model-name-taken`) or stars and unstars it |
 | `DELETE /api/v1/models/{model_id}` | deletes a model and its file |
-| `GET /api/v1/preprocessing/catalog` | the blocks a model's manifest can name, by step: id, description, the display group of a feature (`Candle`, `Bands`, `Momentum`, `Trend`, `Volume`, `Brick`), warm-up and parameters (type, range, default, `tunable`); public, served by `ml` ([preprocessing.md](preprocessing.md#the-blocks)) |
+| `GET /api/v1/preprocessing/catalog` | the blocks a model's manifest can name, by step: id, description, the display group of a feature (`Candle`, `Bands`, `Momentum`, `Trend`, `Volume`, `Brick`, `Line`), warm-up and parameters (type, range, default, `tunable`); public, served by `ml` ([preprocessing.md](preprocessing.md#the-blocks)) |
 | `POST /api/v1/backtests` | starts a backtest of one of the user's models: the body is the setup groups of the result document (`model`, `data`, `decision`, `execution`, `benchmarks`); checked first, then stored `running` and run after the response; 201 with its result document ([Backtests](#backtests)) |
 | `GET /api/v1/backtests/{backtest_id}` | the backtest's result document in the light view, whatever its status ([engine.md](engine.md#the-result-document)) |
 | `GET /api/v1/backtests/{backtest_id}/download` | the result document of a finished backtest with every row and trade, as an attachment |
@@ -125,9 +125,10 @@ flowchart LR
   `backtest-not-finished` (409: a download of a running or failed backtest) and `no-document`
   (409: a test backtest of the seed command has no result document); it uses `not-found`
   (404: no backtest or model of the user with the ID), `validation` (422, also a benchmark of
-  another instrument), and the data module's `warm-up-out-of-range`, `period-out-of-range`,
-  `too-many-candles`, `instrument-not-found`, `source-unavailable` and `source-data-invalid`
-  for the instrument and the period.
+  another instrument, or of SPY, QQQ or DIA on a crypto backtest), and the data module's
+  `warm-up-out-of-range`, `period-out-of-range`, `too-many-candles`, `instrument-not-found`,
+  `source-unavailable` and `source-data-invalid` for the instrument and the period (and the
+  fund a benchmark holds).
 - Every response carries `X-Request-ID` and `Server-Timing: app;dur=<ms>` (the app's time
   until the response started), so response times can be measured from outside.
 - Logs: one JSON object per line on stdout (`ts`, `level`, `logger`, `msg`); the access line
@@ -568,8 +569,8 @@ checked at the next start.
   tighter later never fails the list. A backtest run in the app stores in `setup` a summary of
   its setup in those fields (the model's timeframe, the period's first and last UTC day, long
   only or both, the rule's limit or 0 for k-means, the stop loss in whole percent or 0 without
-  one, fees and slippage in percent, buy and hold); its result document has the setup as it
-  is.
+  one, fees and slippage in percent, `SPY`, `QQQ` or `DIA` for a benchmark that holds that
+  fund, else buy and hold); its result document has the setup as it is.
 - **The Dashboard** (`GET /api/v1/dashboard`) is one response: the counts, the 6 newest
   backtests (failed ones too), the 5 best finished ones by Sharpe ratio, return, drawdown
   (the smallest fall first) and win rate, and the 4 starred ones with the best Sharpe ratio
@@ -581,7 +582,8 @@ checked at the next start.
   seconds; the timeframe and session are the model's), `decision` (the post-processing steps
   as `run.json` records them, threshold 0 by default, windows bounded as
   [engine.md](engine.md#the-shape) says), `execution` (the engine's `Settings`)
-  and `benchmarks` (none, or buy and hold of the instrument). Checked before anything is
+  and `benchmarks` (none, or buy and hold of the instrument, or of SPY, QQQ or DIA for a
+  stock, [engine.md](engine.md#benchmarks-of-a-backtest)). Checked before anything is
   stored, each a problem ([HTTP surface](#http-surface)): the model is the user's and has a
   manifest (`ready` or `verified`), its timeframe is one the list can show (5m, 30m, 1h, 1d),
   its session fits the instrument's market (`regular` for stocks, `24/7` for crypto), the user
@@ -589,14 +591,17 @@ checked at the next start.
   queue answers a ping (an environment without the worker: `503 backtests-unavailable` at
   once, never a wait), and the period with the manifest's warm-up before it fits the data
   (`DataService.warm_up_start`: the period as the candles endpoint checks it, the warm-up's
-  candles before `start`, and all of them against `CANDLES_MAX`). The model is held under
-  that lock until the backtest is stored, so one deleted meanwhile is `404 not-found`. The
+  candles before `start`, and all of them against `CANDLES_MAX`), as does the period without
+  a warm-up for the fund a benchmark holds. The model is held under that lock until the
+  backtest is stored, so one deleted meanwhile is `404 not-found`. The
   reads end before the queue and the data module are asked, so no connection waits on them.
   The answer is the result document of the new backtest, `running`, with `Location`.
 - **The run** (`experiments/runner.py`, `BacktestRunner` on `app.state.backtest_runner`) is a
   task of the API process, so it outlives the request: the candles with the warm-up from the
-  data module, a `predict` job through `JobClient` (the model's file, its SHA-256 and the copy
-  of its manifest; the candles go through the jobs' volume), the predictions of the period
+  data module (and the period's candles of the fund a benchmark holds, which only the document
+  uses: loaded once, so a fund that cannot be loaded fails the run), a `predict` job through
+  `JobClient` (the model's file, its SHA-256 and the copy of its manifest; the candles go
+  through the jobs' volume), the predictions of the period
   stored, `align` (not strict: a candle without a new prediction repeats the last one, as rows
   of Renko or Kagi need), the decision's steps, `engine.backtest`, `metrics.stats` with 252
   periods a year for stocks and 365 for crypto, and the result stored with its summary
@@ -609,8 +614,9 @@ checked at the next start.
   runs it stops fail the same way.
 - **The steps of a run** (`experiments/steps.py`, `backtest.steps` of the result document,
   which the backtest's page asks for every 2 seconds while it runs) are four, in this order:
-  `candles` (`DataService.candles` of the period with the warm-up), `queue` (from handing the
-  job to the worker, its candles written to the jobs' volume, until a worker takes it), `model`
+  `candles` (`DataService.candles` of the period with the warm-up, then of the fund a
+  benchmark holds), `queue` (from handing the job to the worker, its candles written to the
+  jobs' volume, until a worker takes it), `model`
   (the worker's job: it loads the model, builds its input and predicts, until the backend has
   the predictions) and `trades` (the engine, the statistics and storing the result). Each has
   a `state` (`pending`, `running`, `done` or `failed`), `started_at` and `duration_s` (once
@@ -651,7 +657,7 @@ A module is a subpackage of `candlestack` under `backend/src/candlestack/`.
 | `core` | now | settings, logging, problem errors, Redis, Postgres and HTTP clients, CSRF protection, health endpoint |
 | `data` | now | instrument catalog, candles, sessions, cache, source adapters, rate limits |
 | `accounts` | now | users, GitHub and Google sign-in, sessions, the beta list, Settings (name, sign-in methods, preferences, deleting the account); `CurrentUserDep` for the routes of the signed-in user, `AccountDeletionHook` for what other modules delete with an account |
-| `preprocessing` | started | the model's input from its manifest: the manifest's schema and checks, the catalog of blocks, and the input built from candles: representation (candles and Renko triples now; Kagi later), features, normalization, windows ([preprocessing.md](preprocessing.md)) |
+| `preprocessing` | started | the model's input from its manifest: the manifest's schema and checks, the catalog of blocks, and the input built from candles: representation (candles, Renko triples and a Kagi line), features, normalization, windows ([preprocessing.md](preprocessing.md)) |
 | `ml` | now | the models users upload: the upload and its static check, the file storage, the list, rename, star, delete, the manifest; the worker runs them and checks them with their manifests ([Worker](#worker)) |
 | `signals` | started | turn predictions into signals: align them with the candles, thresholds, long only; later smoothing, holding period, sizing, risk limits |
 | `engine` | started | the backtest loop: candles and signals in, trades and an equity series out; `ENGINE_VERSION` names its rules ([engine.md](engine.md)) |

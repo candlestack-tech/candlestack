@@ -39,6 +39,8 @@ INDICATORS = {
     "macd-diff@1": "Trend",
     "macd-diff@2": "Trend",
 }
+# The columns of a Kagi line's rows.
+KAGI_FEATURES = ["kagi-direction@1", "kagi-length@1", "kagi-yang@1"]
 
 
 def test_the_blocks_are_registered() -> None:
@@ -46,6 +48,7 @@ def test_the_blocks_are_registered() -> None:
         "candles@1": "representation",
         "renko-triples@1": "representation",
         "renko-triples@2": "representation",
+        "kagi@1": "representation",
         "open@1": "feature",
         "high@1": "feature",
         "low@1": "feature",
@@ -55,6 +58,7 @@ def test_the_blocks_are_registered() -> None:
         "session-last-candle@1": "feature",
         **dict.fromkeys(INDICATORS, "feature"),
         "renko-direction@1": "feature",
+        **dict.fromkeys(KAGI_FEATURES, "feature"),
         "none@1": "normalization",
         "blesk-norm@1": "normalization",
         "window@1": "window",
@@ -85,6 +89,7 @@ def test_the_catalog_lists_the_blocks_by_step() -> None:
         "candles@1",
         "renko-triples@1",
         "renko-triples@2",
+        "kagi@1",
         "open@1",
         "high@1",
         "low@1",
@@ -94,6 +99,7 @@ def test_the_catalog_lists_the_blocks_by_step() -> None:
         "session-last-candle@1",
         *INDICATORS,
         "renko-direction@1",
+        *KAGI_FEATURES,
         "none@1",
         "blesk-norm@1",
         "window@1",
@@ -121,6 +127,7 @@ def test_the_features_are_in_their_display_groups() -> None:
         **dict.fromkeys([*RELATIVE, "session-last-candle@1"], "Candle"),
         **INDICATORS,
         "renko-direction@1": "Brick",
+        **dict.fromkeys(KAGI_FEATURES, "Line"),
     }
 
 
@@ -167,6 +174,13 @@ def test_the_catalog_describes_an_indicator_with_its_defaults_and_warm_up() -> N
             "renko-triples@2",
             "max(first_brick, atr_window) + ceil(2 * (1 + 2 * atr_multiple))",
         ),
+        (
+            "kagi@1",
+            (
+                "15 * atr_window - 1 + ceil(4 + 4 * amount + 5 * amount ** 2) if reversal == "
+                "'atr' else ceil(4 + 8 * amount + 20 * amount ** 2)"
+            ),
+        ),
     ],
 )
 def test_the_warm_up_rule_says_what_the_warm_up_counts(block: str, rule: str) -> None:
@@ -182,12 +196,14 @@ def test_only_a_representation_may_span_several_candles_a_row() -> None:
     assert [block.id for block in CATALOG.values() if block.candles_per_row] == [
         "renko-triples@1",
         "renko-triples@2",
+        "kagi@1",
     ]
 
 
-def test_only_the_direction_of_a_triple_is_a_feature_of_the_rows() -> None:
+def test_only_the_direction_of_a_triple_and_the_kagi_columns_are_features_of_the_rows() -> None:
     assert {block.id: block.of_rows for block in CATALOG.values() if block.of_rows} == {
-        "renko-direction@1": ("renko-triples@1", "renko-triples@2")
+        "renko-direction@1": ("renko-triples@1", "renko-triples@2"),
+        **dict.fromkeys(KAGI_FEATURES, ("kagi@1",)),
     }
 
 
@@ -214,6 +230,23 @@ def test_the_catalog_describes_renko_triples_2_with_the_candle_of_their_first_br
         ("first_brick", "integer", 49, None),
     ]
     assert (triples.params[3].minimum, triples.params[3].maximum) == (0, 1000)
+
+
+def test_the_catalog_describes_the_kagi_line_with_its_parameters() -> None:
+    line = next(block for block in describe_catalog().blocks if block.id == "kagi@1")
+
+    assert (line.step, line.group) == ("representation", None)
+    assert line.description == (
+        "A Kagi line on the close that reverses after amount ATRs (or percent): one row per "
+        "candle, the current segment"
+    )
+    assert [(p.name, p.type, p.default, p.options) for p in line.params] == [
+        ("reversal", "string", "atr", ["atr", "percent"]),
+        ("amount", "number", 1.0, None),
+        ("atr_window", "integer", 14, None),
+    ]
+    assert (line.params[1].exclusive_minimum, line.params[1].maximum) == (0, 10)
+    assert all(param.description for param in line.params)
 
 
 def test_the_catalog_describes_the_window_and_its_parameters() -> None:

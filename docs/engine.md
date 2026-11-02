@@ -804,8 +804,8 @@ backtest stores only what cannot be recomputed quickly:
 | the fingerprint and range of the loaded candles | under 1 KB | tells whether the candles changed since |
 
 The series, the trades and the document itself are built when they are asked for: the candles
-from the cache, the stored predictions, then `signals`, `backtest` and `metrics`, well under a
-second. A source can re-adjust old prices (after a split or a dividend); then the candles'
+from the cache (and those of the index fund a benchmark holds), the stored predictions, then
+`signals`, `backtest` and `metrics`, well under a second. A source can re-adjust old prices (after a split or a dividend); then the candles'
 fingerprint differs, the document says so (`data.changed` is true) and is built from the
 candles as they are now, so its `results.stats` can differ from the stored ones.
 
@@ -913,11 +913,11 @@ compares it with what is printed here; change both together.
 | `data` | the instrument, timeframe and session; `period`: the user's dates; `loaded`: the candles asked for, warm-up included, with their fingerprint; `changed`; `warm_up` as the preprocessing reports it; `rows`: what the engine ran on; the predictions' count and SHA-256; the `AlignReport` | the data module, the preprocessing, `align` |
 | `decision` | each post-processing step in the order applied, null when off: exactly what `run.json` records | the steps ([Signals](#signals)) |
 | `execution` | the engine's `Settings` | [Settings](#settings) |
-| `benchmarks` | what the run is compared with: an ID, a kind and an instrument. Version 1 has buy and hold only | the builder |
+| `benchmarks` | what the run is compared with, at most one: an ID, a kind and an instrument. Version 1 has buy and hold of the backtest's instrument, or of SPY, QQQ or DIA for a stock backtest ([Benchmarks](#benchmarks-of-a-backtest)) | the builder |
 | `metrics` | the arguments `stats` was called with | [Metrics](#metrics) |
 | `results.stats` | the 12 metrics of [Metrics](#metrics), in their order | `stats`, with `max_drawdown` negative |
-| `results.benchmarks` | each benchmark's `total_return` | `buy_and_hold_return` for `bh` |
-| `results.series` | `ts`, `close`, `prediction`, `signal`, `position`, `equity`, `drawdown` per row; each benchmark's equity on the same rows | the engine's `series`, the candles, `drawdown` |
+| `results.benchmarks` | each benchmark's `total_return` | `buy_and_hold_return` for buy and hold of the backtest's instrument; for a fund, its equity's last value less 1 |
+| `results.series` | `ts`, `close`, `prediction`, `signal`, `position`, `equity`, `drawdown` per row; each benchmark's equity on the same rows | the engine's `series`, the candles (the fund's for its benchmark), `drawdown` |
 | `results.trades` | the engine's trade columns, plus `candles_held`: the rows from the entry candle to the exit candle | the engine's `trades` |
 
 Until a backtest finished, its document has the setup only: `results` is null, and so are
@@ -926,6 +926,28 @@ Until a backtest finished, its document has the setup only: `results` is null, a
 results are built on request, `software.engine_version`, `data.rows` and `data.align` are those
 of the build; `data.loaded` and `data.predictions` are what the run stored, and the Backtests
 list keeps the statistics and the engine version of the run itself.
+
+### Benchmarks of a backtest
+
+A backtest has at most one benchmark, of the kind `buy_and_hold`: of its own instrument
+(`instrument` is the backtest's, the ID usually `bh`), or for a stock backtest of an index fund,
+`stock:SPY`, `stock:QQQ` or `stock:DIA` (the app sends the ID `spy`, `qqq` or `dia`). The
+instrument is stored as the catalog writes it, in any case it was sent. A fund on a crypto
+backtest, or any other instrument, is a `422 validation`, and a period the fund has no candles
+for is refused as the backtest's own period is.
+
+- **Its own instrument**: the equity is each row's close over the first row's, and its
+  `total_return` is `stats.buy_and_hold_return`.
+- **A fund**: its candles of the period, of the backtest's timeframe and session, are joined to
+  the rows as of each row's `ts` (the fund's last close at or before it, so a candle the fund
+  lacks repeats the one before), over the first such close. Rows before the fund's first price
+  are 1.0. `total_return` is the last value less 1, null when the fund has no price by the
+  last row (the equity is then 1.0 throughout). The run loads the fund's candles once in its
+  `candles` step, in the background (a fund that cannot be loaded fails it), and each build of
+  the document loads them again.
+
+`stats.buy_and_hold_return`, the Backtests list's buy and hold and the short equity series stay
+buy and hold of the backtest's own instrument, whatever the benchmark.
 
 ### Conventions
 
@@ -979,7 +1001,7 @@ A 10-year run of 30-minute stock candles is about 4 MB as a download (1.4 MB com
   kept current by a test, as the manifest's is. From `backend/`:
   `uv run python -m candlestack.experiments.json_schema > ../docs/backtest.schema.json`.
 
-Not in version 1: benchmarks other than buy and hold (SPY, QQQ, DIA), returns per month, the
+Not in version 1: benchmarks other than buy and hold, returns per month, the
 candles' OHLC (the fingerprint and `loaded` fetch them again), per-trade excursions, rolling
 statistics, partial results of a failed run.
 
