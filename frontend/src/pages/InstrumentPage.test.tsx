@@ -1,31 +1,17 @@
 // @vitest-environment jsdom
 import { cleanup, screen, within } from '@testing-library/react';
+import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { InstrumentDetail } from '@/api';
 import { ARSEN, problem, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 import { candles, times } from '@/test/candles';
+import { BTC } from '@/test/instruments';
 import { charts } from '@/test/lightweightCharts';
 
 vi.mock('lightweight-charts', () => import('@/test/lightweightCharts'));
 
 const DAY = 86_400;
-const BTC: InstrumentDetail = {
-  id: 'crypto:BTCUSDT',
-  symbol: 'BTCUSDT',
-  name: 'Bitcoin / TetherUS',
-  market: 'crypto',
-  exchange: 'BINANCE',
-  source: 'binance',
-  feed: 'spot',
-  base: 'BTC',
-  quote: 'USDT',
-  available_from: 1_502_942_400, // 2017-08-17 04:00 UTC
-  available_to: 1_790_812_800,
-  max_candles: 1000,
-  timeframes: ['1h', '1d'],
-};
 const DETAIL = 'GET /api/v1/data/instruments/crypto%3ABTCUSDT';
 const DAILY = `${DETAIL}/candles?timeframe=1d&limit=500`;
 const HOURLY = `${DETAIL}/candles?timeframe=1h&limit=500`;
@@ -78,22 +64,33 @@ describe('InstrumentPage', () => {
       [DAILY]: { status: 200, body: candles(OCTOBER) },
     });
     const { router } = await renderApp('/settings');
+    // Loading shows after a second in the app; the test does not wait that long.
+    router.update({ ...router.options, defaultPendingMs: 10, defaultPendingMinMs: 0 });
     void router.navigate({ to: '/instrument/$id', params: { id: 'crypto:BTCUSDT' }, search: { tf: '1d' } });
-    await vi.waitFor(() => expect(screen.getByRole('status').textContent).toBe('Loading…'), { timeout: 3000 });
+    await vi.waitFor(() => expect(screen.getByRole('status').textContent).toBe('Loading…'));
     answer({ status: 200, body: BTC });
     await vi.waitFor(() => expect(heading()).toBe('Bitcoin / TetherUS'));
     expect(screen.queryByText('Loading…')).toBeNull();
   });
 
-  it('says when the instrument does not exist, with the way back to the list', async () => {
+  it('says why the instrument cannot load, and loads it on Try again', async () => {
     stubApi({
       ...sessionWithPreferences(ARSEN),
-      'GET /api/v1/data/instruments/crypto%3ANOPE': problem(404, 'instrument-not-found', 'No instrument crypto:NOPE.'),
+      [DETAIL]: problem(503, 'source-unavailable', 'Binance is not answering.'),
     });
-    await renderApp('/instrument/crypto:NOPE');
-    await vi.waitFor(() => expect(heading()).toBe('Not found'));
-    expect(screen.getByText('No instrument crypto:NOPE.')).toBeDefined();
+    await renderApp('/instrument/crypto:BTCUSDT?tf=1d');
+    await vi.waitFor(() => expect(heading()).toBe('Could not load this page'));
+    expect(screen.getByText('Binance is not answering.')).toBeDefined();
+    expect(document.title).toBe('Could not load this page · CandleStack');
     expect(screen.getByRole('link', { name: 'Back to instruments' }).getAttribute('href')).toBe('/instruments');
+
+    stubApi({
+      ...sessionWithPreferences(ARSEN),
+      [DETAIL]: { status: 200, body: BTC },
+      [DAILY]: { status: 200, body: candles(OCTOBER) },
+    });
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Try again' }));
+    await vi.waitFor(() => expect(heading()).toBe('Bitcoin / TetherUS'));
   });
 
   it('says why the candles cannot load, under the instrument it did load', async () => {

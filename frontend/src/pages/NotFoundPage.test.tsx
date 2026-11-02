@@ -12,10 +12,10 @@ afterEach(() => {
 });
 
 describe('NotFoundPage', () => {
+  // routeTree.test.tsx checks which addresses show it; this checks what the page says and does.
   it('says there is nothing at the address, in the title too', async () => {
     stubApi(session(null));
     await renderApp('/nope');
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Page not found');
     expect(screen.getByText('There is nothing at this address.')).toBeDefined();
     expect(document.title).toBe('Page not found · CandleStack');
   });

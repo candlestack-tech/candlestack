@@ -11,8 +11,8 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { meQueryOptions } from '@/api';
-import { ARSEN, NOT_SIGNED_IN, stubApi } from '@/test/api';
+import { meQueryOptions, modelsQueryOptions, preferencesQueryOptions } from '@/api';
+import { ARSEN, DEFAULT_PREFERENCES, MB, NOT_SIGNED_IN, model, stubApi } from '@/test/api';
 
 import { useDeleteAccount, useSignOut, useSignOutEverywhere } from './useLeaveAccount';
 
@@ -22,8 +22,8 @@ afterEach(() => {
 });
 
 const ME = meQueryOptions().queryKey;
-const PREFERENCES = ['account', 'preferences'];
-const MODELS = ['account', 'models'];
+const PREFERENCES = preferencesQueryOptions().queryKey;
+const MODELS = modelsQueryOptions().queryKey;
 
 type Hook = typeof useSignOut;
 
@@ -50,8 +50,11 @@ async function open(useLeave: Hook) {
   await router.load();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   queryClient.setQueryData(ME, ARSEN);
-  queryClient.setQueryData(PREFERENCES, { theme: 'dark' });
-  queryClient.setQueryData(MODELS, []);
+  queryClient.setQueryData(PREFERENCES, DEFAULT_PREFERENCES);
+  queryClient.setQueryData(MODELS, {
+    models: [model()],
+    usage: { used_bytes: MB, quota_bytes: 100 * MB, file_max_bytes: 50 * MB },
+  });
   queryClient.setQueryData(['auth', 'denied'], null);
   render(
     <QueryClientProvider client={queryClient}>
@@ -94,6 +97,6 @@ describe('useLeaveAccount', () => {
     expect(await screen.findByText('Still here')).toBeDefined();
     expect(router.state.location.pathname).toBe('/settings');
     expect(queryClient.getQueryData(ME)).toEqual(ARSEN);
-    expect(queryClient.getQueryData(PREFERENCES)).toEqual({ theme: 'dark' });
+    expect(queryClient.getQueryData(PREFERENCES)).toEqual(DEFAULT_PREFERENCES);
   });
 });
