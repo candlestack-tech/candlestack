@@ -11,6 +11,7 @@ import {
   CompareToggle,
   HEAD,
   NUMBER,
+  PublicMark,
   ROW,
   RowOpener,
   SortButton,
@@ -56,6 +57,7 @@ function Row({ backtest, rank, by }: RowProps) {
             <BacktestNumber backtest={backtest} />
           </RowOpener>
           <BacktestInstruments backtest={backtest} max={1} />
+          {backtest.public && <PublicMark />}
         </span>
       </td>
       {METRICS.map(({ metric, format }) => (

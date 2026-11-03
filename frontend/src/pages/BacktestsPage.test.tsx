@@ -22,7 +22,7 @@ const TEN = backtest({
   sharpe: -0.184,
   created_at: '2026-10-12T23:44:00Z',
 });
-const COUNTS = { all: 3, starred: 1, failed: 1 };
+const COUNTS = { all: 3, starred: 1, failed: 1, public: 0 };
 const MODELS = [{ name: 'blesk-novol-8.keras', framework: 'keras', count: 3 }];
 const PAGE = { backtests: [TWELVE, ELEVEN, TEN], counts: COUNTS, models: MODELS };
 
@@ -75,6 +75,28 @@ describe('the Backtests page', () => {
     expect(within(rows()[0]!).getByRole('img', { name: 'Keras' })).toBeDefined();
   });
 
+  it('marks a public backtest with a globe, counts them, and shows only them from Filters', async () => {
+    const counts = { ...COUNTS, public: 1 };
+    const published = backtest({ public: true, published_at: '2026-10-16T09:12:00Z' });
+    const fetch = stubApi({
+      ...sessionWithPreferences(ARSEN),
+      ...backtestsAnswer({ ...PAGE, backtests: [published, ELEVEN], total: 3, counts }),
+      ...backtestsAnswer({ ...PAGE, backtests: [published], total: 1, counts }, '?show=public'),
+    });
+    await renderApp('/backtests');
+    await screen.findByText('#12');
+    expect(subtitle()).toBe('3 backtests · 1 public');
+    const globe = { name: 'Public, in Experiments' };
+    expect(within(within(rows()[0]!).getAllByRole('cell')[0]!).getByRole('img', globe)).toBeDefined();
+    expect(within(rows()[1]!).queryByRole('img', globe)).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Filters: All backtests' }));
+    const panel = screen.getByRole('dialog', { name: 'Filters' });
+    await userEvent.click(within(panel).getByRole('option', { name: /^Public only1/ }));
+    await screen.findByRole('button', { name: 'Filters: Public only' });
+    expect(asked(fetch).at(-1)).toBe('/api/v1/backtests?show=public');
+    expect(subtitle()).toBe('1 of 3');
+  });
+
   // #318: the instruments of a row are named with their icons, the rest as +N with all of them in
   // the title.
   it('shows each instrument with its icon', async () => {
@@ -120,7 +142,7 @@ describe('the Backtests page', () => {
         .find((name) => name.startsWith('w-'));
     expect(width(/^Model/)).toBeUndefined();
     expect([/^Backtest/, /^Instruments/, /^Status/, /^Return/, /^Sharpe/, /^Max drawdown/, /^When/].map(width)).toEqual(
-      ['w-[84px]', 'w-[112px]', 'w-[80px]', 'w-[100px]', 'w-[76px]', 'w-[128px]', 'w-[128px]'],
+      ['w-[104px]', 'w-[112px]', 'w-[80px]', 'w-[100px]', 'w-[76px]', 'w-[128px]', 'w-[128px]'],
     );
 
     const [, , , status, result] = within(rows()[0]!).getAllByRole('cell');
@@ -247,7 +269,7 @@ describe('the Backtests page', () => {
       within(panel)
         .getAllByRole('option')
         .map((option) => option.textContent),
-    ).toEqual(['All backtests3', 'Starred1', 'Failed1', 'All models', 'blesk-novol-8.keras3']);
+    ).toEqual(['All backtests3', 'Starred1', 'Public only0', 'Failed1', 'All models', 'blesk-novol-8.keras3']);
     await userEvent.click(within(panel).getByRole('option', { name: /^Starred/ }));
     await screen.findByRole('button', { name: 'Filters: Starred' });
     await userEvent.click(within(panel).getByRole('option', { name: /blesk-novol-8/ }));

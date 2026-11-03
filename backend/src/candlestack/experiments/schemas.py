@@ -11,6 +11,10 @@ BACKTEST_NAME_MAX = 80
 
 # Backtests per page of the list.
 PAGE_SIZE = 10
+# Published backtests per page of Experiments: four rows of three cards.
+EXPERIMENTS_PAGE_SIZE = 12
+# The newest published backtests the Dashboard shows.
+DASHBOARD_EXPERIMENTS = 4
 # The longest search the list takes.
 QUERY_MAX = 100
 # The longest name of a model (models.name, backtests.model_name).
@@ -109,7 +113,7 @@ class BacktestSetupIn(BacktestSetup):
 
 # Reads what is stored without the checks of a new series (EquitySeriesIn).
 class EquitySeries(BaseModel):
-    """The equity of the strategy and of buy and hold over the test period, for a small chart:
+    """The equity of the strategy and of its benchmark over the test period, for a small chart:
     cumulative returns as fractions (0 at the start; 0.246 is 24.6 %), sampled at evenly spaced
     times from the first day to the last, the same times in both."""
 
@@ -118,7 +122,11 @@ class EquitySeries(BaseModel):
         examples=[[0.0, 0.031, 0.118, 0.246]],
     )
     benchmark: list[float] = Field(
-        description="Cumulative return of buying and holding the instruments, as many points",
+        description=(
+            "Cumulative return of the backtest's benchmark, as many points: buy and hold of its "
+            "instrument, or of SPY, QQQ or DIA (`setup.benchmark`); buy and hold of the "
+            "instrument for a backtest that ran before the funds"
+        ),
         examples=[[0.0, 0.12, 0.35, 0.682]],
     )
 
@@ -189,7 +197,7 @@ class BacktestOut(BaseModel):
     )
     num_trades: int | None = Field(description="Number of trades", examples=[1712])
     equity: EquitySeries | None = Field(
-        description="A short equity series of the strategy and of buy and hold, for a small "
+        description="A short equity series of the strategy and of its benchmark, for a small "
         "chart; null for a backtest that did not finish or has none"
     )
     duration_s: float | None = Field(
@@ -200,6 +208,12 @@ class BacktestOut(BaseModel):
         examples=[None],
     )
     starred: bool = Field(description="The user starred the backtest")
+    public: bool = Field(
+        description="Published in Experiments, so every account of the beta can see it"
+    )
+    published_at: datetime | None = Field(
+        description="When it was published (UTC); null while it is not"
+    )
     created_at: datetime = Field(description="When the backtest started (UTC)")
     finished_at: datetime | None = Field(
         description="When it finished or failed (UTC); null while it runs"
@@ -207,11 +221,12 @@ class BacktestOut(BaseModel):
 
 
 class BacktestShow(StrEnum):
-    """Which backtests the list shows: all, the starred or the failed ones."""
+    """Which backtests the list shows: all, the starred, the failed or the published ones."""
 
     all = "all"
     starred = "starred"
     failed = "failed"
+    public = "public"
 
 
 class BacktestSort(StrEnum):
@@ -235,11 +250,12 @@ class SortOrder(StrEnum):
 
 
 class BacktestCounts(BaseModel):
-    """The user's backtests in all, starred and failed."""
+    """The user's backtests in all, starred, failed and published."""
 
     all: int = Field(examples=[15])
     starred: int = Field(examples=[5])
     failed: int = Field(examples=[2])
+    public: int = Field(description="Published in Experiments", examples=[3])
 
 
 class ModelCount(BaseModel):
@@ -265,7 +281,7 @@ class BacktestsPage(BaseModel):
 
 
 class BacktestUpdate(BaseModel):
-    """What the star and Rename change; a field left out stays as it is."""
+    """What the star, Rename, Publish and Unpublish change; a field left out stays as it is."""
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
@@ -277,11 +293,18 @@ class BacktestUpdate(BaseModel):
         pattern=r"^[^\x00-\x1f\x7f]+$",
         description="What to call it, without control characters; null takes the name away",
     )
+    public: bool | None = Field(
+        default=None,
+        description=(
+            "Publish the backtest in Experiments (true) or take it back (false). Only a finished "
+            "backtest made in the app can be published"
+        ),
+    )
 
     @model_validator(mode="after")
     def _says_something(self) -> "BacktestUpdate":
         if not self.model_fields_set:
-            raise ValueError("send what to change: starred, name or both")
+            raise ValueError("send what to change: starred, name, public or more of them")
         return self
 
 
@@ -302,6 +325,114 @@ class StarredBacktests(BaseModel):
     total: int = Field(description="All the starred backtests", examples=[5])
 
 
+class Author(BaseModel):
+    """Who published a backtest: their display name, never their email."""
+
+    id: str = Field(description="Public ID of the account", examples=["usr_7f3k2m9qx4"])
+    name: str = Field(description="The account's display name", examples=["Tymur Tkach"])
+    mine: bool = Field(description="The signed-in user published it")
+
+
+class ExperimentModel(BaseModel):
+    """The model of a published backtest as others see it: its name and what it reads, never
+    the file."""
+
+    name: str = Field(
+        description="The model's name when the backtest ran", examples=["blesk-novol-8.keras"]
+    )
+    framework: str = Field(examples=["keras"])
+    input_shape: list[int] | None = Field(
+        description="The model's input, rows by features, from its manifest; null when unknown",
+        examples=[[25, 23]],
+    )
+
+
+class ExperimentOut(BaseModel):
+    """A published backtest, as Experiments shows it to every account of the beta. Returns and
+    rates are fractions; a published backtest has finished, so its results are there."""
+
+    id: str = Field(description="Public ID of the backtest", examples=["bt_7f3k2m9qx4"])
+    name: str | None = Field(description="What its author calls it; null until they rename it")
+    number: int = Field(description="The author's own number of the backtest, shown as #N", ge=1)
+    instruments: list[BacktestInstrument]
+    representation: Representation
+    model: ExperimentModel
+    setup: BacktestSetup
+    total_return: float | None = Field(examples=[0.246])
+    benchmark_return: float | None = Field(
+        description="Return of its benchmark over the period (`setup.benchmark`), a fraction",
+        examples=[0.143],
+    )
+    buy_and_hold_return: float | None = Field(examples=[0.682])
+    sharpe: float | None = Field(examples=[0.79])
+    max_drawdown: float | None = Field(examples=[-0.197])
+    win_rate: float | None = Field(examples=[0.512])
+    num_trades: int | None = Field(examples=[1712])
+    equity: EquitySeries | None = Field(
+        description="The short equity series of the strategy and of its benchmark"
+    )
+    author: Author
+    published_at: datetime = Field(description="When it was published (UTC)")
+
+
+class ExperimentSort(StrEnum):
+    """What Experiments is sorted by. `newest` is the newest published first (`order` does not
+    apply); the others put those without the value last, and ties go newest published first."""
+
+    newest = "newest"
+    total_return = "return"
+    sharpe = "sharpe"
+    max_drawdown = "max_drawdown"
+    trades = "trades"
+
+
+class FacetCount(BaseModel):
+    """One choice of a filter and how many published backtests have it."""
+
+    value: str = Field(examples=["renko"])
+    count: int = Field(examples=[9])
+
+
+class InstrumentCount(BaseModel):
+    market: InstrumentMarket
+    symbol: str = Field(examples=["AAPL"])
+    count: int = Field(examples=[4])
+
+
+class ExperimentFacets(BaseModel):
+    """What the filters offer, with the count of each choice: over the published backtests of
+    the scope (all, mine or one author) and the search, whatever the filters chosen."""
+
+    markets: list[FacetCount] = Field(description="`stock`, `crypto`")
+    instruments: list[InstrumentCount] = Field(description="The most published first")
+    representations: list[FacetCount] = Field(description="`renko`, `kagi`, `windows`")
+    timeframes: list[FacetCount] = Field(description="`1m` to `1d`, in that order")
+
+
+class ExperimentCounts(BaseModel):
+    all: int = Field(description="Every published backtest", examples=[25])
+    mine: int = Field(description="Those the signed-in user published", examples=[2])
+    people: int = Field(description="Accounts that published one", examples=[7])
+
+
+class ExperimentsPage(BaseModel):
+    experiments: list[ExperimentOut] = Field(
+        description=f"The page, at most {EXPERIMENTS_PAGE_SIZE} published backtests"
+    )
+    total: int = Field(description="Published backtests that match", examples=[25])
+    page: int = Field(description="The page, from 1", examples=[1])
+    pages: int = Field(description="Pages of those that match, at least 1", examples=[3])
+    counts: ExperimentCounts
+    facets: ExperimentFacets
+
+
+class NewExperiments(BaseModel):
+    backtests: list[ExperimentOut] = Field(
+        description=f"The {DASHBOARD_EXPERIMENTS} newest published backtests, anyone's"
+    )
+    total: int = Field(description="Every published backtest", examples=[25])
+
+
 class DashboardOut(BaseModel):
     """Everything the Dashboard shows, in one response."""
 
@@ -311,3 +442,4 @@ class DashboardOut(BaseModel):
     )
     best: BestBacktests
     starred: StarredBacktests
+    experiments: NewExperiments

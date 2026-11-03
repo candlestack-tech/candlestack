@@ -107,7 +107,7 @@ describe('Settings', () => {
   it('shows how many backtests are kept, between the market data and the models', async () => {
     stubApi({
       ...sessionWithPreferences(ARSEN),
-      ...dashboardAnswer({ counts: { all: 12, starred: 3, failed: 1 } }),
+      ...dashboardAnswer({ counts: { all: 12, starred: 3, failed: 1, public: 0 } }),
       ...modelsAnswer([model()]),
     });
     await renderApp('/settings/data-and-storage');

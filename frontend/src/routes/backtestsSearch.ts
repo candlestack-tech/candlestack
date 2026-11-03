@@ -4,8 +4,8 @@ import type { BacktestsParams, SortOrder } from '@/api';
 
 // The Backtests page keeps its search, filters, order and page in the URL, so Back returns to
 // them and the request mirrors what the page shows:
-// /backtests?q=aapl&show=starred&model=lstm.keras&sort=sharpe&order=asc&page=2. Defaults are left
-// out: all backtests, every model, newest first, page 1.
+// /backtests?q=aapl&show=starred&model=lstm.keras&sort=sharpe&order=asc&page=2 (show: starred,
+// public or failed). Defaults are left out: all backtests, every model, newest first, page 1.
 export type BacktestsSearch = BacktestsParams;
 
 export type BacktestsColumn = NonNullable<BacktestsSearch['sort']>;
@@ -55,7 +55,7 @@ export function validateBacktestsSearch(
 ): BacktestsSearch {
   return {
     q: parseText(search.q, MAX_QUERY),
-    show: search.show === 'starred' || search.show === 'failed' ? search.show : undefined,
+    show: search.show === 'starred' || search.show === 'failed' || search.show === 'public' ? search.show : undefined,
     model: parseText(search.model, MAX_MODEL),
     sort: undefined,
     order: undefined,

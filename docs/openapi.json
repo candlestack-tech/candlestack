@@ -107,8 +107,41 @@
         "title": "AppearanceUpdate",
         "type": "object"
       },
+      "Author": {
+        "description": "Who published a backtest: their display name, never their email.",
+        "properties": {
+          "id": {
+            "description": "Public ID of the account",
+            "examples": [
+              "usr_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "mine": {
+            "description": "The signed-in user published it",
+            "title": "Mine",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "The account's display name",
+            "examples": [
+              "Tymur Tkach"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "mine"
+        ],
+        "title": "Author",
+        "type": "object"
+      },
       "BacktestCounts": {
-        "description": "The user's backtests in all, starred and failed.",
+        "description": "The user's backtests in all, starred, failed and published.",
         "properties": {
           "all": {
             "examples": [
@@ -124,6 +157,14 @@
             "title": "Failed",
             "type": "integer"
           },
+          "public": {
+            "description": "Published in Experiments",
+            "examples": [
+              3
+            ],
+            "title": "Public",
+            "type": "integer"
+          },
           "starred": {
             "examples": [
               5
@@ -135,7 +176,8 @@
         "required": [
           "all",
           "starred",
-          "failed"
+          "failed",
+          "public"
         ],
         "title": "BacktestCounts",
         "type": "object"
@@ -341,6 +383,10 @@
       },
       "BacktestHeader": {
         "properties": {
+          "author": {
+            "$ref": "#/components/schemas/DocumentAuthor",
+            "description": "Whose backtest it is. Another account's backtest is shown only while it is published, read only, and its `model.id` is null"
+          },
           "created_at": {
             "description": "When it started (UTC)",
             "format": "date-time",
@@ -415,6 +461,24 @@
             "title": "Number",
             "type": "integer"
           },
+          "public": {
+            "description": "Published in Experiments",
+            "title": "Public",
+            "type": "boolean"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it was published (UTC); null while it is not",
+            "title": "Published At"
+          },
           "status": {
             "$ref": "#/components/schemas/BacktestStatus"
           },
@@ -431,6 +495,9 @@
           "id",
           "name",
           "number",
+          "author",
+          "public",
+          "published_at",
           "status",
           "created_at",
           "finished_at",
@@ -620,7 +687,7 @@
                 "type": "null"
               }
             ],
-            "description": "A short equity series of the strategy and of buy and hold, for a small chart; null for a backtest that did not finish or has none"
+            "description": "A short equity series of the strategy and of its benchmark, for a small chart; null for a backtest that did not finish or has none"
           },
           "error": {
             "anyOf": [
@@ -717,6 +784,24 @@
             "title": "Number",
             "type": "integer"
           },
+          "public": {
+            "description": "Published in Experiments, so every account of the beta can see it",
+            "title": "Public",
+            "type": "boolean"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it was published (UTC); null while it is not",
+            "title": "Published At"
+          },
           "representation": {
             "$ref": "#/components/schemas/Representation"
           },
@@ -802,6 +887,8 @@
           "duration_s",
           "error",
           "starred",
+          "public",
+          "published_at",
           "created_at",
           "finished_at"
         ],
@@ -868,11 +955,12 @@
         "type": "object"
       },
       "BacktestShow": {
-        "description": "Which backtests the list shows: all, the starred or the failed ones.",
+        "description": "Which backtests the list shows: all, the starred, the failed or the published ones.",
         "enum": [
           "all",
           "starred",
-          "failed"
+          "failed",
+          "public"
         ],
         "title": "BacktestShow",
         "type": "string"
@@ -1133,7 +1221,7 @@
       },
       "BacktestUpdate": {
         "additionalProperties": false,
-        "description": "What the star and Rename change; a field left out stays as it is.",
+        "description": "What the star, Rename, Publish and Unpublish change; a field left out stays as it is.",
         "properties": {
           "name": {
             "anyOf": [
@@ -1149,6 +1237,18 @@
             ],
             "description": "What to call it, without control characters; null takes the name away",
             "title": "Name"
+          },
+          "public": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Publish the backtest in Experiments (true) or take it back (false). Only a finished backtest made in the app can be published",
+            "title": "Public"
           },
           "starred": {
             "anyOf": [
@@ -1797,6 +1897,9 @@
           "counts": {
             "$ref": "#/components/schemas/BacktestCounts"
           },
+          "experiments": {
+            "$ref": "#/components/schemas/NewExperiments"
+          },
           "last": {
             "description": "The 6 newest backtests that ended, failed ones included (not running ones)",
             "items": {
@@ -1813,7 +1916,8 @@
           "counts",
           "last",
           "best",
-          "starred"
+          "starred",
+          "experiments"
         ],
         "title": "DashboardOut",
         "type": "object"
@@ -2059,6 +2163,39 @@
         "title": "Direction",
         "type": "string"
       },
+      "DocumentAuthor": {
+        "description": "Who the backtest belongs to: their display name, never their email.",
+        "properties": {
+          "id": {
+            "description": "Public ID of the account",
+            "examples": [
+              "usr_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "mine": {
+            "description": "The signed-in user's own backtest",
+            "title": "Mine",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "The account's display name",
+            "examples": [
+              "Tymur Tkach"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "mine"
+        ],
+        "title": "DocumentAuthor",
+        "type": "object"
+      },
       "EmaStep": {
         "additionalProperties": false,
         "properties": {
@@ -2076,10 +2213,10 @@
         "type": "object"
       },
       "EquitySeries": {
-        "description": "The equity of the strategy and of buy and hold over the test period, for a small chart:\ncumulative returns as fractions (0 at the start; 0.246 is 24.6 %), sampled at evenly spaced\ntimes from the first day to the last, the same times in both.",
+        "description": "The equity of the strategy and of its benchmark over the test period, for a small chart:\ncumulative returns as fractions (0 at the start; 0.246 is 24.6 %), sampled at evenly spaced\ntimes from the first day to the last, the same times in both.",
         "properties": {
           "benchmark": {
-            "description": "Cumulative return of buying and holding the instruments, as many points",
+            "description": "Cumulative return of the backtest's benchmark, as many points: buy and hold of its instrument, or of SPY, QQQ or DIA (`setup.benchmark`); buy and hold of the instrument for a backtest that ran before the funds",
             "examples": [
               [
                 0.0,
@@ -2230,6 +2367,410 @@
           }
         },
         "title": "Execution",
+        "type": "object"
+      },
+      "ExperimentCounts": {
+        "properties": {
+          "all": {
+            "description": "Every published backtest",
+            "examples": [
+              25
+            ],
+            "title": "All",
+            "type": "integer"
+          },
+          "mine": {
+            "description": "Those the signed-in user published",
+            "examples": [
+              2
+            ],
+            "title": "Mine",
+            "type": "integer"
+          },
+          "people": {
+            "description": "Accounts that published one",
+            "examples": [
+              7
+            ],
+            "title": "People",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "all",
+          "mine",
+          "people"
+        ],
+        "title": "ExperimentCounts",
+        "type": "object"
+      },
+      "ExperimentFacets": {
+        "description": "What the filters offer, with the count of each choice: over the published backtests of\nthe scope (all, mine or one author) and the search, whatever the filters chosen.",
+        "properties": {
+          "instruments": {
+            "description": "The most published first",
+            "items": {
+              "$ref": "#/components/schemas/InstrumentCount"
+            },
+            "title": "Instruments",
+            "type": "array"
+          },
+          "markets": {
+            "description": "`stock`, `crypto`",
+            "items": {
+              "$ref": "#/components/schemas/FacetCount"
+            },
+            "title": "Markets",
+            "type": "array"
+          },
+          "representations": {
+            "description": "`renko`, `kagi`, `windows`",
+            "items": {
+              "$ref": "#/components/schemas/FacetCount"
+            },
+            "title": "Representations",
+            "type": "array"
+          },
+          "timeframes": {
+            "description": "`1m` to `1d`, in that order",
+            "items": {
+              "$ref": "#/components/schemas/FacetCount"
+            },
+            "title": "Timeframes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "markets",
+          "instruments",
+          "representations",
+          "timeframes"
+        ],
+        "title": "ExperimentFacets",
+        "type": "object"
+      },
+      "ExperimentModel": {
+        "description": "The model of a published backtest as others see it: its name and what it reads, never\nthe file.",
+        "properties": {
+          "framework": {
+            "examples": [
+              "keras"
+            ],
+            "title": "Framework",
+            "type": "string"
+          },
+          "input_shape": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The model's input, rows by features, from its manifest; null when unknown",
+            "examples": [
+              [
+                25,
+                23
+              ]
+            ],
+            "title": "Input Shape"
+          },
+          "name": {
+            "description": "The model's name when the backtest ran",
+            "examples": [
+              "blesk-novol-8.keras"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "framework",
+          "input_shape"
+        ],
+        "title": "ExperimentModel",
+        "type": "object"
+      },
+      "ExperimentOut": {
+        "description": "A published backtest, as Experiments shows it to every account of the beta. Returns and\nrates are fractions; a published backtest has finished, so its results are there.",
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/Author"
+          },
+          "benchmark_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Return of its benchmark over the period (`setup.benchmark`), a fraction",
+            "examples": [
+              0.143
+            ],
+            "title": "Benchmark Return"
+          },
+          "buy_and_hold_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              0.682
+            ],
+            "title": "Buy And Hold Return"
+          },
+          "equity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EquitySeries"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The short equity series of the strategy and of its benchmark"
+          },
+          "id": {
+            "description": "Public ID of the backtest",
+            "examples": [
+              "bt_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "instruments": {
+            "items": {
+              "$ref": "#/components/schemas/BacktestInstrument"
+            },
+            "title": "Instruments",
+            "type": "array"
+          },
+          "max_drawdown": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              -0.197
+            ],
+            "title": "Max Drawdown"
+          },
+          "model": {
+            "$ref": "#/components/schemas/ExperimentModel"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What its author calls it; null until they rename it",
+            "title": "Name"
+          },
+          "num_trades": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              1712
+            ],
+            "title": "Num Trades"
+          },
+          "number": {
+            "description": "The author's own number of the backtest, shown as #N",
+            "minimum": 1.0,
+            "title": "Number",
+            "type": "integer"
+          },
+          "published_at": {
+            "description": "When it was published (UTC)",
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          },
+          "representation": {
+            "$ref": "#/components/schemas/Representation"
+          },
+          "setup": {
+            "$ref": "#/components/schemas/BacktestSetup"
+          },
+          "sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              0.79
+            ],
+            "title": "Sharpe"
+          },
+          "total_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              0.246
+            ],
+            "title": "Total Return"
+          },
+          "win_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              0.512
+            ],
+            "title": "Win Rate"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "number",
+          "instruments",
+          "representation",
+          "model",
+          "setup",
+          "total_return",
+          "benchmark_return",
+          "buy_and_hold_return",
+          "sharpe",
+          "max_drawdown",
+          "win_rate",
+          "num_trades",
+          "equity",
+          "author",
+          "published_at"
+        ],
+        "title": "ExperimentOut",
+        "type": "object"
+      },
+      "ExperimentSort": {
+        "description": "What Experiments is sorted by. `newest` is the newest published first (`order` does not\napply); the others put those without the value last, and ties go newest published first.",
+        "enum": [
+          "newest",
+          "return",
+          "sharpe",
+          "max_drawdown",
+          "trades"
+        ],
+        "title": "ExperimentSort",
+        "type": "string"
+      },
+      "ExperimentsPage": {
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/ExperimentCounts"
+          },
+          "experiments": {
+            "description": "The page, at most 12 published backtests",
+            "items": {
+              "$ref": "#/components/schemas/ExperimentOut"
+            },
+            "title": "Experiments",
+            "type": "array"
+          },
+          "facets": {
+            "$ref": "#/components/schemas/ExperimentFacets"
+          },
+          "page": {
+            "description": "The page, from 1",
+            "examples": [
+              1
+            ],
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "description": "Pages of those that match, at least 1",
+            "examples": [
+              3
+            ],
+            "title": "Pages",
+            "type": "integer"
+          },
+          "total": {
+            "description": "Published backtests that match",
+            "examples": [
+              25
+            ],
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "experiments",
+          "total",
+          "page",
+          "pages",
+          "counts",
+          "facets"
+        ],
+        "title": "ExperimentsPage",
+        "type": "object"
+      },
+      "FacetCount": {
+        "description": "One choice of a filter and how many published backtests have it.",
+        "properties": {
+          "count": {
+            "examples": [
+              9
+            ],
+            "title": "Count",
+            "type": "integer"
+          },
+          "value": {
+            "examples": [
+              "renko"
+            ],
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "count"
+        ],
+        "title": "FacetCount",
         "type": "object"
       },
       "Feature": {
@@ -2412,6 +2953,34 @@
           "window"
         ],
         "title": "Input",
+        "type": "object"
+      },
+      "InstrumentCount": {
+        "properties": {
+          "count": {
+            "examples": [
+              4
+            ],
+            "title": "Count",
+            "type": "integer"
+          },
+          "market": {
+            "$ref": "#/components/schemas/InstrumentMarket"
+          },
+          "symbol": {
+            "examples": [
+              "AAPL"
+            ],
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "market",
+          "symbol",
+          "count"
+        ],
+        "title": "InstrumentCount",
         "type": "object"
       },
       "InstrumentDetailOut": {
@@ -3593,6 +4162,32 @@
           "usage"
         ],
         "title": "ModelsOut",
+        "type": "object"
+      },
+      "NewExperiments": {
+        "properties": {
+          "backtests": {
+            "description": "The 4 newest published backtests, anyone's",
+            "items": {
+              "$ref": "#/components/schemas/ExperimentOut"
+            },
+            "title": "Backtests",
+            "type": "array"
+          },
+          "total": {
+            "description": "Every published backtest",
+            "examples": [
+              25
+            ],
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "backtests",
+          "total"
+        ],
+        "title": "NewExperiments",
         "type": "object"
       },
       "Output": {
@@ -5419,7 +6014,7 @@
     },
     "/api/v1/backtests/{backtest_id}": {
       "get": {
-        "description": "The result document of the backtest, whatever its status (`results` is null until it\nfinished), in the light view: a series of more than 10,000 rows has one point per UTC day,\nand only the newest 10,000 trades are in it (`trades.complete` false).",
+        "description": "The result document of the user's backtest, whatever its status (`results` is null until\nit finished), or of another account's while it is published (`backtest.author`, read only,\n`model.id` null), in the light view: a series of more than 10,000 rows has one point per\nUTC day, and only the newest 10,000 trades are in it (`trades.complete` false).",
         "operationId": "get_backtest_api_v1_backtests__backtest_id__get",
         "parameters": [
           {
@@ -5466,7 +6061,7 @@
                 }
               }
             },
-            "description": "The user has no backtest with this ID (`not-found`)."
+            "description": "Neither the user's backtest nor a published one has this ID (`not-found`): a backtest its author unpublished is not found."
           },
           "409": {
             "content": {
@@ -5515,7 +6110,7 @@
         ]
       },
       "patch": {
-        "description": "Stars, unstars or renames the backtest; a field left out stays as it is.",
+        "description": "Stars, unstars, renames, publishes or unpublishes the user's backtest; a field left out\nstays as it is. Unpublishing takes it out of Experiments and out of other people's\nCompare.",
         "operationId": "update_backtest_api_v1_backtests__backtest_id__patch",
         "parameters": [
           {
@@ -5584,6 +6179,16 @@
             },
             "description": "The user has no backtest with this ID (`not-found`)."
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Publishing a backtest that is running or failed (`backtest-not-finished`), or test data without a result document (`no-document`)."
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -5603,7 +6208,7 @@
     },
     "/api/v1/backtests/{backtest_id}/download": {
       "get": {
-        "description": "The result document of a finished backtest with every row of its series and every\ntrade, as a file to save.",
+        "description": "The result document of a finished backtest, the user's or a published one of another\naccount, with every row of its series and every trade, as a file to save.",
         "operationId": "download_backtest_api_v1_backtests__backtest_id__download_get",
         "parameters": [
           {
@@ -5650,7 +6255,7 @@
                 }
               }
             },
-            "description": "The user has no backtest with this ID (`not-found`)."
+            "description": "Neither the user's backtest nor a published one has this ID (`not-found`): a backtest its author unpublished is not found."
           },
           "409": {
             "content": {
@@ -6302,6 +6907,209 @@
         "summary": "Top instruments",
         "tags": [
           "data"
+        ]
+      }
+    },
+    "/api/v1/experiments": {
+      "get": {
+        "description": "A page of Experiments: the backtests that accounts of the beta published, which every\nsigned-in account can see, that match the search and the filters, with the counts and what\nthe filters offer. Others see a published backtest's setup, results, charts, trades and what\nits model reads, never the model file. A page past the last one is empty.",
+        "operationId": "list_experiments_api_v1_experiments_get",
+        "parameters": [
+          {
+            "description": "Search: part of an instrument's symbol, of the model's name or of the author's name, in any case",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Search: part of an instrument's symbol, of the model's name or of the author's name, in any case",
+              "examples": [
+                "nvda"
+              ],
+              "maxLength": 100,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only the backtests the signed-in user published",
+            "in": "query",
+            "name": "mine",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Only the backtests the signed-in user published",
+              "title": "Mine",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Only the backtests of this account (`author.id`)",
+            "in": "query",
+            "name": "author",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the backtests of this account (`author.id`)",
+              "examples": [
+                "usr_7f3k2m9qx4"
+              ],
+              "title": "Author"
+            }
+          },
+          {
+            "description": "Only this market",
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/InstrumentMarket"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this market",
+              "title": "Market"
+            }
+          },
+          {
+            "description": "Only this instrument's symbol, in any case",
+            "in": "query",
+            "name": "symbol",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this instrument's symbol, in any case",
+              "title": "Symbol"
+            }
+          },
+          {
+            "description": "Only models that read this",
+            "in": "query",
+            "name": "representation",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Representation"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only models that read this",
+              "title": "Representation"
+            }
+          },
+          {
+            "description": "Only this timeframe",
+            "in": "query",
+            "name": "timeframe",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SetupTimeframe"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this timeframe",
+              "title": "Timeframe"
+            }
+          },
+          {
+            "description": "What to sort by",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ExperimentSort",
+              "default": "newest",
+              "description": "What to sort by"
+            }
+          },
+          {
+            "description": "Direction of the sort",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortOrder",
+              "default": "desc",
+              "description": "Direction of the sort"
+            }
+          },
+          {
+            "description": "The page, from 1, of 12 published backtests",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "The page, from 1, of 12 published backtests",
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentsPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          }
+        },
+        "summary": "List Experiments",
+        "tags": [
+          "backtests"
         ]
       }
     },

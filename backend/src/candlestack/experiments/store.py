@@ -3,9 +3,13 @@ given session. Nothing here commits; the caller does, once a change is complete.
 
 A backtest shows the current name of its model while the model exists, else the name it had
 when the backtest ran: ``MODEL_NAME``, over a left join of ``models``.
+
+Experiments reads the published backtests of every account (``PUBLISHED``) with the display
+name of their author, joined from ``users`` (``accounts.User``, through the package root).
+It never reads the author's email, and shows the model's name of when the backtest ran.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Any, NamedTuple
 
@@ -14,6 +18,7 @@ from sqlalchemy import (
     DateTime,
     Select,
     String,
+    TableValuedAlias,
     UnaryExpression,
     cast,
     column,
@@ -23,6 +28,7 @@ from sqlalchemy import (
     literal,
     select,
     text,
+    true,
     update,
 )
 from sqlalchemy.dialects.postgresql import JSONB, aggregate_order_by, array_agg
@@ -32,7 +38,16 @@ from sqlalchemy.sql import visitors
 
 from candlestack.accounts import User
 from candlestack.experiments.models import Backtest
-from candlestack.experiments.schemas import BacktestShow, BacktestSort, BacktestStatus, SortOrder
+from candlestack.experiments.schemas import (
+    BacktestShow,
+    BacktestSort,
+    BacktestStatus,
+    ExperimentSort,
+    InstrumentMarket,
+    Representation,
+    SetupTimeframe,
+    SortOrder,
+)
 from candlestack.experiments.steps import Steps, failed
 from candlestack.ml import Model, ModelUsageStats
 
@@ -44,6 +59,9 @@ MODEL_NAME = func.coalesce(Model.name, Backtest.model_name)
 _FINISHED = Backtest.status == BacktestStatus.finished.value
 _FAILED = Backtest.status == BacktestStatus.failed.value
 _RUNNING = Backtest.status == BacktestStatus.running.value
+# Only a finished backtest can be published, and it stays finished; the status is checked
+# anyway, so nothing else can ever show in Experiments.
+PUBLISHED = Backtest.published_at.is_not(None) & _FINISHED
 
 # The value each sort of the list orders by; `when` is the order they were made in, as `number`.
 _SORT_KEYS: dict[BacktestSort, SortKey] = {
@@ -57,6 +75,15 @@ _SORT_KEYS: dict[BacktestSort, SortKey] = {
 }
 
 
+# The value each sort of Experiments orders by (`newest` aside).
+_EXPERIMENT_SORT_KEYS: dict[ExperimentSort, SortKey] = {
+    ExperimentSort.total_return: Backtest.total_return,
+    ExperimentSort.sharpe: Backtest.sharpe,
+    ExperimentSort.max_drawdown: Backtest.max_drawdown,
+    ExperimentSort.trades: Backtest.num_trades,
+}
+
+
 class Listed(NamedTuple):
     """A backtest and the name its model shows (``MODEL_NAME``)."""
 
@@ -64,10 +91,33 @@ class Listed(NamedTuple):
     model_name: str
 
 
+class Authored(NamedTuple):
+    """A backtest and its author's display name."""
+
+    backtest: Backtest
+    author: str
+
+
 class Counts(NamedTuple):
     all: int
     starred: int
     failed: int
+    public: int
+
+
+class ExperimentCounts(NamedTuple):
+    all: int
+    mine: int
+    people: int
+
+
+class Facets(NamedTuple):
+    """What the filters of Experiments offer: each value and its published backtests."""
+
+    markets: dict[str, int]
+    instruments: list[tuple[str, str, int]]
+    representations: dict[str, int]
+    timeframes: dict[str, int]
 
 
 class ModelCount(NamedTuple):
@@ -87,6 +137,23 @@ def escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _instruments(name: str = "instrument") -> TableValuedAlias:
+    """The backtest's instruments, one row each (``value``, the JSONB object)."""
+    return (
+        func.jsonb_array_elements(Backtest.instruments)
+        .table_valued(column("value", JSONB))
+        .alias(name)
+    )
+
+
+def _any_instrument(
+    matches: Callable[[ColumnElement[Any]], ColumnElement[bool]],
+) -> ColumnElement[bool]:
+    """Backtests with an instrument whose JSONB object meets ``matches``."""
+    instrument = _instruments()
+    return exists(select(literal(1)).select_from(instrument).where(matches(instrument.c.value)))
+
+
 def search(query: str) -> ColumnElement[bool] | None:
     """Backtests whose ``#number``, an instrument's symbol or the model's name contains `query`,
     in any case; None for a blank query, which every backtest matches."""
@@ -94,16 +161,7 @@ def search(query: str) -> ColumnElement[bool] | None:
     if not query:
         return None
     pattern = f"%{escape_like(query)}%"
-    instrument = (
-        func.jsonb_array_elements(Backtest.instruments)
-        .table_valued(column("value", JSONB))
-        .alias("instrument")
-    )
-    symbol = exists(
-        select(literal(1))
-        .select_from(instrument)
-        .where(instrument.c.value["symbol"].astext.ilike(pattern, escape="\\"))
-    )
+    symbol = _any_instrument(lambda value: value["symbol"].astext.ilike(pattern, escape="\\"))
     number = (literal("#") + cast(Backtest.number, String)).ilike(pattern, escape="\\")
     name = Backtest.name.ilike(pattern, escape="\\")
     return number | name | symbol | MODEL_NAME.ilike(pattern, escape="\\")
@@ -120,9 +178,77 @@ def filters(
         conditions.append(Backtest.starred.is_(True))
     elif show is BacktestShow.failed:
         conditions.append(_FAILED)
+    elif show is BacktestShow.public:
+        conditions.append(PUBLISHED)
     if model is not None:
         conditions.append(func.lower(MODEL_NAME) == func.lower(model))
     return conditions
+
+
+# --- Experiments --------------------------------------------------------------------------------
+
+
+def experiment_search(query: str) -> ColumnElement[bool] | None:
+    """Published backtests whose instrument's symbol, model's name (as it was when the backtest
+    ran) or author's display name contains `query`, in any case; None for a blank query."""
+    query = query.strip()
+    if not query:
+        return None
+    pattern = f"%{escape_like(query)}%"
+    symbol = _any_instrument(lambda value: value["symbol"].astext.ilike(pattern, escape="\\"))
+    model = Backtest.model_name.ilike(pattern, escape="\\")
+    return symbol | model | User.display_name.ilike(pattern, escape="\\")
+
+
+def experiment_scope(
+    viewer: str, *, query: str = "", mine: bool = False, author: str | None = None
+) -> list[ColumnElement[bool]]:
+    """The published backtests of the scope (everyone's, the viewer's or one author's) that
+    match the search: what the facets count, whatever the filters."""
+    conditions = [PUBLISHED]
+    if mine:
+        conditions.append(Backtest.user_id == viewer)
+    if author is not None:
+        conditions.append(Backtest.user_id == author)
+    if (matches := experiment_search(query)) is not None:
+        conditions.append(matches)
+    return conditions
+
+
+def experiment_filters(
+    *,
+    market: InstrumentMarket | None = None,
+    symbol: str | None = None,
+    representation: Representation | None = None,
+    timeframe: SetupTimeframe | None = None,
+) -> list[ColumnElement[bool]]:
+    """The conditions of the filters of Experiments (all of them must hold)."""
+    conditions: list[ColumnElement[bool]] = []
+    if market is not None:
+        name = market.value
+        conditions.append(_any_instrument(lambda value: value["market"].astext == name))
+    if symbol is not None:
+        wanted = symbol.strip().upper()
+        conditions.append(
+            _any_instrument(lambda value: func.upper(value["symbol"].astext) == wanted)
+        )
+    if representation is not None:
+        conditions.append(Backtest.representation == representation.value)
+    if timeframe is not None:
+        conditions.append(Backtest.setup["timeframe"].astext == timeframe.value)
+    return conditions
+
+
+def experiment_ordering(sort: ExperimentSort, order: SortOrder) -> list[UnaryExpression[Any]]:
+    """The ORDER BY of Experiments: `newest` is the newest published first whatever `order`
+    says; the others put those without the value last in both directions, ties newest
+    published first."""
+    newest = [Backtest.published_at.desc(), Backtest.id.desc()]
+    if sort is ExperimentSort.newest:
+        return newest
+    key = _EXPERIMENT_SORT_KEYS[sort]
+    direction = key.asc() if order is SortOrder.asc else key.desc()
+    return [direction.nulls_last(), *newest]
 
 
 def ordering(sort: BacktestSort, order: SortOrder) -> list[UnaryExpression[Any]]:
@@ -146,6 +272,10 @@ def _reads_models(conditions: Sequence[ColumnElement[bool]]) -> bool:
 
 def _listed() -> Select[Backtest, str]:
     return select(Backtest, MODEL_NAME).outerjoin(Model, Model.id == Backtest.model_id)
+
+
+def _authored() -> Select[Backtest, str]:
+    return select(Backtest, User.display_name).join(User, User.id == Backtest.user_id)
 
 
 async def model_usage(
@@ -185,13 +315,14 @@ class BacktestStore:
         )
 
     async def counts(self, user_id: str) -> Counts:
-        """The user's backtests in all, starred and failed."""
+        """The user's backtests in all, starred, failed and published."""
         row = (
             await self._db.execute(
                 select(
                     func.count(),
                     func.count().filter(Backtest.starred.is_(True)),
                     func.count().filter(_FAILED),
+                    func.count().filter(PUBLISHED),
                 ).where(Backtest.user_id == user_id)
             )
         ).one()
@@ -261,6 +392,95 @@ class BacktestStore:
         ).first()
         return Listed(*row) if row is not None else None
 
+    async def has_spec(self, backtest_id: str) -> bool:
+        """Whether the backtest was made in the app, so it has a result document (the seed
+        command's have none)."""
+        found = await self._db.scalar(
+            select(Backtest.spec.is_not(None)).where(Backtest.id == backtest_id)
+        )
+        return bool(found)
+
+    # --- What Experiments needs ------------------------------------------------------------------
+
+    async def experiments(
+        self,
+        conditions: Sequence[ColumnElement[bool]],
+        order_by: Sequence[UnaryExpression[Any]],
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[Authored]:
+        """The backtests of any account that meet the conditions (``experiment_scope``), with
+        their author's display name, in that order, from `offset` on."""
+        rows = await self._db.execute(
+            _authored().where(*conditions).order_by(*order_by).limit(limit).offset(offset)
+        )
+        return [Authored(backtest, author) for backtest, author in rows]
+
+    async def experiment_total(self, conditions: Sequence[ColumnElement[bool]]) -> int:
+        """The backtests of any account that meet the conditions."""
+        total = await self._db.scalar(
+            select(func.count())
+            .select_from(Backtest)
+            .join(User, User.id == Backtest.user_id)
+            .where(*conditions)
+        )
+        return int(total or 0)
+
+    async def experiment_counts(self, viewer: str) -> ExperimentCounts:
+        """Every published backtest, the viewer's and the accounts that published one."""
+        row = (
+            await self._db.execute(
+                select(
+                    func.count(),
+                    func.count().filter(Backtest.user_id == viewer),
+                    func.count(Backtest.user_id.distinct()),
+                ).where(PUBLISHED)
+            )
+        ).one()
+        return ExperimentCounts(*row)
+
+    async def facets(self, conditions: Sequence[ColumnElement[bool]]) -> Facets:
+        """The markets, instruments, representations and timeframes of the backtests that meet
+        the conditions, each with how many have it: the instruments the most published first,
+        then by symbol."""
+        # Named apart from the instruments a search looks through.
+        instrument = _instruments("each_instrument").lateral()
+        market = instrument.c.value["market"].astext
+        symbol = instrument.c.value["symbol"].astext
+        count = func.count(Backtest.id.distinct()).label("count")
+        timeframe = Backtest.setup["timeframe"].astext
+
+        def counted(*keys: SortKey, each: bool = False) -> Select[*tuple[Any, ...]]:
+            """The backtests of each value of ``keys``; ``each`` counts them over their
+            instruments, once each."""
+            query = select(*keys, count if each else func.count()).select_from(Backtest)
+            query = query.join(User, User.id == Backtest.user_id)
+            if each:
+                query = query.join(instrument, true())
+            return query.where(*conditions).group_by(*keys)
+
+        async def by_value(query: Select[*tuple[Any, ...]]) -> dict[str, int]:
+            return {row[0]: row[1] for row in await self._db.execute(query)}
+
+        instruments = await self._db.execute(
+            counted(market, symbol, each=True).order_by(count.desc(), symbol, market)
+        )
+        return Facets(
+            markets=await by_value(counted(market, each=True)),
+            instruments=[(row[0], row[1], row[2]) for row in instruments],
+            representations=await by_value(counted(Backtest.representation)),
+            timeframes=await by_value(counted(timeframe)),
+        )
+
+    # --- What the result document needs --------------------------------------------------------
+
+    async def author_name(self, user_id: str) -> str:
+        """The user's display name, what others see of the author of a backtest."""
+        return (
+            await self._db.execute(select(User.display_name).where(User.id == user_id))
+        ).scalar_one()
+
     # --- What starting and running a backtest needs --------------------------------------------
 
     def add(self, backtest: Backtest) -> None:
@@ -295,18 +515,22 @@ class BacktestStore:
         """The ID of the backtest's model; None once the model is deleted."""
         return await self._db.scalar(select(Backtest.model_id).where(Backtest.id == backtest_id))
 
-    async def with_run(self, user_id: str, backtest_id: str) -> Backtest | None:
-        """The user's backtest with what its run stored, its predictions aside."""
-        return await self._db.scalar(
-            select(Backtest)
-            .options(
-                undefer(Backtest.spec),
-                undefer(Backtest.report),
-                undefer(Backtest.stats),
-                undefer(Backtest.steps),
+    async def with_run(self, user_id: str, backtest_id: str) -> Authored | None:
+        """The user's backtest, or another account's while it is published, with what its run
+        stored, its predictions aside, and its author's display name; None for any other."""
+        row = (
+            await self._db.execute(
+                _authored()
+                .options(
+                    undefer(Backtest.spec),
+                    undefer(Backtest.report),
+                    undefer(Backtest.stats),
+                    undefer(Backtest.steps),
+                )
+                .where(Backtest.id == backtest_id, (Backtest.user_id == user_id) | PUBLISHED)
             )
-            .where(Backtest.id == backtest_id, Backtest.user_id == user_id)
-        )
+        ).first()
+        return Authored(*row) if row is not None else None
 
     async def run_of(self, backtest_id: str) -> Backtest | None:
         """The backtest with its setup, whoever it is of: what the run reads when it starts."""

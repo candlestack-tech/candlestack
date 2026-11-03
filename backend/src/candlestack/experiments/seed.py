@@ -316,6 +316,8 @@ def seed_backtest(
         total, buy_and_hold, sharpe, drawdown, trades, win_rate = run.results
         backtest.total_return = _fraction(total)
         backtest.buy_and_hold_return = _fraction(buy_and_hold)
+        # Their benchmark is buy and hold.
+        backtest.benchmark_return = backtest.buy_and_hold_return
         backtest.sharpe = sharpe
         backtest.max_drawdown = _fraction(drawdown)
         backtest.num_trades = trades

@@ -2,14 +2,15 @@ import type { BacktestsPage } from '@/api';
 import { moveInList, typeAhead } from '@/lib/listKeys';
 import type { BacktestsSearch } from '@/routes/backtestsSearch';
 
-// The rules of the Backtests page's Filters panel (mockups/app, btFilters): Show (all, starred or
-// failed) and Model, both in the URL, applied together.
+// The rules of the Backtests page's Filters panel (mockups/app, btFilters): Show (all, starred,
+// public or failed; public-experiments, B_SHOW) and Model, both in the URL, applied together.
 
 type Show = BacktestsSearch['show'];
 
 const SHOWS: readonly { show: Show; label: string; count: keyof BacktestsPage['counts'] }[] = [
   { show: undefined, label: 'All backtests', count: 'all' },
   { show: 'starred', label: 'Starred', count: 'starred' },
+  { show: 'public', label: 'Public only', count: 'public' },
   { show: 'failed', label: 'Failed', count: 'failed' },
 ];
 

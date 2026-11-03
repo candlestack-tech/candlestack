@@ -7,6 +7,7 @@ import { BUTTON_SIZES } from '@/components/buttonStyles';
 import { useViewerDateStyle } from '@/features/preferences';
 import { cn } from '@/lib/utils';
 
+import { AuthorAvatar } from '../experiments/AuthorAvatar';
 import { resultRows, setupRows, type CompareRow, type Mark } from './rows';
 import { removeFromCompare } from './selection';
 
@@ -20,8 +21,20 @@ const MARKS: Record<NonNullable<Mark>, string> = {
   worst: 'bg-[color-mix(in_srgb,var(--down)_14%,transparent)] font-semibold text-down',
 };
 
+// Whose a backtest is: the initials and the name (or "You"), in a column's head and the Author row.
+function Author({ name, text = name, className }: { name: string; text?: string; className: string }) {
+  return (
+    <span className={cn('flex min-w-0 items-center whitespace-nowrap', className)}>
+      <AuthorAvatar name={name} size="xs" />
+      <span className="truncate">{text}</span>
+    </span>
+  );
+}
+
+// A column's head: its colour, number and instrument, its name or model, and another account's
+// author by initials and name (public-experiments, .cmp-h .a).
 function Heading({ doc, color }: CompareColumn) {
-  const { id, number } = doc.backtest;
+  const { id, number, author } = doc.backtest;
   return (
     <th scope="col" className={cn(LINE, 'px-3.5 py-2 text-left align-top font-normal')}>
       <div className="flex items-start justify-between gap-2">
@@ -41,6 +54,7 @@ function Heading({ doc, color }: CompareColumn) {
           <div title={doc.backtest.name ?? doc.model.name} className="mt-0.5 truncate text-xs text-muted-foreground">
             {doc.backtest.name ?? doc.model.name}
           </div>
+          {!author.mine && <Author name={author.name} className="mt-[5px] gap-1.5 text-xs font-medium" />}
         </div>
         <button
           type="button"
@@ -81,14 +95,14 @@ function Rows({ title, rows, mono, spare, span }: RowsProps) {
           <th scope="row" className={cn(LINE, LABEL)}>
             {label}
           </th>
-          {cells.map(({ text, mark }, index) => (
+          {cells.map(({ text, mark, avatar }, index) => (
             <td
               // eslint-disable-next-line react/no-array-index-key -- the columns have no other key here
               key={index}
               title={text}
               className={cn(LINE, CELL, mono && 'font-mono', mark && MARKS[mark])}
             >
-              {text}
+              {avatar ? <Author name={avatar} text={text} className="gap-[7px]" /> : text}
             </td>
           ))}
           {spare && (

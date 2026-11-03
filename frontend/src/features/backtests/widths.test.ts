@@ -17,6 +17,11 @@ describe('the widths of the backtest columns (#315)', () => {
     expect(room(WIDTH.return)).toBeGreaterThanOrEqual(text.length * 7.8);
   });
 
+  // The star's 24 px (28 px less its margins), 6 px, "#999" in Geist Mono, 6 px and the 14 px globe.
+  it('leave room for the star, a number up to #999 and the globe of a public backtest', () => {
+    expect(room(WIDTH.backtest)).toBeGreaterThanOrEqual(24 + 6 + '#999'.length * 7.8 + 6 + 14);
+  });
+
   // The longest When of every date and time format: a day of an earlier year in the default
   // format, with a two-digit hour on the 12-hour clock. 139.8 px in Geist at 13 px, measured in
   // Chrome over every month. The When cell wraps, so it takes two lines of the column; this year's

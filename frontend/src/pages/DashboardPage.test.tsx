@@ -33,7 +33,7 @@ const TEN = backtest({
   created_at: '2026-10-12T23:44:00Z',
 });
 const FULL = {
-  counts: { all: 3, starred: 2, failed: 1 },
+  counts: { all: 3, starred: 2, failed: 1, public: 0 },
   last: [TWELVE, ELEVEN, TEN],
   best: { sharpe: [TWELVE, TEN], total_return: [TEN, TWELVE], max_drawdown: [TEN, TWELVE], win_rate: [TEN, TWELVE] },
   starred: { backtests: [TWELVE, ELEVEN], total: 2 },

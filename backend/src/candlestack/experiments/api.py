@@ -1,6 +1,7 @@
 """HTTP API of the experiments module: the signed-in user's backtests under
-``/api/v1/backtests`` (the list, starting one, its result document and its download) and the
-Dashboard under ``/api/v1/dashboard``.
+``/api/v1/backtests`` (the list, starting one, its result document and its download), the
+backtests every account published under ``/api/v1/experiments`` and the Dashboard under
+``/api/v1/dashboard``.
 """
 
 from collections.abc import Iterator
@@ -26,6 +27,7 @@ from candlestack.experiments.errors import (
     NoDocument,
 )
 from candlestack.experiments.schemas import (
+    EXPERIMENTS_PAGE_SIZE,
     MODEL_NAME_MAX,
     PAGE_SIZE,
     QUERY_MAX,
@@ -35,9 +37,14 @@ from candlestack.experiments.schemas import (
     BacktestsPage,
     BacktestUpdate,
     DashboardOut,
+    ExperimentSort,
+    ExperimentsPage,
+    InstrumentMarket,
+    Representation,
+    SetupTimeframe,
     SortOrder,
 )
-from candlestack.experiments.service import ListQuery
+from candlestack.experiments.service import ExperimentsQuery, ListQuery
 
 router = APIRouter(tags=["backtests"])
 
@@ -107,6 +114,11 @@ async def list_backtests(
             403, "The request does not come from the app's own pages (`cross-origin-request`)."
         ),
         **problem_doc(404, "The user has no backtest with this ID (`not-found`)."),
+        **problem_doc(
+            409,
+            "Publishing a backtest that is running or failed (`backtest-not-finished`), or test "
+            "data without a result document (`no-document`).",
+        ),
     },
     dependencies=[Depends(require_same_origin)],
 )
@@ -117,7 +129,9 @@ async def update_backtest(
     service: BacktestsServiceDep,
     response: Response,
 ) -> BacktestOut:
-    """Stars, unstars or renames the backtest; a field left out stays as it is."""
+    """Stars, unstars, renames, publishes or unpublishes the user's backtest; a field left out
+    stays as it is. Unpublishing takes it out of Experiments and out of other people's
+    Compare."""
     response.headers.update(NO_STORE)
     try:
         return await service.update(user.id, backtest_id, body)
@@ -125,6 +139,94 @@ async def update_backtest(
         raise ProblemError(
             404, "not-found", "Not Found", "You have no backtest with this ID."
         ) from None
+    except NoDocument:
+        raise ProblemError(
+            409,
+            "no-document",
+            "No result document",
+            "This backtest is test data from before backtests ran in the app, so it cannot be "
+            "published.",
+        ) from None
+    except BacktestNotFinished:
+        raise ProblemError(
+            409,
+            "backtest-not-finished",
+            "Backtest not finished",
+            "Only a finished backtest can be published.",
+        ) from None
+
+
+def experiments_query(  # noqa: PLR0913 (one argument per query parameter)
+    *,
+    q: Annotated[
+        str,
+        Query(
+            max_length=QUERY_MAX,
+            description=(
+                "Search: part of an instrument's symbol, of the model's name or of the author's "
+                "name, in any case"
+            ),
+            examples=["nvda"],
+        ),
+    ] = "",
+    mine: Annotated[
+        bool, Query(description="Only the backtests the signed-in user published")
+    ] = False,
+    author: Annotated[
+        str | None,
+        Query(
+            max_length=32,
+            description="Only the backtests of this account (`author.id`)",
+            examples=["usr_7f3k2m9qx4"],
+        ),
+    ] = None,
+    market: Annotated[InstrumentMarket | None, Query(description="Only this market")] = None,
+    symbol: Annotated[
+        str | None,
+        Query(max_length=32, description="Only this instrument's symbol, in any case"),
+    ] = None,
+    representation: Annotated[
+        Representation | None, Query(description="Only models that read this")
+    ] = None,
+    timeframe: Annotated[SetupTimeframe | None, Query(description="Only this timeframe")] = None,
+    sort: Annotated[ExperimentSort, Query(description="What to sort by")] = ExperimentSort.newest,
+    order: Annotated[SortOrder, Query(description="Direction of the sort")] = SortOrder.desc,
+    page: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=PAGE_MAX,
+            description=f"The page, from 1, of {EXPERIMENTS_PAGE_SIZE} published backtests",
+        ),
+    ] = 1,
+) -> ExperimentsQuery:
+    return ExperimentsQuery(
+        query=q,
+        mine=mine,
+        author=author,
+        market=market,
+        symbol=symbol,
+        representation=representation,
+        timeframe=timeframe,
+        sort=sort,
+        order=order,
+        page=page,
+    )
+
+
+@router.get("/api/v1/experiments", responses=_NOT_SIGNED_IN)
+async def list_experiments(
+    query: Annotated[ExperimentsQuery, Depends(experiments_query)],
+    user: CurrentUserDep,
+    service: BacktestsServiceDep,
+    response: Response,
+) -> ExperimentsPage:
+    """A page of Experiments: the backtests that accounts of the beta published, which every
+    signed-in account can see, that match the search and the filters, with the counts and what
+    the filters offer. Others see a published backtest's setup, results, charts, trades and what
+    its model reads, never the model file. A page past the last one is empty."""
+    response.headers.update(NO_STORE)
+    return await service.experiments(user.id, query)
 
 
 @router.get("/api/v1/dashboard", responses=_NOT_SIGNED_IN)
@@ -151,7 +253,11 @@ _SOURCE_ERRORS = {
         "worker that runs the models (`backtests-unavailable`).",
     ),
 }
-_NOT_FOUND = problem_doc(404, "The user has no backtest with this ID (`not-found`).")
+_NOT_FOUND = problem_doc(
+    404,
+    "Neither the user's backtest nor a published one has this ID (`not-found`): a backtest "
+    "its author unpublished is not found.",
+)
 
 
 def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911 (one per error)
@@ -299,9 +405,10 @@ async def start_backtest(
 async def get_backtest(
     backtest_id: BacktestId, user: CurrentUserDep, runs: BacktestRunsDep, response: Response
 ) -> Response:
-    """The result document of the backtest, whatever its status (`results` is null until it
-    finished), in the light view: a series of more than 10,000 rows has one point per UTC day,
-    and only the newest 10,000 trades are in it (`trades.complete` false)."""
+    """The result document of the user's backtest, whatever its status (`results` is null until
+    it finished), or of another account's while it is published (`backtest.author`, read only,
+    `model.id` null), in the light view: a series of more than 10,000 rows has one point per
+    UTC day, and only the newest 10,000 trades are in it (`trades.complete` false)."""
     with _problems():
         _, content = await runs.document(user.id, backtest_id, light=True)
     return _json(content, response)
@@ -324,8 +431,8 @@ async def get_backtest(
 async def download_backtest(
     backtest_id: BacktestId, user: CurrentUserDep, runs: BacktestRunsDep, response: Response
 ) -> Response:
-    """The result document of a finished backtest with every row of its series and every
-    trade, as a file to save."""
+    """The result document of a finished backtest, the user's or a published one of another
+    account, with every row of its series and every trade, as a file to save."""
     with _problems():
         number, content = await runs.document(user.id, backtest_id, light=False)
     disposition = f'attachment; filename="candlestack-backtest-{number}.json"'

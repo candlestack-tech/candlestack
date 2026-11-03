@@ -7,6 +7,7 @@ import { addToCompare, clearCompare } from '@/features/backtests/compare/selecti
 import { valueAt } from '@/features/backtests/compare/chartLines';
 import { ARSEN, backtestDocument, backtestsAnswer, problem, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
+import { othersDocument } from '@/test/experiments';
 import { charts } from '@/test/lightweightCharts';
 
 vi.mock('lightweight-charts', () => import('@/test/lightweightCharts'));
@@ -44,7 +45,7 @@ const MIDDLE = doc(10);
 const answer = (body: unknown) => ({ status: 200, body });
 const LISTS = {
   ...sessionWithPreferences(ARSEN),
-  ...backtestsAnswer({ backtests: [], counts: { all: 0, starred: 0, failed: 0 }, models: [] }),
+  ...backtestsAnswer({ backtests: [], counts: { all: 0, starred: 0, failed: 0, public: 0 }, models: [] }),
 };
 
 const choose = (...docs: ReturnType<typeof doc>[]) => {
@@ -183,6 +184,51 @@ describe('the compare page', () => {
     await renderApp('/backtests/compare');
     await screen.findByRole('rowheader', { name: 'Total return' });
     expect(screen.queryByRole('complementary', { name: 'Compare' })).toBeNull();
+  });
+});
+
+describe('comparing with another account’s backtests', () => {
+  const theirs = () => {
+    const doc = othersDocument();
+    addToCompare({ id: doc.backtest.id, number: doc.backtest.number, symbol: 'AAPL', author: 'Tymur Tkach' });
+    return { [`GET /api/v1/backtests/${doc.backtest.id}`]: answer(doc) };
+  };
+
+  it('counts whose they are, and names the author in the head, the legends and the Author row', async () => {
+    stubApi({ ...LISTS, ...choose(BETTER), ...theirs() });
+    await renderApp('/backtests/compare');
+    expect(await screen.findByText('2 of 4 backtests · 1 yours, 1 from Experiments')).toBeDefined();
+    await screen.findByRole('rowheader', { name: 'Author' });
+    expect(row('Author').map((cell) => cell.textContent)).toEqual(['ALYou', 'TTTymur Tkach', 'No backtest']);
+    const head = screen.getByRole('link', { name: '#9' }).closest('th')!;
+    expect(within(head).getByText('Tymur Tkach').previousElementSibling?.textContent).toBe('TT');
+    const legend = within(screen.getByRole('region', { name: 'Equity' }));
+    expect(legend.getByText('#12').textContent).toBe('#12');
+    expect(legend.getByTitle('Tymur Tkach').parentElement?.textContent).toBe('TT#9');
+  });
+
+  it('has no Author row with only the user’s own', async () => {
+    stubApi({ ...LISTS, ...choose(BETTER, WORSE) });
+    await renderApp('/backtests/compare');
+    await screen.findByRole('rowheader', { name: 'Total return' });
+    expect(screen.queryByRole('rowheader', { name: 'Author' })).toBeNull();
+    expect(screen.getByText('2 of 4 backtests')).toBeDefined();
+  });
+
+  it('says which one its author unpublished until it is dismissed', async () => {
+    const doc = othersDocument();
+    addToCompare({ id: doc.backtest.id, number: 9, symbol: 'AAPL', author: 'Tymur Tkach' });
+    stubApi({
+      ...LISTS,
+      ...choose(BETTER, WORSE),
+      [`GET /api/v1/backtests/${doc.backtest.id}`]: problem(404, 'not-found', 'Not found.'),
+    });
+    await renderApp('/backtests/compare');
+    const note = (await screen.findByText(/unpublished #9, so it left your Compare\.$/)).parentElement!;
+    expect(note.textContent).toBe('TTTymur Tkach unpublished #9, so it left your Compare.');
+    expect(screen.getByText('2 of 4 backtests')).toBeDefined();
+    await userEvent.click(within(note).getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByText(/unpublished #9/)).toBeNull();
   });
 });
 
