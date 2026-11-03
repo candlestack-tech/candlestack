@@ -23,7 +23,7 @@ type Column = { label: string; sort?: ExperimentsColumn | 'newest'; width?: stri
 
 const COLUMNS: readonly Column[] = [
   { label: 'Backtest', width: 'w-[72px]' },
-  { label: 'Author', width: 'w-[168px] max-[640px]:w-[52px]' },
+  { label: 'Author', width: 'w-[152px] max-[640px]:w-[52px]' },
   { label: 'Instrument', width: WIDTH.instruments },
   { label: 'Model', hide: 'max-[620px]:hidden' },
   { label: 'Return', sort: 'return', width: WIDTH.return, number: true },
@@ -84,12 +84,13 @@ function AuthorCell({ author }: { author: Experiment['author'] }) {
   );
 }
 
-// The model by its mark (not a link: the file stays with its author), what it reads under it.
+// The model by its mark (not a link: the file stays with its author), on up to two lines as in
+// the Backtests table, what it reads under it.
 function ModelCell({ experiment }: { experiment: Experiment }) {
   const reads = readsText(experiment);
   return (
     <span title={experiment.model.name} className="flex min-w-0 flex-col text-[12px]">
-      <ModelName name={experiment.model.name} framework={experiment.model.framework} />
+      <ModelName name={experiment.model.name} framework={experiment.model.framework} wrap />
       <span title={reads} className="truncate font-mono text-[11.5px] text-muted-foreground">
         {reads}
       </span>
