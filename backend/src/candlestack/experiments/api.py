@@ -24,6 +24,7 @@ from candlestack.experiments.errors import (
     InvalidBacktest,
     ModelNeedsSetup,
     ModelNotFound,
+    NameTaken,
     NoDocument,
 )
 from candlestack.experiments.schemas import (
@@ -140,6 +141,15 @@ async def update_backtest(
     except BacktestNotFound:
         raise ProblemError(
             404, "not-found", "Not Found", "You have no backtest with this ID."
+        ) from None
+    except NameTaken as taken:
+        raise ProblemError(
+            409,
+            "name-taken",
+            "Name taken",
+            f"You already have a backtest called {taken.name} (#{taken.number}). Pick another "
+            "name.",
+            headers=NO_STORE,  # it names a backtest of the user
         ) from None
     except NoDocument:
         raise ProblemError(

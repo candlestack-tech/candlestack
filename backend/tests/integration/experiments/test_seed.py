@@ -9,6 +9,7 @@ import pytest
 from candlestack.core import Database, Settings
 from candlestack.experiments import seed as seed_module
 from candlestack.experiments.errors import UnknownUser
+from candlestack.experiments.names import ADJECTIVES, NOUNS
 from candlestack.experiments.seed import main, seed
 
 pytestmark = pytest.mark.integration
@@ -80,6 +81,22 @@ def test_a_second_run_replaces_only_what_the_seed_added(ada, sql, run_seed) -> N
     ]
     assert (17, False) in [(number, seeded) for _, number, seeded in rows]
     assert first_ids.isdisjoint(row[0] for row in rows)
+
+
+def test_each_seeded_backtest_gets_a_name_the_account_has_not(ada, sql, run_seed) -> None:
+    ada.backtest(1, generated_name="Silent Orion", name="Bright Vega")
+    run_seed(ada.email)
+    first = {row[0] for row in sql("SELECT generated_name FROM backtests WHERE seeded")}
+
+    run_seed(ada.email)
+
+    names = [row[0].lower() for row in sql("SELECT generated_name FROM backtests WHERE seeded")]
+    assert len(set(names)) == len(names) == 15
+    assert not {"silent orion", "bright vega"} & set(names)
+    assert len(first) == 15
+    for name in names:
+        adjective, noun = name.title().split(" ")
+        assert (adjective in ADJECTIVES, noun in NOUNS) == (True, True)
 
 
 def test_an_unknown_email_is_refused(ada, sql, run_seed) -> None:

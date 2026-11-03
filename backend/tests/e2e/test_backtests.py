@@ -49,6 +49,16 @@ def test_experiments(http: httpx.Client) -> None:
     }
 
 
+@pytest.mark.parametrize("path", ["/api/v1/backtests", "/api/v1/experiments"])
+def test_the_lists_search_and_sort_by_name(http: httpx.Client, path: str) -> None:
+    http.post("/api/v1/auth/dev", headers=ORIGIN)
+
+    response = http.get(path, params={"q": "silent orion", "sort": "name", "order": "asc"})
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+
+
 def test_the_dashboard(http: httpx.Client) -> None:
     http.post("/api/v1/auth/dev", headers=ORIGIN)
 
@@ -60,8 +70,8 @@ def test_the_dashboard(http: httpx.Client) -> None:
     assert response.json()["experiments"] == {"backtests": [], "total": 0}
 
 
-@pytest.mark.parametrize("change", [{"starred": True}, {"public": True}])
-def test_changing_an_unknown_backtest(http: httpx.Client, change: dict[str, bool]) -> None:
+@pytest.mark.parametrize("change", [{"starred": True}, {"public": True}, {"name": "Silent Orion"}])
+def test_changing_an_unknown_backtest(http: httpx.Client, change: dict[str, object]) -> None:
     http.post("/api/v1/auth/dev", headers=ORIGIN)
 
     response = http.patch("/api/v1/backtests/bt_zzzzzzzzzz", json=change, headers=ORIGIN)

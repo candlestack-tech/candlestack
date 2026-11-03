@@ -70,6 +70,8 @@ def test_search_looks_at_the_number_the_symbols_and_the_models_name() -> None:
     assert "('#' || CAST(backtests.number AS VARCHAR)) ILIKE '%%Aapl%%' ESCAPE" in sql
     assert "jsonb_array_elements(backtests.instruments)" in sql
     assert "coalesce(models.name, backtests.model_name) ILIKE '%%Aapl%%'" in sql
+    # The name it shows: the user's own, else the generated one.
+    assert "coalesce(backtests.name, backtests.generated_name) ILIKE '%%Aapl%%'" in sql
 
 
 def test_the_filters_add_up() -> None:
@@ -111,6 +113,16 @@ def test_the_default_sort_is_newest_first_in_any_order(order: SortOrder) -> None
             BacktestSort.model,
             SortOrder.asc,
             "lower(coalesce(models.name, backtests.model_name)) ASC NULLS LAST",
+        ),
+        (
+            BacktestSort.name,
+            SortOrder.asc,
+            "lower(coalesce(backtests.name, backtests.generated_name)) ASC NULLS LAST",
+        ),
+        (
+            BacktestSort.name,
+            SortOrder.desc,
+            "lower(coalesce(backtests.name, backtests.generated_name)) DESC NULLS LAST",
         ),
     ],
 )
@@ -174,9 +186,10 @@ def test_a_blank_search_of_experiments_matches_everything(query: str) -> None:
     assert len(experiment_scope("usr_adaaaaaaaa", query=query)) == 1
 
 
-def test_the_search_of_experiments_looks_at_symbols_the_model_and_the_author() -> None:
+def test_the_search_of_experiments_looks_at_the_name_symbols_the_model_and_the_author() -> None:
     sql = experiments_where_sql(*experiment_scope("usr_adaaaaaaaa", query=" Nv_ "))
 
+    assert "coalesce(backtests.name, backtests.generated_name) ILIKE '%%Nv\\_%%'" in sql
     assert "jsonb_array_elements(backtests.instruments)" in sql
     assert "->> 'symbol') ILIKE '%%Nv\\_%%' ESCAPE" in sql
     # The name the model had when the backtest ran, never its current one.
@@ -221,6 +234,11 @@ def test_experiments_are_newest_published_first_in_any_order(order: SortOrder) -
         (ExperimentSort.sharpe, SortOrder.asc, "backtests.sharpe ASC NULLS LAST"),
         (ExperimentSort.max_drawdown, SortOrder.desc, "backtests.max_drawdown DESC NULLS LAST"),
         (ExperimentSort.trades, SortOrder.asc, "backtests.num_trades ASC NULLS LAST"),
+        (
+            ExperimentSort.name,
+            SortOrder.asc,
+            "lower(coalesce(backtests.name, backtests.generated_name)) ASC NULLS LAST",
+        ),
     ],
 )
 def test_a_sort_of_experiments_puts_nulls_last_and_ties_newest_published_first(

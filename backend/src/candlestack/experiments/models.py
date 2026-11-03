@@ -18,6 +18,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     false,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -60,8 +61,11 @@ class Backtest(Base):
     # [{"market": "stock", "symbol": "AAPL"}, ...] in the order chosen.
     instruments: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
     representation: Mapped[str] = mapped_column(String(16))
-    # What the user calls it, beside its number; null until they rename it.
+    # The user's own name; null until they rename it, and again when they go back to the
+    # generated one, which shows while it is null (``shown_name``).
     name: Mapped[str | None] = mapped_column(String(BACKTEST_NAME_MAX))
+    # The name it got when it was created (``names.generated_name``), never changed after.
+    generated_name: Mapped[str] = mapped_column(String(BACKTEST_NAME_MAX))
     # The model goes, the backtest stays: then its name and framework of when it ran are shown.
     model_id: Mapped[str | None] = mapped_column(
         ForeignKey("models.id", ondelete="SET NULL"), index=True
@@ -122,6 +126,11 @@ class Backtest(Base):
     # null while it is not published.
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    @property
+    def shown_name(self) -> str:
+        """What the backtest is called: the user's own name, else the generated one."""
+        return self.generated_name if self.name is None else self.name
+
     def set_equity(self, strategy: Sequence[float], benchmark: Sequence[float]) -> None:
         """Keeps the equity series of the strategy and of its benchmark (cumulative returns as
         fractions at the same evenly spaced times); what writes a backtest sets it this way.
@@ -136,6 +145,15 @@ class Backtest(Base):
 
 # The list and the Dashboard read a user's backtests newest first.
 Index("ix_backtests_user_id_created_at", Backtest.user_id, Backtest.created_at)
+# Two backtests of an account never get one generated name, in any case. A custom name must
+# also differ from the other backtests' generated names, which no index of one column compares,
+# so renames are checked under the lock of the user's backtests (``BacktestStore.lock_user``).
+Index(
+    "uq_backtests_user_id_generated_name",
+    Backtest.user_id,
+    func.lower(Backtest.generated_name),
+    unique=True,
+)
 # Experiments and the Dashboard read the published backtests of everyone, newest first: a few
 # among all the rows.
 Index(

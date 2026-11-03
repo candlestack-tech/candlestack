@@ -100,7 +100,7 @@ def test_a_star_needs_the_apps_own_origin(client: TestClient) -> None:
     [
         {"q": "a" * 101},
         {"show": "running"},
-        {"sort": "name"},
+        {"sort": "title"},
         {"order": "up"},
         {"page": "0"},
         {"page": "100001"},

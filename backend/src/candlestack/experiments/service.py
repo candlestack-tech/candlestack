@@ -7,7 +7,12 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from math import ceil
 
-from candlestack.experiments.errors import BacktestNotFinished, BacktestNotFound, NoDocument
+from candlestack.experiments.errors import (
+    BacktestNotFinished,
+    BacktestNotFound,
+    NameTaken,
+    NoDocument,
+)
 from candlestack.experiments.models import Backtest
 from candlestack.experiments.schemas import (
     DASHBOARD_EXPERIMENTS,
@@ -102,7 +107,8 @@ def backtest_out(listed: Listed) -> BacktestOut:
     backtest = listed.backtest
     return BacktestOut(
         id=backtest.id,
-        name=backtest.name,
+        name=backtest.shown_name,
+        generated_name=backtest.generated_name,
         number=backtest.number,
         status=BacktestStatus(backtest.status),
         seeded=backtest.seeded,
@@ -136,7 +142,7 @@ def experiment_out(authored: Authored, viewer: str) -> ExperimentOut:
     assert backtest.published_at is not None
     return ExperimentOut(
         id=backtest.id,
-        name=backtest.name,
+        name=backtest.shown_name,
         number=backtest.number,
         instruments=[BacktestInstrument.model_validate(item) for item in backtest.instruments],
         representation=Representation(backtest.representation),
@@ -223,33 +229,68 @@ class BacktestsService:
 
     async def update(self, user_id: str, backtest_id: str, changes: BacktestUpdate) -> BacktestOut:
         """Stars, unstars, renames, publishes or unpublishes the user's backtest: the fields of
-        ``changes`` that were sent; a name of null takes the name away. Publishing one that is
-        published already keeps when it was published; publishing it again after it was taken
-        back makes it new in Experiments. Nothing changes when a field cannot.
+        ``changes`` that were sent. A name of null, or the backtest's generated name in any
+        case, goes back to the generated name. Publishing one that is published already keeps
+        when it was published; publishing it again after it was taken back makes it new in
+        Experiments. Nothing changes when a field cannot.
 
         Raises:
             BacktestNotFound: The user has no backtest with the ID.
+            NameTaken: Another backtest of the user has the name, as its own or its generated
+                name, in any case.
             NoDocument: Publishing test data, which has no result document.
             BacktestNotFinished: Publishing a backtest that is running or failed.
         """
+        renamed = "name" in changes.model_fields_set
+        if renamed:
+            # No other rename or new backtest takes the name between the check and the commit.
+            await self._store.lock_user(user_id)
         listed = await self._store.backtest(user_id, backtest_id)
         if listed is None:
             raise BacktestNotFound
         backtest = listed.backtest
-        if changes.public and backtest.published_at is None:
+        name = backtest.name
+        if renamed:
+            name = await self._custom_name(user_id, backtest, changes.name)
+        await self._publish(backtest, public=changes.public)
+        if changes.starred is not None:
+            backtest.starred = changes.starred
+        backtest.name = name
+        await self._store.commit()
+        return backtest_out(listed)
+
+    async def _publish(self, backtest: Backtest, *, public: bool | None) -> None:
+        """Publishes the backtest, or takes it back, as `public` asks; null leaves it as it is.
+
+        Raises:
+            NoDocument: Publishing test data, which has no result document.
+            BacktestNotFinished: Publishing a backtest that is running or failed.
+        """
+        if public and backtest.published_at is None:
             if not await self._store.has_spec(backtest.id):
                 raise NoDocument
             if backtest.status != BacktestStatus.finished.value:
                 raise BacktestNotFinished(backtest.status)
             backtest.published_at = datetime.now(UTC)
-        elif changes.public is False:
+        elif public is False:
             backtest.published_at = None
-        if changes.starred is not None:
-            backtest.starred = changes.starred
-        if "name" in changes.model_fields_set:
-            backtest.name = changes.name
-        await self._store.commit()
-        return backtest_out(listed)
+
+    async def _custom_name(self, user_id: str, backtest: Backtest, name: str | None) -> str | None:
+        """What to store as the backtest's own name for a rename to `name`: null to go back to
+        the generated name, for null and for the generated name in any case.
+
+        Raises:
+            NameTaken: Another backtest of the user has `name`, the oldest of them named.
+        """
+        if name is None:
+            return None
+        namesakes = await self._store.namesakes(user_id, name)
+        for namesake in namesakes:
+            if namesake.id != backtest.id:
+                raise NameTaken(namesake.name, namesake.number)
+        if any(namesake.generated for namesake in namesakes):
+            return None
+        return name
 
     async def experiments(self, user_id: str, query: ExperimentsQuery) -> ExperimentsPage:
         """A page of the published backtests that match the query, with the counts and what

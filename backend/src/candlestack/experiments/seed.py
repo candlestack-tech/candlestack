@@ -6,7 +6,8 @@ New accounts start empty: only the tech lead's account gets this test data, on s
 local. The command refuses to run with ``APP_ENV`` ``prod``. It marks what it adds
 (``backtests.seeded``) and a second run replaces only that, never the user's other
 backtests, whose numbers it continues after. A backtest uses the user's model of its model's
-name if there is one, else it keeps only the name, as a backtest of a deleted model does.
+name if there is one, else it keeps only the name, as a backtest of a deleted model does. Each
+gets a generated name, as a backtest made in the app does.
 """
 
 import argparse
@@ -22,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from candlestack.core import Database, get_settings
 from candlestack.experiments.errors import UnknownUser
 from candlestack.experiments.models import Backtest, new_backtest_id
+from candlestack.experiments.names import generated_name
 from candlestack.experiments.schemas import (
     EQUITY_POINTS,
     BacktestSetupIn,
@@ -363,6 +365,11 @@ async def seed(db: AsyncSession, email: str, now: datetime) -> list[Backtest]:
         models=await store.models(user_id),
         now=now,
     )
+    # Under the lock, so what the user's other backtests are called is all that is taken.
+    taken = await store.names(user_id)
+    for backtest in backtests:
+        backtest.generated_name = generated_name(taken)
+        taken.add(backtest.generated_name.lower())
     store.add_all(backtests)
     await store.commit()
     return backtests

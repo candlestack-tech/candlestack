@@ -52,6 +52,16 @@ class BacktestNotFinished(Exception):
         self.status = status
 
 
+class NameTaken(Exception):
+    """Another backtest of the user has the name, as its own or its generated name, in any
+    case; ``name`` is what that backtest shows and ``number`` its number."""
+
+    def __init__(self, name: str, number: int) -> None:
+        super().__init__(name, number)
+        self.name = name
+        self.number = number
+
+
 class NoDocument(Exception):
     """The backtest was not made in the app (the seed command's test data): it has no result
     document."""

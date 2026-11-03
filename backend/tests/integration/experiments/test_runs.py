@@ -24,8 +24,11 @@ from candlestack.data import (
     WarmUpOutOfRange,
 )
 from candlestack.engine import ENGINE_VERSION
+from candlestack.experiments import names as names_module
 from candlestack.experiments import runner as runner_module
+from candlestack.experiments import store as store_module
 from candlestack.experiments.assembly import NothingToTest
+from candlestack.experiments.names import ADJECTIVES, NOUNS
 from candlestack.jobs import JobClient, JobFiles, JobQueue
 from candlestack.main import create_app
 
@@ -586,6 +589,76 @@ def test_two_starts_at_once_run_one_backtest(ada, market) -> None:
     assert ada.sql("SELECT count(*) FROM backtests") == [(1,)]
 
 
+# --- The name it gets --------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("market")
+def test_a_new_backtest_gets_a_name_of_the_word_lists(ada, sql) -> None:
+    started = ada.start(body(ada.runnable_model())).json()["backtest"]
+
+    adjective, noun = started["name"].split(" ")
+    assert (adjective in ADJECTIVES, noun in NOUNS) == (True, True)
+    assert started["generated_name"] == started["name"]
+    assert sql("SELECT name, generated_name FROM backtests") == [(None, started["name"])]
+    (listed,) = ada.backtests().json()["backtests"]
+    assert (listed["name"], listed["generated_name"]) == (started["name"], started["name"])
+
+
+@pytest.mark.usefixtures("market")
+def test_a_new_name_is_none_the_account_has(ada, bob, monkeypatch) -> None:
+    ada.backtest(1, generated_name="Silent Orion", name="Half Size", status="failed")
+    bob.backtest(1, generated_name="Bright Vega", status="failed")
+    seen: list[set[str]] = []
+
+    def generated_name(taken: set[str]) -> str:
+        seen.append(set(taken))
+        return names_module.generated_name(taken)
+
+    monkeypatch.setattr(store_module, "generated_name", generated_name)
+
+    started = ada.start(body(ada.runnable_model())).json()["backtest"]
+
+    # The account's names, its own and generated, lowercased; never another account's.
+    assert seen == [{"silent orion", "half size"}]
+    assert started["number"] == 2
+    assert started["name"].lower() not in seen[0]
+
+
+@pytest.mark.usefixtures("market")
+def test_a_name_the_index_refuses_is_drawn_again(ada, sql, monkeypatch) -> None:
+    ada.backtest(1, generated_name="Silent Orion", status="failed")
+    # As a writer without the lock could: a name the account has, then a free one.
+    drawn = iter(["SILENT ORION", "Bright Vega"])
+    monkeypatch.setattr(store_module, "generated_name", lambda _taken: next(drawn))
+
+    started = ada.start(body(ada.runnable_model()))
+
+    assert started.status_code == 201
+    assert started.json()["backtest"]["name"] == "Bright Vega"
+    assert sql("SELECT number, generated_name FROM backtests ORDER BY number") == [
+        (1, "Silent Orion"),
+        (2, "Bright Vega"),
+    ]
+
+
+@pytest.mark.usefixtures("market")
+def test_no_backtest_is_stored_when_every_draw_is_refused(ada, sql, monkeypatch) -> None:
+    ada.backtest(1, generated_name="Silent Orion", status="failed")
+    drawn: list[set[str]] = []
+
+    def taken_name(taken: set[str]) -> str:
+        drawn.append(taken)
+        return "Silent Orion"
+
+    monkeypatch.setattr(store_module, "generated_name", taken_name)
+
+    started = ada.start(body(ada.runnable_model()))
+
+    assert started.status_code == 500
+    assert len(drawn) == store_module.NAME_ATTEMPTS
+    assert sql("SELECT count(*) FROM backtests") == [(1,)]
+
+
 @pytest.mark.usefixtures("market")
 def test_a_model_deleted_while_the_start_checks_it_is_not_found(ada, market) -> None:
     market.slow = 0.5
@@ -834,6 +907,22 @@ def test_a_published_backtest_is_shown_to_others_read_only(ada, bob) -> None:
     assert ada.document(backtest_id).status_code == 404
     assert ada.download(backtest_id).status_code == 404
     assert bob.document(backtest_id).status_code == 200
+
+
+@pytest.mark.usefixtures("worker")
+def test_the_document_has_the_name_its_author_gives_it(ada, bob) -> None:
+    backtest_id = bob.start(body(bob.runnable_model())).json()["backtest"]["id"]
+    generated = bob.ended(backtest_id)["backtest"]["generated_name"]
+    bob.rename(backtest_id, "half size")
+    bob.publish(backtest_id)
+
+    own = bob.document(backtest_id).json()["backtest"]
+    shown = ada.document(backtest_id).json()["backtest"]
+    download = ada.download(backtest_id).json()["backtest"]
+
+    assert (own["name"], own["generated_name"]) == ("half size", generated)
+    assert (shown["name"], shown["generated_name"]) == ("half size", generated)
+    assert (download["name"], download["generated_name"]) == ("half size", generated)
 
 
 @pytest.mark.usefixtures("market")
