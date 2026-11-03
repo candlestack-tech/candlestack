@@ -32,12 +32,14 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects.postgresql import JSONB, aggregate_order_by, array_agg
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, undefer
 from sqlalchemy.sql import visitors
 
 from candlestack.accounts import User
 from candlestack.experiments.models import Backtest
+from candlestack.experiments.names import generated_name
 from candlestack.experiments.schemas import (
     BacktestShow,
     BacktestSort,
@@ -55,6 +57,11 @@ from candlestack.ml import Model, ModelUsageStats
 type SortKey = InstrumentedAttribute[Any] | ColumnElement[Any]
 
 MODEL_NAME = func.coalesce(Model.name, Backtest.model_name)
+# What a backtest is called (``Backtest.shown_name``): the user's own name, else the generated.
+SHOWN_NAME = func.coalesce(Backtest.name, Backtest.generated_name)
+# How often a new backtest draws its generated name again when the unique index refuses it.
+NAME_ATTEMPTS = 3
+_NAME_INDEX = "uq_backtests_user_id_generated_name"
 
 _FINISHED = Backtest.status == BacktestStatus.finished.value
 _FAILED = Backtest.status == BacktestStatus.failed.value
@@ -67,6 +74,7 @@ PUBLISHED = Backtest.published_at.is_not(None) & _FINISHED
 _SORT_KEYS: dict[BacktestSort, SortKey] = {
     BacktestSort.number: Backtest.number,
     BacktestSort.when: Backtest.number,
+    BacktestSort.name: func.lower(SHOWN_NAME),
     BacktestSort.model: func.lower(MODEL_NAME),
     BacktestSort.total_return: Backtest.total_return,
     BacktestSort.sharpe: Backtest.sharpe,
@@ -77,6 +85,7 @@ _SORT_KEYS: dict[BacktestSort, SortKey] = {
 
 # The value each sort of Experiments orders by (`newest` aside).
 _EXPERIMENT_SORT_KEYS: dict[ExperimentSort, SortKey] = {
+    ExperimentSort.name: func.lower(SHOWN_NAME),
     ExperimentSort.total_return: Backtest.total_return,
     ExperimentSort.sharpe: Backtest.sharpe,
     ExperimentSort.max_drawdown: Backtest.max_drawdown,
@@ -126,6 +135,16 @@ class ModelCount(NamedTuple):
     count: int
 
 
+class Namesake(NamedTuple):
+    """A backtest of the user that has a name (``BacktestStore.namesakes``): its shown name and
+    whether its generated name is the one."""
+
+    id: str
+    number: int
+    name: str
+    generated: bool
+
+
 class UserModel(NamedTuple):
     id: str
     name: str
@@ -155,15 +174,15 @@ def _any_instrument(
 
 
 def search(query: str) -> ColumnElement[bool] | None:
-    """Backtests whose ``#number``, an instrument's symbol or the model's name contains `query`,
-    in any case; None for a blank query, which every backtest matches."""
+    """Backtests whose shown name, ``#number``, an instrument's symbol or the model's name
+    contains `query`, in any case; None for a blank query, which every backtest matches."""
     query = query.strip()
     if not query:
         return None
     pattern = f"%{escape_like(query)}%"
     symbol = _any_instrument(lambda value: value["symbol"].astext.ilike(pattern, escape="\\"))
     number = (literal("#") + cast(Backtest.number, String)).ilike(pattern, escape="\\")
-    name = Backtest.name.ilike(pattern, escape="\\")
+    name = SHOWN_NAME.ilike(pattern, escape="\\")
     return number | name | symbol | MODEL_NAME.ilike(pattern, escape="\\")
 
 
@@ -189,15 +208,17 @@ def filters(
 
 
 def experiment_search(query: str) -> ColumnElement[bool] | None:
-    """Published backtests whose instrument's symbol, model's name (as it was when the backtest
-    ran) or author's display name contains `query`, in any case; None for a blank query."""
+    """Published backtests whose shown name, instrument's symbol, model's name (as it was when
+    the backtest ran) or author's display name contains `query`, in any case; None for a blank
+    query."""
     query = query.strip()
     if not query:
         return None
     pattern = f"%{escape_like(query)}%"
+    name = SHOWN_NAME.ilike(pattern, escape="\\")
     symbol = _any_instrument(lambda value: value["symbol"].astext.ilike(pattern, escape="\\"))
     model = Backtest.model_name.ilike(pattern, escape="\\")
-    return symbol | model | User.display_name.ilike(pattern, escape="\\")
+    return name | symbol | model | User.display_name.ilike(pattern, escape="\\")
 
 
 def experiment_scope(
@@ -400,6 +421,38 @@ class BacktestStore:
         )
         return bool(found)
 
+    # --- The names --------------------------------------------------------------------------------
+
+    async def names(self, user_id: str) -> set[str]:
+        """Every name of the user's backtests, generated and custom, lowercased by Postgres as
+        the unique index of the generated names compares them."""
+        rows = await self._db.execute(
+            select(func.lower(Backtest.generated_name), func.lower(Backtest.name)).where(
+                Backtest.user_id == user_id
+            )
+        )
+        return {name for row in rows for name in row if name is not None}
+
+    async def namesakes(self, user_id: str, name: str) -> list[Namesake]:
+        """The user's backtests whose custom or generated name is `name`, in any case, the
+        oldest first."""
+        lowered = func.lower(name)
+        rows = await self._db.execute(
+            select(
+                Backtest.id,
+                Backtest.number,
+                SHOWN_NAME,
+                func.lower(Backtest.generated_name) == lowered,
+            )
+            .where(
+                Backtest.user_id == user_id,
+                (func.lower(Backtest.name) == lowered)
+                | (func.lower(Backtest.generated_name) == lowered),
+            )
+            .order_by(Backtest.number)
+        )
+        return [Namesake(*row) for row in rows]
+
     # --- What Experiments needs ------------------------------------------------------------------
 
     async def experiments(
@@ -483,8 +536,26 @@ class BacktestStore:
 
     # --- What starting and running a backtest needs --------------------------------------------
 
-    def add(self, backtest: Backtest) -> None:
-        self._db.add(backtest)
+    async def add_named(self, backtest: Backtest) -> None:
+        """Adds the backtest with a generated name none of the user's backtests has. Taken under
+        ``lock_user``, the name is free; should the unique index still refuse it (a writer that
+        did not take the lock), another is drawn, ``NAME_ATTEMPTS`` times at most.
+
+        Raises:
+            IntegrityError: The row breaks another constraint, or no draw found a free name.
+        """
+        attempt = 1
+        while True:
+            backtest.generated_name = generated_name(await self.names(backtest.user_id))
+            try:
+                async with self._db.begin_nested():
+                    self._db.add(backtest)
+            except IntegrityError as error:
+                if attempt == NAME_ATTEMPTS or _NAME_INDEX not in str(error.orig):
+                    raise
+            else:
+                return
+            attempt += 1
 
     async def running(self, user_id: str) -> bool:
         """Whether a backtest of the user is running."""

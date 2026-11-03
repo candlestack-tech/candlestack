@@ -138,7 +138,7 @@ def test_a_published_backtest_as_experiments_shows_it(ada, bob) -> None:
         "experiments": [
             {
                 "id": backtest_id,
-                "name": None,
+                "name": "Backtest A",
                 "number": 1,
                 "instruments": [{"market": "stock", "symbol": "NVDA"}],
                 "representation": "renko",
@@ -368,6 +368,51 @@ def test_sort_puts_those_without_the_value_last(
     page = ada.experiments(sort=sort, order=order).json()["experiments"]
 
     assert [f"{short[item['author']['id']]}{item['number']}" for item in page] == expected
+
+
+@pytest.fixture
+def named(ada, bob) -> None:
+    """Published backtests shown by their own name or their generated one, a name two
+    accounts have, and one not published."""
+    ada.backtest(1, generated_name="Silent Orion", name="zeta", published=1)
+    ada.backtest(2, generated_name="Bright Vega", published=2)
+    ada.backtest(3, generated_name="Calm Lyra")
+    bob.backtest(1, generated_name="bright vega", published=3)
+    bob.backtest(2, generated_name="Golden Rigel", name="Alpha", published=4)
+
+
+@pytest.mark.usefixtures("named")
+@pytest.mark.parametrize(
+    ("order", "expected"),
+    [("asc", ["b2", "b1", "a2", "a1"]), ("desc", ["a1", "b1", "a2", "b2"])],
+)
+def test_sort_by_the_shown_name_ties_newest_published_first(
+    ada, bob, order: str, expected: list[str]
+) -> None:
+    short = {ada.id: "a", bob.id: "b"}
+
+    page = ada.experiments(sort="name", order=order).json()["experiments"]
+
+    assert [f"{short[item['author']['id']]}{item['number']}" for item in page] == expected
+
+
+@pytest.mark.usefixtures("named")
+def test_search_finds_the_shown_name(ada, bob) -> None:
+    assert numbers(ada.experiments(q="VEGA")) == [(bob.id, 1), (ada.id, 2)]
+    assert numbers(ada.experiments(q="zet")) == [(ada.id, 1)]
+    assert numbers(ada.experiments(q="orion")) == []  # its own name shows instead
+    assert numbers(ada.experiments(q="lyra")) == []  # not published
+
+
+def test_experiments_show_the_name_its_author_gives_it(ada, bob) -> None:
+    backtest_id = bob.backtest(1, generated_name="Silent Orion", spec=SPEC, published=1)
+
+    before = ada.experiments().json()["experiments"][0]["name"]
+    bob.rename(backtest_id, "half size")
+
+    assert before == "Silent Orion"
+    assert ada.experiments().json()["experiments"][0]["name"] == "half size"
+    assert ada.dashboard().json()["experiments"]["backtests"][0]["name"] == "half size"
 
 
 def test_the_default_sort_is_the_newest_published(ada) -> None:

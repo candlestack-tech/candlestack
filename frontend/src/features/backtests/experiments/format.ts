@@ -1,16 +1,11 @@
-import type { Backtest, BacktestDocument, Experiment, Manifest, Representation } from '@/api';
-import { formatGrid, manifestRepresentation } from '@/features/models';
+import type { Backtest, BacktestDocument, Experiment, Manifest } from '@/api';
+import { formatGrid } from '@/features/models';
 
 import { benchmarkName } from '../result/format';
-import { instrumentList, symbolsOf } from '../format';
+import { descriptionOf, instrumentList, representationLabel, symbolsOf } from '../format';
+import { documentDescription, documentRepresentation } from '../names';
 
 // How Experiments writes a published backtest (public-experiments: gCard, eTable, reads).
-
-// What a model reads, as its manifest names it (Settings, Models): the windows of candles are
-// Candles, as `candles@1` is.
-const READS: Record<Representation, string> = { renko: 'Renko', kagi: 'Kagi', windows: 'Candles' };
-
-export const representationLabel = (representation: Representation) => READS[representation];
 
 // "Renko · 30m · 25 × 23"; without the model's input shape "Renko · 30m".
 export function readsText(experiment: Pick<Experiment, 'representation' | 'model' | 'setup'>): string {
@@ -31,6 +26,8 @@ export const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? name;
 export const experimentTarget = (experiment: Experiment) => ({
   id: experiment.id,
   number: experiment.number,
+  name: experiment.name,
+  description: descriptionOf(experiment),
   status: 'finished' as const,
   symbol: instrumentList(symbolsOf(experiment)),
   author: experiment.author.mine ? undefined : experiment.author.name,
@@ -40,7 +37,9 @@ export const experimentTarget = (experiment: Experiment) => ({
 // of one about to be.
 export type CardFacts = {
   id: string;
-  number: number;
+  name: string;
+  // "AAPL · Kagi · 1h", the second line of the name.
+  description: string;
   instruments: Backtest['instruments'];
   model: { name: string; framework: string };
   representation: string;
@@ -61,7 +60,8 @@ export function cardOf(experiment: Experiment): CardFacts {
   const { model, setup, equity } = experiment;
   return {
     id: experiment.id,
-    number: experiment.number,
+    name: experiment.name,
+    description: descriptionOf(experiment),
     instruments: experiment.instruments,
     model: { name: model.name, framework: model.framework },
     representation: representationLabel(experiment.representation),
@@ -97,17 +97,18 @@ type Results = NonNullable<BacktestDocument['results']>;
 
 // The card a finished backtest gets once published, as its author sees it in the dialog.
 export function cardOfDocument(doc: BacktestDocument, results: Results): CardFacts {
-  const { input, signature } = doc.model.manifest as unknown as Partial<Manifest>;
+  const { signature } = doc.model.manifest as unknown as Partial<Manifest>;
   const benchmark = doc.benchmarks[0];
   const { stats, series } = results;
   return {
     id: doc.backtest.id,
-    number: doc.backtest.number,
+    name: doc.backtest.name,
+    description: documentDescription(doc),
     instruments: [
       { symbol: doc.data.instrument.symbol, market: doc.data.instrument.market === 'crypto' ? 'crypto' : 'stock' },
     ],
     model: { name: doc.model.name, framework: doc.model.framework },
-    representation: input ? manifestRepresentation(input.representation.id) : '',
+    representation: documentRepresentation(doc),
     timeframe: doc.data.timeframe,
     input: signature ? formatGrid(signature.input.shape) : null,
     strategy: sampled(series.columns.equity),

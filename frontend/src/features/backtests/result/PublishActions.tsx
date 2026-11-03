@@ -133,13 +133,13 @@ export function PublishActions({ doc }: Props) {
         doc={doc}
         open={dialog === 'publish'}
         onOpenChange={onOpenChange}
-        onDone={done(`Backtest #${backtest.number} is in Experiments now`)}
+        onDone={done(`${backtest.name} is in Experiments now`)}
       />
       <UnpublishDialog
         doc={doc}
         open={dialog === 'unpublish'}
         onOpenChange={onOpenChange}
-        onDone={done(`Backtest #${backtest.number} left Experiments`)}
+        onDone={done(`${backtest.name} left Experiments`)}
       />
       {toast}
     </>

@@ -1,4 +1,5 @@
 import { Globe } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 import type { Backtest, BacktestStatus } from '@/api';
 import { InstrumentSymbol } from '@/components/InstrumentSymbol';
@@ -9,6 +10,8 @@ import { formatPercent, MISSING } from '@/lib/results';
 import { cn } from '@/lib/utils';
 
 import { hasResults, instrumentId, instrumentList, instrumentsShown, returnClass, symbolsOf } from './format';
+import { NameTooltip } from './NameTooltip';
+import { useNameTooltip } from './useNameTooltip';
 
 // The small parts every list of backtests draws the same way (mockups/app).
 
@@ -44,17 +47,99 @@ export function BacktestInstruments({
   );
 }
 
-// "#12", the user's own number of the backtest (.rid).
-export function BacktestNumber({
+// "#12", the number of the backtest in its author's account: small and muted after its name, in
+// tables only (backtest-names, .bid).
+export function BacktestNumber({ backtest, className }: { backtest: Pick<Backtest, 'number'>; className?: string }) {
+  return (
+    <span className={cn('flex-none font-mono text-[11.5px] whitespace-nowrap text-muted-foreground', className)}>
+      #{backtest.number}
+    </span>
+  );
+}
+
+type NameProps = { name: string; className?: string };
+
+// A backtest's name on one line, cut with an ellipsis where it has no room, the full name then in
+// a tooltip on hover or focus (backtest-names, .bn). It sits above the link a row stretches over
+// itself, so hovering it shows the tooltip; a click still opens the row.
+export function BacktestName({ name, className }: NameProps) {
+  const { ref, at } = useNameTooltip<HTMLSpanElement>();
+  return (
+    <>
+      <span ref={ref} className={cn('relative z-[1] block min-w-0 truncate', className)}>
+        {name}
+      </span>
+      {at && <NameTooltip text={name} at={at} />}
+    </>
+  );
+}
+
+// The title of a backtest's page: up to two lines, broken anywhere, then an ellipsis and the same
+// tooltip (backtest-names, .r7-t h1).
+export function BacktestTitle({ name, className }: NameProps) {
+  const { ref, at } = useNameTooltip<HTMLHeadingElement>();
+  return (
+    <>
+      <h1 ref={ref} className={cn('line-clamp-2 min-w-0 [overflow-wrap:anywhere]', className)}>
+        {name}
+      </h1>
+      {at && <NameTooltip text={name} at={at} />}
+    </>
+  );
+}
+
+// In a table, one line: the name, then the number 6 px after it (backtest-names, .bcell). The
+// name stops at `max` (150 px in Backtests and on the Dashboard, 160 px in Experiments) or where
+// the cell ends.
+export function BacktestNameNumber({
   backtest,
-  className,
+  max = 'max-w-[150px]',
 }: {
-  backtest: Pick<Backtest, 'number' | 'name'>;
-  className?: string;
+  backtest: Pick<Backtest, 'name' | 'number'>;
+  max?: string;
 }) {
   return (
-    <span title={backtest.name ?? undefined} className={cn('font-mono text-[13px]/[normal] font-medium', className)}>
-      #{backtest.number}
+    <span className="flex max-w-full min-w-0 items-center gap-1.5">
+      <BacktestName name={backtest.name} className={cn('font-medium text-foreground', max)} />
+      <BacktestNumber backtest={backtest} />
+    </span>
+  );
+}
+
+// Two lines where nothing else describes the backtest: the name, then what it ran on, what its
+// model reads and the timeframe in muted mono, "AAPL · Kagi · 1h" (backtest-names, .bn, .bsub).
+// Each place sizes the name; `lead` comes before the name on its line (an author's initials), and
+// `wrap` puts the name in what it is there (the link to the backtest, the card's heading).
+export function BacktestNameLines({
+  name,
+  description,
+  nameClassName,
+  descriptionClassName,
+  lead,
+  wrap,
+}: {
+  name: string;
+  description: string;
+  nameClassName?: string;
+  descriptionClassName?: string;
+  lead?: ReactNode;
+  wrap?: (name: ReactNode) => ReactNode;
+}) {
+  const shown = <BacktestName name={name} className={nameClassName} />;
+  const title = wrap ? wrap(shown) : shown;
+  return (
+    <span className="flex min-w-0 flex-1 flex-col">
+      {lead ? (
+        <span className="flex min-w-0 items-center gap-[5px]">
+          {lead}
+          {title}
+        </span>
+      ) : (
+        title
+      )}
+      <span className={cn('block truncate font-mono text-[11.5px]/4 text-muted-foreground', descriptionClassName)}>
+        {description}
+      </span>
     </span>
   );
 }

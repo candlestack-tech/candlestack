@@ -91,9 +91,9 @@ flowchart LR
 | `POST /api/v1/backtests` | starts a backtest of one of the user's models: the body is the setup groups of the result document (`model`, `data`, `decision`, `execution`, `benchmarks`); checked first, then stored `running` and run after the response; 201 with its result document ([Backtests](#backtests)) |
 | `GET /api/v1/backtests/{backtest_id}` | the result document in the light view of the user's backtest, whatever its status, or of another account's while it is published ([engine.md](engine.md#the-result-document)) |
 | `GET /api/v1/backtests/{backtest_id}/download` | the result document of a finished backtest, the user's or a published one of another account, with every row and trade, as an attachment |
-| `GET /api/v1/backtests` | a page of 10 of the user's backtests: search `q` (number, symbol or model name), `show` (`all`, `starred`, `failed`, `public`), `model` (a model's name), `sort` and `order`, `page`; with the total, the pages and what the filter panel shows (the counts of all, starred, failed and published backtests, the models used) ([Backtests](#backtests)) |
-| `PATCH /api/v1/backtests/{backtest_id}` | stars, unstars, renames, publishes or unpublishes the user's backtest |
-| `GET /api/v1/experiments` | a page of 12 of the backtests every account published ([Experiments](#experiments)): search `q` (symbol, model name or author's name), `mine` or `author` (a user ID), `market`, `symbol`, `representation`, `timeframe`, `sort` and `order`, `page`; with the total, the pages, the counts (all published, the user's, the accounts that published) and what the filters offer |
+| `GET /api/v1/backtests` | a page of 10 of the user's backtests: search `q` (name, number, symbol or model name), `show` (`all`, `starred`, `failed`, `public`), `model` (a model's name), `sort` and `order`, `page`; with the total, the pages and what the filter panel shows (the counts of all, starred, failed and published backtests, the models used) ([Backtests](#backtests)) |
+| `PATCH /api/v1/backtests/{backtest_id}` | stars, unstars, renames (`409 name-taken`; a name of null goes back to the generated one), publishes or unpublishes the user's backtest |
+| `GET /api/v1/experiments` | a page of 12 of the backtests every account published ([Experiments](#experiments)): search `q` (the backtest's name, symbol, model name or author's name), `mine` or `author` (a user ID), `market`, `symbol`, `representation`, `timeframe`, `sort` and `order`, `page`; with the total, the pages, the counts (all published, the user's, the accounts that published) and what the filters offer |
 | `GET /api/v1/dashboard` | everything the Dashboard shows in one response: the counts, the 6 newest backtests, the 5 best finished ones by Sharpe ratio, return, drawdown and win rate, the 4 best starred ones, and the 4 newest published backtests of anyone with how many are published |
 | `GET /api/v1/docs` | API reference (Scalar); public on prod |
 | `GET /api/v1/openapi.json` | OpenAPI schema; snapshot committed as [openapi.json](openapi.json) |
@@ -124,9 +124,11 @@ flowchart LR
   `instrument-not-for-model` (422: a model of US trading hours on a crypto pair or the other
   way round, with `session` and `market`), `backtest-running` (409: another backtest of the
   user runs), `backtests-unavailable` (503: the worker's queue cannot be reached),
-  `backtest-not-finished` (409: a download of a running or failed backtest, or publishing one)
-  and `no-document` (409: a test backtest of the seed command has no result document and
-  cannot be published); it uses `not-found` (404: no backtest or model of the user with the
+  `backtest-not-finished` (409: a download of a running or failed backtest, or publishing one),
+  `no-document` (409: a test backtest of the seed command has no result document and
+  cannot be published) and `name-taken` (409: renaming a backtest to a name another backtest
+  of the account has as its own or its generated name, in any case; the detail names that
+  backtest and its number); it uses `not-found` (404: no backtest or model of the user with the
   ID; for a result document, also no published backtest of another account with it),
   `validation` (422, also a benchmark of
   another instrument, or of SPY, QQQ or DIA on a crypto backtest), and the data module's
@@ -522,7 +524,8 @@ checked at the next start.
 ## Backtests
 
 - **Table** `backtests`, one row per run of a user: the user's own number (`#N`: 1, 2, 3 per
-  user, unique with the user, given under an advisory lock of the user), the status
+  user, unique with the user, given under an advisory lock of the user), its names
+  (`generated_name`, and `name`, the user's own, null until a Rename; below), the status
   (`running`, `finished` or `failed`), the instruments in the order chosen (JSONB: market as the market data
   API names it, `stock` or `crypto`, and symbol), the representation (`renko`, `kagi`,
   `windows`), the model, the setup (JSONB, the fields of Settings > Backtest defaults), the
@@ -545,6 +548,28 @@ checked at the next start.
   backups and go with the account's cascade, and no other volume is needed), and `steps`
   (JSONB: the steps of the run, below). The seed command's backtests have none of them, and no
   result document.
+- **Names**: every backtest gets a generated name when it is created (`generated_name`,
+  `experiments/names.py`): an adjective and a word from space, as `Silent Orion`, from 128
+  adjectives (none judges a result or could offend) and 128 nouns (stars, constellations,
+  planets, moons, comets, words such as Nebula or Orbit), 16,384 names. The pick is at random
+  among those that no backtest of the account has as its generated or its own name, in any
+  case; once every pair is taken, the first number from 2 follows (`Silent Orion 2`). It is
+  drawn under the advisory lock of the user (starting one, the seed command), and a unique
+  index on `(user_id, lower(generated_name))` backs it: should the index still refuse the
+  name, it is drawn again, 3 times at most. The generated name never changes. The API's
+  `name` is the shown name, the user's own (`name`) else the generated one, in
+  `BacktestOut`, `ExperimentOut` and the document's `backtest` (also of others' published
+  backtests); `BacktestOut` and the document also have `generated_name`. Rename (`PATCH` with
+  `name`, 1 to 80 characters, trimmed, no control characters) checks under the same lock that
+  no other backtest of the account has the name as its own or its generated name, in any case
+  (`409 name-taken`: `You already have a backtest called <its shown name> (#<its number>).
+  Pick another name.`); the backtest's own generated name in any case, or a name of null,
+  stores null, so it shows the generated name again. A failed rename changes nothing else of
+  the request. Two accounts can have the same names. The migration that added the column gave
+  every backtest stored before a generated name, account by account, oldest first, the first
+  free one in an order of the account's own (the pairs sorted by a SHA-256 of the user's ID
+  and the name, so the same rows always get the same names), from a copy of the word lists
+  in the migration. Custom names given before then may repeat one another; they stay.
 - **The equity series** (`equity`: `{strategy, benchmark}`, JSONB) draws the small lines of the
   Dashboard's starred backtests and of Experiments: the cumulative return of the strategy and
   of its benchmark as fractions (0 at the start), at most 60 points each, at the same evenly
@@ -565,10 +590,11 @@ checked at the next start.
   name and framework when the backtest ran. A backtest shows the model's current name while the
   model exists (a rename shows in its backtests) and the name it ran with once it is gone (the
   backtest stays, with its results).
-- **The list** (`GET /api/v1/backtests`) searches the number (`#12` or `12`), the symbols and
-  the model's shown name as substrings in any case (`%` and `_` match themselves), filters by
-  show and by a model's name (exact, in any case) and sorts: `default` newest first, or by
-  number, model, return, Sharpe ratio, drawdown, trades or `when` (as number), `asc` or
+- **The list** (`GET /api/v1/backtests`) searches the shown name, the number (`#12` or `12`),
+  the symbols and the model's shown name as substrings in any case (`%` and `_` match
+  themselves), filters by show and by a model's name (exact, in any case) and sorts: `default`
+  newest first, or by number, name (the shown name in any case, `asc` A to Z), model, return,
+  Sharpe ratio, drawdown, trades or `when` (as number), `asc` or
   `desc`. Backtests without the sorted value (failed ones) are last in both directions, ties
   newest first. 10 a page; a page past the last is empty, with the real `pages`. The counts
   (all, starred, failed) and the models used (by count, then name) ignore the search and the
@@ -682,11 +708,13 @@ The backtests users published, which every signed-in account (the beta list's) c
 - **The catalog** (`GET /api/v1/experiments`) lists the published backtests that finished,
   joined with `users` for the author's display name (`accounts.User`, through the package root,
   as `experiments` sits above `accounts`), the model's name as it was when the backtest ran
-  (others never see a rename). `q` searches the symbols, the model's name and the author's
-  display name as substrings in any case (`%` and `_` match themselves); `mine` keeps the
+  (others never see a rename of the model; a rename of the backtest shows at once). `q`
+  searches the backtest's shown name, the symbols, the model's name and the author's display
+  name as substrings in any case (`%` and `_` match themselves); `mine` keeps the
   user's own and `author` one account's; `market`, `symbol` (exact, in any case),
   `representation` and `timeframe` (`setup.timeframe`) filter. Sorts: `newest` (the newest
-  published first, whatever `order` says), `return`, `sharpe`, `max_drawdown` and `trades`,
+  published first, whatever `order` says), `name` (the shown name in any case, `asc` A to Z),
+  `return`, `sharpe`, `max_drawdown` and `trades`,
   `asc` or `desc`, those without the value last, ties newest published first. 12 a page; a page
   past the last is empty. `counts` are all published backtests, the user's and the accounts
   that published one, whatever the query; `facets` are the markets (stock, then crypto), the
@@ -895,6 +923,7 @@ to check that an error reaches Sentry. The Sentry settings are recorded in
 | An upload is checked statically (the zip, its JSON and the HDF5 metadata) in a limited child process, never loaded; only what an allowlist generated from Keras names passes | loading a Keras file can run code from it (a `Lambda` layer is pickled Python, a `function` object any Keras function), and the API process must run no user's code and carry no framework; an allowlist fails closed on what a new Keras release or an attacker adds, where a list of what is known to be bad would not; the parsers of zip and HDF5 meet hostile files, so they run where a crash or a leak costs only a failed check |
 | An ONNX upload is checked statically too (`onnx.load` without external data, then `onnx.checker`), in the same child process; it is refused with external data, operators of other domains than `ai.onnx` and `ai.onnx.ml`, not one float32 input and output, or a fixed batch axis | onnxruntime would read any file an external tensor names and run the operators a library registers, and those are what a hostile ONNX file can misuse; refusing them leaves the standard operators, which onnxruntime implements itself; the shapes the manifest is compared with must be read from the file, so a model that does not fix them is refused at upload rather than kept unusable; the research spike #256 was not done, so this is #276's choice |
 | A backtest keeps its model's name and framework of when it ran next to a foreign key that a deleted model sets to null; it shows the model's current name while the model exists | a rename shows in the backtests that used the model, and deleting the model keeps its backtests with their results and a name to show |
+| Every backtest gets a generated name (an adjective and a word from space) that no other backtest of the account has, custom names included, in any case; the user may rename it and go back | a name is easier to remember, say and tell apart than #13, and one name per backtest in an account lets Rename say which backtest has it; the number stays for those who know their backtests by it |
 | Results in the API as fractions (0.246), the drawdown negative | the numbers `metrics` computes, unrounded; the app formats them for the reader |
 | The Dashboard in one request | one round trip and one loading state for the page's six panels; each is a small query on the user's index |
 | `ml` gets the models' backtest counts through a `ModelUsage` that `main.py` wires | `ml` stays below `experiments` in the import graph, and the models list still costs one extra query, not one per model |

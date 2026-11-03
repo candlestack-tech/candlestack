@@ -192,8 +192,8 @@ export interface paths {
         /**
          * Update Backtest
          * @description Stars, unstars, renames, publishes or unpublishes the user's backtest; a field left out
-         *     stays as it is. Unpublishing takes it out of Experiments and out of other people's
-         *     Compare.
+         *     stays as it is. A name of null goes back to the generated name. Unpublishing takes it out
+         *     of Experiments and out of other people's Compare.
          */
         patch: operations["update_backtest_api_v1_backtests__backtest_id__patch"];
         trace?: never;
@@ -853,15 +853,22 @@ export interface components {
              */
             finished_at: string | null;
             /**
+             * Generated Name
+             * @description The name it got when it was created
+             * @example Silent Orion
+             */
+            generated_name: string;
+            /**
              * Id
              * @example bt_7f3k2m9qx4
              */
             id: string;
             /**
              * Name
-             * @description What the user calls it; null until they rename it
+             * @description What the user calls it: their own name, else the generated one
+             * @example Silent Orion
              */
-            name: string | null;
+            name: string;
             /**
              * Number
              * @description The user's own number, shown as #N
@@ -1004,6 +1011,12 @@ export interface components {
              */
             finished_at: string | null;
             /**
+             * Generated Name
+             * @description The name it got when it was created, an adjective and a word from space; Rename with a name of null goes back to it
+             * @example Silent Orion
+             */
+            generated_name: string;
+            /**
              * Id
              * @description Public ID of the backtest
              * @example bt_7f3k2m9qx4
@@ -1023,9 +1036,10 @@ export interface components {
             model: components["schemas"]["UsedModel"];
             /**
              * Name
-             * @description What the user calls it; null until they rename it
+             * @description What the backtest is called: the user's own name after a Rename, else the name it got when it was created. Unique in the account, ignoring case
+             * @example Silent Orion
              */
-            name: string | null;
+            name: string;
             /**
              * Num Trades
              * @description Number of trades
@@ -1129,11 +1143,11 @@ export interface components {
         /**
          * BacktestSort
          * @description What the list is sorted by. `default` is newest first (`order` does not apply); `when`
-         *     sorts like `number`. Backtests without the value (failed ones) come last either way, and
-         *     ties go by number, newest first.
+         *     sorts like `number`; `name` by the name, in any case. Backtests without the value (failed
+         *     ones) come last either way, and ties go by number, newest first.
          * @enum {string}
          */
-        BacktestSort: "default" | "number" | "model" | "return" | "sharpe" | "max_drawdown" | "trades" | "when";
+        BacktestSort: "default" | "number" | "name" | "model" | "return" | "sharpe" | "max_drawdown" | "trades" | "when";
         /**
          * BacktestStatus
          * @description `finished` (it has results) or `failed` (it has an error); `running` comes with the
@@ -1242,7 +1256,7 @@ export interface components {
         BacktestUpdate: {
             /**
              * Name
-             * @description What to call it, without control characters; null takes the name away
+             * @description What to call it, without control characters, unique in the account ignoring case; null goes back to the generated name
              */
             name?: string | null;
             /**
@@ -1940,9 +1954,10 @@ export interface components {
             model: components["schemas"]["ExperimentModel"];
             /**
              * Name
-             * @description What its author calls it; null until they rename it
+             * @description What its author calls it: their own name, else the generated one
+             * @example Silent Orion
              */
-            name: string | null;
+            name: string;
             /**
              * Num Trades
              * @example 1712
@@ -1980,10 +1995,11 @@ export interface components {
         /**
          * ExperimentSort
          * @description What Experiments is sorted by. `newest` is the newest published first (`order` does not
-         *     apply); the others put those without the value last, and ties go newest published first.
+         *     apply); `name` by the name, in any case; the others put those without the value last, and
+         *     ties go newest published first.
          * @enum {string}
          */
-        ExperimentSort: "newest" | "return" | "sharpe" | "max_drawdown" | "trades";
+        ExperimentSort: "newest" | "name" | "return" | "sharpe" | "max_drawdown" | "trades";
         /** ExperimentsPage */
         ExperimentsPage: {
             counts: components["schemas"]["ExperimentCounts"];
@@ -3580,7 +3596,7 @@ export interface operations {
     list_backtests_api_v1_backtests_get: {
         parameters: {
             query?: {
-                /** @description Search: part of the number (`#12` or `12`), of an instrument's symbol or of the model's name, in any case */
+                /** @description Search: part of the name, of the number (`#12` or `12`), of an instrument's symbol or of the model's name, in any case */
                 q?: string;
                 /** @description All, the starred or the failed backtests */
                 show?: components["schemas"]["BacktestShow"];
@@ -3844,7 +3860,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Publishing a backtest that is running or failed (`backtest-not-finished`), or test data without a result document (`no-document`). */
+            /** @description Publishing a backtest that is running or failed (`backtest-not-finished`), or test data without a result document (`no-document`); a name another backtest of the account has, ignoring case, as its name or generated name (`name-taken`, the detail names that backtest and its number). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -4286,7 +4302,7 @@ export interface operations {
     list_experiments_api_v1_experiments_get: {
         parameters: {
             query?: {
-                /** @description Search: part of an instrument's symbol, of the model's name or of the author's name, in any case */
+                /** @description Search: part of the backtest's name, of an instrument's symbol, of the model's name or of the author's name, in any case */
                 q?: string;
                 /** @description Only the backtests the signed-in user published */
                 mine?: boolean;

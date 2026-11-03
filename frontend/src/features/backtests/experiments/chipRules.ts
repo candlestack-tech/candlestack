@@ -1,7 +1,7 @@
 import type { ExperimentsPage, Representation, SetupTimeframe } from '@/api';
 import type { ExperimentsColumn, ExperimentsSearch } from '@/routes/experimentsSearch';
 
-import { representationLabel } from './format';
+import { representationLabel } from '../format';
 
 // The rules of the chips of Experiments (public-experiments, fChip and sortDd): what each one
 // offers with the count the API gives it (`facets`: over the scope and the search, whatever the

@@ -149,7 +149,7 @@ class BacktestRuns:
             steps=pending(),
             created_at=datetime.now(UTC),
         )
-        self._store.add(backtest)
+        await self._store.add_named(backtest)
         await self._store.commit()
         self._runner.start(backtest.id)
         return backtest, dumps(_document(backtest, spec, author=author))
@@ -289,7 +289,8 @@ def _document(  # noqa: PLR0913 (the document's sources)
     return document(
         backtest=BacktestHeader(
             id=backtest.id,
-            name=backtest.name,
+            name=backtest.shown_name,
+            generated_name=backtest.generated_name,
             number=backtest.number,
             author=author,
             public=backtest.published_at is not None,

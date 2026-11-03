@@ -10,11 +10,11 @@ type Answers = Parameters<typeof stubApi>[0];
 // Another account of the beta, as an author of Experiments.
 export const TYMUR = { id: 'usr_t9m8r7k6j5', name: 'Tymur Tkach', mine: false };
 
-// A published backtest as Experiments shows it: Tymur's #9 on NVDA with a Renko model, against
+// A published backtest as Experiments shows it: Tymur's #9, Velvet Deneb, on NVDA with a Renko model, against
 // SPY, published at 10:14 on 17 Oct 2026.
 export const experiment = (fields: Partial<Experiment> = {}): Experiment => ({
   id: 'bt_t9n8v7d6a5',
-  name: null,
+  name: 'Velvet Deneb',
   number: 9,
   instruments: [{ symbol: 'NVDA', market: 'stock' }],
   representation: 'renko',
@@ -53,7 +53,7 @@ export const experimentsAnswer = (page: Partial<ExperimentsPage> = {}, query = '
   };
 };
 
-// The backtest of api.ts's backtestDocument as another account published it: Tymur's #9, read
+// The backtest of api.ts's backtestDocument as another account published it: Tymur's #9, Velvet Deneb, read
 // only, its model without an ID (the file stays with him).
 export const othersDocument = (): BacktestDocument => {
   const doc = backtestDocument();
@@ -62,6 +62,8 @@ export const othersDocument = (): BacktestDocument => {
     backtest: {
       ...doc.backtest,
       id: 'bt_t9n8v7d6a5',
+      name: 'Velvet Deneb',
+      generated_name: 'Velvet Deneb',
       number: 9,
       author: TYMUR,
       public: true,

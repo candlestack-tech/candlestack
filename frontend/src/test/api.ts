@@ -122,10 +122,12 @@ export const model = (fields: Partial<Model> = {}): Model => ({
   ...fields,
 });
 
-// A finished backtest as the API sends it: #12 on AAPL and MSFT with blesk-novol-8.keras.
+// A finished backtest as the API sends it: #12, Bright Vega, on AAPL and MSFT with
+// blesk-novol-8.keras.
 export const backtest = (fields: Partial<Backtest> = {}): Backtest => ({
   id: 'bt_7f3k2m9qx4',
-  name: null,
+  name: 'Bright Vega',
+  generated_name: 'Bright Vega',
   seeded: false,
   number: 12,
   instruments: [
@@ -371,13 +373,23 @@ const EXAMPLE_EXECUTION: BacktestDocument['execution'] = {
   slippage_bps: 0,
 };
 
-// The worked example of docs/engine.md as the result document of #12: AAPL, 30-minute candles,
+const EXAMPLE_DECISION: BacktestDocument['decision'] = {
+  calibrate: null,
+  ema: null,
+  rule: { name: 'threshold', limit: 0.05 },
+  long_only: false,
+  confirm: null,
+  min_hold: null,
+};
+
+// The worked example of docs/engine.md as the result document of #12, Bright Vega: AAPL, 30-minute candles,
 // one long trade stopped out, 5 % stop and 10 bps fees, against buy and hold.
 export const backtestDocument = (fields: Partial<BacktestDocument> = {}): BacktestDocument => ({
   version: 1,
   backtest: {
     id: 'bt_7f3k2m9qx4',
-    name: null,
+    name: 'Bright Vega',
+    generated_name: 'Bright Vega',
     number: 12,
     author: { id: ARSEN.id, name: ARSEN.display_name, mine: true },
     public: false,
@@ -403,14 +415,7 @@ export const backtestDocument = (fields: Partial<BacktestDocument> = {}): Backte
     manifest: manifest(),
   },
   data: EXAMPLE_DATA,
-  decision: {
-    calibrate: null,
-    ema: null,
-    rule: { name: 'threshold', limit: 0.05 },
-    long_only: false,
-    confirm: null,
-    min_hold: null,
-  },
+  decision: EXAMPLE_DECISION,
   execution: EXAMPLE_EXECUTION,
   benchmarks: [{ id: 'bh', kind: 'buy_and_hold', instrument: 'stock:AAPL' }],
   metrics: { periods_per_year: 252, risk_free_rate: 0 },

@@ -9,29 +9,39 @@ import type { ExperimentsColumn, ExperimentsSearch } from '@/routes/experimentsS
 import { CompareToggle } from '../compare/CompareToggle';
 import { useComparedRow } from '../compare/selection';
 import { instrumentId, instrumentList, symbolsOf } from '../format';
-import { BacktestNumber, ModelName, ReturnValue, Missing } from '../parts';
+import { BacktestNameNumber, ModelName, ReturnValue, Missing } from '../parts';
 import { CELL, COMPARE_CELL, HEAD, NUMBER, ROW, RowOpener, SortButton, TABLE } from '../table';
 import { WIDTH } from '../widths';
 import { AuthorAvatar } from './AuthorAvatar';
 import { experimentTarget, readsText } from './format';
 
-// The Backtests table with the author and what the model reads (public-experiments, eTable). A
-// fixed layout as there: the columns keep their widths and the model takes the rest. Max drawdown
-// hides at 1150 px as on the Backtests page, Published at 800, the model at 620, the author's name
-// at 640 (the initials stay), Sharpe at 420. The results and Published sort.
+// The Backtests table with the author and what the model reads (public-experiments, eTable;
+// backtest-names, .ex-t). A fixed layout as there: the columns keep their widths, cells 7 px from
+// the side, and the backtest takes the rest, its name up to 160 px; the author's name and the
+// model take up to two lines. From which width down each column hides, so the name keeps about
+// 120 px or more: Max drawdown at 1200 px, Published at 852 and between 980 and 1080 (the sidebar
+// beside the page leaves it narrow there), the model at 760, the author's name at 640 (the
+// initials stay), Sharpe at 560, the instrument at 480. The results and Published sort.
 type Column = { label: string; sort?: ExperimentsColumn | 'newest'; width?: string; hide?: string; number?: boolean };
 
 const COLUMNS: readonly Column[] = [
-  { label: 'Backtest', width: 'w-[72px]' },
-  { label: 'Author', width: 'w-[152px] max-[640px]:w-[52px]' },
-  { label: 'Instrument', width: WIDTH.instruments },
-  { label: 'Model', hide: 'max-[620px]:hidden' },
+  { label: 'Backtest' },
+  { label: 'Author', width: 'w-[120px] max-[640px]:w-[52px]' },
+  { label: 'Instrument', width: WIDTH.instruments, hide: 'max-[480px]:hidden' },
+  { label: 'Model', width: 'w-[112px]', hide: 'max-[760px]:hidden' },
   { label: 'Return', sort: 'return', width: WIDTH.return, number: true },
-  { label: 'Sharpe', sort: 'sharpe', width: WIDTH.sharpe, hide: 'max-[420px]:hidden', number: true },
-  { label: 'Max drawdown', sort: 'max_drawdown', width: WIDTH.maxDrawdown, hide: 'max-[1150px]:hidden', number: true },
-  { label: 'Published', sort: 'newest', width: 'w-[104px]', hide: 'max-[800px]:hidden' },
+  { label: 'Sharpe', sort: 'sharpe', width: WIDTH.sharpe, hide: 'max-[560px]:hidden', number: true },
+  { label: 'Max drawdown', sort: 'max_drawdown', width: WIDTH.maxDrawdown, hide: 'max-[1200px]:hidden', number: true },
+  {
+    label: 'Published',
+    sort: 'newest',
+    width: 'w-[96px]',
+    hide: 'max-[852px]:hidden min-[980px]:max-[1080px]:hidden',
+  },
   { label: 'Compare', width: WIDTH.compare },
 ];
+// Cells 7 px from the side (.ex-t th, .ex-t td).
+const SIDES = 'px-[7px]';
 const hideOf = (label: string) => COLUMNS.find((column) => column.label === label)?.hide;
 
 type HeaderProps = { search: ExperimentsSearch; onSort: (column: ExperimentsColumn | undefined) => void };
@@ -52,7 +62,7 @@ function Header({ search, onSort }: HeaderProps) {
           const order = sortOf(sort, search);
           const arrow = order === undefined ? '' : order === 'ascending' ? ' ↑' : ' ↓';
           return (
-            <th key={label} scope="col" aria-sort={order} className={cn(HEAD, width, hide, number && NUMBER)}>
+            <th key={label} scope="col" aria-sort={order} className={cn(HEAD, SIDES, width, hide, number && NUMBER)}>
               {sort ? (
                 <SortButton on={order !== undefined} onClick={() => onSort(sort === 'newest' ? undefined : sort)}>
                   {label}
@@ -71,12 +81,13 @@ function Header({ search, onSort }: HeaderProps) {
   );
 }
 
-// The author's initials and name, "you" after the user's own; the name hides on a phone.
+// The author's initials and name, "you" after the user's own; the name takes up to two lines
+// (.ex-t td.c-auth) and hides on a phone.
 function AuthorCell({ author }: { author: Experiment['author'] }) {
   return (
     <span className="inline-flex max-w-full min-w-0 items-center gap-2">
       <AuthorAvatar name={author.name} size="md" />
-      <span className="min-w-0 truncate max-[640px]:hidden">
+      <span className="line-clamp-2 min-w-0 whitespace-normal max-[640px]:hidden">
         {author.name}
         {author.mine && <span className="ml-1 text-xs text-muted-foreground">you</span>}
       </span>
@@ -105,30 +116,30 @@ function Row({ experiment }: { experiment: Experiment }) {
   const [first] = experiment.instruments;
   return (
     <tr className={cn(ROW, compared)}>
-      <td className={CELL}>
+      <td className={cn(CELL, SIDES)}>
         <RowOpener backtest={experiment}>
-          <BacktestNumber backtest={experiment} />
+          <BacktestNameNumber backtest={experiment} max="max-w-[160px]" />
         </RowOpener>
       </td>
-      <td className={CELL}>
+      <td className={cn(CELL, SIDES)}>
         <AuthorCell author={experiment.author} />
       </td>
-      <td className={CELL}>
+      <td className={cn(CELL, SIDES, hideOf('Instrument'))}>
         {first && (
           <InstrumentSymbol id={instrumentId(first)} symbol={instrumentList(symbolsOf(experiment))} size={20} />
         )}
       </td>
-      <td className={cn(CELL, hideOf('Model'))}>
+      <td className={cn(CELL, SIDES, hideOf('Model'))}>
         <ModelCell experiment={experiment} />
       </td>
-      <td className={cn(CELL, NUMBER)}>
+      <td className={cn(CELL, SIDES, NUMBER)}>
         {experiment.total_return === null ? <Missing /> : <ReturnValue value={experiment.total_return} />}
       </td>
-      <td className={cn(CELL, NUMBER, hideOf('Sharpe'))}>{formatSharpe(experiment.sharpe)}</td>
-      <td className={cn(CELL, NUMBER, hideOf('Max drawdown'))}>{formatPercent(experiment.max_drawdown)}</td>
+      <td className={cn(CELL, SIDES, NUMBER, hideOf('Sharpe'))}>{formatSharpe(experiment.sharpe)}</td>
+      <td className={cn(CELL, SIDES, NUMBER, hideOf('Max drawdown'))}>{formatPercent(experiment.max_drawdown)}</td>
       <td
         title={`${formatDate(published, style)} ${formatTime(published, style)}`}
-        className={cn(CELL, hideOf('Published'), 'text-muted-foreground')}
+        className={cn(CELL, SIDES, hideOf('Published'), 'text-muted-foreground')}
       >
         {formatRecentDay(published, style, undefined, true)}
       </td>

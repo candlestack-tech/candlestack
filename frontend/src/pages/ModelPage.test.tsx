@@ -182,12 +182,14 @@ describe("a model's page", () => {
 
   it("lists the model's backtests, newest first, with a link to all of them when there are more", async () => {
     const one = backtest({ id: 'bt_1', number: 12, model: { id: ID, name: READY.name, framework: 'keras' } });
-    const two = failedBacktest({ id: 'bt_2', number: 9 });
+    const two = failedBacktest({ id: 'bt_2', number: 9, name: 'Lone Polaris', generated_name: 'Lone Polaris' });
     const { fetch } = await openPage(READY, {
       ...backtestsAnswer({ backtests: [one, two], total: 14, pages: 2 }, BACKTESTS),
     });
     const runs = box('Backtests');
-    expect((await runs.findByRole('link', { name: 'Backtest #12' })).getAttribute('href')).toBe('/backtests/bt_1');
+    // Each by its name and number on one line, as the Backtests table has them (#376).
+    expect((await runs.findByRole('link', { name: 'Bright Vega' })).getAttribute('href')).toBe('/backtests/bt_1');
+    expect(runs.getByRole('link', { name: 'Lone Polaris' }).textContent).toBe('Lone Polaris#9');
     expect(runs.getByRole('heading', { level: 2 }).textContent).toBe('Backtests 14');
     expect(runs.getByRole('link', { name: 'All 14' }).getAttribute('href')).toBe('/backtests?model=my-tsmixer.keras');
     expect(runs.getByText('+24.6 %')).toBeDefined();

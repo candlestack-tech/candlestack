@@ -4,12 +4,13 @@ import type { Backtest, BestMetric, Dashboard } from '@/api';
 import { Hint } from '@/components/Hint';
 import { TrophyIcon } from '@/components/icons';
 import {
-  BacktestInstruments,
-  BacktestNumber,
+  BacktestNameNumber,
   CELL,
   COMPARE_CELL,
   CompareToggle,
   HEAD,
+  NAME_CELL,
+  NAME_HEAD,
   NUMBER,
   PublicMark,
   ROW,
@@ -44,19 +45,18 @@ const TIGHT = 'px-1.5';
 
 type RowProps = { backtest: Backtest; rank: number; by: BestMetric };
 
-// The rank, the number with up to two instruments and their icons, then the four results; the one ranked by in
-// semibold, the return in its colour.
+// The rank, the name and the number taking what the results leave (backtest-names, .dd-best),
+// then the four results; the one ranked by in semibold, the return in its colour.
 function Row({ backtest, rank, by }: RowProps) {
   const compared = useComparedRow(backtest.id);
   return (
     <tr className={cn(ROW, compared)}>
       <td className={cn(CELL, 'w-7 font-mono text-xs text-muted-foreground')}>{rank}</td>
-      <td className={CELL}>
-        <span className="flex items-center gap-1.5">
+      <td className={cn(CELL, NAME_CELL)}>
+        <span className="flex max-w-full min-w-0 items-center gap-1.5">
           <RowOpener backtest={backtest}>
-            <BacktestNumber backtest={backtest} />
+            <BacktestNameNumber backtest={backtest} />
           </RowOpener>
-          <BacktestInstruments backtest={backtest} max={1} />
           {backtest.public && <PublicMark />}
         </span>
       </td>
@@ -89,7 +89,7 @@ function Headings({ by, onPick }: { by: BestMetric; onPick: (metric: BestMetric)
         <th scope="col" className={HEAD}>
           <span className="sr-only">Rank</span>
         </th>
-        <th scope="col" className={HEAD}>
+        <th scope="col" className={cn(HEAD, NAME_HEAD)}>
           Backtest
         </th>
         {METRICS.map(({ metric, label }) => (

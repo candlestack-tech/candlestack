@@ -344,6 +344,15 @@ def real_worker(settings: Settings, market: FakeMarket) -> Iterator[None]:
     thread.join(timeout=30)
 
 
+def letters(number: int) -> str:
+    """`number` in the letters of column names: 1 is A, 26 Z, 27 AA."""
+    shown = ""
+    while number:
+        number, rest = divmod(number - 1, 26)
+        shown = chr(ord("A") + rest) + shown
+    return shown
+
+
 class BacktestsUser:
     """A signed-in user (the shared ``Account``: ``id``, ``email``, ``sql``, ``request``), the
     backtests API and rows made straight in the tables."""
@@ -455,10 +464,14 @@ class BacktestsUser:
         equity: dict[str, list[float]] | None = None,
         spec: dict[str, Any] | None = None,
         published: int | None = None,
+        name: str | None = None,
+        generated_name: str | None = None,
     ) -> str:
         """Adds a backtest straight in the table, started `number` hours after ``EPOCH``; its
         ID. A failed one has no results. ``published`` publishes it that many minutes after
-        ``EPOCH``; ``spec`` is what a backtest made in the app stores (test data has none)."""
+        ``EPOCH``; ``spec`` is what a backtest made in the app stores (test data has none).
+        Its generated name is ``generated_name``, by default ``Backtest A`` for #1, ``Backtest
+        B`` for #2 and so on (no search of the tests finds it), and ``name`` its custom one."""
         backtest_id = f"bt_{self.id[4:8]}{number:06d}"
         failed = status == "failed"
         created = EPOCH + timedelta(hours=number)
@@ -467,15 +480,17 @@ class BacktestsUser:
             "model_id, model_name, model_framework, setup, total_return, buy_and_hold_return, "
             "benchmark_return, sharpe, max_drawdown, win_rate, num_trades, equity, input_shape, "
             "duration_s, engine_version, error, starred, seeded, spec, created_at, finished_at, "
-            "published_at) VALUES (:id, :user_id, :number, :status, "
+            "published_at, name, generated_name) VALUES (:id, :user_id, :number, :status, "
             "CAST(:instruments AS jsonb), :representation, :model_id, :model_name, 'keras', "
             "CAST(:setup AS jsonb), :total_return, 0.5, :benchmark_return, :sharpe, "
             ":max_drawdown, :win_rate, :num_trades, CAST(:equity AS jsonb), "
             "CAST(:input_shape AS jsonb), 20, '0.2.0', :error, :starred, :seeded, "
-            "CAST(:spec AS jsonb), :created, :finished, :published)",
+            "CAST(:spec AS jsonb), :created, :finished, :published, :name, :generated_name)",
             id=backtest_id,
             user_id=self.id,
             number=number,
+            name=name,
+            generated_name=generated_name or f"Backtest {letters(number)}",
             status=status,
             instruments=json.dumps([{"market": market, "symbol": s} for s in symbols]),
             representation=representation,

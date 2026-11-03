@@ -31,6 +31,8 @@ describe('experimentTarget', () => {
     expect(experimentTarget(experiment())).toEqual({
       id: 'bt_t9n8v7d6a5',
       number: 9,
+      name: 'Velvet Deneb',
+      description: 'NVDA · Renko · 30m',
       status: 'finished',
       symbol: 'NVDA',
       author: 'Tymur Tkach',
@@ -42,7 +44,8 @@ describe('experimentTarget', () => {
 describe('the facts of a card', () => {
   it('come from a published backtest', () => {
     expect(cardOf(experiment())).toMatchObject({
-      number: 9,
+      name: 'Velvet Deneb',
+      description: 'NVDA · Renko · 30m',
       model: { name: 'blesk-novol-8.keras', framework: 'keras' },
       representation: 'Renko',
       timeframe: '30m',
@@ -60,7 +63,8 @@ describe('the facts of a card', () => {
     const doc = backtestDocument();
     const card = cardOfDocument(doc, doc.results!);
     expect(card).toMatchObject({
-      number: 12,
+      name: 'Bright Vega',
+      description: 'AAPL · Candles · 30m',
       instruments: [{ symbol: 'AAPL', market: 'stock' }],
       representation: 'Candles',
       timeframe: '30m',

@@ -35,7 +35,8 @@ def test_a_backtest_as_the_list_shows_it(ada) -> None:
         "backtests": [
             {
                 "id": backtest_id,
-                "name": None,
+                "name": "Backtest A",
+                "generated_name": "Backtest A",
                 "number": 1,
                 "status": "finished",
                 "seeded": False,
@@ -329,19 +330,111 @@ def test_star_and_unstar(ada, sql) -> None:
     assert ada.backtests().json()["counts"]["starred"] == 1
 
 
-def test_rename_and_take_the_name_away(ada, sql) -> None:
-    backtest_id = ada.backtest(1)
+def test_rename_and_go_back_to_the_generated_name(ada, sql) -> None:
+    backtest_id = ada.backtest(1, generated_name="Silent Orion")
     ada.star(backtest_id)
 
     renamed = ada.rename(backtest_id, "  half size ")
 
     assert renamed.status_code == 200
-    assert renamed.json()["name"] == "half size"
+    assert (renamed.json()["name"], renamed.json()["generated_name"]) == (
+        "half size",
+        "Silent Orion",
+    )
     assert renamed.json()["starred"] is True
-    assert sql("SELECT name FROM backtests") == [("half size",)]
+    assert sql("SELECT name, generated_name FROM backtests") == [("half size", "Silent Orion")]
     assert numbers(ada.backtests(q="half")) == [1]
-    assert ada.rename(backtest_id, None).json()["name"] is None
+    back = ada.rename(backtest_id, None).json()
+    assert (back["name"], back["generated_name"]) == ("Silent Orion", "Silent Orion")
+    assert sql("SELECT name FROM backtests") == [(None,)]
     assert numbers(ada.backtests(q="half")) == []
+
+
+def test_renaming_to_the_generated_name_in_any_case_goes_back_to_it(ada, sql) -> None:
+    backtest_id = ada.backtest(1, generated_name="Silent Orion", name="half size")
+
+    back = ada.rename(backtest_id, "SILENT orion")
+
+    assert back.status_code == 200
+    assert back.json()["name"] == "Silent Orion"
+    assert sql("SELECT name FROM backtests") == [(None,)]
+
+
+def test_a_backtest_keeps_its_own_name_in_another_case(ada, sql) -> None:
+    backtest_id = ada.backtest(1, name="half size")
+
+    assert ada.rename(backtest_id, "Half Size").json()["name"] == "Half Size"
+    assert sql("SELECT name FROM backtests") == [("Half Size",)]
+
+
+@pytest.mark.parametrize(
+    ("name", "holder"),
+    [
+        ("HALF SIZE", "half size (#1)"),  # another backtest's own name
+        ("bright vega", "Bright Vega (#2)"),  # another's generated name
+        ("silent orion", "half size (#1)"),  # the generated name of one renamed since
+    ],
+)
+def test_a_name_another_backtest_has_is_taken(ada, sql, name: str, holder: str) -> None:
+    ada.backtest(1, generated_name="Silent Orion", name="half size")
+    ada.backtest(2, generated_name="Bright Vega")
+    backtest_id = ada.backtest(3, spec={"made": "in the app"})
+
+    response = ada.request(
+        "PATCH",
+        f"/api/v1/backtests/{backtest_id}",
+        json={"name": name, "starred": True, "public": True},
+    )
+
+    assert response.status_code == 409
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "type": PROBLEMS + "name-taken",
+        "title": "Name taken",
+        "status": 409,
+        "detail": f"You already have a backtest called {holder}. Pick another name.",
+    }
+    # Nothing of the request changed.
+    assert sql("SELECT name, starred, published_at FROM backtests WHERE number = 3") == [
+        (None, False, None)
+    ]
+
+
+def test_another_accounts_names_are_free(ada, bob) -> None:
+    bob.backtest(1, generated_name="Silent Orion", name="half size")
+    backtest_id = ada.backtest(1)
+
+    assert ada.rename(backtest_id, "half size").json()["name"] == "half size"
+    assert ada.rename(backtest_id, "Silent Orion").json()["name"] == "Silent Orion"
+
+
+@pytest.fixture
+def named(ada) -> None:
+    """Backtests shown by their own name or their generated one, and two of one name in
+    another case (custom names were not unique before generated names came)."""
+    ada.backtest(1, generated_name="Delta Nova", name="zeta")
+    ada.backtest(2, generated_name="beta")
+    ada.backtest(3, generated_name="Alpha")
+    ada.backtest(4, generated_name="Omega", name="Gamma")
+    ada.backtest(5, generated_name="Kappa", name="BETA")
+
+
+@pytest.mark.usefixtures("named")
+@pytest.mark.parametrize(
+    ("order", "expected"),
+    [("asc", [3, 5, 2, 4, 1]), ("desc", [1, 4, 5, 2, 3])],
+)
+def test_sort_by_the_shown_name_in_any_case(ada, order: str, expected: list[int]) -> None:
+    assert numbers(ada.backtests(sort="name", order=order)) == expected
+
+
+@pytest.mark.usefixtures("named")
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [("ZET", [1]), ("beta", [5, 2]), ("delta", []), ("omega", []), ("AMM", [4])],
+)
+def test_search_finds_the_shown_name(ada, query: str, expected: list[int]) -> None:
+    assert numbers(ada.backtests(q=query)) == expected
 
 
 def test_another_users_backtest_cannot_be_renamed(ada, bob) -> None:

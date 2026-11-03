@@ -297,7 +297,13 @@ class DocumentAuthor(BaseModel):
 
 class BacktestHeader(BaseModel):
     id: str = Field(examples=["bt_7f3k2m9qx4"])
-    name: str | None = Field(description="What the user calls it; null until they rename it")
+    name: str = Field(
+        description="What the user calls it: their own name, else the generated one",
+        examples=["Silent Orion"],
+    )
+    generated_name: str = Field(
+        description="The name it got when it was created", examples=["Silent Orion"]
+    )
     number: int = Field(ge=1, description="The user's own number, shown as #N", examples=[12])
     author: DocumentAuthor = Field(
         description=(

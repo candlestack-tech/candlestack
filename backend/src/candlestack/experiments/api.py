@@ -24,6 +24,7 @@ from candlestack.experiments.errors import (
     InvalidBacktest,
     ModelNeedsSetup,
     ModelNotFound,
+    NameTaken,
     NoDocument,
 )
 from candlestack.experiments.schemas import (
@@ -66,8 +67,8 @@ def list_query(
         Query(
             max_length=QUERY_MAX,
             description=(
-                "Search: part of the number (`#12` or `12`), of an instrument's symbol or of the "
-                "model's name, in any case"
+                "Search: part of the name, of the number (`#12` or `12`), of an instrument's "
+                "symbol or of the model's name, in any case"
             ),
             examples=["aapl"],
         ),
@@ -117,7 +118,9 @@ async def list_backtests(
         **problem_doc(
             409,
             "Publishing a backtest that is running or failed (`backtest-not-finished`), or test "
-            "data without a result document (`no-document`).",
+            "data without a result document (`no-document`); a name another backtest of the "
+            "account has, ignoring case, as its name or generated name (`name-taken`, the detail "
+            "names that backtest and its number).",
         ),
     },
     dependencies=[Depends(require_same_origin)],
@@ -130,14 +133,23 @@ async def update_backtest(
     response: Response,
 ) -> BacktestOut:
     """Stars, unstars, renames, publishes or unpublishes the user's backtest; a field left out
-    stays as it is. Unpublishing takes it out of Experiments and out of other people's
-    Compare."""
+    stays as it is. A name of null goes back to the generated name. Unpublishing takes it out
+    of Experiments and out of other people's Compare."""
     response.headers.update(NO_STORE)
     try:
         return await service.update(user.id, backtest_id, body)
     except BacktestNotFound:
         raise ProblemError(
             404, "not-found", "Not Found", "You have no backtest with this ID."
+        ) from None
+    except NameTaken as taken:
+        raise ProblemError(
+            409,
+            "name-taken",
+            "Name taken",
+            f"You already have a backtest called {taken.name} (#{taken.number}). Pick another "
+            "name.",
+            headers=NO_STORE,  # it names a backtest of the user
         ) from None
     except NoDocument:
         raise ProblemError(
@@ -163,8 +175,8 @@ def experiments_query(  # noqa: PLR0913 (one argument per query parameter)
         Query(
             max_length=QUERY_MAX,
             description=(
-                "Search: part of an instrument's symbol, of the model's name or of the author's "
-                "name, in any case"
+                "Search: part of the backtest's name, of an instrument's symbol, of the model's "
+                "name or of the author's name, in any case"
             ),
             examples=["nvda"],
         ),

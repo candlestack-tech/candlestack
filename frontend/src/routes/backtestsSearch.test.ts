@@ -44,6 +44,7 @@ describe('validateBacktestsSearch', () => {
     expect(validate({ order: 'asc' })).toEqual({});
     expect(validate({ sort: 'return' })).toEqual({ sort: 'return', order: 'desc' });
     expect(validate({ sort: 'model' })).toEqual({ sort: 'model', order: 'asc' });
+    expect(validate({ sort: 'name' })).toEqual({ sort: 'name', order: 'asc' });
   });
 
   it('caps the page at the most the API takes', () => {
@@ -65,12 +66,12 @@ describe('withSortBy', () => {
     expect(withSortBy(up, 'sharpe')).toMatchObject({ sort: undefined, order: undefined });
   });
 
-  it('sorts the model A to Z first', () => {
-    const first = withSortBy({}, 'model');
-    expect(first).toMatchObject({ sort: 'model', order: 'asc' });
-    const second = withSortBy(first, 'model');
-    expect(second).toMatchObject({ sort: 'model', order: 'desc' });
-    expect(withSortBy(second, 'model')).toMatchObject({ sort: undefined });
+  it.each(['model', 'name'] as const)('sorts the %s A to Z first', (column) => {
+    const first = withSortBy({}, column);
+    expect(first).toMatchObject({ sort: column, order: 'asc' });
+    const second = withSortBy(first, column);
+    expect(second).toMatchObject({ sort: column, order: 'desc' });
+    expect(withSortBy(second, column)).toMatchObject({ sort: undefined });
   });
 
   it('starts another column over at its first order', () => {

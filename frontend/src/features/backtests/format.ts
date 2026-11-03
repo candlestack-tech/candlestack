@@ -10,6 +10,12 @@ export function representationName(representation: Representation): string {
   return REPRESENTATIONS[representation];
 }
 
+// What a model reads, as its manifest names it (Settings, Models): the windows of candles are
+// Candles, as `candles@1` is.
+const READS: Record<Representation, string> = { renko: 'Renko', kagi: 'Kagi', windows: 'Candles' };
+
+export const representationLabel = (representation: Representation) => READS[representation];
+
 // Whether a backtest has results to show: a finished one. A failed one shows the Failed badge and
 // dashes, with no line and no Sharpe ratio.
 export const hasResults = (backtest: Backtest) => backtest.status === 'finished';
@@ -20,10 +26,23 @@ export const returnClass = (fraction: number) => (returnTone(fraction) === 'up' 
 export const symbolsOf = (backtest: Pick<Backtest, 'instruments'>) =>
   backtest.instruments.map((instrument) => instrument.symbol);
 
+// The second line of a backtest's name where nothing else describes it (backtest-names, .bsub):
+// what it ran on, what its model reads and the timeframe, "AAPL · Kagi · 1h".
+export const describedAs = (parts: readonly string[]) => parts.filter(Boolean).join(' · ');
+
+export const descriptionOf = (backtest: Pick<Backtest, 'instruments' | 'representation' | 'setup'>) =>
+  describedAs([
+    instrumentList(symbolsOf(backtest)),
+    representationLabel(backtest.representation),
+    backtest.setup.timeframe,
+  ]);
+
 // What the comparison needs of a backtest: a backtest has one instrument now, older ones more.
 export const compareTarget = (backtest: Backtest) => ({
   id: backtest.id,
   number: backtest.number,
+  name: backtest.name,
+  description: descriptionOf(backtest),
   status: backtest.status,
   seeded: backtest.seeded,
   symbol: instrumentList(symbolsOf(backtest)),

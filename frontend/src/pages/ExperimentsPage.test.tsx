@@ -15,6 +15,7 @@ const NINE = experiment();
 const MINE = experiment({
   id: 'bt_7f3k2m9qx4',
   number: 12,
+  name: 'Bright Vega',
   instruments: [{ symbol: 'AAPL', market: 'stock' }],
   representation: 'kagi',
   author: { id: ARSEN.id, name: ARSEN.display_name, mine: true },
@@ -92,13 +93,16 @@ describe('Experiments as cards', () => {
     await open('/experiments', experimentsAnswer(PAGE, '?page=1'));
     const [nine, mine] = await screen.findAllByRole('article');
     const card = within(nine!);
-    const link = card.getByRole('link', { name: 'Backtest #9, NVDA, by Tymur Tkach' });
+    // Its name over what it ran on, what its model reads and the timeframe, without its number
+    // (#376); the second line takes the place of the Renko and 30m badges.
+    const link = card.getByRole('link', { name: 'Velvet Deneb, NVDA · Renko · 30m, by Tymur Tkach' });
     expect(link.getAttribute('href')).toBe('/backtests/bt_t9n8v7d6a5');
-    expect(card.getByText('#9')).toBeDefined();
+    expect(card.getByRole('heading', { level: 2 }).textContent).toBe('Velvet Deneb');
+    expect(card.getByText('NVDA · Renko · 30m')).toBeDefined();
+    expect(card.queryByText('#9')).toBeNull();
+    expect(card.queryByText('Renko')).toBeNull();
     expect(card.getByText('blesk-novol-8.keras')).toBeDefined();
-    expect(['Renko', '30m', 'in 25 × 23', 'SPY +14.3 %'].map((text) => card.getByText(text).textContent)).toHaveLength(
-      4,
-    );
+    expect(['in 25 × 23', 'SPY +14.3 %'].map((text) => card.getByText(text).textContent)).toHaveLength(2);
     expect(
       card.getAllByRole('term').map((term) => `${term.textContent} ${term.nextElementSibling?.textContent}`),
     ).toEqual(['Return +41.2 %', 'Sharpe 1.38', 'Max drawdown −12.4 %', 'Trades 188']);
@@ -137,12 +141,23 @@ describe('Experiments as cards', () => {
       ...experimentsAnswer(PAGE, '?page=1'),
       'GET /api/v1/backtests/bt_t9n8v7d6a5': { status: 200, body: othersDocument() },
     });
-    await user.click(await screen.findByRole('button', { name: 'Add to compare: backtest 9' }));
+    await user.click(await screen.findByRole('button', { name: 'Add to compare: Velvet Deneb' }));
     const panel = screen.getByRole('complementary', { name: 'Compare' });
-    expect(within(panel).getByRole('link', { name: '#9' })).toBeDefined();
+    expect(within(panel).getByRole('link', { name: 'Velvet Deneb' })).toBeDefined();
     expect(within(panel).getByTitle('Tymur Tkach').textContent).toBe('TT');
     expect(JSON.parse(localStorage.getItem('compare-backtests') ?? '{}')).toMatchObject({
-      slots: [{ id: 'bt_t9n8v7d6a5', number: 9, symbol: 'NVDA', author: 'Tymur Tkach' }, null, null, null],
+      slots: [
+        {
+          id: 'bt_t9n8v7d6a5',
+          number: 9,
+          name: 'Velvet Deneb',
+          symbol: 'NVDA',
+          author: 'Tymur Tkach',
+        },
+        null,
+        null,
+        null,
+      ],
     });
   });
 });
@@ -178,7 +193,7 @@ describe('Experiments as a table', () => {
         .getAllByRole('cell')
         .map((cell) => cell.textContent),
     ).toEqual([
-      '#9',
+      'Velvet Deneb#9',
       'TTTymur Tkach',
       'NVDA',
       'blesk-novol-8.kerasRenko · 30m · 25 × 23',
@@ -286,7 +301,12 @@ describe('the search and the chips of Experiments', () => {
       ...experimentsAnswer(PAGE, '?page=1'),
     });
     expect(await screen.findByRole('heading', { name: 'Nothing matches “dogecoin”' })).toBeDefined();
-    expect(screen.getByText('Search by instrument, model or author, like NVDA, kagi or Tymur.')).toBeDefined();
+    expect(screen.getByRole('searchbox', { name: 'Search experiments' }).getAttribute('placeholder')).toBe(
+      'Name, instrument, model or author',
+    );
+    expect(
+      screen.getByText('Search by name, instrument, model or author, like Orion, NVDA, kagi or Tymur.'),
+    ).toBeDefined();
     await user.click(screen.getByRole('button', { name: 'Clear search and filters' }));
     expect(router.state.location.search).toEqual({});
     expect(await screen.findByText('25 backtests from 7 people')).toBeDefined();

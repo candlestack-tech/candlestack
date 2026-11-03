@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 import { AuthorAvatar } from '../experiments/AuthorAvatar';
 import { experimentTarget } from '../experiments/format';
 import { compareTarget } from '../format';
-import { BacktestNumber, BacktestReturn, Missing, ReturnValue, StatusBadge } from '../parts';
+import { BacktestNameNumber, BacktestReturn, Missing, ReturnValue, StatusBadge } from '../parts';
 import { useBacktestsPage } from '../useBacktests';
 import { CompareToggle } from './CompareToggle';
 import { useCompareSelection, SLOTS } from './selection';
@@ -19,8 +19,10 @@ import { useCompareSelection, SLOTS } from './selection';
 type Props = { open: boolean; onOpenChange: (open: boolean) => void };
 type Tab = 'yours' | 'experiments';
 
+// The name with its number, the instrument, whose and the model, the return, the scale icon
+// (backtest-names, .pk-r): the name takes up to 180 px.
 const ROW =
-  'grid grid-cols-[52px_minmax(60px,110px)_minmax(0,1fr)_96px_36px] items-center gap-2 border-b py-1 text-[13px] last:border-b-0';
+  'grid grid-cols-[minmax(0,180px)_74px_minmax(0,1fr)_76px_40px] items-center gap-2 border-b py-1 text-[13px] last:border-b-0';
 const LIST = 'max-h-[50vh] overflow-y-auto border-t';
 const NONE = 'p-6 text-center text-muted-foreground';
 
@@ -33,10 +35,10 @@ function Yours({ query }: { query: string }) {
       <div className={LIST}>
         {data.backtests.map((backtest) => (
           <div key={backtest.id} className={ROW}>
-            <BacktestNumber backtest={backtest} />
-            <span className="truncate font-medium">{compareTarget(backtest).symbol}</span>
-            <span title={backtest.name ?? backtest.model.name} className="truncate text-muted-foreground">
-              {backtest.name ?? backtest.model.name}
+            <BacktestNameNumber backtest={backtest} max="max-w-full" />
+            <span className="truncate font-mono font-medium">{compareTarget(backtest).symbol}</span>
+            <span title={backtest.model.name} className="truncate text-muted-foreground">
+              {backtest.model.name}
             </span>
             <span className="text-right font-mono">
               {backtest.status === 'finished' ? (
@@ -70,7 +72,7 @@ function FromExperiments({ query }: { query: string }) {
           const who = `${experiment.author.name} · ${experiment.model.name}`;
           return (
             <div key={experiment.id} className={ROW}>
-              <BacktestNumber backtest={experiment} />
+              <BacktestNameNumber backtest={experiment} max="max-w-full" />
               <span className="truncate font-mono font-medium">{target.symbol}</span>
               <span title={who} className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
                 <AuthorAvatar name={experiment.author.name} size="xxs" />
@@ -158,7 +160,7 @@ function Lists() {
         key={tab}
         query={query}
         onSearch={setQuery}
-        placeholder={yours ? 'Number, instrument or model, e.g. aapl' : 'Instrument, model or author'}
+        placeholder={yours ? 'Name, instrument or model' : 'Name, instrument, model or author'}
         label={yours ? 'Search backtests' : 'Search experiments'}
         maxLength={100}
         debounceMs={300}
@@ -173,7 +175,7 @@ function Lists() {
 export function ComparePicker({ open, onOpenChange }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[640px]">
+      <DialogContent className="w-[min(680px,calc(100%-32px))]">
         <PickerHead />
         <DialogBody>{open && <Lists />}</DialogBody>
         <DialogFooter>
