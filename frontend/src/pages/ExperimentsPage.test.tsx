@@ -82,6 +82,12 @@ describe('Experiments as cards', () => {
     expect(cards()).toHaveLength(2);
   });
 
+  it('counts one backtest of one person in the singular', async () => {
+    const one = { ...PAGE, experiments: [MINE], total: 1, pages: 1, counts: { all: 1, mine: 1, people: 1 } };
+    await open('/experiments', experimentsAnswer(one, '?page=1'));
+    expect(await screen.findByText('1 backtest from 1 person')).toBeDefined();
+  });
+
   it('draws a card with the model, what it reads, the return against its benchmark and the author', async () => {
     await open('/experiments', experimentsAnswer(PAGE, '?page=1'));
     const [nine, mine] = await screen.findAllByRole('article');

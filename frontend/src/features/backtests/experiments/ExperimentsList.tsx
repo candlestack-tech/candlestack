@@ -69,7 +69,8 @@ const LINK = 'cursor-pointer text-[13px] font-medium text-primary underline-offs
 function CountLine({ search, first }: { search: ExperimentsSearch; first: ExperimentsPage }) {
   const navigate = useNavigate({ from: '/experiments' });
   const { counts, total } = first;
-  let line: ReactNode = `${counts.all} backtests from ${counts.people} people`;
+  const backtests = `${counts.all} ${counts.all === 1 ? 'backtest' : 'backtests'}`;
+  let line: ReactNode = `${backtests} from ${counts.people} ${counts.people === 1 ? 'person' : 'people'}`;
   if (isFiltered(search)) {
     line = (
       <>
