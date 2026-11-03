@@ -70,6 +70,14 @@
           "description": "When it finished or failed (UTC)",
           "title": "Finished At"
         },
+        "generated_name": {
+          "description": "The name it got when it was created",
+          "examples": [
+            "Silent Orion"
+          ],
+          "title": "Generated Name",
+          "type": "string"
+        },
         "id": {
           "examples": [
             "bt_7f3k2m9qx4"
@@ -78,16 +86,12 @@
           "type": "string"
         },
         "name": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
+          "description": "What the user calls it: their own name, else the generated one",
+          "examples": [
+            "Silent Orion"
           ],
-          "description": "What the user calls it; null until they rename it",
-          "title": "Name"
+          "title": "Name",
+          "type": "string"
         },
         "number": {
           "description": "The user's own number, shown as #N",
@@ -131,6 +135,7 @@
       "required": [
         "id",
         "name",
+        "generated_name",
         "number",
         "author",
         "public",

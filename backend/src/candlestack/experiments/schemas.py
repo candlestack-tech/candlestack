@@ -170,7 +170,20 @@ class BacktestOut(BaseModel):
     null for a backtest that did not finish."""
 
     id: str = Field(description="Public ID of the backtest", examples=["bt_7f3k2m9qx4"])
-    name: str | None = Field(description="What the user calls it; null until they rename it")
+    name: str = Field(
+        description=(
+            "What the backtest is called: the user's own name after a Rename, else the name it "
+            "got when it was created. Unique in the account, ignoring case"
+        ),
+        examples=["Silent Orion"],
+    )
+    generated_name: str = Field(
+        description=(
+            "The name it got when it was created, an adjective and a word from space; Rename "
+            "with a name of null goes back to it"
+        ),
+        examples=["Silent Orion"],
+    )
     number: int = Field(description="The user's own number of the backtest, shown as #N", ge=1)
     status: BacktestStatus
     seeded: bool = Field(description="Test data of the seed command, with no result document")
@@ -231,11 +244,12 @@ class BacktestShow(StrEnum):
 
 class BacktestSort(StrEnum):
     """What the list is sorted by. `default` is newest first (`order` does not apply); `when`
-    sorts like `number`. Backtests without the value (failed ones) come last either way, and
-    ties go by number, newest first."""
+    sorts like `number`; `name` by the name, in any case. Backtests without the value (failed
+    ones) come last either way, and ties go by number, newest first."""
 
     default = "default"
     number = "number"
+    name = "name"
     model = "model"
     total_return = "return"
     sharpe = "sharpe"
@@ -291,7 +305,10 @@ class BacktestUpdate(BaseModel):
         min_length=1,
         max_length=BACKTEST_NAME_MAX,
         pattern=r"^[^\x00-\x1f\x7f]+$",
-        description="What to call it, without control characters; null takes the name away",
+        description=(
+            "What to call it, without control characters, unique in the account ignoring case; "
+            "null goes back to the generated name"
+        ),
     )
     public: bool | None = Field(
         default=None,
@@ -352,7 +369,10 @@ class ExperimentOut(BaseModel):
     rates are fractions; a published backtest has finished, so its results are there."""
 
     id: str = Field(description="Public ID of the backtest", examples=["bt_7f3k2m9qx4"])
-    name: str | None = Field(description="What its author calls it; null until they rename it")
+    name: str = Field(
+        description="What its author calls it: their own name, else the generated one",
+        examples=["Silent Orion"],
+    )
     number: int = Field(description="The author's own number of the backtest, shown as #N", ge=1)
     instruments: list[BacktestInstrument]
     representation: Representation
@@ -377,9 +397,11 @@ class ExperimentOut(BaseModel):
 
 class ExperimentSort(StrEnum):
     """What Experiments is sorted by. `newest` is the newest published first (`order` does not
-    apply); the others put those without the value last, and ties go newest published first."""
+    apply); `name` by the name, in any case; the others put those without the value last, and
+    ties go newest published first."""
 
     newest = "newest"
+    name = "name"
     total_return = "return"
     sharpe = "sharpe"
     max_drawdown = "max_drawdown"
