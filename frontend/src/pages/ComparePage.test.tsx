@@ -29,11 +29,15 @@ const STATS: Stats = {
   buy_and_hold_return: 0.3,
 };
 
+// The names of the user's backtests here (#376).
+const NAMES: Record<number, string> = { 12: 'Bright Vega', 11: 'Frozen Pulsar', 10: 'Crimson Nova' };
+
 // A finished backtest's document with these results.
 function doc(number: number, stats: Partial<Stats> = {}) {
   const base = backtestDocument();
+  const name = NAMES[number] ?? `Backtest ${String(number)}`;
   return backtestDocument({
-    backtest: { ...base.backtest, id: `bt_${String(number)}`, number },
+    backtest: { ...base.backtest, id: `bt_${String(number)}`, number, name, generated_name: name },
     results: base.results && { ...base.results, stats: { ...STATS, ...stats } },
   });
 }
@@ -50,7 +54,7 @@ const LISTS = {
 
 const choose = (...docs: ReturnType<typeof doc>[]) => {
   docs.forEach(({ backtest }) => {
-    addToCompare({ id: backtest.id, number: backtest.number, symbol: 'AAPL' });
+    addToCompare({ id: backtest.id, number: backtest.number, name: backtest.name, symbol: 'AAPL' });
   });
   return Object.fromEntries(docs.map((each) => [`GET /api/v1/backtests/${each.backtest.id}`, answer(each)]));
 };
@@ -116,8 +120,8 @@ describe('the compare page', () => {
     stubApi({ ...LISTS, ...choose(BETTER, WORSE) });
     await renderApp('/backtests/compare');
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Remove backtest 11 from compare' }));
-    expect(screen.queryByRole('link', { name: '#11' })).toBeNull();
+    await user.click(await screen.findByRole('button', { name: 'Remove Frozen Pulsar from compare' }));
+    expect(screen.queryByRole('link', { name: 'Frozen Pulsar' })).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Clear all' }));
     expect(await screen.findByRole('heading', { name: 'Nothing to compare yet' })).toBeDefined();
   });
@@ -164,7 +168,7 @@ describe('the compare page', () => {
     await screen.findByRole('dialog');
     expect(charts.of('Line')).toHaveLength(4);
     await user.keyboard('{Escape}');
-    await user.click(screen.getByRole('button', { name: 'Remove backtest 11 from compare' }));
+    await user.click(screen.getByRole('button', { name: 'Remove Frozen Pulsar from compare' }));
     await vi.waitFor(() => {
       expect(charts.of('Line')).toHaveLength(6);
     });
@@ -174,7 +178,7 @@ describe('the compare page', () => {
     stubApi({ ...LISTS, ...choose(BETTER, WORSE) });
     await renderApp('/backtests/compare');
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('link', { name: '#12' }));
+    await user.click(await screen.findByRole('link', { name: 'Bright Vega' }));
     await user.click(await screen.findByRole('button', { name: '← Compare backtests' }));
     expect(await screen.findByRole('heading', { level: 1, name: 'Compare backtests' })).toBeDefined();
   });
@@ -190,7 +194,13 @@ describe('the compare page', () => {
 describe('comparing with another account’s backtests', () => {
   const theirs = () => {
     const doc = othersDocument();
-    addToCompare({ id: doc.backtest.id, number: doc.backtest.number, symbol: 'AAPL', author: 'Tymur Tkach' });
+    addToCompare({
+      id: doc.backtest.id,
+      number: doc.backtest.number,
+      name: doc.backtest.name,
+      symbol: 'AAPL',
+      author: 'Tymur Tkach',
+    });
     return { [`GET /api/v1/backtests/${doc.backtest.id}`]: answer(doc) };
   };
 
@@ -200,11 +210,15 @@ describe('comparing with another account’s backtests', () => {
     expect(await screen.findByText('2 of 4 backtests · 1 yours, 1 from Experiments')).toBeDefined();
     await screen.findByRole('rowheader', { name: 'Author' });
     expect(row('Author').map((cell) => cell.textContent)).toEqual(['ALYou', 'TTTymur Tkach', 'No backtest']);
-    const head = screen.getByRole('link', { name: '#9' }).closest('th')!;
+    // Each head and legend names its backtest on two lines, without its number (#376).
+    const head = screen.getByRole('link', { name: 'Velvet Deneb' }).closest('th')!;
     expect(within(head).getByText('Tymur Tkach').previousElementSibling?.textContent).toBe('TT');
+    expect(within(head).getByText('AAPL · Candles · 30m')).toBeDefined();
+    expect(within(head).queryByText('#9')).toBeNull();
     const legend = within(screen.getByRole('region', { name: 'Equity' }));
-    expect(legend.getByText('#12').textContent).toBe('#12');
-    expect(legend.getByTitle('Tymur Tkach').parentElement?.textContent).toBe('TT#9');
+    expect(legend.getByText('Bright Vega').parentElement?.textContent).toBe('Bright VegaAAPL · Candles · 30m');
+    expect(legend.getByTitle('Tymur Tkach').parentElement?.textContent).toBe('TTVelvet Deneb');
+    expect(legend.queryByText(/#/)).toBeNull();
   });
 
   it('has no Author row with only the user’s own', async () => {
@@ -217,18 +231,18 @@ describe('comparing with another account’s backtests', () => {
 
   it('says which one its author unpublished until it is dismissed', async () => {
     const doc = othersDocument();
-    addToCompare({ id: doc.backtest.id, number: 9, symbol: 'AAPL', author: 'Tymur Tkach' });
+    addToCompare({ id: doc.backtest.id, number: 9, name: 'Velvet Deneb', symbol: 'AAPL', author: 'Tymur Tkach' });
     stubApi({
       ...LISTS,
       ...choose(BETTER, WORSE),
       [`GET /api/v1/backtests/${doc.backtest.id}`]: problem(404, 'not-found', 'Not found.'),
     });
     await renderApp('/backtests/compare');
-    const note = (await screen.findByText(/unpublished #9, so it left your Compare\.$/)).parentElement!;
-    expect(note.textContent).toBe('TTTymur Tkach unpublished #9, so it left your Compare.');
+    const note = (await screen.findByText(/, so it left your Compare\.$/)).parentElement!;
+    expect(note.textContent).toBe('TTTymur Tkach unpublished Velvet Deneb, so it left your Compare.');
     expect(screen.getByText('2 of 4 backtests')).toBeDefined();
     await userEvent.click(within(note).getByRole('button', { name: 'Dismiss' }));
-    expect(screen.queryByText(/unpublished #9/)).toBeNull();
+    expect(screen.queryByText(/so it left your Compare/)).toBeNull();
   });
 });
 

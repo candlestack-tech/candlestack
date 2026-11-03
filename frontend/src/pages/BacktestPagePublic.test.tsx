@@ -87,18 +87,20 @@ describe('publishing a backtest', () => {
       },
     });
     await user.click(within(header()).getByRole('button', { name: 'Publish' }));
-    const dialog = within(await screen.findByRole('dialog', { name: 'Publish backtest #12?' }));
+    const dialog = within(await screen.findByRole('dialog', { name: 'Publish Bright Vega?' }));
     expect(
       dialog.getByText('Everyone on the CandleStack beta can see it. It never goes on the public web.'),
     ).toBeDefined();
     const card = within(dialog.getByRole('article', { name: 'Your card as others will see it' }));
     expect(card.queryByRole('link')).toBeNull();
     expect(card.queryByRole('button')).toBeNull();
+    // The card names it on two lines, without its number (#376).
     expect(
-      ['AAPL', '#12', 'Candles', '30m', 'in 25 × 5', 'Buy and hold −2.0 %', 'Arsen Labovich', 'Today'].every((text) =>
-        card.getByText(text),
+      ['Bright Vega', 'AAPL · Candles · 30m', 'in 25 × 5', 'Buy and hold −2.0 %', 'Arsen Labovich', 'Today'].every(
+        (text) => card.getByText(text),
       ),
     ).toBe(true);
+    expect(card.queryByText('#12')).toBeNull();
     const lists = dialog.getAllByRole('list').map((list) =>
       within(list)
         .getAllByRole('listitem')
@@ -106,6 +108,7 @@ describe('publishing a backtest', () => {
     );
     expect(lists).toEqual([
       [
+        'Its nameBright Vega · you can rename it first',
         'Results, charts and the 1 trade',
         'The setupData, decision, fees, benchmark',
         'The model’s name and what it readsraw-candles.keras · Candles · 30m · 25 × 5',
@@ -116,7 +119,7 @@ describe('publishing a backtest', () => {
     expect(dialog.getByText('You can unpublish it any time')).toBeDefined();
     await user.click(dialog.getByRole('button', { name: 'Publish' }));
     expect(sentBody(fetch, `PATCH /api/v1/backtests/${ID}`)).toEqual({ public: true });
-    expect((await screen.findByRole('status')).textContent).toBe('Backtest #12 is in Experiments now');
+    expect((await screen.findByRole('status')).textContent).toBe('Bright Vega is in Experiments now');
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(within(header()).getByText('Public').getAttribute('title')).toBe(
       'Everyone on the CandleStack beta can see it',
@@ -161,7 +164,9 @@ describe('publishing a backtest', () => {
       },
     });
     await user.click(screen.getByRole('button', { name: 'Unpublish' }));
-    const dialog = within(await screen.findByRole('dialog', { name: 'Unpublish backtest #12?' }));
+    const dialog = within(await screen.findByRole('dialog', { name: 'Unpublish Bright Vega?' }));
+    expect(dialog.getByText('Bright Vega')).toBeDefined();
+    expect(dialog.getByText('AAPL · Candles · 30m')).toBeDefined();
     expect(
       dialog.getByText(
         'It leaves Experiments now. It also leaves the Compare of anyone who added it, and their panel says it was unpublished.',
@@ -170,7 +175,7 @@ describe('publishing a backtest', () => {
     expect(dialog.getByText('The backtest stays in your Backtests. You can publish it again later.')).toBeDefined();
     await user.click(dialog.getByRole('button', { name: 'Unpublish' }));
     expect(sentBody(fetch, `PATCH /api/v1/backtests/${ID}`)).toEqual({ public: false });
-    expect((await screen.findByRole('status')).textContent).toBe('Backtest #12 left Experiments');
+    expect((await screen.findByRole('status')).textContent).toBe('Bright Vega left Experiments');
     expect(within(header()).getByRole('button', { name: 'Publish' })).toBeDefined();
     expect(screen.queryByText(/In Experiments since/)).toBeNull();
   });
@@ -202,7 +207,10 @@ describe('publishing a backtest', () => {
 describe("another account's published backtest", () => {
   it('is the same page, read only: no Rename and no Publish, its author first under the title', async () => {
     await open(OTHERS, { [`GET /api/v1/backtests/${OTHERS}`]: { status: 200, body: othersDocument() } });
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Backtest #9');
+    // Its name, the number in its author's account beside it (#376).
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Velvet Deneb');
+    expect(document.title).toBe('Velvet Deneb · CandleStack');
+    expect(within(header()).getByText('#9').getAttribute('title')).toBe('Backtest number 9 in Tymur’s account');
     expect(buttons()).toEqual(['Download JSON', 'Add to compare']);
     expect(screen.getByRole('button', { name: 'Download JSON' }).getAttribute('title')).toBe(
       'Results, trades and setup. No model file.',

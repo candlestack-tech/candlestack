@@ -19,10 +19,19 @@ import { charts } from '@/test/lightweightCharts';
 vi.mock('lightweight-charts', () => import('@/test/lightweightCharts'));
 
 const TWELVE = backtest({ starred: true, sharpe: 1.344 });
-const ELEVEN = failedBacktest({ id: 'bt_a2b3c4d5e6', number: 11, starred: true, created_at: '2026-10-16T22:10:00Z' });
+const ELEVEN = failedBacktest({
+  id: 'bt_a2b3c4d5e6',
+  number: 11,
+  name: 'Frozen Pulsar',
+  generated_name: 'Frozen Pulsar',
+  starred: true,
+  created_at: '2026-10-16T22:10:00Z',
+});
 const TEN = backtest({
   id: 'bt_q7r8s9t2u3',
   number: 10,
+  name: 'Crimson Nova',
+  generated_name: 'Crimson Nova',
   representation: 'renko',
   instruments: ['AAPL', 'MSFT', 'NVDA', 'SPY'].map((symbol) => ({ symbol, market: 'stock' as const })),
   total_return: 0.965,
@@ -158,21 +167,21 @@ describe('the dashboard of an account with backtests', () => {
     await open({ ...dashboardAnswer(FULL), ...modelsAnswer([]) });
     await screen.findByRole('region', { name: 'Last backtests' });
     expect(rowsOf('Last backtests')).toEqual([
-      ['★#12', 'AAPLMSFT', '+24.6 %', '1.34', 'Today 10:05', ''],
-      ['★#11', 'AAPLMSFT', 'Failed', '–', 'Yesterday 18:10', ''],
-      ['☆#10', 'AAPL+3', '+96.5 %', '0.50', '12 Oct 19:44', ''],
+      ['★Bright Vega#12', 'AAPL+1', '+24.6 %', '1.34', 'Today 10:05', ''],
+      ['★Frozen Pulsar#11', 'AAPL+1', 'Failed', '–', 'Yesterday 18:10', ''],
+      ['☆Crimson Nova#10', 'AAPL+3', '+96.5 %', '0.50', '12 Oct 19:44', ''],
     ]);
-    // #318: each instrument with its icon, in every widget.
+    // #318: each instrument with its icon in the Instruments column. Best backtests has none, and
+    // Starred backtests names them in its second line (#376).
     const icons = (name: string) =>
       [...screen.getByRole('region', { name }).querySelectorAll('img')].map((img) => img.getAttribute('src'));
-    expect(icons('Last backtests')).toHaveLength(5);
-    expect(icons('Best backtests')).toHaveLength(2);
-    expect(icons('Starred backtests')).toEqual([
+    expect(icons('Last backtests')).toEqual([
       '/api/v1/data/instruments/stock%3AAAPL/icon',
-      '/api/v1/data/instruments/stock%3AMSFT/icon',
       '/api/v1/data/instruments/stock%3AAAPL/icon',
-      '/api/v1/data/instruments/stock%3AMSFT/icon',
+      '/api/v1/data/instruments/stock%3AAAPL/icon',
     ]);
+    expect(icons('Best backtests')).toEqual([]);
+    expect(icons('Starred backtests')).toEqual([]);
     expect(widget('Last backtests').getByRole('link', { name: 'All backtests' }).getAttribute('href')).toBe(
       '/backtests',
     );
@@ -183,14 +192,14 @@ describe('the dashboard of an account with backtests', () => {
     const best = within(await screen.findByRole('region', { name: 'Best backtests' }));
     expect(best.getByText('by Sharpe')).toBeDefined();
     expect(rowsOf('Best backtests')).toEqual([
-      ['1', '#12AAPL+1', '1.34', '+24.6 %', '−19.7 %', '51.2 %', ''],
-      ['2', '#10AAPL+3', '0.50', '+96.5 %', '−8.0 %', '55.6 %', ''],
+      ['1', 'Bright Vega#12', '1.34', '+24.6 %', '−19.7 %', '51.2 %', ''],
+      ['2', 'Crimson Nova#10', '0.50', '+96.5 %', '−8.0 %', '55.6 %', ''],
     ]);
     expect(best.getByRole('button', { name: 'Sharpe ↓' }).getAttribute('aria-pressed')).toBe('true');
     await userEvent.click(best.getByRole('button', { name: 'Return' }));
     expect(best.getByText('by return')).toBeDefined();
     expect(best.getByRole('button', { name: 'Return ↓' }).getAttribute('aria-pressed')).toBe('true');
-    expect(rowsOf('Best backtests').map((row) => row[1])).toEqual(['#10AAPL+3', '#12AAPL+1']);
+    expect(rowsOf('Best backtests').map((row) => row[1])).toEqual(['Crimson Nova#10', 'Bright Vega#12']);
     await userEvent.click(best.getByRole('button', { name: 'Drawdown' }));
     expect(best.getByText('by drawdown')).toBeDefined();
     await userEvent.click(best.getByRole('button', { name: 'Win rate' }));
@@ -201,11 +210,13 @@ describe('the dashboard of an account with backtests', () => {
     await open({ ...dashboardAnswer(FULL), ...modelsAnswer([]) });
     const starred = within(await screen.findByRole('region', { name: 'Starred backtests' }));
     expect(starred.getByText('by Sharpe')).toBeDefined();
-    const rows = starred.getAllByRole('button', { name: /^Unstar backtest/ }).map((star) => star.closest('div'));
+    // The name, then what it ran on, what its model reads and the timeframe, without its number (#376).
+    const rows = starred.getAllByRole('button', { name: /^Unstar / }).map((star) => star.closest('div'));
     expect(rows.map((row) => row?.textContent)).toEqual([
-      '★#12AAPLMSFT+24.6 %blesk-novol-8.kerasSharpe 1.34',
-      '★#11AAPLMSFTFailedblesk-novol-8.keras',
+      '★Bright Vega+24.6 %AAPL and MSFT · Candles · 30mSharpe 1.34',
+      '★Frozen PulsarFailedAAPL and MSFT · Candles · 30m',
     ]);
+    expect(starred.getByRole('link', { name: 'Bright Vega' }).getAttribute('href')).toBe('/backtests/bt_7f3k2m9qx4');
     // One tiny chart, of the finished backtest: its return in percent, on a baseline at zero.
     const [line] = charts.of('Baseline');
     expect(charts.of('Baseline')).toHaveLength(1);
@@ -213,13 +224,6 @@ describe('the dashboard of an account with backtests', () => {
     expect(line?.data).toEqual(
       TWELVE.equity?.strategy.map((value, index) => ({ time: index * 86400, value: value * 100 })),
     );
-    expect(rows[0]?.querySelector('span[title*="keras"]')?.getAttribute('title')).toBe(
-      'blesk-novol-8.keras · Time windows',
-    );
-    expect(rows.map((row) => row?.querySelector('svg[role="img"]')?.getAttribute('aria-label'))).toEqual([
-      'Keras',
-      'Keras',
-    ]);
     expect(starred.queryByRole('link', { name: /More/ })).toBeNull();
   });
 
@@ -246,15 +250,15 @@ describe('the dashboard of an account with backtests', () => {
       'PATCH /api/v1/backtests/bt_7f3k2m9qx4': () => new Promise(() => {}),
     });
     const starred = within(await screen.findByRole('region', { name: 'Starred backtests' }));
-    await userEvent.click(starred.getByRole('button', { name: 'Unstar backtest 12' }));
-    expect(starred.queryByRole('button', { name: 'Unstar backtest 12' })).toBeNull();
-    expect(widget('Last backtests').getByRole('button', { name: 'Star backtest 12' }).textContent).toBe('☆');
+    await userEvent.click(starred.getByRole('button', { name: 'Unstar Bright Vega' }));
+    expect(starred.queryByRole('button', { name: 'Unstar Bright Vega' })).toBeNull();
+    expect(widget('Last backtests').getByRole('button', { name: 'Star Bright Vega' }).textContent).toBe('☆');
   });
 
   it("opens a backtest's page from a widget, with its way back to the dashboard", async () => {
     await open({ ...dashboardAnswer(FULL), ...modelsAnswer([]) });
     const best = within(await screen.findByRole('region', { name: 'Best backtests' }));
-    const opener = best.getByRole('link', { name: 'Backtest #10' });
+    const opener = best.getByRole('link', { name: 'Crimson Nova' });
     await userEvent.click(opener);
     expect(await screen.findByRole('link', { name: '← Dashboard' })).toBeDefined();
     expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe('Not found');

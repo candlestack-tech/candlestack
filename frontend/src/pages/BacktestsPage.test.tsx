@@ -148,14 +148,20 @@ describe('the Backtests page', () => {
         .getByRole('columnheader', { name: label })
         .className.split(' ')
         .find((name) => name.startsWith('w-'));
-    expect(width(/^Model/)).toBeUndefined();
-    expect([/^Backtest/, /^Instruments/, /^Status/, /^Return/, /^Sharpe/, /^Max drawdown/, /^When/].map(width)).toEqual(
-      ['w-[104px]', 'w-[112px]', 'w-[80px]', 'w-[100px]', 'w-[76px]', 'w-[128px]', 'w-[128px]'],
-    );
+    expect(width(/^Backtest/)).toBeUndefined();
+    expect([/^Instruments/, /^Model/, /^Return/, /^Sharpe/, /^Max drawdown/, /^When/].map(width)).toEqual([
+      'w-[104px]',
+      'w-[120px]',
+      'w-[96px]',
+      'w-[72px]',
+      'w-[120px]',
+      'w-[120px]',
+    ]);
+    expect(screen.queryByRole('columnheader', { name: 'Status' })).toBeNull();
 
-    const [, , , status, result] = within(rows()[0]!).getAllByRole('cell');
-    expect(status!.textContent).toBe('Failed');
-    expect(within(result!).getByText('–').parentElement!.className).toBe('max-[500px]:hidden');
+    const [backtestCell, , , result] = within(rows()[0]!).getAllByRole('cell');
+    expect(backtestCell!.textContent).toBe('☆Bright Vega#12');
+    expect(result!.textContent).toBe('Failed');
   });
 
   it('says how many match a search, and one backtest in the singular', async () => {
@@ -216,7 +222,7 @@ describe('the Backtests page', () => {
     });
     const { router } = await renderApp('/backtests?page=2');
     const field = await screen.findByRole('searchbox', { name: 'Search backtests' });
-    expect(field.getAttribute('placeholder')).toBe('Name, number, instrument or model, e.g. aapl');
+    expect(field.getAttribute('placeholder')).toBe('Name, instrument or model');
     await userEvent.type(field, 'btc');
     await vi.waitFor(() => expect(router.state.location.search).toEqual({ q: 'btc' }));
     expect(await screen.findByText('1 of 3')).toBeDefined();
@@ -262,95 +268,6 @@ describe('the Backtests page', () => {
     ]);
   });
 
-  it('filters by Show and Model, keeping the panel open', async () => {
-    const fetch = stubApi({
-      ...sessionWithPreferences(ARSEN),
-      ...backtestsAnswer(PAGE),
-      ...backtestsAnswer({ ...PAGE, backtests: [TEN], total: 1 }, '?show=starred'),
-      ...backtestsAnswer({ ...PAGE, backtests: [TEN], total: 1 }, '?show=starred&model=blesk-novol-8.keras'),
-    });
-    await renderApp('/backtests');
-    await screen.findByText('#12');
-    await userEvent.click(screen.getByRole('button', { name: 'Filters: All backtests' }));
-    const panel = screen.getByRole('dialog', { name: 'Filters' });
-    expect(
-      within(panel)
-        .getAllByRole('option')
-        .map((option) => option.textContent),
-    ).toEqual(['All backtests3', 'Starred1', 'Public only0', 'Failed1', 'All models', 'blesk-novol-8.keras3']);
-    await userEvent.click(within(panel).getByRole('option', { name: /^Starred/ }));
-    await screen.findByRole('button', { name: 'Filters: Starred' });
-    await userEvent.click(within(panel).getByRole('option', { name: /blesk-novol-8/ }));
-    await screen.findByRole('button', { name: 'Filters: Starred · blesk-novol-8.keras' });
-    expect(screen.getByRole('dialog', { name: 'Filters' })).toBeDefined();
-    expect(asked(fetch).at(-1)).toBe('/api/v1/backtests?show=starred&model=blesk-novol-8.keras');
-  });
-
-  it('pops the Filters panel open from its corner and closes it at once, 8 px under each heading', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
-    await renderApp('/backtests');
-    await screen.findByText('#12');
-    const button = screen.getByRole('button', { name: 'Filters: All backtests' });
-    await userEvent.click(button);
-    const panel = screen.getByRole('dialog', { name: 'Filters' });
-    expect(panel.className.split(' ')).toEqual(
-      expect.arrayContaining([
-        'origin-top-left',
-        'data-[state=open]:animate-fx-pop!',
-        'data-[state=closed]:animate-none!',
-      ]),
-    );
-    for (const name of ['Show', 'Model']) {
-      const list = within(panel).getByRole('listbox', { name });
-      const heading = document.getElementById(list.getAttribute('aria-labelledby') ?? '');
-      expect(heading?.className.split(' ')).toContain('mb-2');
-      expect(heading?.className).not.toMatch(/mb-1/);
-    }
-    // Nothing plays on closing: the panel is gone right after Escape, the focus back on the button.
-    await userEvent.keyboard('{Escape}');
-    expect(screen.queryByRole('dialog', { name: 'Filters' })).toBeNull();
-    expect(document.activeElement).toBe(button);
-  });
-
-  it('ends a model name too long for the Filters panel in an ellipsis, its count still beside it', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
-    await renderApp('/backtests');
-    await screen.findByText('#12');
-    await userEvent.click(screen.getByRole('button', { name: 'Filters: All backtests' }));
-    const option = within(screen.getByRole('dialog', { name: 'Filters' })).getByRole('option', { name: /blesk/ });
-    const name = within(option).getByText('blesk-novol-8.keras');
-    expect(name.className.split(' ')).toEqual(expect.arrayContaining(['min-w-0', 'truncate']));
-    // The mark and the name sit in a row no wider than the entry's label, which gives way first.
-    expect(name.parentElement?.className.split(' ')).toContain('max-w-full');
-    expect(name.parentElement?.parentElement?.className.split(' ')).toEqual(
-      expect.arrayContaining(['min-w-0', 'truncate']),
-    );
-    expect(within(option).getByText('3').className.split(' ')).toContain('shrink-0');
-  });
-
-  it('lights an entry of the Filters panel under the pointer, and where the focus is only once keys are used', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
-    await renderApp('/backtests');
-    await screen.findByText('#12');
-    await userEvent.click(screen.getByRole('button', { name: 'Filters: All backtests' }));
-    const panel = screen.getByRole('dialog', { name: 'Filters' });
-    const first = within(panel).getAllByRole('option')[0]!;
-    expect(document.activeElement).toBe(first);
-    expect(panel.hasAttribute('data-keys')).toBe(false);
-    expect(first.className.split(' ')).toEqual(
-      expect.arrayContaining(['hover:bg-accent', 'in-data-keys:focus:bg-accent']),
-    );
-    expect(first.className).not.toMatch(/(^| )focus:bg-accent/);
-    expect(first.querySelector('svg')?.getAttribute('class')).toMatch(/(^| )size-4( |$)/);
-    await userEvent.keyboard('{ArrowDown}');
-    expect(panel.getAttribute('data-keys')).toBe('true');
-    expect(document.activeElement).toBe(within(panel).getAllByRole('option')[1]);
-    await userEvent.keyboard('{Escape}');
-    // Opened from the keyboard, the panel says so at once.
-    await userEvent.keyboard('{Enter}');
-    expect(screen.getByRole('dialog', { name: 'Filters' }).getAttribute('data-keys')).toBe('true');
-  });
-
   it('writes the headers of the number columns in mono at the right', async () => {
     stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
     await renderApp('/backtests');
@@ -362,20 +279,49 @@ describe('the Backtests page', () => {
     expect(mono).toEqual(['Return', 'Sharpe', 'Max drawdown']);
   });
 
-  it("shows a backtest's name under its number", async () => {
-    const named = backtest({ name: 'Half size' });
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer({ ...PAGE, backtests: [named] }) });
+  // #376: a name of the user's own replaces the generated one, on one line with the number after
+  // it; cut with an ellipsis, it shows in full in a tooltip on hover, and only then.
+  it("shows a backtest's own name in place of the generated one, in full on hover when it is cut", async () => {
+    const long = 'MSFT Renko retest after the fee fix, long only, threshold 0.2, second try';
+    const named = backtest({ name: long });
+    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer({ ...PAGE, backtests: [named, TEN] }) });
     await renderApp('/backtests');
-    expect(await screen.findByText('Half size')).toBeDefined();
+    const name = await screen.findByText(long);
+    expect(screen.queryByText('Bright Vega')).toBeNull();
+    expect(within(rows()[0]!).getAllByRole('cell')[0]!.textContent).toBe(`☆${long}#12`);
+    expect(screen.getByRole('link', { name: long })).toBeDefined();
+    expect(name.className.split(' ')).toEqual(expect.arrayContaining(['truncate', 'max-w-[150px]']));
+
+    await userEvent.hover(screen.getByText('Crimson Nova'));
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    Object.defineProperties(name, { scrollWidth: { value: 480 }, clientWidth: { value: 150 } });
+    await userEvent.hover(name);
+    expect(screen.getByRole('tooltip').textContent).toBe(long);
+    await userEvent.unhover(name);
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+
+  it('sorts by the name of the backtest, A to Z first', async () => {
+    const fetch = stubApi({
+      ...sessionWithPreferences(ARSEN),
+      ...backtestsAnswer(PAGE),
+      ...backtestsAnswer(PAGE, '?sort=name&order=asc'),
+    });
+    await renderApp('/backtests');
+    await screen.findByText('#12');
+    const head = () => screen.getByRole('columnheader', { name: /^Backtest/ });
+    await userEvent.click(within(head()).getByRole('button'));
+    await vi.waitFor(() => expect(head().textContent).toBe('Backtest ↑'));
+    expect(asked(fetch).at(-1)).toBe('/api/v1/backtests?sort=name&order=asc');
   });
 
   it('opens a row from the keyboard, ringing the row while its link has the focus', async () => {
     stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
     const { router } = await renderApp('/backtests');
-    const star = await screen.findByRole('button', { name: 'Star backtest 12' });
+    const star = await screen.findByRole('button', { name: 'Star Bright Vega' });
     star.focus();
     await userEvent.tab();
-    const opener = screen.getByRole('link', { name: 'Backtest #12' });
+    const opener = screen.getByRole('link', { name: 'Bright Vega' });
     expect(document.activeElement).toBe(opener);
     expect(opener.className.split(' ')).toEqual(
       expect.arrayContaining(['after:absolute', 'after:inset-0', 'focus-visible:after:ring-2']),
@@ -391,8 +337,8 @@ describe('the Backtests page', () => {
         new Promise((resolve) => setTimeout(() => resolve(problem(404, 'not-found', 'Gone.')), 50)),
     });
     await renderApp('/backtests');
-    const starOf = () => screen.getByRole('button', { name: 'Star backtest 12' });
-    await userEvent.click(await screen.findByRole('button', { name: 'Star backtest 12' }));
+    const starOf = () => screen.getByRole('button', { name: 'Star Bright Vega' });
+    await userEvent.click(await screen.findByRole('button', { name: 'Star Bright Vega' }));
     expect(starOf().getAttribute('aria-pressed')).toBe('true');
     expect(starOf().textContent).toBe('★');
     await vi.waitFor(() => expect(starOf().getAttribute('aria-pressed')).toBe('false'));
@@ -405,7 +351,7 @@ describe('the Backtests page', () => {
       'PATCH /api/v1/backtests/bt_q7r8s9t2u3': () => new Promise(() => {}),
     });
     await renderApp('/backtests?show=starred');
-    await userEvent.click(await screen.findByRole('button', { name: 'Star backtest 10' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Star Crimson Nova' }));
     expect(screen.getByText('No backtests match')).toBeDefined();
     expect(subtitle()).toBe('0 of 3');
   });
@@ -417,9 +363,9 @@ describe('the Backtests page', () => {
       'PATCH /api/v1/backtests/bt_q7r8s9t2u3': { status: 200, body: { ...TEN, starred: false } },
     });
     const { router } = await renderApp('/backtests');
-    await userEvent.click(await screen.findByRole('button', { name: 'Star backtest 10' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Star Crimson Nova' }));
     expect(router.state.location.pathname).toBe('/backtests');
-    const opener = screen.getByRole('link', { name: 'Backtest #10' });
+    const opener = screen.getByRole('link', { name: 'Crimson Nova' });
     expect(opener.getAttribute('href')).toBe('/backtests/bt_q7r8s9t2u3');
     await userEvent.click(opener);
     await vi.waitFor(() => expect(router.state.location.pathname).toBe('/backtests/bt_q7r8s9t2u3'));
