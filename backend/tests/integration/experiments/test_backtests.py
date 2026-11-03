@@ -431,7 +431,7 @@ def test_sort_by_the_shown_name_in_any_case(ada, order: str, expected: list[int]
 @pytest.mark.usefixtures("named")
 @pytest.mark.parametrize(
     ("query", "expected"),
-    [("ZET", [1]), ("beta", [5, 2]), ("delta", []), ("omega", []), ("game", [4])],
+    [("ZET", [1]), ("beta", [5, 2]), ("delta", []), ("omega", []), ("AMM", [4])],
 )
 def test_search_finds_the_shown_name(ada, query: str, expected: list[int]) -> None:
     assert numbers(ada.backtests(q=query)) == expected
