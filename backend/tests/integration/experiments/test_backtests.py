@@ -372,7 +372,7 @@ def test_a_backtest_keeps_its_own_name_in_another_case(ada, sql) -> None:
     [
         ("HALF SIZE", "half size (#1)"),  # another backtest's own name
         ("bright vega", "Bright Vega (#2)"),  # another's generated name
-        ("silent orion", "half size (#1)"),  # the generated name another no longer shows
+        ("silent orion", "half size (#1)"),  # the generated name of one renamed since
     ],
 )
 def test_a_name_another_backtest_has_is_taken(ada, sql, name: str, holder: str) -> None:
