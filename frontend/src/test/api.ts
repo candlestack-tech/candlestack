@@ -373,6 +373,15 @@ const EXAMPLE_EXECUTION: BacktestDocument['execution'] = {
   slippage_bps: 0,
 };
 
+const EXAMPLE_DECISION: BacktestDocument['decision'] = {
+  calibrate: null,
+  ema: null,
+  rule: { name: 'threshold', limit: 0.05 },
+  long_only: false,
+  confirm: null,
+  min_hold: null,
+};
+
 // The worked example of docs/engine.md as the result document of #12, Bright Vega: AAPL, 30-minute candles,
 // one long trade stopped out, 5 % stop and 10 bps fees, against buy and hold.
 export const backtestDocument = (fields: Partial<BacktestDocument> = {}): BacktestDocument => ({
@@ -406,14 +415,7 @@ export const backtestDocument = (fields: Partial<BacktestDocument> = {}): Backte
     manifest: manifest(),
   },
   data: EXAMPLE_DATA,
-  decision: {
-    calibrate: null,
-    ema: null,
-    rule: { name: 'threshold', limit: 0.05 },
-    long_only: false,
-    confirm: null,
-    min_hold: null,
-  },
+  decision: EXAMPLE_DECISION,
   execution: EXAMPLE_EXECUTION,
   benchmarks: [{ id: 'bh', kind: 'buy_and_hold', instrument: 'stock:AAPL' }],
   metrics: { periods_per_year: 252, risk_free_rate: 0 },

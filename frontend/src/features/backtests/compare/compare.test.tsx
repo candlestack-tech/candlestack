@@ -86,7 +86,7 @@ describe('choosing backtests to compare', () => {
   it('names a slot by the name over what it ran on, never by its number (#376)', async () => {
     const user = await openList();
     await user.click(toggle(/^Add to compare: Bright Vega$/));
-    const slot = within(panel()).getByRole('link', { name: 'Bright Vega' }).closest('div.h-11')!;
+    const slot = within(panel()).getByRole('link', { name: 'Bright Vega' }).closest<HTMLElement>('div.h-11')!;
     expect(slot.textContent).toBe(`Bright Vega${LINE}`);
     expect(within(slot).getByRole('button', { name: 'Remove Bright Vega from compare' })).toBeDefined();
     expect(saved().slots[0]).toMatchObject({ id: 'bt_12', number: 12, name: 'Bright Vega', description: LINE });
@@ -142,7 +142,13 @@ describe('choosing backtests to compare', () => {
 
   it('remembers the choice in this browser', () => {
     addToCompare({ id: 'bt_12', number: 12, name: 'Bright Vega', description: LINE, symbol: 'AAPL' });
-    expect(saved().slots[0]).toEqual({ id: 'bt_12', number: 12, name: 'Bright Vega', description: LINE, symbol: 'AAPL' });
+    expect(saved().slots[0]).toEqual({
+      id: 'bt_12',
+      number: 12,
+      name: 'Bright Vega',
+      description: LINE,
+      symbol: 'AAPL',
+    });
   });
 
   it('takes a new name into its slot, and keeps the line', () => {
@@ -209,7 +215,7 @@ describe('another account’s backtest in the comparison', () => {
       'GET /api/v1/backtests/bt_57': problem(404, 'not-found', 'Not found.'),
     });
     await renderApp('/backtests');
-    const slot = (await within(panel()).findByText('Distant Lyra was unpublished')).closest('div.h-11')!;
+    const slot = (await within(panel()).findByText('Distant Lyra was unpublished')).closest<HTMLElement>('div.h-11')!;
     expect(slot.getAttribute('title')).toBe('Vladyslav Shudiehov unpublished it');
     expect(slot.textContent).toBe('VSDistant Lyra was unpublishedBTCUSDT · Kagi · 30m');
     expect(within(slot).getByTitle('Vladyslav Shudiehov').textContent).toBe('VS');
@@ -285,7 +291,7 @@ describe('another account’s backtest in the comparison', () => {
       'Name, instrument, model or author',
     );
     // Only the other accounts’: the user's own are under Yours. One line: the name, then its number.
-    const row = (await dialog.findByText('Tymur Tkach · blesk-novol-8.keras')).closest('div.grid')!;
+    const row = (await dialog.findByText('Tymur Tkach · blesk-novol-8.keras')).closest<HTMLElement>('div.grid')!;
     expect(row.textContent).toBe('Velvet Deneb#9NVDATTTymur Tkach · blesk-novol-8.keras+41.2 %');
     expect(dialog.queryByText('Bright Vega')).toBeNull();
     await user.click(within(row).getByRole('button', { name: 'Add to compare: Velvet Deneb' }));
