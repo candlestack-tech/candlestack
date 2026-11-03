@@ -6,11 +6,11 @@ import { ExperimentsIcon } from '@/components/icons';
 import { MiniChart } from '@/components/MiniChart';
 import {
   AuthorAvatar,
-  BacktestInstruments,
-  BacktestNumber,
+  BacktestName,
   CompareToggle,
   ReturnValue,
   RowOpener,
+  descriptionOf,
   experimentTarget,
 } from '@/features/backtests';
 import { useViewerDateStyle } from '@/features/preferences';
@@ -20,23 +20,26 @@ import { cn } from '@/lib/utils';
 
 import { STARRED_ROW, Widget } from './widgets';
 
-// A row as Starred backtests has it (.dd-sr): the author's initials beside both lines; the number
-// with the instrument, the tiny chart of the return and the return; under them who published it
-// and when, and the Sharpe ratio.
+// A row as Starred backtests has it (.dd-sr): the author's initials beside both lines; the name,
+// the tiny chart of the return and the return; under them what it ran on, what its model reads
+// and the timeframe, and the Sharpe ratio. Who published it and when is the row's title
+// (backtest-names, ddRow).
 function Row({ experiment }: { experiment: Experiment }) {
   const style = useViewerDateStyle();
   const { author } = experiment;
   const when = formatRecentDayInline(new Date(experiment.published_at), style, undefined, true);
   return (
-    <div className={cn(STARRED_ROW, 'grid-cols-[auto_minmax(0,1fr)_64px_86px_32px] gap-y-1')}>
+    <div
+      title={`By ${author.name}, published ${when}`}
+      className={cn(STARRED_ROW, 'grid-cols-[auto_minmax(0,1fr)_64px_86px_32px] gap-y-1')}
+    >
       <span className="row-span-2 grid min-h-[22px] w-[22px] place-items-center self-start">
         <AuthorAvatar name={author.name} size="md" />
       </span>
-      <span className="flex items-center gap-1.5 overflow-hidden text-[13px] text-ellipsis whitespace-nowrap">
+      <span className="flex min-w-0 items-center text-[13px]">
         <RowOpener backtest={experiment}>
-          <BacktestNumber backtest={experiment} />
+          <BacktestName name={experiment.name} className="font-medium" />
         </RowOpener>
-        <BacktestInstruments backtest={experiment} max={2} size={16} />
       </span>
       {experiment.equity ? <MiniChart strategy={experiment.equity.strategy} /> : <span />}
       <span className="text-right font-mono text-sm/[1.5] font-semibold whitespace-nowrap">
@@ -45,8 +48,8 @@ function Row({ experiment }: { experiment: Experiment }) {
       <span className="row-span-2 self-center">
         <CompareToggle target={experimentTarget(experiment)} />
       </span>
-      <span className="col-span-2 min-w-0 truncate text-xs/[1.5] text-muted-foreground">
-        {author.name} · {when}
+      <span className="col-span-2 min-w-0 truncate font-mono text-[11.5px]/[1.5] text-muted-foreground">
+        {descriptionOf(experiment)}
       </span>
       <span className="text-right font-mono text-[11px]/[1.5] whitespace-nowrap text-muted-foreground">
         Sharpe {formatSharpe(experiment.sharpe)}

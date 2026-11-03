@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { errorMessage, type BacktestDocument } from '@/api';
 import { CancelButton, PrimaryButton } from '@/components/DialogButtons';
 import { Hint } from '@/components/Hint';
+import { InstrumentIcon } from '@/components/InstrumentIcon';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { formatCount } from '@/lib/results';
 import { cn } from '@/lib/utils';
@@ -11,6 +12,8 @@ import { cn } from '@/lib/utils';
 import { AuthorAvatar } from '../experiments/AuthorAvatar';
 import { ExperimentCard } from '../experiments/ExperimentCard';
 import { cardOfDocument } from '../experiments/format';
+import { documentDescription, hasOwnName } from '../names';
+import { BacktestNameLines } from '../parts';
 import { usePublishBacktest } from '../useBacktests';
 
 // The dialogs of Publish and Unpublish (public-experiments, MODALS.publish and .unpublish).
@@ -50,7 +53,18 @@ function List({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-// Others see the results, the setup, the model by name and what it reads, and the author; never
+// Its name first: others see it, and it can still change before it goes (backtest-names).
+function NameItem({ backtest }: { backtest: BacktestDocument['backtest'] }) {
+  return (
+    <Item shown title="Its name">
+      <span className="min-w-0 [overflow-wrap:anywhere]">
+        {backtest.name} · {hasOwnName(backtest) ? 'the name you gave it' : 'you can rename it first'}
+      </span>
+    </Item>
+  );
+}
+
+// Others see its name, the results, the setup, the model by name and what it reads, and the author; never
 // the model file, the email or anything else of the account.
 function WhatShows({ doc, results }: { doc: BacktestDocument; results: Results }) {
   const card = cardOfDocument(doc, results);
@@ -60,6 +74,7 @@ function WhatShows({ doc, results }: { doc: BacktestDocument; results: Results }
   return (
     <div className="flex flex-col gap-[18px] pt-1">
       <List title="Others see">
+        <NameItem backtest={doc.backtest} />
         <Item
           shown
           title={
@@ -114,7 +129,7 @@ function Failure({ error, fallback }: { error: Error | null; fallback: string })
   );
 }
 
-// Publish backtest #13? (800 px): who can see it, the card it gets in Experiments beside what
+// Publish Silent Orion? (800 px): who can see it, the card it gets in Experiments beside what
 // others see and do not, then Publish. The preview and the lists stack under 980 px.
 export function PublishDialog({ doc, open, onOpenChange, onDone }: DialogProps) {
   const publish = usePublishBacktest();
@@ -132,7 +147,7 @@ export function PublishDialog({ doc, open, onOpenChange, onDone }: DialogProps) 
     >
       <DialogContent className="w-[min(800px,calc(100%-32px))]">
         <DialogHeader>
-          <DialogTitle>Publish backtest #{backtest.number}?</DialogTitle>
+          <DialogTitle className="min-w-0 truncate">Publish {backtest.name}?</DialogTitle>
         </DialogHeader>
         <DialogBody>
           <p className="flex items-center gap-2.5 rounded-lg bg-accent-soft px-3 py-2.5 text-[13px]">
@@ -155,7 +170,22 @@ export function PublishDialog({ doc, open, onOpenChange, onDone }: DialogProps) 
   );
 }
 
-// Unpublish backtest #13? (560 px): it also leaves the Compare of others, whose panel says so.
+// Which backtest leaves: its instrument beside its two lines (backtest-names, .who-bt).
+function Which({ doc }: { doc: BacktestDocument }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2.5 rounded-lg bg-muted px-3 py-2.5">
+      <InstrumentIcon id={doc.data.instrument.id} size={28} />
+      <BacktestNameLines
+        name={doc.backtest.name}
+        description={documentDescription(doc)}
+        nameClassName="font-semibold"
+      />
+    </div>
+  );
+}
+
+// Unpublish Silent Orion? (560 px): which backtest, then that it also leaves the Compare of
+// others, whose panel says so.
 export function UnpublishDialog({ doc, open, onOpenChange, onDone }: DialogProps) {
   const publish = usePublishBacktest();
   const { backtest } = doc;
@@ -169,9 +199,10 @@ export function UnpublishDialog({ doc, open, onOpenChange, onDone }: DialogProps
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Unpublish backtest #{backtest.number}?</DialogTitle>
+          <DialogTitle className="min-w-0 truncate">Unpublish {backtest.name}?</DialogTitle>
         </DialogHeader>
         <DialogBody>
+          <Which doc={doc} />
           <p>
             It leaves Experiments now. It also leaves the Compare of anyone who added it, and their panel says it was
             unpublished.

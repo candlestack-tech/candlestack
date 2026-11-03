@@ -6,12 +6,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ARSEN, backtest, backtestsAnswer, failedBacktest, problem, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
 
-// #12 finished today at 10:05 in New York, #11 failed yesterday, #10 on three instruments.
+// #12 (Bright Vega) finished today at 10:05 in New York, #11 failed yesterday, #10 on three
+// instruments.
 const TWELVE = backtest();
-const ELEVEN = failedBacktest({ id: 'bt_a2b3c4d5e6', number: 11, created_at: '2026-10-16T22:10:00Z' });
+const ELEVEN = failedBacktest({
+  id: 'bt_a2b3c4d5e6',
+  number: 11,
+  name: 'Frozen Pulsar',
+  generated_name: 'Frozen Pulsar',
+  created_at: '2026-10-16T22:10:00Z',
+});
 const TEN = backtest({
   id: 'bt_q7r8s9t2u3',
   number: 10,
+  name: 'Crimson Nova',
+  generated_name: 'Crimson Nova',
   starred: true,
   instruments: [
     { symbol: 'BTCUSDT', market: 'crypto' },
@@ -59,18 +68,17 @@ describe('the Backtests page', () => {
       'Backtest',
       'Instruments',
       'Model',
-      'Status',
       'Return',
       'Sharpe',
       'Max drawdown',
       'When',
       'Compare',
     ]);
-    // A failed return is a dash, with the badge for phones, where the Status column is hidden.
+    // The name, then the number (#376); a backtest without results has its badge as its return.
     expect(rows().map(cells)).toEqual([
-      ['☆#12', 'AAPL+1', 'blesk-novol-8.keras', 'Finished', '+24.6 %', '0.79', '−19.7 %', 'Today 10:05', ''],
-      ['☆#11', 'AAPL+1', 'blesk-novol-8.keras', 'Failed', 'Failed–', '–', '–', 'Yesterday 18:10', ''],
-      ['★#10', 'BTCUSDT+2', 'blesk-novol-8.keras', 'Finished', '−24.1 %', '−0.18', '−19.7 %', '12 Oct 19:44', ''],
+      ['☆Bright Vega#12', 'AAPL+1', 'blesk-novol-8.keras', '+24.6 %', '0.79', '−19.7 %', 'Today 10:05', ''],
+      ['☆Frozen Pulsar#11', 'AAPL+1', 'blesk-novol-8.keras', 'Failed', '–', '–', 'Yesterday 18:10', ''],
+      ['★Crimson Nova#10', 'BTCUSDT+2', 'blesk-novol-8.keras', '−24.1 %', '−0.18', '−19.7 %', '12 Oct 19:44', ''],
     ]);
     expect(within(rows()[0]!).getByRole('img', { name: 'Keras' })).toBeDefined();
   });
@@ -114,8 +122,8 @@ describe('the Backtests page', () => {
     );
   });
 
-  // #315: a long model name is cut inside its column, the numbers keep their widths and the status
-  // has its own column.
+  // #315: a long model name is cut inside its column and the numbers keep their widths; the
+  // backtest takes the rest (#376), and a failed one has its badge as its return.
   it('keeps a row with a long model name inside the table', async () => {
     const name = `${'BLESK_ATR06_R8_OHLC_LAM08_EOD_SPLIT_ATR_NO-VOL_OPT1_8_M25x23_'.repeat(2)}`.slice(0, 84) + '.keras';
     expect(name).toHaveLength(90);

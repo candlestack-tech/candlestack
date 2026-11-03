@@ -1,5 +1,4 @@
 import { Scale } from 'lucide-react';
-import type { ReactNode } from 'react';
 
 import { InstrumentIcon } from '@/components/InstrumentIcon';
 import { MiniChart } from '@/components/MiniChart';
@@ -9,59 +8,53 @@ import { formatCount, formatPercent, formatSharpe, returnTone } from '@/lib/resu
 import { cn } from '@/lib/utils';
 
 import { CompareToggle } from '../compare/CompareToggle';
-import { instrumentId, instrumentList, returnClass, symbolsOf } from '../format';
-import { ModelName } from '../parts';
+import { instrumentId, returnClass } from '../format';
+import { BacktestNameLines, ModelName } from '../parts';
 import { RowOpener } from '../table';
 import { AuthorAvatar } from './AuthorAvatar';
 import type { CardFacts } from './format';
 
-// The neutral 11 px mono tag of what the model reads (.badge), the same for every representation.
-function Tag({ children }: { children: ReactNode }) {
-  return (
-    <span className="inline-block rounded-[4px] border px-1.5 py-px font-mono text-[11px]/4 font-medium whitespace-nowrap text-muted-foreground">
-      {children}
-    </span>
-  );
-}
-
-// The instrument's 28 px tile, its symbol in the 16 px title and the number (.sec-h .dd-h, .xc-id);
-// on a live card the symbol is the link stretched over the whole card.
+// The instrument's 28 px tile beside the name in 15 px over what it ran on, what its model reads
+// and the timeframe (backtest-names, .xc-tt); on a live card the name is the link stretched over
+// the whole card.
 function Title({ facts, live }: { facts: CardFacts; live: boolean }) {
-  const symbol = instrumentList(symbolsOf(facts));
   const [first] = facts.instruments;
-  const label = `Backtest #${facts.number}, ${symbol}, by ${facts.author.name}`;
+  const label = `${facts.name}, ${facts.description}, by ${facts.author.name}`;
   return (
-    <div className="flex min-w-0 items-center gap-2.5">
+    <div className="flex min-w-0 flex-1 items-center gap-2.5">
       {first && <InstrumentIcon id={instrumentId(first)} size={28} />}
-      <h2 title={symbol} className="truncate text-base font-semibold">
-        {live ? (
-          <RowOpener backtest={facts} label={label}>
-            {symbol}
-          </RowOpener>
-        ) : (
-          symbol
+      <BacktestNameLines
+        name={facts.name}
+        description={facts.description}
+        wrap={(shown) => (
+          <h2 className="flex min-w-0 text-[15px]/5 font-semibold">
+            {live ? (
+              <RowOpener backtest={facts} label={label}>
+                {shown}
+              </RowOpener>
+            ) : (
+              shown
+            )}
+          </h2>
         )}
-      </h2>
-      <span className="font-mono text-[13px] text-muted-foreground">#{facts.number}</span>
+      />
     </div>
   );
 }
 
-// The model by its mark and name, then what it reads and its input (.xc-m, .xc-tags).
+// The model by its mark and name, then its input: "in 25 × 3" (backtest-names, .xc-m).
 function Model({ facts }: { facts: CardFacts }) {
   return (
-    <>
-      <span title={facts.model.name} className="flex min-w-0 text-[13px] font-medium">
+    <span className="mt-0.5 flex min-w-0 items-center text-[13px] font-medium">
+      <span title={facts.model.name} className="flex min-w-0">
         <ModelName name={facts.model.name} framework={facts.model.framework} />
       </span>
-      <div className="mt-1.5 flex items-center gap-1">
-        {facts.representation && <Tag>{facts.representation}</Tag>}
-        <Tag>{facts.timeframe}</Tag>
-        {facts.input && (
-          <span className="ml-1 font-mono text-xs whitespace-nowrap text-muted-foreground">in {facts.input}</span>
-        )}
-      </div>
-    </>
+      {facts.input && (
+        <span className="ml-[9px] font-mono text-xs font-normal whitespace-nowrap text-muted-foreground">
+          in {facts.input}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -137,10 +130,10 @@ type Props = {
   target?: Parameters<typeof CompareToggle>[0]['target'];
 };
 
-// A published backtest as a card of Experiments (public-experiments, gCard): the dashboard
-// widget's card with the instrument in the icon's place, the model and what it reads, the return
-// against its benchmark, four results and the author. The whole card opens the backtest; without
-// a `target` it is the preview in the Publish dialog, which opens nothing.
+// A published backtest as a card of Experiments (public-experiments, gCard; backtest-names): the
+// dashboard widget's card with the instrument in the icon's place beside the name, the model with
+// its input, the return against its benchmark, four results and the author. The whole card opens
+// the backtest; without a `target` it is the preview in the Publish dialog, which opens nothing.
 export function ExperimentCard({ facts, target }: Props) {
   const live = target !== undefined;
   return (

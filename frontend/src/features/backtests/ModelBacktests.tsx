@@ -9,15 +9,16 @@ import { CompareToggle } from './compare/CompareToggle';
 import { useComparedRow } from './compare/selection';
 import { compareTarget, hasResults } from './format';
 import { BacktestInstruments, BacktestReturn, BacktestWhen, Missing } from './parts';
-import { BacktestCell, CELL, COMPARE_CELL, HEAD, NUMBER, ROW, TABLE } from './table';
+import { BacktestCell, CELL, COMPARE_CELL, HEAD, NAME_CELL, NAME_HEAD, NUMBER, ROW, TABLE } from './table';
 import { useBacktestsPage, useStarBacktest } from './useBacktests';
 import { WIDTH } from './widths';
 
-// The columns with the widths every table of backtests gives them (the instruments take the
-// rest), and from which width down each one hides so the table never scrolls sideways.
+// The columns with the widths every table of backtests gives them (the backtest takes the rest,
+// its name up to 150 px), and from which width down each one hides so the table never scrolls
+// sideways.
 const COLUMNS: readonly { label: string; number?: boolean; width?: string; hide?: string }[] = [
-  { label: 'Backtest', width: WIDTH.backtest },
-  { label: 'Instruments', hide: 'max-[420px]:hidden' },
+  { label: 'Backtest', width: NAME_HEAD },
+  { label: 'Instruments', width: WIDTH.instruments, hide: 'max-[420px]:hidden' },
   { label: 'Return', number: true, width: WIDTH.return },
   { label: 'Sharpe', number: true, width: WIDTH.sharpe },
   { label: 'Max drawdown', number: true, width: WIDTH.maxDrawdown, hide: 'max-[760px]:hidden' },
@@ -34,11 +35,11 @@ function Row({ backtest, onStar }: RowProps) {
   const compared = useComparedRow(backtest.id);
   return (
     <tr className={cn(ROW, compared)}>
-      <td className={CELL}>
+      <td className={cn(CELL, NAME_CELL)}>
         <BacktestCell backtest={backtest} onStar={onStar} />
       </td>
       <td className={cn(CELL, hideOf('Instruments'))}>
-        <BacktestInstruments backtest={backtest} max={2} />
+        <BacktestInstruments backtest={backtest} max={1} />
       </td>
       <td className={cn(CELL, NUMBER)}>
         <BacktestReturn backtest={backtest} />

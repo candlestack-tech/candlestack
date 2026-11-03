@@ -17,9 +17,11 @@ import {
   clearCompare,
   isMissing,
   lineOf,
+  pickName,
   removeFromCompare,
   useCompareSelection,
   useLeaveMissing,
+  useNamesOf,
   type CompareColumn,
   type ComparePick,
 } from '@/features/backtests';
@@ -31,6 +33,7 @@ function useColumns() {
   const { slots, picks, full } = useCompareSelection();
   const results = useQueries({ queries: picks.map((pick) => backtestQueryOptions(pick.id)) });
   useLeaveMissing(picks, results);
+  useNamesOf(picks, results);
   const docs = new Map<string, BacktestDocument>();
   picks.forEach((pick, index) => {
     const data = results[index]?.data;
@@ -87,8 +90,8 @@ function UnpublishedNote({ pick }: { pick: ComparePick }) {
     <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-dashed border-[color-mix(in_srgb,var(--warn)_45%,var(--rule))] bg-background py-2 pr-2 pl-3 text-[13px] text-muted-foreground">
       {pick.author !== undefined && <AuthorAvatar name={pick.author} size="md" />}
       <span className="min-w-0 flex-1">
-        <b className="font-medium text-foreground">{pick.author}</b> unpublished #{pick.number}, so it left your
-        Compare.
+        <b className="font-medium text-foreground">{pick.author}</b> unpublished{' '}
+        <b className="font-medium text-foreground">{pickName(pick)}</b>, so it left your Compare.
       </span>
       <button
         type="button"

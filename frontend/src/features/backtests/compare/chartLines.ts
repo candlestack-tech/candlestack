@@ -1,13 +1,17 @@
 import type { BacktestDocument } from '@/api';
 
+import { documentDescription } from '../names';
+
 // What the comparison's charts draw of a backtest: its return and its fall from the top, in
 // percent, on its own times, so a line starts where its period starts. Times are UTC epoch seconds.
 
 export type Point = { time: number; value: number };
+// A line is named as its backtest (backtest-names, lgLabel): the name and "AAPL · Kagi · 1h".
 // Another account's line carries its author's name, for the initials in the legends.
 export type Line = {
   id: string;
-  number: number;
+  name: string;
+  description: string;
   author: string | null;
   color: string;
   equity: Point[];
@@ -26,7 +30,8 @@ export function lineOf(doc: BacktestDocument, color: string): Line | null {
   const { ts, equity, drawdown } = series.columns;
   return {
     id: doc.backtest.id,
-    number: doc.backtest.number,
+    name: doc.backtest.name,
+    description: documentDescription(doc),
     author: doc.backtest.author.mine ? null : doc.backtest.author.name,
     color,
     equity: percentOf(ts, equity, (value) => value - 1),

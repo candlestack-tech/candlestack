@@ -11,6 +11,8 @@ import {
   type Dashboard,
 } from '@/api';
 
+import { nameInCompare } from './compare/selection';
+
 // Every page of the list, whatever its search and filters, the dashboard, and every page and the
 // cards of Experiments.
 const LISTS: QueryKey = ['account', 'backtests'];
@@ -67,17 +69,26 @@ export function starOnDashboard(dashboard: Dashboard, changed: Backtest): Dashbo
 
 // Stars or unstars at once everywhere it shows, with the counts; everything goes back when the
 // API refuses, and is asked for again either way.
-// Renames the backtest, or takes its name away; what shows it is asked for again.
+// Renames the backtest, or with a name of null goes back to its generated one: its page and its
+// slot in the comparison say so at once from the API's answer, and the lists, the dashboard and
+// Experiments are asked for again.
 export function useRenameBacktest() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, name }: { id: string; name: string | null }) => updateBacktest(id, { name }),
-    onSuccess: (_backtest, { id }) =>
-      Promise.all([
+    onSuccess: (changed, { id }) => {
+      queryClient.setQueryData(
+        backtestQueryOptions(id).queryKey,
+        (doc) =>
+          doc && { ...doc, backtest: { ...doc.backtest, name: changed.name, generated_name: changed.generated_name } },
+      );
+      nameInCompare(id, changed.name);
+      return Promise.all([
         queryClient.invalidateQueries({ queryKey: LISTS }),
         queryClient.invalidateQueries({ queryKey: DASHBOARD }),
-        queryClient.invalidateQueries({ queryKey: ['account', 'backtest', id] }),
-      ]),
+        queryClient.invalidateQueries({ queryKey: EXPERIMENTS }),
+      ]);
+    },
   });
 }
 

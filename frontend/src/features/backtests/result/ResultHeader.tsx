@@ -14,8 +14,10 @@ import { cn } from '@/lib/utils';
 
 import { CompareButton } from '../compare/CompareToggle';
 import { AuthorAvatar } from '../experiments/AuthorAvatar';
+import { firstName } from '../experiments/format';
+import { documentDescription, documentReads } from '../names';
 import { RenameBacktest } from '../RenameBacktest';
-import { StatusBadge } from '../parts';
+import { BacktestTitle, StatusBadge } from '../parts';
 import { durationText, periodText } from './format';
 import { PublicPill, PublishActions } from './PublishActions';
 
@@ -188,13 +190,15 @@ function Actions({ doc }: { doc: BacktestDocument }) {
   const others = !backtest.author.mine;
   return (
     <div className="flex flex-wrap gap-2">
-      {!others && <RenameBacktest id={backtest.id} name={backtest.name} />}
+      {!others && <RenameBacktest backtest={backtest} />}
       {backtest.status === 'finished' && <FinishedActions id={backtest.id} number={backtest.number} others={others} />}
       {!others && <PublishActions doc={doc} />}
       <CompareButton
         target={{
           id: backtest.id,
           number: backtest.number,
+          name: backtest.name,
+          description: documentDescription(doc),
           status: backtest.status,
           symbol: doc.data.instrument.symbol,
           author: others ? backtest.author.name : undefined,
@@ -230,28 +234,48 @@ function When({ backtest }: { backtest: BacktestDocument['backtest'] }) {
   );
 }
 
-// The title with the status and the buttons, then what it ran on (the instrument with its icon),
-// with what, over which days and when (mockups/app, runHead). A running backtest's status counts
+// What the number beside the title is: numbers are per account (backtest-names, .r7-id).
+const numberTitle = ({ number, author }: BacktestDocument['backtest']) =>
+  `Backtest number ${String(number)} in ${author.mine ? 'your' : `${firstName(author.name)}’s`} account`;
+
+// The name on up to two lines, then on its first line the number, the status (with how long a
+// running one runs) and the Public pill of the user's own published one (backtest-names, .r7-t).
+function TitleRow({ backtest }: { backtest: BacktestDocument['backtest'] }) {
+  const now = useNow(backtest.status === 'running');
+  const runs = backtest.status === 'running' ? durationText(secondsSince(backtest.created_at, now) ?? 0) : undefined;
+  return (
+    <div className="flex min-w-0 flex-[1_1_420px] items-start gap-2.5">
+      <BacktestTitle name={backtest.name} className="text-[22px]/7 font-semibold tracking-[-0.02em]" />
+      <span title={numberTitle(backtest)} className="flex-none font-mono text-[13px]/7 text-muted-foreground">
+        #{backtest.number}
+      </span>
+      <span className="mt-[5px] flex flex-none">
+        <StatusBadge status={backtest.status} detail={runs} />
+      </span>
+      {backtest.author.mine && backtest.public && (
+        <span className="mt-1 flex flex-none">
+          <PublicPill />
+        </span>
+      )}
+    </div>
+  );
+}
+
+// The name (up to two lines) with the number, the status and the buttons, then what it ran on
+// (the instrument with its icon, what its model reads and the timeframe), with what, over which
+// days and when (mockups/app, runHead; backtest-names, .r7-t). A running backtest's status counts
 // how long it runs. Published, a green Public pill follows the status; another account's starts
 // the line under it with its author (public-experiments, pageBt).
 export function ResultHeader({ doc }: { doc: BacktestDocument }) {
   const dateStyle = useViewerDateStyle();
   const { backtest } = doc;
+  const reads = documentReads(doc);
   const others = !backtest.author.mine;
-  const now = useNow(backtest.status === 'running');
-  const runs = backtest.status === 'running' ? durationText(secondsSince(backtest.created_at, now) ?? 0) : undefined;
   return (
     <>
       <BackLink model={doc.model} others={others} />
-      <div className="flex flex-wrap items-center justify-between gap-2.5">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <h1 className="text-[22px]/7 font-semibold tracking-[-0.02em]">
-            {backtest.name ?? `Backtest #${String(backtest.number)}`}
-          </h1>
-          {backtest.name && <span className="font-mono text-[13px] text-muted-foreground">#{backtest.number}</span>}
-          <StatusBadge status={backtest.status} detail={runs} />
-          {!others && backtest.public && <PublicPill />}
-        </div>
+      <div className="flex flex-wrap items-start justify-between gap-2.5">
+        <TitleRow backtest={backtest} />
         <Actions doc={doc} />
       </div>
       <div className="mt-1 mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-muted-foreground">
@@ -261,7 +285,10 @@ export function ResultHeader({ doc }: { doc: BacktestDocument }) {
             {backtest.author.name}
           </span>
         )}
-        <InstrumentSymbol id={doc.data.instrument.id} symbol={doc.data.instrument.symbol} size={20} />
+        <span className="inline-flex min-w-0 items-center whitespace-pre">
+          <InstrumentSymbol id={doc.data.instrument.id} symbol={doc.data.instrument.symbol} size={20} />
+          {reads && ` · ${reads}`}
+        </span>
         <span className={cn(others && 'text-foreground')}>
           <ModelLink model={doc.model} />
         </span>

@@ -9,6 +9,8 @@ import {
   COMPARE_CELL,
   CompareToggle,
   HEAD,
+  NAME_CELL,
+  NAME_HEAD,
   compareTarget,
   hasResults,
   Missing,
@@ -23,17 +25,17 @@ import { cn } from '@/lib/utils';
 
 import { Widget, WidgetLink } from './widgets';
 
-// When hides in a card under 520 px (the dashboard at 1024 px), so the instruments keep 100 px
-// or more and nothing is cut.
+// When hides in a card under 520 px (the dashboard at 1024 px), so the name keeps its room.
 const WHEN = '@max-[520px]:hidden';
 
-// With the widths every table of backtests gives them; the instruments take the rest.
+// The backtest takes what the others leave, its name up to 150 px; the others take what their
+// values need, When on two lines (backtest-names, .dd-card .tbl).
 const COLUMNS: readonly { label: string; number: boolean; width?: string; hide?: string }[] = [
-  { label: 'Backtest', number: false, width: WIDTH.backtest },
+  { label: 'Backtest', number: false, width: NAME_HEAD },
   { label: 'Instruments', number: false },
-  { label: 'Return', number: true, width: WIDTH.return },
-  { label: 'Sharpe', number: true, width: WIDTH.sharpe },
-  { label: 'When', number: false, width: 'w-[108px]', hide: WHEN },
+  { label: 'Return', number: true },
+  { label: 'Sharpe', number: true },
+  { label: 'When', number: false, hide: WHEN },
   { label: 'Compare', number: false, width: WIDTH.compare },
 ];
 
@@ -43,11 +45,11 @@ function Row({ backtest, onStar }: RowProps) {
   const compared = useComparedRow(backtest.id);
   return (
     <tr className={cn(ROW, compared)}>
-      <td className={CELL}>
+      <td className={cn(CELL, NAME_CELL)}>
         <BacktestCell backtest={backtest} onStar={onStar} />
       </td>
       <td className={CELL}>
-        <BacktestInstruments backtest={backtest} max={2} />
+        <BacktestInstruments backtest={backtest} max={1} />
       </td>
       <td className={cn(CELL, NUMBER)}>
         <BacktestReturn backtest={backtest} />
@@ -65,14 +67,14 @@ function Row({ backtest, onStar }: RowProps) {
 
 type Props = { backtests: Backtest[] } & Omit<RowProps, 'backtest'>;
 
-// The six newest backtests, failed ones too (mockups/app, ddLast): the star and the number, up to
-// two instruments with their icons in the width the fixed layout leaves them, the return, the
-// Sharpe ratio and when it ran. All backtests leads to the whole list.
+// The six newest backtests, failed ones too (mockups/app, ddLast; backtest-names): the star, the
+// name and the number, the instrument with its icon, the return, the Sharpe ratio and when it ran.
+// All backtests leads to the whole list.
 export function LastBacktests({ backtests, onStar }: Props) {
   return (
     <Widget icon={ClockIcon} title="Last backtests" aside={<WidgetLink to="/backtests">All backtests</WidgetLink>}>
       <div className="@container overflow-x-auto">
-        <table className={cn(TABLE, 'table-fixed')}>
+        <table className={TABLE}>
           <thead>
             <tr>
               {COLUMNS.map(({ label, number, width, hide }) => (

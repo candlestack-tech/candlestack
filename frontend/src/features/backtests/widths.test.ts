@@ -5,9 +5,10 @@ import { formatPercent } from '@/lib/results';
 
 import { WIDTH } from './widths';
 
-// A cell's padding, 10 px at each side (CELL), and the room it leaves for the text.
-const PADDING = 20;
-const room = (width: string) => Number(/^w-\[(\d+)px\]$/.exec(width)?.[1]) - PADDING;
+// A cell's padding, 8 px at each side (CELL), and the room it leaves for the text.
+const PADDING = 16;
+const width = (value: string) => Number(/^w-\[(\d+)px\]$/.exec(value)?.[1]);
+const room = (value: string) => width(value) - PADDING;
 
 describe('the widths of the backtest columns (#315)', () => {
   // Geist Mono draws every figure, sign and space 0.6 em wide: 7.8 px at the rows' 13 px.
@@ -17,9 +18,9 @@ describe('the widths of the backtest columns (#315)', () => {
     expect(room(WIDTH.return)).toBeGreaterThanOrEqual(text.length * 7.8);
   });
 
-  // The star's 24 px (28 px less its margins), 6 px, "#999" in Geist Mono, 6 px and the 14 px globe.
-  it('leave room for the star, a number up to #999 and the globe of a public backtest', () => {
-    expect(room(WIDTH.backtest)).toBeGreaterThanOrEqual(24 + 6 + '#999'.length * 7.8 + 6 + 14);
+  // The 20 px icon, 6 px and "BTCUSDT" in Geist Mono.
+  it('leave room for an instrument of seven letters with its icon', () => {
+    expect(room(WIDTH.instruments)).toBeGreaterThanOrEqual(20 + 6 + 'BTCUSDT'.length * 7.8);
   });
 
   // The longest When of every date and time format: a day of an earlier year in the default
@@ -32,5 +33,15 @@ describe('the widths of the backtest columns (#315)', () => {
     expect(when).toBe('28 May 2025 11:58 AM');
     // "28 May 2025" and "11:58 AM" each fit a line: about 81 and 61 px.
     expect(room(WIDTH.when)).toBeGreaterThanOrEqual(81);
+  });
+
+  // The Backtests table at the page's full width (1200 px and up: 928 px beside the sidebar) with
+  // every column: the backtest takes the rest, which holds the star's 24 px (28 px less its
+  // margins), 6 px, a name of 150 px (backtest-names), 6 px, "#999" in Geist Mono at 11.5 px
+  // (6.9 px a figure), 6 px and the 14 px globe of a public backtest.
+  it('leave a name 150 px in the Backtests table at its full width (#376)', () => {
+    const columns = [WIDTH.instruments, WIDTH.model, WIDTH.return, WIDTH.sharpe, WIDTH.maxDrawdown, WIDTH.when];
+    const rest = 928 - columns.reduce((sum, each) => sum + width(each), 0) - width(WIDTH.compare) - PADDING;
+    expect(rest).toBeGreaterThanOrEqual(24 + 6 + 150 + 6 + '#999'.length * 6.9 + 6 + 14);
   });
 });

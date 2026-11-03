@@ -10,7 +10,16 @@ export type BacktestsSearch = BacktestsParams;
 
 export type BacktestsColumn = NonNullable<BacktestsSearch['sort']>;
 
-const SORTS: readonly BacktestsColumn[] = ['number', 'model', 'return', 'sharpe', 'max_drawdown', 'trades', 'when'];
+const SORTS: readonly BacktestsColumn[] = [
+  'number',
+  'name',
+  'model',
+  'return',
+  'sharpe',
+  'max_drawdown',
+  'trades',
+  'when',
+];
 
 const MAX_QUERY = 100; // the API's limit for `q`
 const MAX_MODEL = 64; // a model's name: 60 characters and its extension
@@ -30,8 +39,8 @@ function parsePage(value: unknown): number | undefined {
   return Number.isSafeInteger(page) && page > 1 ? Math.min(page, MAX_PAGE) : undefined;
 }
 
-// The order a column sorts in first: down, but the model A to Z.
-const firstOrder = (column: BacktestsColumn): SortOrder => (column === 'model' ? 'asc' : 'desc');
+// The order a column sorts in first: down, but the name and the model A to Z.
+const firstOrder = (column: BacktestsColumn): SortOrder => (column === 'name' || column === 'model' ? 'asc' : 'desc');
 
 // A column and its order; an order without a column means nothing.
 function parseSort(sort: unknown, order: unknown): Pick<BacktestsSearch, 'sort' | 'order'> {
@@ -64,9 +73,9 @@ export function validateBacktestsSearch(
   };
 }
 
-// What a click on a column's header does (mockups/app, btSort): a new column sorts down (Model
-// up, A to Z), a second click the other way, a third goes back to newest first. Like every
-// change, it starts at page 1.
+// What a click on a column's header does (mockups/app, btSort): a new column sorts down (the
+// backtest's name and the model up, A to Z), a second click the other way, a third goes back to
+// newest first. Like every change, it starts at page 1.
 export function withSortBy(search: BacktestsSearch, column: BacktestsColumn): BacktestsSearch {
   const first = firstOrder(column);
   const next = { ...search, page: undefined };

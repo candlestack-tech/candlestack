@@ -19,22 +19,23 @@ export {
   SLOTS,
   clearCompare,
   comparedFromOf,
+  pickName,
   removeFromCompare,
   useComparedRow,
   useCompareSelection,
   type ComparePick,
 } from './compare/selection';
-export { isMissing, useLeaveMissing } from './compare/unpublished';
+export { isMissing, useLeaveMissing, useNamesOf } from './compare/unpublished';
 export { ModelBacktests } from './ModelBacktests';
 export { BackLink, BacktestResult, useBacktestResult } from './result';
-export { compareTarget, hasResults, representationName, returnClass } from './format';
+export { compareTarget, descriptionOf, hasResults, returnClass } from './format';
 export {
   BacktestInstruments,
-  BacktestNumber,
+  BacktestName,
+  BacktestNameNumber,
   BacktestReturn,
   BacktestWhen,
   Missing,
-  ModelName,
   PublicMark,
   ReturnValue,
 } from './parts';
@@ -43,6 +44,8 @@ export {
   CELL,
   COMPARE_CELL,
   HEAD,
+  NAME_CELL,
+  NAME_HEAD,
   NUMBER,
   ROW,
   ROW_OPENER,

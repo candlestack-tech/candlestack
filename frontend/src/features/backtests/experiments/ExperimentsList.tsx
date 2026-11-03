@@ -49,7 +49,7 @@ function Tools({ search, first, author }: ToolsProps) {
       <SearchBox
         query={search.q ?? ''}
         onSearch={onSearch}
-        placeholder="Instrument, model or author"
+        placeholder="Name, instrument, model or author"
         label="Search experiments"
         maxLength={100}
         debounceMs={200}
@@ -121,7 +121,7 @@ function Empty({ search }: { search: ExperimentsSearch }) {
     <EmptyCard
       icon={<Search className="size-5" />}
       title={search.q ? `Nothing matches “${search.q}”` : 'Nothing matches these filters'}
-      hint="Search by instrument, model or author, like NVDA, kagi or Tymur."
+      hint="Search by name, instrument, model or author, like Orion, NVDA, kagi or Tymur."
       action={
         <Button
           type="button"
