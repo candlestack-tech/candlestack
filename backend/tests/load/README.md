@@ -80,8 +80,8 @@ with the same pauses as above:
 
 These endpoints have no per-client rate limit. First give the dev account about 1000 backtests
 and 100 models: `fill.py` adds them straight to the database (models as rows only, without
-files) and replaces its own earlier rows on a second run. From `backend/`, after the dev sign-in
-above has made the account:
+files). A second run replaces them, and also removes the seed command's backtests of that
+account. From `backend/`, after the dev sign-in above has made the account:
 
 ```sh
 uv run python tests/load/fill.py --backtests 1000 --models 100

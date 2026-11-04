@@ -3,7 +3,6 @@ under load then read, and that a second run replaces only its own rows."""
 
 import asyncio
 import importlib.util
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,7 +19,6 @@ _spec = importlib.util.spec_from_file_location(
 assert _spec is not None
 assert _spec.loader is not None
 fill_module = importlib.util.module_from_spec(_spec)
-sys.modules["fill"] = fill_module
 _spec.loader.exec_module(fill_module)
 
 NOW = datetime(2026, 11, 2, 20, 0, tzinfo=UTC)
@@ -47,6 +45,12 @@ def test_fill_gives_the_pages_many_backtests_and_models(ada, bob, run_fill) -> N
     page = ada.backtests(sort="number", order="asc").json()
     assert page["total"] == 30
     assert page["counts"]["all"] == 30
+    names = [
+        item["generated_name"]
+        for number in (1, 2, 3)
+        for item in ada.backtests(sort="number", order="asc", page=number).json()["backtests"]
+    ]
+    assert len({name.lower() for name in names}) == 30
     assert {model["name"] for model in page["models"]} <= {
         "load-0.keras",
         "load-1.onnx",

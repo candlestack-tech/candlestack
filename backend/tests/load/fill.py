@@ -22,6 +22,7 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from candlestack.core import Database, get_settings
+from candlestack.experiments.names import generated_name
 from candlestack.experiments.schemas import Representation, SetupDirection
 from candlestack.experiments.seed import REFUSED_ENV, SeedRun, seed_backtest
 from candlestack.experiments.store import BacktestStore, UserModel
@@ -118,6 +119,11 @@ async def fill(
         model = draw.choice(owned)
         run = random_run(draw, n + 1, model)
         rows.append(seed_backtest(run, user_id, number=first + n, model=model, now=now))
+    # Under the lock and after the delete, like the seed command: the names left are all taken.
+    taken = await store.names(user_id)
+    for row in rows:
+        row.generated_name = generated_name(taken)
+        taken.add(row.generated_name.lower())
     db.add_all(rows)
     await store.commit()
     return user_id, len(rows), len(added)
