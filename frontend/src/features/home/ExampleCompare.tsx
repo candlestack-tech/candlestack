@@ -110,8 +110,10 @@ function Chart() {
 }
 
 const CELL = 'border-t px-3 py-2 text-[13px] max-[480px]:px-2';
+// The best value's green is mixed a little toward the ink: plain --up on its own tint reads
+// 4.0:1 in light, under the 4.5:1 of WCAG AA.
 const MARKS = {
-  best: 'bg-[color-mix(in_srgb,var(--up)_14%,transparent)] font-semibold text-up',
+  best: 'bg-[color-mix(in_srgb,var(--up)_14%,transparent)] font-semibold text-[color-mix(in_srgb,var(--up)_85%,var(--ink))]',
   worst: 'bg-[color-mix(in_srgb,var(--down)_14%,transparent)] font-semibold text-down',
 };
 
@@ -145,7 +147,7 @@ function Heads() {
 
 function Table() {
   return (
-    <table className="w-full table-fixed border-collapse">
+    <table aria-label="Example comparison of three backtests" className="w-full table-fixed border-collapse">
       <Heads />
       <tbody>
         {ROWS.map(({ label, better, write }, row) => {

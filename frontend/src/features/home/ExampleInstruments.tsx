@@ -171,7 +171,7 @@ function Row({ example }: { example: Example }) {
 export function ExampleInstruments() {
   return (
     <div className="overflow-x-auto rounded-lg border bg-background">
-      <table className="w-full table-fixed border-collapse text-sm">
+      <table aria-label="Example instruments" className="w-full table-fixed border-collapse text-sm">
         <Header />
         <tbody>
           {EXAMPLES.map((example) => (

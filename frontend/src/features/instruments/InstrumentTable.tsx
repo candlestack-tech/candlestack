@@ -150,7 +150,7 @@ function SymbolCell({ instrument, where }: { instrument: Instrument; where: stri
             to="/instrument/$id"
             params={{ id: instrument.id }}
             title={instrument.symbol}
-            className="block truncate font-mono leading-[18px] outline-none after:absolute after:inset-0 focus-visible:text-primary @min-[740px]:leading-5"
+            className="block truncate font-mono leading-[18px] outline-none after:absolute after:inset-0 focus-visible:text-primary focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset @min-[740px]:leading-5"
           >
             {instrument.symbol}
           </Link>
@@ -243,15 +243,16 @@ function SinceCell({ instrument }: { instrument: Instrument }) {
 // One row per instrument with its 24 h stats (#184), its last daily candles (#189) and since when
 // there is data (#199): Symbol 168 | Price 128 | 24h 104 | 10d 136 | Volume 24h 112 | Name (the
 // rest) | Type 88 | Exchange 104 | Data since 96 px. The symbol is the row's link, stretched over
-// the whole row, so the row is one click target and one tab stop. The columns have fixed widths
-// and the name takes the rest, so long text truncates instead of widening the table past the
+// the whole row, so the row is one click target and one tab stop, ringed while it has the
+// keyboard focus. The columns have fixed widths and the name takes the rest, so long text
+// truncates instead of widening the table past the
 // table (the mockup scrolls it sideways instead): each column shows from the table width (above)
 // where it still leaves the name about 150 px; a phone shows the symbol over "exchange · volume", the last 7
 // candles in 60 px and the price over the change. The sorted column's header is ink with an arrow.
 export function InstrumentTable({ items, sort }: { items: readonly Instrument[]; sort?: ListSort | undefined }) {
   return (
     <div className="@container">
-      <table className="w-full table-fixed border-collapse text-sm">
+      <table aria-label="Instruments" className="w-full table-fixed border-collapse text-sm">
         <Header sort={sort} />
         <tbody>
           {items.map((instrument) => (
