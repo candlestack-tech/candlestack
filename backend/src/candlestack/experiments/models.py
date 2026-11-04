@@ -18,6 +18,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     false,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -60,8 +61,11 @@ class Backtest(Base):
     # [{"market": "stock", "symbol": "AAPL"}, ...] in the order chosen.
     instruments: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
     representation: Mapped[str] = mapped_column(String(16))
-    # What the user calls it, beside its number; null until they rename it.
+    # The user's own name; null until they rename it, and again when they go back to the
+    # generated one, which shows while it is null (``shown_name``).
     name: Mapped[str | None] = mapped_column(String(BACKTEST_NAME_MAX))
+    # The name it got when it was created (``names.generated_name``), never changed after.
+    generated_name: Mapped[str] = mapped_column(String(BACKTEST_NAME_MAX))
     # The model goes, the backtest stays: then its name and framework of when it ran are shown.
     model_id: Mapped[str | None] = mapped_column(
         ForeignKey("models.id", ondelete="SET NULL"), index=True
@@ -72,12 +76,19 @@ class Backtest(Base):
     setup: Mapped[dict[str, Any]] = mapped_column(JSONB)
     total_return: Mapped[float | None] = mapped_column(Float)
     buy_and_hold_return: Mapped[float | None] = mapped_column(Float)
+    # The return of its benchmark (setup.benchmark): buy and hold of its instrument, or of the
+    # index fund it was compared with, which only the run can work out. Null for a backtest
+    # that compared with a fund before this was stored.
+    benchmark_return: Mapped[float | None] = mapped_column(Float)
     sharpe: Mapped[float | None] = mapped_column(Float)
     max_drawdown: Mapped[float | None] = mapped_column(Float)
     win_rate: Mapped[float | None] = mapped_column(Float)
     num_trades: Mapped[int | None] = mapped_column(Integer)
-    # A short equity series of the strategy and of buy and hold (schemas.EquitySeries).
+    # A short equity series of the strategy and of its benchmark (schemas.EquitySeries).
     equity: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # The model's input, rows by features, from the signature of the manifest it ran with: what
+    # Experiments shows of the model without reading the deferred spec. Null for test data.
+    input_shape: Mapped[list[int] | None] = mapped_column(JSONB)
     duration_s: Mapped[float | None] = mapped_column(Float)
     engine_version: Mapped[str | None] = mapped_column(String(16))
     # What the user sees of a failed backtest: what went wrong and what to do.
@@ -111,9 +122,17 @@ class Backtest(Base):
     seeded: Mapped[bool] = mapped_column(Boolean, server_default=false(), default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the user last published it to Experiments, where every account of the beta sees it;
+    # null while it is not published.
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    @property
+    def shown_name(self) -> str:
+        """What the backtest is called: the user's own name, else the generated one."""
+        return self.generated_name if self.name is None else self.name
 
     def set_equity(self, strategy: Sequence[float], benchmark: Sequence[float]) -> None:
-        """Keeps the equity series of the strategy and of buy and hold (cumulative returns as
+        """Keeps the equity series of the strategy and of its benchmark (cumulative returns as
         fractions at the same evenly spaced times); what writes a backtest sets it this way.
 
         Raises:
@@ -126,3 +145,19 @@ class Backtest(Base):
 
 # The list and the Dashboard read a user's backtests newest first.
 Index("ix_backtests_user_id_created_at", Backtest.user_id, Backtest.created_at)
+# Two backtests of an account never get one generated name, in any case. A custom name must
+# also differ from the other backtests' generated names, which no index of one column compares,
+# so renames are checked under the lock of the user's backtests (``BacktestStore.lock_user``).
+Index(
+    "uq_backtests_user_id_generated_name",
+    Backtest.user_id,
+    func.lower(Backtest.generated_name),
+    unique=True,
+)
+# Experiments and the Dashboard read the published backtests of everyone, newest first: a few
+# among all the rows.
+Index(
+    "ix_backtests_published_at",
+    Backtest.published_at,
+    postgresql_where=Backtest.published_at.is_not(None),
+)

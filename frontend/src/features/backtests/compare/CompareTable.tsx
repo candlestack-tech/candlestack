@@ -7,6 +7,9 @@ import { BUTTON_SIZES } from '@/components/buttonStyles';
 import { useViewerDateStyle } from '@/features/preferences';
 import { cn } from '@/lib/utils';
 
+import { AuthorAvatar } from '../experiments/AuthorAvatar';
+import { documentDescription } from '../names';
+import { BacktestName } from '../parts';
 import { resultRows, setupRows, type CompareRow, type Mark } from './rows';
 import { removeFromCompare } from './selection';
 
@@ -20,31 +23,43 @@ const MARKS: Record<NonNullable<Mark>, string> = {
   worst: 'bg-[color-mix(in_srgb,var(--down)_14%,transparent)] font-semibold text-down',
 };
 
+// Whose a backtest is: the initials and the name (or "You"), in a column's head and the Author row.
+function Author({ name, text = name, className }: { name: string; text?: string; className: string }) {
+  return (
+    <span className={cn('flex min-w-0 items-center whitespace-nowrap', className)}>
+      <AuthorAvatar name={name} size="xs" />
+      <span className="truncate">{text}</span>
+    </span>
+  );
+}
+
+// A column's head: its colour and its name opening it, what it ran on under it, and another
+// account's author by initials and name (backtest-names, .cmp-h).
 function Heading({ doc, color }: CompareColumn) {
-  const { id, number } = doc.backtest;
+  const { id, name, author } = doc.backtest;
   return (
     <th scope="col" className={cn(LINE, 'px-3.5 py-2 text-left align-top font-normal')}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex min-w-0 items-center gap-2">
             <span aria-hidden="true" className="size-2.5 flex-none rounded-full" style={{ background: color }} />
             <Link
               to="/backtests/$backtestId"
               params={{ backtestId: id }}
               state={{ from: 'compare' }}
-              className="font-mono font-medium outline-none hover:text-primary focus-visible:text-primary"
+              className="flex min-w-0 text-sm/5 font-semibold outline-none hover:text-primary focus-visible:text-primary"
             >
-              #{number}
+              <BacktestName name={name} />
             </Link>
-            <span className="truncate font-semibold">{doc.data.instrument.symbol}</span>
           </div>
-          <div title={doc.backtest.name ?? doc.model.name} className="mt-0.5 truncate text-xs text-muted-foreground">
-            {doc.backtest.name ?? doc.model.name}
-          </div>
+          <span className="mt-px ml-[18px] block truncate font-mono text-xs text-muted-foreground">
+            {documentDescription(doc)}
+          </span>
+          {!author.mine && <Author name={author.name} className="mt-[5px] ml-[18px] gap-1.5 text-xs font-medium" />}
         </div>
         <button
           type="button"
-          aria-label={`Remove backtest ${number} from compare`}
+          aria-label={`Remove ${name} from compare`}
           title="Remove from compare"
           onClick={() => {
             removeFromCompare(id);
@@ -81,14 +96,14 @@ function Rows({ title, rows, mono, spare, span }: RowsProps) {
           <th scope="row" className={cn(LINE, LABEL)}>
             {label}
           </th>
-          {cells.map(({ text, mark }, index) => (
+          {cells.map(({ text, mark, avatar }, index) => (
             <td
               // eslint-disable-next-line react/no-array-index-key -- the columns have no other key here
               key={index}
               title={text}
               className={cn(LINE, CELL, mono && 'font-mono', mark && MARKS[mark])}
             >
-              {text}
+              {avatar ? <Author name={avatar} text={text} className="gap-[7px]" /> : text}
             </td>
           ))}
           {spare && (

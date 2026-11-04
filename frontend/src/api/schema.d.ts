@@ -178,9 +178,10 @@ export interface paths {
         };
         /**
          * Get Backtest
-         * @description The result document of the backtest, whatever its status (`results` is null until it
-         *     finished), in the light view: a series of more than 10,000 rows has one point per UTC day,
-         *     and only the newest 10,000 trades are in it (`trades.complete` false).
+         * @description The result document of the user's backtest, whatever its status (`results` is null until
+         *     it finished), or of another account's while it is published (`backtest.author`, read only,
+         *     `model.id` null), in the light view: a series of more than 10,000 rows has one point per
+         *     UTC day, and only the newest 10,000 trades are in it (`trades.complete` false).
          */
         get: operations["get_backtest_api_v1_backtests__backtest_id__get"];
         put?: never;
@@ -190,7 +191,9 @@ export interface paths {
         head?: never;
         /**
          * Update Backtest
-         * @description Stars, unstars or renames the backtest; a field left out stays as it is.
+         * @description Stars, unstars, renames, publishes or unpublishes the user's backtest; a field left out
+         *     stays as it is. A name of null goes back to the generated name. Unpublishing takes it out
+         *     of Experiments and out of other people's Compare.
          */
         patch: operations["update_backtest_api_v1_backtests__backtest_id__patch"];
         trace?: never;
@@ -204,8 +207,8 @@ export interface paths {
         };
         /**
          * Download Backtest
-         * @description The result document of a finished backtest with every row of its series and every
-         *     trade, as a file to save.
+         * @description The result document of a finished backtest, the user's or a published one of another
+         *     account, with every row of its series and every trade, as a file to save.
          */
         get: operations["download_backtest_api_v1_backtests__backtest_id__download_get"];
         put?: never;
@@ -365,6 +368,29 @@ export interface paths {
          *     503 when no market's instrument list can be loaded.
          */
         get: operations["top_instruments_api_v1_data_top_instruments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/experiments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Experiments
+         * @description A page of Experiments: the backtests that accounts of the beta published, which every
+         *     signed-in account can see, that match the search and the filters, with the counts and what
+         *     the filters offer. Others see a published backtest's setup, results, charts, trades and what
+         *     its model reads, never the model file. A page past the last one is empty.
+         */
+        get: operations["list_experiments_api_v1_experiments_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -633,8 +659,31 @@ export interface components {
             time_zone?: components["schemas"]["TimeZone"] | null;
         };
         /**
+         * Author
+         * @description Who published a backtest: their display name, never their email.
+         */
+        Author: {
+            /**
+             * Id
+             * @description Public ID of the account
+             * @example usr_7f3k2m9qx4
+             */
+            id: string;
+            /**
+             * Mine
+             * @description The signed-in user published it
+             */
+            mine: boolean;
+            /**
+             * Name
+             * @description The account's display name
+             * @example Tymur Tkach
+             */
+            name: string;
+        };
+        /**
          * BacktestCounts
-         * @description The user's backtests in all, starred and failed.
+         * @description The user's backtests in all, starred, failed and published.
          */
         BacktestCounts: {
             /**
@@ -647,6 +696,12 @@ export interface components {
              * @example 2
              */
             failed: number;
+            /**
+             * Public
+             * @description Published in Experiments
+             * @example 3
+             */
+            public: number;
             /**
              * Starred
              * @example 5
@@ -773,6 +828,8 @@ export interface components {
         };
         /** BacktestHeader */
         BacktestHeader: {
+            /** @description Whose backtest it is. Another account's backtest is shown only while it is published, read only, and its `model.id` is null */
+            author: components["schemas"]["DocumentAuthor"];
             /**
              * Created At
              * Format: date-time
@@ -796,21 +853,38 @@ export interface components {
              */
             finished_at: string | null;
             /**
+             * Generated Name
+             * @description The name it got when it was created
+             * @example Silent Orion
+             */
+            generated_name: string;
+            /**
              * Id
              * @example bt_7f3k2m9qx4
              */
             id: string;
             /**
              * Name
-             * @description What the user calls it; null until they rename it
+             * @description What the user calls it: their own name, else the generated one
+             * @example Silent Orion
              */
-            name: string | null;
+            name: string;
             /**
              * Number
              * @description The user's own number, shown as #N
              * @example 12
              */
             number: number;
+            /**
+             * Public
+             * @description Published in Experiments
+             */
+            public: boolean;
+            /**
+             * Published At
+             * @description When it was published (UTC); null while it is not
+             */
+            published_at: string | null;
             status: components["schemas"]["BacktestStatus"];
             /**
              * Steps
@@ -923,7 +997,7 @@ export interface components {
              * @example 162
              */
             duration_s: number | null;
-            /** @description A short equity series of the strategy and of buy and hold, for a small chart; null for a backtest that did not finish or has none */
+            /** @description A short equity series of the strategy and of its benchmark, for a small chart; null for a backtest that did not finish or has none */
             equity: components["schemas"]["EquitySeries"] | null;
             /**
              * Error
@@ -936,6 +1010,12 @@ export interface components {
              * @description When it finished or failed (UTC); null while it runs
              */
             finished_at: string | null;
+            /**
+             * Generated Name
+             * @description The name it got when it was created, an adjective and a word from space; Rename with a name of null goes back to it
+             * @example Silent Orion
+             */
+            generated_name: string;
             /**
              * Id
              * @description Public ID of the backtest
@@ -956,9 +1036,10 @@ export interface components {
             model: components["schemas"]["UsedModel"];
             /**
              * Name
-             * @description What the user calls it; null until they rename it
+             * @description What the backtest is called: the user's own name after a Rename, else the name it got when it was created. Unique in the account, ignoring case
+             * @example Silent Orion
              */
-            name: string | null;
+            name: string;
             /**
              * Num Trades
              * @description Number of trades
@@ -970,6 +1051,16 @@ export interface components {
              * @description The user's own number of the backtest, shown as #N
              */
             number: number;
+            /**
+             * Public
+             * @description Published in Experiments, so every account of the beta can see it
+             */
+            public: boolean;
+            /**
+             * Published At
+             * @description When it was published (UTC); null while it is not
+             */
+            published_at: string | null;
             representation: components["schemas"]["Representation"];
             /**
              * Seeded
@@ -1045,18 +1136,18 @@ export interface components {
         };
         /**
          * BacktestShow
-         * @description Which backtests the list shows: all, the starred or the failed ones.
+         * @description Which backtests the list shows: all, the starred, the failed or the published ones.
          * @enum {string}
          */
-        BacktestShow: "all" | "starred" | "failed";
+        BacktestShow: "all" | "starred" | "failed" | "public";
         /**
          * BacktestSort
          * @description What the list is sorted by. `default` is newest first (`order` does not apply); `when`
-         *     sorts like `number`. Backtests without the value (failed ones) come last either way, and
-         *     ties go by number, newest first.
+         *     sorts like `number`; `name` by the name, in any case. Backtests without the value (failed
+         *     ones) come last either way, and ties go by number, newest first.
          * @enum {string}
          */
-        BacktestSort: "default" | "number" | "model" | "return" | "sharpe" | "max_drawdown" | "trades" | "when";
+        BacktestSort: "default" | "number" | "name" | "model" | "return" | "sharpe" | "max_drawdown" | "trades" | "when";
         /**
          * BacktestStatus
          * @description `finished` (it has results) or `failed` (it has an error); `running` comes with the
@@ -1160,14 +1251,19 @@ export interface components {
         BacktestTimeframe: "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d";
         /**
          * BacktestUpdate
-         * @description What the star and Rename change; a field left out stays as it is.
+         * @description What the star, Rename, Publish and Unpublish change; a field left out stays as it is.
          */
         BacktestUpdate: {
             /**
              * Name
-             * @description What to call it, without control characters; null takes the name away
+             * @description What to call it, without control characters, unique in the account ignoring case; null goes back to the generated name
              */
             name?: string | null;
+            /**
+             * Public
+             * @description Publish the backtest in Experiments (true) or take it back (false). Only a finished backtest made in the app can be published
+             */
+            public?: boolean | null;
             /**
              * Starred
              * @description Star or unstar the backtest
@@ -1528,6 +1624,7 @@ export interface components {
         DashboardOut: {
             best: components["schemas"]["BestBacktests"];
             counts: components["schemas"]["BacktestCounts"];
+            experiments: components["schemas"]["NewExperiments"];
             /**
              * Last
              * @description The 6 newest backtests that ended, failed ones included (not running ones)
@@ -1629,6 +1726,29 @@ export interface components {
          * @enum {string}
          */
         Direction: "long" | "both";
+        /**
+         * DocumentAuthor
+         * @description Who the backtest belongs to: their display name, never their email.
+         */
+        DocumentAuthor: {
+            /**
+             * Id
+             * @description Public ID of the account
+             * @example usr_7f3k2m9qx4
+             */
+            id: string;
+            /**
+             * Mine
+             * @description The signed-in user's own backtest
+             */
+            mine: boolean;
+            /**
+             * Name
+             * @description The account's display name
+             * @example Tymur Tkach
+             */
+            name: string;
+        };
         /** EmaStep */
         EmaStep: {
             /**
@@ -1639,14 +1759,14 @@ export interface components {
         };
         /**
          * EquitySeries
-         * @description The equity of the strategy and of buy and hold over the test period, for a small chart:
+         * @description The equity of the strategy and of its benchmark over the test period, for a small chart:
          *     cumulative returns as fractions (0 at the start; 0.246 is 24.6 %), sampled at evenly spaced
          *     times from the first day to the last, the same times in both.
          */
         EquitySeries: {
             /**
              * Benchmark
-             * @description Cumulative return of buying and holding the instruments, as many points
+             * @description Cumulative return of the backtest's benchmark, as many points: buy and hold of its instrument, or of SPY, QQQ or DIA (`setup.benchmark`); buy and hold of the instrument for a backtest that ran before the funds
              * @example [
              *       0,
              *       0.12,
@@ -1722,6 +1842,207 @@ export interface components {
             slippage_bps: number;
             /** Stop Loss */
             stop_loss?: number | null;
+        };
+        /** ExperimentCounts */
+        ExperimentCounts: {
+            /**
+             * All
+             * @description Every published backtest
+             * @example 25
+             */
+            all: number;
+            /**
+             * Mine
+             * @description Those the signed-in user published
+             * @example 2
+             */
+            mine: number;
+            /**
+             * People
+             * @description Accounts that published one
+             * @example 7
+             */
+            people: number;
+        };
+        /**
+         * ExperimentFacets
+         * @description What the filters offer, with the count of each choice: over the published backtests of
+         *     the scope (all, mine or one author) and the search, whatever the filters chosen.
+         */
+        ExperimentFacets: {
+            /**
+             * Instruments
+             * @description The most published first
+             */
+            instruments: components["schemas"]["InstrumentCount"][];
+            /**
+             * Markets
+             * @description `stock`, `crypto`
+             */
+            markets: components["schemas"]["FacetCount"][];
+            /**
+             * Representations
+             * @description `renko`, `kagi`, `windows`
+             */
+            representations: components["schemas"]["FacetCount"][];
+            /**
+             * Timeframes
+             * @description `1m` to `1d`, in that order
+             */
+            timeframes: components["schemas"]["FacetCount"][];
+        };
+        /**
+         * ExperimentModel
+         * @description The model of a published backtest as others see it: its name and what it reads, never
+         *     the file.
+         */
+        ExperimentModel: {
+            /**
+             * Framework
+             * @example keras
+             */
+            framework: string;
+            /**
+             * Input Shape
+             * @description The model's input, rows by features, from its manifest; null when unknown
+             * @example [
+             *       25,
+             *       23
+             *     ]
+             */
+            input_shape: number[] | null;
+            /**
+             * Name
+             * @description The model's name when the backtest ran
+             * @example blesk-novol-8.keras
+             */
+            name: string;
+        };
+        /**
+         * ExperimentOut
+         * @description A published backtest, as Experiments shows it to every account of the beta. Returns and
+         *     rates are fractions; a published backtest has finished, so its results are there.
+         */
+        ExperimentOut: {
+            author: components["schemas"]["Author"];
+            /**
+             * Benchmark Return
+             * @description Return of its benchmark over the period (`setup.benchmark`), a fraction
+             * @example 0.143
+             */
+            benchmark_return: number | null;
+            /**
+             * Buy And Hold Return
+             * @example 0.682
+             */
+            buy_and_hold_return: number | null;
+            /** @description The short equity series of the strategy and of its benchmark */
+            equity: components["schemas"]["EquitySeries"] | null;
+            /**
+             * Id
+             * @description Public ID of the backtest
+             * @example bt_7f3k2m9qx4
+             */
+            id: string;
+            /** Instruments */
+            instruments: components["schemas"]["BacktestInstrument"][];
+            /**
+             * Max Drawdown
+             * @example -0.197
+             */
+            max_drawdown: number | null;
+            model: components["schemas"]["ExperimentModel"];
+            /**
+             * Name
+             * @description What its author calls it: their own name, else the generated one
+             * @example Silent Orion
+             */
+            name: string;
+            /**
+             * Num Trades
+             * @example 1712
+             */
+            num_trades: number | null;
+            /**
+             * Number
+             * @description The author's own number of the backtest, shown as #N
+             */
+            number: number;
+            /**
+             * Published At
+             * Format: date-time
+             * @description When it was published (UTC)
+             */
+            published_at: string;
+            representation: components["schemas"]["Representation"];
+            setup: components["schemas"]["BacktestSetup"];
+            /**
+             * Sharpe
+             * @example 0.79
+             */
+            sharpe: number | null;
+            /**
+             * Total Return
+             * @example 0.246
+             */
+            total_return: number | null;
+            /**
+             * Win Rate
+             * @example 0.512
+             */
+            win_rate: number | null;
+        };
+        /**
+         * ExperimentSort
+         * @description What Experiments is sorted by. `newest` is the newest published first (`order` does not
+         *     apply); `name` by the name, in any case; the others put those without the value last, and
+         *     ties go newest published first.
+         * @enum {string}
+         */
+        ExperimentSort: "newest" | "name" | "return" | "sharpe" | "max_drawdown" | "trades";
+        /** ExperimentsPage */
+        ExperimentsPage: {
+            counts: components["schemas"]["ExperimentCounts"];
+            /**
+             * Experiments
+             * @description The page, at most 12 published backtests
+             */
+            experiments: components["schemas"]["ExperimentOut"][];
+            facets: components["schemas"]["ExperimentFacets"];
+            /**
+             * Page
+             * @description The page, from 1
+             * @example 1
+             */
+            page: number;
+            /**
+             * Pages
+             * @description Pages of those that match, at least 1
+             * @example 3
+             */
+            pages: number;
+            /**
+             * Total
+             * @description Published backtests that match
+             * @example 25
+             */
+            total: number;
+        };
+        /**
+         * FacetCount
+         * @description One choice of a filter and how many published backtests have it.
+         */
+        FacetCount: {
+            /**
+             * Count
+             * @example 9
+             */
+            count: number;
+            /**
+             * Value
+             * @example renko
+             */
+            value: string;
         };
         /**
          * Feature
@@ -1821,6 +2142,20 @@ export interface components {
              */
             timeframe: "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d";
             window: components["schemas"]["Window"];
+        };
+        /** InstrumentCount */
+        InstrumentCount: {
+            /**
+             * Count
+             * @example 4
+             */
+            count: number;
+            market: components["schemas"]["InstrumentMarket"];
+            /**
+             * Symbol
+             * @example AAPL
+             */
+            symbol: string;
         };
         /**
          * InstrumentDetailOut
@@ -2443,6 +2778,20 @@ export interface components {
              */
             models: components["schemas"]["ModelOut"][];
             usage: components["schemas"]["StorageUsage"];
+        };
+        /** NewExperiments */
+        NewExperiments: {
+            /**
+             * Backtests
+             * @description The 4 newest published backtests, anyone's
+             */
+            backtests: components["schemas"]["ExperimentOut"][];
+            /**
+             * Total
+             * @description Every published backtest
+             * @example 25
+             */
+            total: number;
         };
         /** Output */
         Output: {
@@ -3247,7 +3596,7 @@ export interface operations {
     list_backtests_api_v1_backtests_get: {
         parameters: {
             query?: {
-                /** @description Search: part of the number (`#12` or `12`), of an instrument's symbol or of the model's name, in any case */
+                /** @description Search: part of the name, of the number (`#12` or `12`), of an instrument's symbol or of the model's name, in any case */
                 q?: string;
                 /** @description All, the starred or the failed backtests */
                 show?: components["schemas"]["BacktestShow"];
@@ -3412,7 +3761,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The user has no backtest with this ID (`not-found`). */
+            /** @description Neither the user's backtest nor a published one has this ID (`not-found`): a backtest its author unpublished is not found. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -3511,6 +3860,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Publishing a backtest that is running or failed (`backtest-not-finished`), or test data without a result document (`no-document`); a name another backtest of the account has, ignoring case, as its name or generated name (`name-taken`, the detail names that backtest and its number). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Invalid request */
             422: {
                 headers: {
@@ -3552,7 +3910,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The user has no backtest with this ID (`not-found`). */
+            /** @description Neither the user's backtest nor a published one has this ID (`not-found`): a backtest its author unpublished is not found. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -3932,6 +4290,65 @@ export interface operations {
             };
             /** @description The source is down or our request budget for it is spent (`source-unavailable`); `Retry-After` when waiting helps. */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_experiments_api_v1_experiments_get: {
+        parameters: {
+            query?: {
+                /** @description Search: part of the backtest's name, of an instrument's symbol, of the model's name or of the author's name, in any case */
+                q?: string;
+                /** @description Only the backtests the signed-in user published */
+                mine?: boolean;
+                /** @description Only the backtests of this account (`author.id`) */
+                author?: string | null;
+                /** @description Only this market */
+                market?: components["schemas"]["InstrumentMarket"] | null;
+                /** @description Only this instrument's symbol, in any case */
+                symbol?: string | null;
+                /** @description Only models that read this */
+                representation?: components["schemas"]["Representation"] | null;
+                /** @description Only this timeframe */
+                timeframe?: components["schemas"]["SetupTimeframe"] | null;
+                /** @description What to sort by */
+                sort?: components["schemas"]["ExperimentSort"];
+                /** @description Direction of the sort */
+                order?: components["schemas"]["SortOrder"];
+                /** @description The page, from 1, of 12 published backtests */
+                page?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentsPage"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

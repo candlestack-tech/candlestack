@@ -1,43 +1,40 @@
 import type { Backtest, Dashboard } from '@/api';
 import { Hint } from '@/components/Hint';
 import { BacktestsIcon } from '@/components/icons';
+import { MiniChart } from '@/components/MiniChart';
 import {
-  BacktestInstruments,
-  BacktestNumber,
+  BacktestName,
   BacktestReturn,
   CompareToggle,
-  ModelName,
+  PublicMark,
   RowOpener,
   RowStar,
   compareTarget,
+  descriptionOf,
   hasResults,
-  representationName,
 } from '@/features/backtests';
 import { formatSharpe } from '@/lib/results';
 import { cn } from '@/lib/utils';
 
-import { MiniChart } from './MiniChart';
 import { MoreRow, STARRED_ROW, Widget } from './widgets';
 
 type RowProps = { backtest: Backtest; onStar: (backtest: Backtest) => void };
 
-// Two lines (.dd-sb): the star beside both; the number with up to two instruments and their icons,
-// the tiny chart of the return and the return; under them the model by its mark, on one line, and
-// the Sharpe ratio. The full name and the representation are the model's tooltip. A failed
-// backtest has the Failed badge instead, without a chart.
+// Two lines (.dd-sr): the star beside both; the name, the tiny chart of the return and the return;
+// under them what it ran on, what its model reads and the timeframe, and the Sharpe ratio
+// (backtest-names, ddRow). A failed backtest has the Failed badge instead, without a chart.
 function Row({ backtest, onStar }: RowProps) {
   const done = hasResults(backtest);
-  const { name, framework } = backtest.model;
   return (
     <div className={cn(STARRED_ROW, 'grid-cols-[auto_minmax(0,1fr)_64px_86px_32px] gap-y-1')}>
       <span className="row-span-2 self-start">
-        <RowStar starred label={`Unstar backtest ${backtest.number}`} onToggle={() => onStar(backtest)} />
+        <RowStar starred label={`Unstar ${backtest.name}`} onToggle={() => onStar(backtest)} />
       </span>
-      <span className="flex items-center gap-1.5 overflow-hidden text-[13px] text-ellipsis whitespace-nowrap">
+      <span className="flex min-w-0 items-center gap-1.5 text-[13px]">
         <RowOpener backtest={backtest}>
-          <BacktestNumber backtest={backtest} />
+          <BacktestName name={backtest.name} className="font-medium" />
         </RowOpener>
-        <BacktestInstruments backtest={backtest} max={2} size={16} />
+        {backtest.public && <PublicMark />}
       </span>
       {done && backtest.equity ? <MiniChart strategy={backtest.equity.strategy} /> : <span />}
       <span className="text-right font-mono text-sm/[1.5] font-semibold whitespace-nowrap">
@@ -46,11 +43,8 @@ function Row({ backtest, onStar }: RowProps) {
       <span className="row-span-2 self-center">
         <CompareToggle target={compareTarget(backtest)} />
       </span>
-      <span
-        title={`${name} · ${representationName(backtest.representation)}`}
-        className="col-span-2 flex min-w-0 text-xs/[1.5] text-muted-foreground"
-      >
-        <ModelName name={name} framework={framework} />
+      <span className="col-span-2 min-w-0 truncate font-mono text-[11.5px]/[1.5] text-muted-foreground">
+        {descriptionOf(backtest)}
       </span>
       <span className="text-right font-mono text-[11px]/[1.5] whitespace-nowrap text-muted-foreground">
         {done && `Sharpe ${formatSharpe(backtest.sharpe)}`}

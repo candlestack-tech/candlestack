@@ -18,6 +18,7 @@ import { SignInPage } from '@/pages/SignInPage';
 import { requireSignedIn, skipSignInWhenSignedIn } from '@/routes/accountGuards';
 import { validateBacktestsSearch } from '@/routes/backtestsSearch';
 import { validateBuilderSearch } from '@/routes/builderSearch';
+import { validateExperimentsSearch } from '@/routes/experimentsSearch';
 import { validateInstrumentSearch } from '@/routes/instrumentSearch';
 import { validateInstrumentsSearch } from '@/routes/instrumentsSearch';
 import { FIRST_SECTION, isSettingsSection, showsPreferences, validateSettingsSearch } from '@/routes/settingsSections';
@@ -108,6 +109,15 @@ const backtestsRoute = createRoute({
   component: lazyRouteComponent(() => import('@/pages/BacktestsPage'), 'BacktestsPage'),
 });
 
+// /experiments?q=nvda&mine=true&market=crypto&sort=sharpe&page=2: the backtests the beta published;
+// broken values are dropped. Cards or Table is the browser's, not the URL's.
+const experimentsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/experiments',
+  validateSearch: validateExperimentsSearch,
+  component: lazyRouteComponent(() => import('@/pages/ExperimentsPage'), 'ExperimentsPage'),
+});
+
 // /backtests/new?model=mdl_7f3k2m9qx4: the builder, without the sidebar (mockups/app, pageBuilder).
 // It starts from the account's Backtest defaults, so they load first.
 const newBacktestRoute = createRoute({
@@ -127,8 +137,8 @@ const compareRoute = createRoute({
   component: lazyRouteComponent(() => import('@/pages/ComparePage'), 'ComparePage'),
 });
 
-// /backtests/bt_7f3k2m9qx4: one backtest's page, without the sidebar (mockups/app, pageRun). An ID
-// the user has no backtest with says so on the page.
+// /backtests/bt_7f3k2m9qx4: one backtest's page, without the sidebar (mockups/app, pageRun), the
+// user's or another account's published one, read only. An ID neither is says so on the page.
 const backtestRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/backtests/$backtestId',
@@ -209,6 +219,7 @@ export const routeTree = rootRoute.addChildren([
     newBacktestRoute,
     compareRoute,
     backtestRoute,
+    experimentsRoute,
     modelsRoute,
     modelRoute,
     instrumentsRoute,

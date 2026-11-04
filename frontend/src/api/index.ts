@@ -34,6 +34,14 @@ export {
 } from './backtests';
 export { candleBridgeQueryOptions, candlePageQueryOptions, candleSpanQueryOptions, type Candles } from './candles';
 export { ApiError, errorMessage } from './client';
+export {
+  experimentCardsQueryOptions,
+  experimentsQueryOptions,
+  type Experiment,
+  type ExperimentsPage,
+  type ExperimentsParams,
+  type SetupTimeframe,
+} from './experiments';
 export { EXCHANGES, exchangeLabel, exchangeMarket, type Exchange } from './exchanges';
 export {
   exchangeName,

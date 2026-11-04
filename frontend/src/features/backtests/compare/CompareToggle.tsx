@@ -7,7 +7,12 @@ import { cn } from '@/lib/utils';
 
 import { addToCompare, removeFromCompare, useCompareSelection, type ComparePick } from './selection';
 
-type Target = ComparePick & { status: BacktestStatus; seeded?: boolean };
+type Target = Omit<ComparePick, 'gone' | 'name' | 'description'> & {
+  name: string;
+  description: string;
+  status: BacktestStatus;
+  seeded?: boolean;
+};
 
 // Whether a backtest can go in the comparison, and what its button says.
 function useCompareState({ id, status, seeded = false }: Target) {
@@ -23,7 +28,10 @@ function useCompareState({ id, status, seeded = false }: Target) {
 
 function toggle(target: Target, added: boolean) {
   if (added) removeFromCompare(target.id);
-  else addToCompare({ id: target.id, number: target.number, symbol: target.symbol });
+  else {
+    const { id, number, name, description, symbol, author } = target;
+    addToCompare({ id, number, name, description, symbol, author });
+  }
 }
 
 // The scale icon of a row in a list of backtests: muted, the accent on hover, filled once added,
@@ -34,7 +42,7 @@ export function CompareToggle({ target }: { target: Target }) {
     <button
       type="button"
       title={title}
-      aria-label={`${title}: backtest ${target.number}`}
+      aria-label={`${title}: ${target.name}`}
       aria-pressed={added}
       disabled={why !== undefined}
       onClick={() => {

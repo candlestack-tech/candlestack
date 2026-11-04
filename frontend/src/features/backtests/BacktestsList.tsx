@@ -10,7 +10,10 @@ import { BacktestFilters } from './BacktestFilters';
 import { BacktestsTable } from './BacktestsTable';
 import { useStarBacktest } from './useBacktests';
 
-const NO_FILTERS: Pick<BacktestsPage, 'counts' | 'models'> = { counts: { all: 0, starred: 0, failed: 0 }, models: [] };
+const NO_FILTERS: Pick<BacktestsPage, 'counts' | 'models'> = {
+  counts: { all: 0, starred: 0, failed: 0, public: 0 },
+  models: [],
+};
 
 // An old or shared link can point past the end (?page=9 of 2): once the pages are known, the page
 // goes to the last one, in place of the broken entry in the history.
@@ -38,7 +41,7 @@ function Tools({ search, data }: Omit<Props, 'loading'>) {
       <SearchBox
         query={search.q ?? ''}
         onSearch={onSearch}
-        placeholder="Name, number, instrument or model, e.g. aapl"
+        placeholder="Name, instrument or model"
         label="Search backtests"
         maxLength={100}
         debounceMs={200}

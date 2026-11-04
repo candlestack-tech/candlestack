@@ -4,13 +4,22 @@ import type { BacktestsParams, SortOrder } from '@/api';
 
 // The Backtests page keeps its search, filters, order and page in the URL, so Back returns to
 // them and the request mirrors what the page shows:
-// /backtests?q=aapl&show=starred&model=lstm.keras&sort=sharpe&order=asc&page=2. Defaults are left
-// out: all backtests, every model, newest first, page 1.
+// /backtests?q=aapl&show=starred&model=lstm.keras&sort=sharpe&order=asc&page=2 (show: starred,
+// public or failed). Defaults are left out: all backtests, every model, newest first, page 1.
 export type BacktestsSearch = BacktestsParams;
 
 export type BacktestsColumn = NonNullable<BacktestsSearch['sort']>;
 
-const SORTS: readonly BacktestsColumn[] = ['number', 'model', 'return', 'sharpe', 'max_drawdown', 'trades', 'when'];
+const SORTS: readonly BacktestsColumn[] = [
+  'number',
+  'name',
+  'model',
+  'return',
+  'sharpe',
+  'max_drawdown',
+  'trades',
+  'when',
+];
 
 const MAX_QUERY = 100; // the API's limit for `q`
 const MAX_MODEL = 64; // a model's name: 60 characters and its extension
@@ -30,8 +39,8 @@ function parsePage(value: unknown): number | undefined {
   return Number.isSafeInteger(page) && page > 1 ? Math.min(page, MAX_PAGE) : undefined;
 }
 
-// The order a column sorts in first: down, but the model A to Z.
-const firstOrder = (column: BacktestsColumn): SortOrder => (column === 'model' ? 'asc' : 'desc');
+// The order a column sorts in first: down, but the name and the model A to Z.
+const firstOrder = (column: BacktestsColumn): SortOrder => (column === 'name' || column === 'model' ? 'asc' : 'desc');
 
 // A column and its order; an order without a column means nothing.
 function parseSort(sort: unknown, order: unknown): Pick<BacktestsSearch, 'sort' | 'order'> {
@@ -55,7 +64,7 @@ export function validateBacktestsSearch(
 ): BacktestsSearch {
   return {
     q: parseText(search.q, MAX_QUERY),
-    show: search.show === 'starred' || search.show === 'failed' ? search.show : undefined,
+    show: search.show === 'starred' || search.show === 'failed' || search.show === 'public' ? search.show : undefined,
     model: parseText(search.model, MAX_MODEL),
     sort: undefined,
     order: undefined,
@@ -64,9 +73,9 @@ export function validateBacktestsSearch(
   };
 }
 
-// What a click on a column's header does (mockups/app, btSort): a new column sorts down (Model
-// up, A to Z), a second click the other way, a third goes back to newest first. Like every
-// change, it starts at page 1.
+// What a click on a column's header does (mockups/app, btSort): a new column sorts down (the
+// backtest's name and the model up, A to Z), a second click the other way, a third goes back to
+// newest first. Like every change, it starts at page 1.
 export function withSortBy(search: BacktestsSearch, column: BacktestsColumn): BacktestsSearch {
   const first = firstOrder(column);
   const next = { ...search, page: undefined };

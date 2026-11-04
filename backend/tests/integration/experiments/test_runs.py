@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -23,8 +24,11 @@ from candlestack.data import (
     WarmUpOutOfRange,
 )
 from candlestack.engine import ENGINE_VERSION
+from candlestack.experiments import names as names_module
 from candlestack.experiments import runner as runner_module
+from candlestack.experiments import store as store_module
 from candlestack.experiments.assembly import NothingToTest
+from candlestack.experiments.names import ADJECTIVES, NOUNS
 from candlestack.jobs import JobClient, JobFiles, JobQueue
 from candlestack.main import create_app
 
@@ -194,9 +198,15 @@ def test_the_list_and_the_dashboard_show_a_finished_run(ada) -> None:
     assert equity["strategy"][-1] == pytest.approx(stats["total_return"])
     assert [backtest["id"] for backtest in dashboard["last"]] == [backtest_id]
     assert models[0]["backtest_count"] == 1
-    stored = ada.sql("SELECT engine_version, stats FROM backtests WHERE id = :id", id=backtest_id)
+    stored = ada.sql(
+        "SELECT engine_version, stats, benchmark_return, input_shape FROM backtests WHERE id = :id",
+        id=backtest_id,
+    )
     assert stored[0][0] == ENGINE_VERSION
     assert stored[0][1] == stats
+    # Buy and hold of the instrument is the benchmark, and the model reads 25 rows of 5.
+    assert (stored[0][2], stored[0][3]) == (stats["buy_and_hold_return"], [25, 5])
+    assert equity["benchmark"][-1] == pytest.approx(stats["buy_and_hold_return"])
 
 
 @pytest.mark.usefixtures("worker")
@@ -250,6 +260,15 @@ def test_a_stock_backtest_compares_with_an_index_fund(ada, market) -> None:
     )
     assert listed["buy_and_hold_return"] == results["stats"]["buy_and_hold_return"]
     assert listed["setup"]["benchmark"] == "SPY"
+    # What the run stores of the backtest's benchmark is the fund's: its return, and its
+    # equity at the same times as the strategy's in the short series.
+    stored = ada.sql("SELECT benchmark_return FROM backtests WHERE id = :id", id=backtest_id)
+    assert stored == [(pytest.approx(results["benchmarks"]["spy"]["total_return"]),)]
+    ts = np.array(results["series"]["columns"]["ts"])
+    picked = np.searchsorted(ts, np.linspace(ts[0], ts[-1], 60), side="right") - 1
+    assert listed["equity"]["benchmark"] == pytest.approx(list(np.array(spy)[picked] - 1))
+    strategy = np.array(results["series"]["columns"]["equity"])[picked] - 1
+    assert listed["equity"]["strategy"] == pytest.approx(list(strategy))
     # The run loads the fund's candles of the period in the background after its own, and
     # the document loads both again.
     own = ("stock:AAPL", (START - 24 * 1800, END))
@@ -570,6 +589,76 @@ def test_two_starts_at_once_run_one_backtest(ada, market) -> None:
     assert ada.sql("SELECT count(*) FROM backtests") == [(1,)]
 
 
+# --- The name it gets --------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("market")
+def test_a_new_backtest_gets_a_name_of_the_word_lists(ada, sql) -> None:
+    started = ada.start(body(ada.runnable_model())).json()["backtest"]
+
+    adjective, noun = started["name"].split(" ")
+    assert (adjective in ADJECTIVES, noun in NOUNS) == (True, True)
+    assert started["generated_name"] == started["name"]
+    assert sql("SELECT name, generated_name FROM backtests") == [(None, started["name"])]
+    (listed,) = ada.backtests().json()["backtests"]
+    assert (listed["name"], listed["generated_name"]) == (started["name"], started["name"])
+
+
+@pytest.mark.usefixtures("market")
+def test_a_new_name_is_none_the_account_has(ada, bob, monkeypatch) -> None:
+    ada.backtest(1, generated_name="Silent Orion", name="Half Size", status="failed")
+    bob.backtest(1, generated_name="Bright Vega", status="failed")
+    seen: list[set[str]] = []
+
+    def generated_name(taken: set[str]) -> str:
+        seen.append(set(taken))
+        return names_module.generated_name(taken)
+
+    monkeypatch.setattr(store_module, "generated_name", generated_name)
+
+    started = ada.start(body(ada.runnable_model())).json()["backtest"]
+
+    # The account's names, its own and generated, lowercased; never another account's.
+    assert seen == [{"silent orion", "half size"}]
+    assert started["number"] == 2
+    assert started["name"].lower() not in seen[0]
+
+
+@pytest.mark.usefixtures("market")
+def test_a_name_the_index_refuses_is_drawn_again(ada, sql, monkeypatch) -> None:
+    ada.backtest(1, generated_name="Silent Orion", status="failed")
+    # As a writer without the lock could: a name the account has, then a free one.
+    drawn = iter(["SILENT ORION", "Bright Vega"])
+    monkeypatch.setattr(store_module, "generated_name", lambda _taken: next(drawn))
+
+    started = ada.start(body(ada.runnable_model()))
+
+    assert started.status_code == 201
+    assert started.json()["backtest"]["name"] == "Bright Vega"
+    assert sql("SELECT number, generated_name FROM backtests ORDER BY number") == [
+        (1, "Silent Orion"),
+        (2, "Bright Vega"),
+    ]
+
+
+@pytest.mark.usefixtures("market")
+def test_no_backtest_is_stored_when_every_draw_is_refused(ada, sql, monkeypatch) -> None:
+    ada.backtest(1, generated_name="Silent Orion", status="failed")
+    drawn: list[set[str]] = []
+
+    def taken_name(taken: set[str]) -> str:
+        drawn.append(taken)
+        return "Silent Orion"
+
+    monkeypatch.setattr(store_module, "generated_name", taken_name)
+
+    started = ada.start(body(ada.runnable_model()))
+
+    assert started.status_code == 500
+    assert len(drawn) == store_module.NAME_ATTEMPTS
+    assert sql("SELECT count(*) FROM backtests") == [(1,)]
+
+
 @pytest.mark.usefixtures("market")
 def test_a_model_deleted_while_the_start_checks_it_is_not_found(ada, market) -> None:
     market.slow = 0.5
@@ -778,6 +867,71 @@ def test_a_backtest_whose_model_was_deleted_keeps_its_document(ada) -> None:
     assert document["model"]["id"] is None
     assert document["model"]["name"] == "raw-candles.keras"
     assert document["results"] is not None
+
+
+@pytest.mark.usefixtures("worker")
+def test_a_published_backtest_is_shown_to_others_read_only(ada, bob) -> None:
+    bob.sql("UPDATE users SET display_name = 'Bob Stone' WHERE id = :id", id=bob.id)
+    model_id = bob.runnable_model()
+    started = bob.start(body(model_id)).json()
+    backtest_id = started["backtest"]["id"]
+    own = bob.ended(backtest_id)
+    before = ada.document(backtest_id)
+
+    bob.publish(backtest_id)
+    shown = ada.document(backtest_id)
+    download = ada.download(backtest_id)
+    published = bob.document(backtest_id).json()
+
+    author = {"id": bob.id, "name": "Bob Stone", "mine": True}
+    assert started["backtest"]["author"] == author
+    assert (started["backtest"]["public"], started["backtest"]["published_at"]) == (False, None)
+    assert (own["backtest"]["author"], own["model"]["id"]) == (author, model_id)
+    assert (before.status_code, before.json()["type"]) == (404, PROBLEMS + "not-found")
+    assert shown.status_code == 200
+    document = shown.json()
+    assert document["backtest"]["author"] == {**author, "mine": False}
+    assert document["backtest"]["public"] is True
+    assert document["backtest"]["published_at"] == published["backtest"]["published_at"]
+    assert document["model"]["id"] is None
+    assert document["model"]["manifest"] == own["model"]["manifest"]  # what the model reads
+    assert document["results"] == own["results"]
+    assert bob.email not in shown.text
+    assert (published["model"]["id"], published["backtest"]["author"]["mine"]) == (model_id, True)
+    assert download.status_code == 200
+    assert download.json()["backtest"]["author"]["mine"] is False
+    assert bob.email not in download.text
+
+    bob.publish(backtest_id, public=False)
+
+    assert ada.document(backtest_id).status_code == 404
+    assert ada.download(backtest_id).status_code == 404
+    assert bob.document(backtest_id).status_code == 200
+
+
+@pytest.mark.usefixtures("worker")
+def test_the_document_has_the_name_its_author_gives_it(ada, bob) -> None:
+    backtest_id = bob.start(body(bob.runnable_model())).json()["backtest"]["id"]
+    generated = bob.ended(backtest_id)["backtest"]["generated_name"]
+    bob.rename(backtest_id, "half size")
+    bob.publish(backtest_id)
+
+    own = bob.document(backtest_id).json()["backtest"]
+    shown = ada.document(backtest_id).json()["backtest"]
+    download = ada.download(backtest_id).json()["backtest"]
+
+    assert (own["name"], own["generated_name"]) == ("half size", generated)
+    assert (shown["name"], shown["generated_name"]) == ("half size", generated)
+    assert (download["name"], download["generated_name"]) == ("half size", generated)
+
+
+@pytest.mark.usefixtures("market")
+def test_a_running_backtest_of_another_account_is_not_found(ada, bob) -> None:
+    # No worker answers: it keeps running.
+    backtest_id = bob.start(body(bob.runnable_model())).json()["backtest"]["id"]
+    bob.sql("UPDATE backtests SET published_at = now()")  # cannot happen through the API
+
+    assert ada.document(backtest_id).status_code == 404
 
 
 @pytest.mark.usefixtures("market")

@@ -2,14 +2,14 @@
 // longest value and for the header with its sort arrow in the app's fonts, so neither is ever cut.
 // Return fits "+9,999.9 %", When "12 Oct 22:34" on one line (an older run's "28 May 2025
 // 11:58 AM" takes two), the instruments one symbol of seven letters with its icon (a "+N" after it
-// cuts the symbol). In the Backtests table (table-fixed) the model takes the rest.
+// cuts the symbol). The Backtest column takes the rest, so its name has room (#376): in the
+// Backtests table the model has a width too, on up to two lines.
 export const WIDTH = {
-  backtest: 'w-[84px]',
-  instruments: 'w-[112px]',
-  status: 'w-[80px]',
-  return: 'w-[100px]',
-  sharpe: 'w-[76px]',
-  maxDrawdown: 'w-[128px]',
-  when: 'w-[128px]',
+  instruments: 'w-[104px]',
+  model: 'w-[120px]',
+  return: 'w-[96px]',
+  sharpe: 'w-[72px]',
+  maxDrawdown: 'w-[120px]',
+  when: 'w-[120px]',
   compare: 'w-[44px]',
 } as const;

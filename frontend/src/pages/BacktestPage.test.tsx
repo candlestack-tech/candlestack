@@ -67,8 +67,14 @@ const box = (name: string) => within(screen.getByRole('heading', { level: 2, nam
 describe("a finished backtest's page", () => {
   it('names the backtest and what it ran on, with what, over which days and when, without the sidebar', async () => {
     await openPage({ status: 200, body: backtestDocument() });
-    expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe('Backtest #12');
-    expect(document.title).toBe('Backtest #12 · CandleStack');
+    // #376: its name, the number beside it, and the name in the browser's tab.
+    expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe('Bright Vega');
+    expect(document.title).toBe('Bright Vega · CandleStack');
+    // A long name takes up to two lines, then ends in an ellipsis.
+    expect(screen.getByRole('heading', { level: 1 }).className.split(' ')).toEqual(
+      expect.arrayContaining(['line-clamp-2', '[overflow-wrap:anywhere]']),
+    );
+    expect(screen.getByText('#12').getAttribute('title')).toBe('Backtest number 12 in your account');
     expect(screen.getByText('Finished')).toBeDefined();
     expect(screen.getByRole('link', { name: 'raw-candles.keras' }).getAttribute('href')).toBe('/models/mdl_7f3k2m9qx4');
     expect(screen.getByText('3 Jun 2024 – 3 Jun 2024')).toBeDefined();
@@ -85,7 +91,8 @@ describe("a finished backtest's page", () => {
     const icon = '/api/v1/data/instruments/stock%3AAAPL/icon';
     const header = title.parentElement!.parentElement!.nextElementSibling!;
     expect(header.querySelector('img')?.getAttribute('src')).toBe(icon);
-    expect(header.firstElementChild?.textContent).toBe('AAPL');
+    // What it ran on, then what its model reads and the timeframe (#376).
+    expect(header.firstElementChild?.textContent).toBe('AAPL · Candles · 30m');
     const setup = screen.getByRole('heading', { level: 2, name: 'Setup' }).closest('section')!;
     const data = within(setup).getByText('Data').parentElement!;
     expect(data.querySelector('img')?.getAttribute('src')).toBe(icon);
@@ -125,28 +132,14 @@ describe("a finished backtest's page", () => {
     expect((await screen.findByText('The file did not download. Try again.')).getAttribute('role')).toBe('alert');
   });
 
-  it('renames the backtest from its header and shows the name with its number', async () => {
-    const doc = backtestDocument();
-    let current = doc;
-    await openPage(async () => Promise.resolve({ status: 200, body: current }), {
-      [`PATCH /api/v1/backtests/${ID}`]: async () => {
-        current = { ...doc, backtest: { ...doc.backtest, name: 'Half size' } };
-        return Promise.resolve({ status: 200, body: backtest({ name: 'Half size' }) });
-      },
-    });
-    await userEvent.click(await screen.findByRole('button', { name: 'Rename' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Rename backtest' });
-    expect(within(dialog).getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true);
-    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Backtest name' }), 'Half size');
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
-    expect(await screen.findByRole('heading', { level: 1, name: 'Half size' })).toBeDefined();
-    expect(screen.getByText('#12')).toBeDefined();
-  });
-
   it('adds the backtest to compare from its header, and takes it out again', async () => {
     await openPage({ status: 200, body: backtestDocument() });
     await userEvent.click(await screen.findByRole('button', { name: 'Add to compare' }));
-    expect(screen.getByRole('complementary', { name: 'Compare' }).textContent).toContain('#12');
+    // The panel names it on two lines, without its number (#376).
+    const panel = within(screen.getByRole('complementary', { name: 'Compare' }));
+    expect(panel.getByText('Bright Vega')).toBeDefined();
+    expect(panel.getByText('AAPL · Candles · 30m')).toBeDefined();
+    expect(panel.queryByText('#12')).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: 'Added to compare' }));
     expect(screen.queryByRole('complementary', { name: 'Compare' })).toBeNull();
   });
@@ -400,7 +393,7 @@ describe('opening a backtest', () => {
       [DOCUMENT]: { status: 200, body: backtestDocument() },
     });
     const { router } = await renderApp('/backtests');
-    await userEvent.click(await screen.findByRole('link', { name: 'Backtest #12' }));
+    await userEvent.click(await screen.findByRole('link', { name: 'Bright Vega' }));
     expect(await screen.findByRole('link', { name: '← Backtests' })).toBeDefined();
     await router.navigate({ to: '/backtests/$backtestId', params: { backtestId: ID }, state: { from: 'model' } });
     expect((await screen.findByRole('link', { name: '← raw-candles.keras' })).getAttribute('href')).toBe(

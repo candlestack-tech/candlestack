@@ -82,7 +82,7 @@ describe('Account', () => {
   it('says how many backtests and uploaded models go with the account', async () => {
     stubApi({
       ...sessionWithPreferences(ARSEN),
-      ...dashboardAnswer({ counts: { all: 15, starred: 5, failed: 2 } }),
+      ...dashboardAnswer({ counts: { all: 15, starred: 5, failed: 2, public: 0 } }),
       ...modelsAnswer([model(), model({ id: 'mdl_a2b3c4d5e6' })]),
     });
     await renderApp('/settings/account');

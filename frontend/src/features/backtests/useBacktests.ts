@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
 
 import {
+  backtestQueryOptions,
   backtestsQueryOptions,
   dashboardQueryOptions,
   updateBacktest,
@@ -10,9 +11,13 @@ import {
   type Dashboard,
 } from '@/api';
 
-// Every page of the list, whatever its search and filters, and the dashboard.
+import { nameInCompare } from './compare/selection';
+
+// Every page of the list, whatever its search and filters, the dashboard, and every page and the
+// cards of Experiments.
 const LISTS: QueryKey = ['account', 'backtests'];
 const DASHBOARD = dashboardQueryOptions().queryKey;
+const EXPERIMENTS: QueryKey = ['account', 'experiments'];
 
 // A page of the user's backtests for what the Backtests page shows.
 export function useBacktestsPage(params: BacktestsParams) {
@@ -64,17 +69,47 @@ export function starOnDashboard(dashboard: Dashboard, changed: Backtest): Dashbo
 
 // Stars or unstars at once everywhere it shows, with the counts; everything goes back when the
 // API refuses, and is asked for again either way.
-// Renames the backtest, or takes its name away; what shows it is asked for again.
+// Renames the backtest, or with a name of null goes back to its generated one: its page and its
+// slot in the comparison say so at once from the API's answer, and the lists, the dashboard and
+// Experiments are asked for again.
 export function useRenameBacktest() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, name }: { id: string; name: string | null }) => updateBacktest(id, { name }),
-    onSuccess: (_backtest, { id }) =>
-      Promise.all([
+    onSuccess: (changed, { id }) => {
+      queryClient.setQueryData(
+        backtestQueryOptions(id).queryKey,
+        (doc) =>
+          doc && { ...doc, backtest: { ...doc.backtest, name: changed.name, generated_name: changed.generated_name } },
+      );
+      nameInCompare(id, changed.name);
+      return Promise.all([
         queryClient.invalidateQueries({ queryKey: LISTS }),
         queryClient.invalidateQueries({ queryKey: DASHBOARD }),
-        queryClient.invalidateQueries({ queryKey: ['account', 'backtest', id] }),
-      ]),
+        queryClient.invalidateQueries({ queryKey: EXPERIMENTS }),
+      ]);
+    },
+  });
+}
+
+// Publishes the backtest to Experiments or takes it back: its page says so at once from the API's
+// answer, and the lists, the dashboard and Experiments are asked for again.
+export function usePublishBacktest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, published }: { id: string; published: boolean }) => updateBacktest(id, { public: published }),
+    onSuccess: (changed, { id }) => {
+      queryClient.setQueryData(
+        backtestQueryOptions(id).queryKey,
+        (doc) =>
+          doc && { ...doc, backtest: { ...doc.backtest, public: changed.public, published_at: changed.published_at } },
+      );
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: LISTS }),
+        queryClient.invalidateQueries({ queryKey: DASHBOARD }),
+        queryClient.invalidateQueries({ queryKey: EXPERIMENTS }),
+      ]);
+    },
   });
 }
 

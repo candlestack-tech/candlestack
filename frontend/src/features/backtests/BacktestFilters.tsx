@@ -1,4 +1,5 @@
 import { useNavigate } from '@tanstack/react-router';
+import { Globe } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import type { BacktestsPage } from '@/api';
@@ -18,6 +19,22 @@ const PANEL =
 // The headings of its sections (.fp-h) keep 8 px under them on a phone too.
 const HEADING = 'mb-2';
 
+// A model by its framework's mark, Public only after a globe (public-experiments, bFilters).
+function OptionLabel({ option }: { option: FilterOption }) {
+  if (option.section === 'model' && option.framework) {
+    return <ModelName name={option.label} framework={option.framework} />;
+  }
+  if (option.section === 'show' && option.show === 'public') {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <Globe aria-hidden="true" className="size-4" />
+        {option.label}
+      </span>
+    );
+  }
+  return option.label;
+}
+
 // Show and Model behind one button (mockups/app, btFilters), the panel lined up with the button's
 // left edge: Show in its 128 px column, the models beside it with their framework's mark. A pick
 // goes to the URL (page 1, a new history entry, so Back undoes it) and leaves the panel open.
@@ -33,13 +50,7 @@ export function BacktestFilters({ search, page }: Props) {
       move={(active, key) => nextActive(options, active, key)}
       onPick={(option) => void navigate({ search: (prev) => applyOption(prev, option) })}
       start={() => sectionStart(options, 'show')}
-      label={(option) =>
-        option.section === 'model' && option.framework ? (
-          <ModelName name={option.label} framework={option.framework} />
-        ) : (
-          option.label
-        )
-      }
+      label={(option) => <OptionLabel option={option} />}
       note={(option) => option.count}
       align="start"
       sideOffset={6}

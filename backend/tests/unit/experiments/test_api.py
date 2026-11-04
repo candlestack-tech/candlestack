@@ -34,6 +34,7 @@ def signed_in(app: FastAPI) -> FastAPI:
         ("GET", "/api/v1/backtests"),
         ("PATCH", "/api/v1/backtests/bt_7f3k2m9qx4"),
         ("GET", "/api/v1/dashboard"),
+        ("GET", "/api/v1/experiments"),
         ("POST", "/api/v1/backtests"),
         ("GET", "/api/v1/backtests/bt_7f3k2m9qx4"),
         ("GET", "/api/v1/backtests/bt_7f3k2m9qx4/download"),
@@ -99,7 +100,7 @@ def test_a_star_needs_the_apps_own_origin(client: TestClient) -> None:
     [
         {"q": "a" * 101},
         {"show": "running"},
-        {"sort": "name"},
+        {"sort": "title"},
         {"order": "up"},
         {"page": "0"},
         {"page": "100001"},
@@ -117,9 +118,46 @@ def test_the_list_query_is_validated(client: TestClient, params: dict[str, str])
 
 
 @pytest.mark.parametrize(
+    "params",
+    [
+        {"q": "a" * 101},
+        {"mine": "maybe"},
+        {"author": "u" * 33},
+        {"market": "forex"},
+        {"symbol": "s" * 33},
+        {"representation": "ticks"},
+        {"timeframe": "2h"},
+        {"sort": "number"},
+        {"order": "up"},
+        {"page": "0"},
+        {"page": "100001"},
+    ],
+    ids=[
+        "long-q",
+        "mine",
+        "long-author",
+        "market",
+        "long-symbol",
+        "representation",
+        "timeframe",
+        "sort",
+        "order",
+        "page-0",
+        "page-huge",
+    ],
+)
+@pytest.mark.usefixtures("signed_in")
+def test_the_experiments_query_is_validated(client: TestClient, params: dict[str, str]) -> None:
+    response = client.get("/api/v1/experiments", params=params)
+
+    assert response.status_code == 422
+    assert response.json()["type"] == PROBLEMS + "validation"
+
+
+@pytest.mark.parametrize(
     "body",
-    [{}, {"starred": "maybe"}, {"starred": True, "number": 3}],
-    ids=["empty", "not-bool", "extra"],
+    [{}, {"starred": "maybe"}, {"starred": True, "number": 3}, {"public": "yes please"}],
+    ids=["empty", "not-bool", "extra", "public-not-bool"],
 )
 @pytest.mark.usefixtures("signed_in")
 def test_a_star_is_validated(client: TestClient, body: dict[str, object]) -> None:

@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from 'react';
 import type { BacktestDocument } from '@/api';
 import { FactsStrip } from '@/components/FactsStrip';
 
+import { AuthorCard } from './AuthorCard';
 import { chartTrades } from './chartData';
 import { allMetrics, basicMetrics, TONE } from './format';
 import { FailedNote, MetricList, ResultBox, SetupBox } from './ResultParts';
@@ -47,7 +48,8 @@ function Charts({ doc, results }: Props) {
 }
 
 // A finished run (mockups/app, resA): the first results in a strip, then the charts and the
-// trades beside every metric and the setup; one column up to 980 px.
+// trades beside every metric and the setup; one column up to 980 px. Another account's has its
+// author on top of the right column (public-experiments).
 function Finished({ doc, results }: Props) {
   const facts = basicMetrics(results.stats).map(({ name, value, tone }) => ({
     term: name,
@@ -60,6 +62,7 @@ function Finished({ doc, results }: Props) {
       <div className="grid grid-cols-[minmax(0,1fr)_280px] items-start gap-4 max-[980px]:grid-cols-[minmax(0,1fr)]">
         <Charts doc={doc} results={results} />
         <aside className="flex min-w-0 flex-col gap-4">
+          {!doc.backtest.author.mine && <AuthorCard backtest={doc.backtest} />}
           <ResultBox title="All metrics">
             <MetricList metrics={allMetrics(doc, results)} />
           </ResultBox>

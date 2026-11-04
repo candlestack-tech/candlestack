@@ -179,8 +179,8 @@ names the layout: `useSearch({ from: '/_app/instruments' })`.
   kept) and Contact the team. A clicked button stays busy ("Opening GitHub", a spinner) while
   the browser leaves; Back from the provider offers the buttons again. An open session skips
   the page and goes to `next` or `/dashboard`.
-- `/dashboard`, `/backtests`, `/models`, `/instruments`, `/instrument/$id` and `/settings` sit
-  behind a guard (`src/routes/accountGuards.ts`): signed out, it redirects to `/signin?next=<the
+- `/dashboard`, `/backtests`, `/experiments`, `/models`, `/instruments`, `/instrument/$id` and
+  `/settings` sit behind a guard (`src/routes/accountGuards.ts`): signed out, it redirects to `/signin?next=<the
   page asked for>`. The app code loads on demand.
 - `next` is only ever a path of this app (`appPath` in `src/routes/signInSearch.ts`): anything
   that leaves the origin (`https://…`, `//…`, `/\…`), `/signin` itself and `/api/…` are dropped,
@@ -191,7 +191,8 @@ names the layout: `useSearch({ from: '/_app/instruments' })`.
 
 The app shell (`src/features/workspace/`) follows `mockups/app`: the app header (logo to the
 dashboard, no nav, New backtest, the theme toggle, the avatar), a 200 px sidebar (Dashboard,
-Backtests, Models with the model count, Instruments, Settings, then the storage the models take, under "Model
+Backtests with the backtest count, Experiments with the count of published backtests
+(`dashboard.experiments.total`), Models with the model count, Instruments, Settings, then the storage the models take, under "Model
 storage" on one line ("4.7 MB of 100 MB"), and the note that market data is delayed 15 min; up to 980 px above the page as a row that scrolls sideways
 without a scrollbar, the foot left out) and the footer.
 The avatar is the user's initials (`initials.ts`), never a provider picture; its menu
@@ -354,11 +355,14 @@ delete modals):
 
 The Backtests page (`src/features/backtests/BacktestsTable.tsx`, #315) follows the approved
 table design: the star and the number, the instruments, the model, the status, Return, Sharpe, Max
-drawdown and When. The layout is fixed (`table-fixed`): every column but the model has the width
+drawdown and When. A backtest in Experiments has a 14 px globe after its number, here and in the
+dashboard's widgets; the line under the title adds how many are public ("13 backtests · 2
+public"), and Filters' Show has Public only (`?show=public`, `counts.public`) between Starred and
+Failed. The layout is fixed (`table-fixed`): every column but the model has the width
 of `src/features/backtests/widths.ts`, room for its longest value and its header with the sort
 arrow, so no number is cut; the model takes the rest. Its name is 12 px (one step under the
 row's 13 px), ends in an ellipsis when it does not fit, shows in full in its title and links to
-the model while it exists. Return has room for "+9,999.9 %", When for "28 May 2025 11:58 AM",
+the model while it exists. The backtest has room for the star, "#999" and the globe, Return for "+9,999.9 %", When for "28 May 2025 11:58 AM",
 the longest of every date and time format. Trades is left out: with it the model would keep under
 100 px. From which width down a column hides, so the table never scrolls sideways: Max drawdown
 at 1150 px, When at 800, Model at 620, Status at 500 (Return then shows the badge), Sharpe at 420.
@@ -484,6 +488,28 @@ so its back link returns there (else "← Backtests").
 - Limits: the returns are daily for runs of more than 10 000 rows (the light view), and the
   candles carry the data API's adjustment of today (`adjustment=all`), so a stock's prices can
   differ from those the run traded at after a later split or dividend.
+- Publish ([Experiments](#experiments)): the user's own finished backtest has Publish, an outline
+  button with a globe, between Download JSON and Add to compare. It opens an 800 px dialog
+  (`PublishDialogs.tsx`): who can see it, the card it gets in Experiments (296 px, the preview of
+  `ExperimentCard`, which opens nothing) beside what others see and do not, then Publish
+  (`PATCH /api/v1/backtests/{id}` with `{"public": true}`; a 409 shows the API's sentence in the
+  dialog). Published, a green Public pill follows the status, the line under the title ends with
+  "In Experiments since today 20:41", and Copy link (the page's address; the toast says it opens
+  for the beta only) and Unpublish (a 560 px dialog: it also leaves other people's Compare) take
+  the place of Publish. The answer goes into the document in the cache at once, and the lists, the
+  dashboard and Experiments are asked for again; a toast says what happened
+  (`src/components/Toast.tsx`). Running or failed, Publish is faded (`aria-disabled`, so it stays
+  in the tab order) with the reason in a tooltip under it on hover or focus. A seeded test
+  backtest has no document, so no page and no Publish.
+- Another account's published backtest (`backtest.author.mine` false, `model.id` null) is the
+  same page, read only: no Rename and no Publish; Download JSON says it holds results, trades and
+  setup, no model file; the line under the title starts with the author (initials and name) and
+  ends with "Published today"; the model is its name in ink, never a link, and the setup says the
+  model file stays with the author. On top of the right column the author card: the 40 px
+  initials, the name, "Published 2 Nov 2026 at 10:14" and "More by Tymur →" to
+  `/experiments?author=<id>`. The back link goes to Experiments (back through the history when it
+  was opened there, so its search stays). Once its author unpublished it, the page answers 404
+  and says it is not found.
 
 ## Compare backtests
 
@@ -493,6 +519,19 @@ so its back link returns there (else "← Backtests").
 - The choice: up to 4 finished backtests in slots, kept in `localStorage` (`selection.ts`), so it
   stays after a reload in this browser. A slot gives a backtest its colour, and removing another
   moves nothing. One that no longer exists leaves the choice when the page gets a 404.
+- Other accounts' backtests from Experiments can be compared too; their slot keeps the author's
+  name. The panel asks for their documents (the compare page reads the same cache), and one that
+  now answers 404 was unpublished: it leaves the comparison but keeps its slot, dashed in the
+  warning colour, "#57 was unpublished" with the author's initials, until the user dismisses it
+  (the compare page says "Vladyslav Shudiehov unpublished #57, so it left your Compare."). The
+  user's own that answers 404 was deleted and leaves at once (`leaveCompare`).
+- Whose: another account's backtest has its author's initials (16 px) in the panel and the charts'
+  legends, the initials and the name (20 px) in the table's head, and the Setup gets an Author
+  row ("You" for the user's own) while any of them is another account's. The line under the
+  title says "4 of 4 backtests · 2 yours, 2 from Experiments".
+- The picker has two tabs, Yours (the user's backtests) and Experiments (the other accounts'
+  published ones, newest first, the author's initials and name before the model), each with its
+  count; another tab starts its search over.
 - Adding: a scale icon on every list of backtests, off with the reason in its title for a running
   or failed one or at 4, and a button on a backtest's page. The Compare panel in the bottom right
   corner of the signed-in pages lists them; Compare opens the page from 2. It can fold to a small
@@ -502,6 +541,57 @@ so its back link returns there (else "← Backtests").
   table. In each row of the results the best value is green and the worst red, the others plain,
   and all plain when they read the same or when no value is better (Trades, Time in market, Buy
   and hold). The setup follows, with a dash where a backtest has no such row.
+
+## Experiments
+
+`/experiments` (#368, `src/pages/ExperimentsPage.tsx`, the parts in
+`src/features/backtests/experiments/`) follows the approved design
+(`design/mockups/public-experiments`): the backtests that accounts of the beta published, which
+every signed-in account (the beta) sees. Others only look: the setup, the results, the charts,
+the trades, what the model reads and Download JSON of the results, never the model file. An
+author is their display name with the initials the app draws (`AuthorAvatar.tsx` over
+`Avatar.tsx`), never the email.
+
+- One request, `GET /api/v1/experiments` (`src/api/experiments.ts`, under
+  `['account', 'experiments', ...]`), with the search, All · Mine (`mine`), the author, the market
+  or one instrument (`symbol`), the representation, the timeframe, the order and the page, all in
+  the URL (`src/routes/experimentsSearch.ts`):
+  `/experiments?q=nvda&mine=true&author=usr_…&market=crypto&representation=renko&timeframe=1h&sort=sharpe&order=asc&page=2`.
+  Broken values are dropped; a pick starts at page 1 and adds a history entry. Publishing or
+  unpublishing asks for all of it again.
+- Beside the title All · Mine with their counts (`counts`) and Cards · Table, both the app's
+  segmented control at 34 px. Cards is the default; the view is the browser's (`localStorage`,
+  `view.ts`, like the compare selection), not the URL's, and stays as it was left.
+- The toolbar: the search (instrument, model or author), the author chip of "More by Tymur" (the
+  initials, the name and a cross that shows everyone), then Market (All markets, Stocks, Crypto,
+  then under "Instrument" each published one), Representation (Any, Renko, Kagi, Candles) and
+  Timeframe (Any and those published), each a 34 px chip with a 236 px list of one choice
+  (shadcn's DropdownMenu radio items) and the count of each from `facets`; a set chip has the
+  accent's rim and names its value. At the right Sort: Newest (the default), Sharpe and Return
+  high to low, Max drawdown smallest first (`chipRules.ts`).
+- The line over the list: "25 backtests from 7 people", "2 of your backtests are in Experiments"
+  under Mine, or "8 of 25" with Clear filters once something narrows it. Nothing to show says why:
+  nothing of the user's published yet (Go to Backtests), nothing published at all, or nothing
+  that matches (Clear search and filters).
+- Cards (`ExperimentCard.tsx`): the dashboard widget's card in a
+  `repeat(auto-fill, minmax(272px, 1fr))` grid with 16 px gaps; the 28 px instrument icon, the
+  16 px symbol and the number, the compare button, the model by its mark, what it reads as
+  neutral mono tags and its input, the return over the card's width (`src/components/MiniChart.tsx`,
+  44 px, its benchmark 1 px dashed: buy and hold or the ETF of `setup.benchmark`), Return, Sharpe,
+  Max drawdown and Trades, then the author ("you" on the user's own) and the day it was published.
+  The symbol's link is stretched over the card. The cards come a page of 12 at a time
+  (`useInfiniteQuery`): Load more adds the next page under them with "Showing 12 of 25", and "That
+  is all 25" once they are.
+- Table (`ExperimentsTable.tsx`): the Backtests table with the author and what the model reads
+  under its name (not a link), Published instead of When, the pager under it (12 a page, the
+  API's). The results' headers sort down, up, then back to newest first; Published is the order
+  of Newest. Max drawdown hides at 1150 px, Published at 800, the author's name at 640 (the
+  initials stay), the model at 620, Sharpe at 420.
+- Every card and row adds to Compare ([Compare backtests](#compare-backtests)), and opens the
+  backtest's page ([Backtest page](#backtest-page)), whose back link returns here as it was.
+- The dashboard has New in Experiments on top of the right column once anything is published:
+  the four newest (`dashboard.experiments`) in the rows of Starred backtests with the author's
+  initials, "Tymur Tkach · today", and "Open Experiments … 25 published →".
 
 ## Instrument icons
 

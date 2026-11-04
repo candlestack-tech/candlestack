@@ -49,6 +49,7 @@ def test_the_backtests_of_the_runs() -> None:
     ]  # fmt: skip
     assert {item["market"] for item in newest.instruments} == {"stock"}
     assert (newest.total_return, newest.buy_and_hold_return) == (0.246, 0.682)
+    assert newest.benchmark_return == 0.682  # buy and hold, its benchmark
     assert (newest.sharpe, newest.max_drawdown, newest.win_rate) == (0.79, -0.197, 0.512)
     assert (newest.num_trades, newest.duration_s) == (1712, 162.0)
     assert newest.created_at == datetime(2026, 10, 17, 16, 5, tzinfo=UTC)

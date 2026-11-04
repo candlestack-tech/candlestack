@@ -122,10 +122,12 @@ export const model = (fields: Partial<Model> = {}): Model => ({
   ...fields,
 });
 
-// A finished backtest as the API sends it: #12 on AAPL and MSFT with blesk-novol-8.keras.
+// A finished backtest as the API sends it: #12, Bright Vega, on AAPL and MSFT with
+// blesk-novol-8.keras.
 export const backtest = (fields: Partial<Backtest> = {}): Backtest => ({
   id: 'bt_7f3k2m9qx4',
-  name: null,
+  name: 'Bright Vega',
+  generated_name: 'Bright Vega',
   seeded: false,
   number: 12,
   instruments: [
@@ -147,6 +149,8 @@ export const backtest = (fields: Partial<Backtest> = {}): Backtest => ({
   },
   status: 'finished',
   starred: false,
+  public: false,
+  published_at: null,
   total_return: 0.246,
   buy_and_hold_return: 0.682,
   sharpe: 0.79,
@@ -187,7 +191,7 @@ export const backtestsAnswer = (page: Partial<BacktestsPage>, query = ''): Recor
         total: backtests.length,
         page: 1,
         pages: 1,
-        counts: { all: backtests.length, starred: 0, failed: 0 },
+        counts: { all: backtests.length, starred: 0, failed: 0, public: 0 },
         models: [],
         ...page,
       },
@@ -195,15 +199,17 @@ export const backtestsAnswer = (page: Partial<BacktestsPage>, query = ''): Recor
   };
 };
 
-// GET /api/v1/dashboard of an account; without fields, one without backtests.
+// GET /api/v1/dashboard of an account; without fields, one without backtests, and nothing
+// published in Experiments.
 export const dashboardAnswer = (dashboard: Partial<Dashboard> = {}): Record<string, Answer> => ({
   'GET /api/v1/dashboard': {
     status: 200,
     body: {
-      counts: { all: 0, starred: 0, failed: 0 },
+      counts: { all: 0, starred: 0, failed: 0, public: 0 },
       last: [],
       best: { sharpe: [], total_return: [], max_drawdown: [], win_rate: [] },
       starred: { backtests: [], total: 0 },
+      experiments: { backtests: [], total: 0 },
       ...dashboard,
     },
   },
@@ -367,14 +373,27 @@ const EXAMPLE_EXECUTION: BacktestDocument['execution'] = {
   slippage_bps: 0,
 };
 
-// The worked example of docs/engine.md as the result document of #12: AAPL, 30-minute candles,
+const EXAMPLE_DECISION: BacktestDocument['decision'] = {
+  calibrate: null,
+  ema: null,
+  rule: { name: 'threshold', limit: 0.05 },
+  long_only: false,
+  confirm: null,
+  min_hold: null,
+};
+
+// The worked example of docs/engine.md as the result document of #12, Bright Vega: AAPL, 30-minute candles,
 // one long trade stopped out, 5 % stop and 10 bps fees, against buy and hold.
 export const backtestDocument = (fields: Partial<BacktestDocument> = {}): BacktestDocument => ({
   version: 1,
   backtest: {
     id: 'bt_7f3k2m9qx4',
-    name: null,
+    name: 'Bright Vega',
+    generated_name: 'Bright Vega',
     number: 12,
+    author: { id: ARSEN.id, name: ARSEN.display_name, mine: true },
+    public: false,
+    published_at: null,
     status: 'finished',
     created_at: '2026-10-17T14:05:00Z',
     finished_at: '2026-10-17T14:07:42Z',
@@ -396,14 +415,7 @@ export const backtestDocument = (fields: Partial<BacktestDocument> = {}): Backte
     manifest: manifest(),
   },
   data: EXAMPLE_DATA,
-  decision: {
-    calibrate: null,
-    ema: null,
-    rule: { name: 'threshold', limit: 0.05 },
-    long_only: false,
-    confirm: null,
-    min_hold: null,
-  },
+  decision: EXAMPLE_DECISION,
   execution: EXAMPLE_EXECUTION,
   benchmarks: [{ id: 'bh', kind: 'buy_and_hold', instrument: 'stock:AAPL' }],
   metrics: { periods_per_year: 252, risk_free_rate: 0 },

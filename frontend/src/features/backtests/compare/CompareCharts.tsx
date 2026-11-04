@@ -20,11 +20,14 @@ import { useViewerDateStyle } from '@/features/preferences';
 import { formatDate } from '@/lib/dates';
 import { useTheme } from '@/theme';
 
+import { AuthorAvatar } from '../experiments/AuthorAvatar';
+import { BacktestNameLines } from '../parts';
 import { valueAt, type Line } from './chartLines';
 
 // The Equity and Drawdown charts of the comparison, on TradingView Lightweight Charts: one line per
 // backtest in its slot's colour, one crosshair and one view of time across both, and a box with
-// each backtest's value at the crosshair.
+// each backtest's value at the crosshair. The legend names each by its name over what it ran on,
+// another account's after its author's initials (backtest-names, lgLabel).
 
 type Field = 'equity' | 'drawdown';
 const FIELDS: readonly { field: Field; title: string }[] = [
@@ -205,9 +208,9 @@ function HoverBox({ lines, field, hover }: ChartProps & { hover: Hover }) {
         const value = valueAt(line[field], hover.time);
         return (
           <div key={line.id} className="flex items-center justify-between gap-3.5 text-xs">
-            <span className="inline-flex items-center gap-1.5 font-mono">
-              <span aria-hidden="true" className="size-2 rounded-full" style={{ background: line.color }} />#
-              {line.number}
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <span aria-hidden="true" className="size-2 flex-none rounded-full" style={{ background: line.color }} />
+              <span className="max-w-[140px] truncate">{line.name}</span>
             </span>
             <span className="font-mono font-medium">{value === null ? '–' : withSign(value)}</span>
           </div>
@@ -228,11 +231,21 @@ function ChartBox({ lines, hover, field, title, box }: BoxProps) {
     <section aria-label={title} className="min-w-0 rounded-lg border bg-background p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-[15px] font-semibold">{title}</h2>
-        <div className="flex flex-wrap gap-x-3 gap-y-1">
-          {lines.map(({ id, number, color }) => (
-            <span key={id} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span aria-hidden="true" className="h-[3px] w-3.5 rounded-sm" style={{ background: color }} />
-              <span className="font-mono">#{number}</span>
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+          {lines.map(({ id, name, description, author, color }) => (
+            <span key={id} className="inline-flex max-w-[168px] min-w-0 items-start gap-[7px]">
+              <span
+                aria-hidden="true"
+                className="mt-[7px] h-[3px] w-3.5 flex-none rounded-sm"
+                style={{ background: color }}
+              />
+              <BacktestNameLines
+                name={name}
+                description={description}
+                lead={author && <AuthorAvatar name={author} size="xxs" />}
+                nameClassName="text-[12.5px]/[17px] font-medium text-foreground"
+                descriptionClassName="text-[11px]/[15px]"
+              />
             </span>
           ))}
         </div>

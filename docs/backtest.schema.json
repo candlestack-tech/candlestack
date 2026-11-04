@@ -20,6 +20,10 @@
     },
     "BacktestHeader": {
       "properties": {
+        "author": {
+          "$ref": "#/$defs/DocumentAuthor",
+          "description": "Whose backtest it is. Another account's backtest is shown only while it is published, read only, and its `model.id` is null"
+        },
         "created_at": {
           "description": "When it started (UTC)",
           "format": "date-time",
@@ -66,6 +70,14 @@
           "description": "When it finished or failed (UTC)",
           "title": "Finished At"
         },
+        "generated_name": {
+          "description": "The name it got when it was created",
+          "examples": [
+            "Silent Orion"
+          ],
+          "title": "Generated Name",
+          "type": "string"
+        },
         "id": {
           "examples": [
             "bt_7f3k2m9qx4"
@@ -74,16 +86,12 @@
           "type": "string"
         },
         "name": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
+          "description": "What the user calls it: their own name, else the generated one",
+          "examples": [
+            "Silent Orion"
           ],
-          "description": "What the user calls it; null until they rename it",
-          "title": "Name"
+          "title": "Name",
+          "type": "string"
         },
         "number": {
           "description": "The user's own number, shown as #N",
@@ -93,6 +101,24 @@
           "minimum": 1,
           "title": "Number",
           "type": "integer"
+        },
+        "public": {
+          "description": "Published in Experiments",
+          "title": "Public",
+          "type": "boolean"
+        },
+        "published_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When it was published (UTC); null while it is not",
+          "title": "Published At"
         },
         "status": {
           "$ref": "#/$defs/BacktestStatus"
@@ -109,7 +135,11 @@
       "required": [
         "id",
         "name",
+        "generated_name",
         "number",
+        "author",
+        "public",
+        "published_at",
         "status",
         "created_at",
         "finished_at",
@@ -704,6 +734,39 @@
         }
       },
       "title": "Decision",
+      "type": "object"
+    },
+    "DocumentAuthor": {
+      "description": "Who the backtest belongs to: their display name, never their email.",
+      "properties": {
+        "id": {
+          "description": "Public ID of the account",
+          "examples": [
+            "usr_7f3k2m9qx4"
+          ],
+          "title": "Id",
+          "type": "string"
+        },
+        "mine": {
+          "description": "The signed-in user's own backtest",
+          "title": "Mine",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "The account's display name",
+          "examples": [
+            "Tymur Tkach"
+          ],
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "mine"
+      ],
+      "title": "DocumentAuthor",
       "type": "object"
     },
     "EmaStep": {

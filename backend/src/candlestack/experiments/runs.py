@@ -47,6 +47,7 @@ from candlestack.experiments.document import (
     BacktestModel,
     BenchmarkIn,
     DataOut,
+    DocumentAuthor,
     HysteresisRule,
     InstrumentOut,
     MetricsArgs,
@@ -115,6 +116,7 @@ class BacktestRuns:
         if model is None:
             raise ModelNotFound
         manifest = _manifest(model, instrument_id)
+        author = DocumentAuthor(id=user_id, name=await self._store.author_name(user_id), mine=True)
         # Before the slower checks; again under the lock below, where it counts.
         if await self._store.running(user_id):
             raise BacktestRunning
@@ -143,13 +145,14 @@ class BacktestRuns:
             model_framework=model.framework,
             setup=_setup(spec),
             spec=spec.model_dump(mode="json"),
+            input_shape=list(manifest.signature.input.shape),
             steps=pending(),
             created_at=datetime.now(UTC),
         )
-        self._store.add(backtest)
+        await self._store.add_named(backtest)
         await self._store.commit()
         self._runner.start(backtest.id)
-        return backtest, dumps(_document(backtest, spec))
+        return backtest, dumps(_document(backtest, spec, author=author))
 
     async def _spec(
         self, model: Model, manifest: Manifest, instrument_id: InstrumentId, body: BacktestIn
@@ -196,24 +199,30 @@ class BacktestRuns:
         return spec
 
     async def document(self, user_id: str, backtest_id: str, *, light: bool) -> tuple[int, bytes]:
-        """The user's backtest's number and its result document: the light view, or with
-        ``light`` False the download, which needs a finished backtest.
+        """The number and the result document of the user's backtest, or of another account's
+        while it is published: the light view, or with ``light`` False the download, which
+        needs a finished backtest.
 
         Raises:
             BacktestNotFound, NoDocument, BacktestNotFinished (the download), and the data
             module's errors of loading the candles again (``data.DataError``).
         """
-        backtest = await self._store.with_run(user_id, backtest_id)
-        if backtest is None:
+        found = await self._store.with_run(user_id, backtest_id)
+        if found is None:
             raise BacktestNotFound
+        backtest = found.backtest
         if backtest.spec is None:
             raise NoDocument
         finished = backtest.status == BacktestStatus.finished.value
         if not light and not finished:
             raise BacktestNotFinished(backtest.status)
         spec = RunSpec.model_validate(backtest.spec)
+        # Only the account's display name and public ID: never its email.
+        author = DocumentAuthor(
+            id=backtest.user_id, name=found.author, mine=backtest.user_id == user_id
+        )
         if not finished or backtest.report is None:
-            return backtest.number, dumps(_document(backtest, spec))
+            return backtest.number, dumps(_document(backtest, spec, author=author))
         report = RunReport.model_validate(backtest.report)
         blob = await self._store.predictions(backtest.id)
         assert blob is not None  # a finished run stored them
@@ -231,7 +240,9 @@ class BacktestRuns:
             benchmark: (await self._data.candles(etf, timeframe, period.start, period.end)).frame
             for benchmark, etf in spec.etf_benchmarks().items()
         }
-        build = partial(_finished, backtest, spec, report, candles, blob, light=light, held=held)
+        build = partial(
+            _finished, backtest, spec, report, candles, blob, author=author, light=light, held=held
+        )
         return backtest.number, await anyio.to_thread.run_sync(build)
 
 
@@ -242,6 +253,7 @@ def _finished(  # noqa: PLR0913 (what a build of the document is made of)
     candles: CandleSet,
     blob: bytes,
     *,
+    author: DocumentAuthor,
     light: bool,
     held: Mapping[str, pl.DataFrame],
 ) -> bytes:
@@ -259,25 +271,30 @@ def _finished(  # noqa: PLR0913 (what a build of the document is made of)
         )
     except NothingToTest:
         # The candles changed so much that no prediction lands on one any more.
-        return dumps(_document(backtest, spec, report, changed=changed))
+        return dumps(_document(backtest, spec, report, author=author, changed=changed))
     shown = results(done, spec.benchmarks, light=light, held=held)
-    return dumps(_document(backtest, spec, report, done, shown, changed=changed))
+    return dumps(_document(backtest, spec, report, done, shown, author=author, changed=changed))
 
 
-def _document(
+def _document(  # noqa: PLR0913 (the document's sources)
     backtest: Backtest,
     spec: RunSpec,
     report: RunReport | None = None,
     done: Run | None = None,
     shown: dict[str, Any] | None = None,
     *,
+    author: DocumentAuthor,
     changed: bool | None = None,
 ) -> dict[str, Any]:
     return document(
         backtest=BacktestHeader(
             id=backtest.id,
-            name=backtest.name,
+            name=backtest.shown_name,
+            generated_name=backtest.generated_name,
             number=backtest.number,
+            author=author,
+            public=backtest.published_at is not None,
+            published_at=backtest.published_at,
             status=BacktestStatus(backtest.status),
             created_at=backtest.created_at,
             finished_at=backtest.finished_at,
@@ -291,7 +308,8 @@ def _document(
             runner=None if report is None else report.runner,
         ),
         model=BacktestModel(
-            id=backtest.model_id,
+            # Others never reach the model: they only read what it is.
+            id=backtest.model_id if author.mine else None,
             name=spec.model.name,
             framework=spec.model.framework,
             sha256=spec.model.sha256,

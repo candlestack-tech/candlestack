@@ -81,7 +81,16 @@ const RUN = 'POST /api/v1/backtests';
 const started = runningDocument();
 const STARTED = {
   status: 201,
-  body: { ...started, backtest: { ...started.backtest, id: 'bt_n3w8a9c4k2', number: 13 } },
+  body: {
+    ...started,
+    backtest: {
+      ...started.backtest,
+      id: 'bt_n3w8a9c4k2',
+      number: 13,
+      name: 'Silent Orion',
+      generated_name: 'Silent Orion',
+    },
+  },
 };
 
 beforeEach(() => {
@@ -293,7 +302,9 @@ describe('the backtest builder', () => {
     await user.click(screen.getByRole('button', { name: 'Run backtest' }));
     await vi.waitFor(() => expect(router.state.location.pathname).toBe('/backtests/bt_n3w8a9c4k2'));
     // The answer is on the backtest's page at once, running.
-    expect((await screen.findByRole('heading', { level: 1, name: 'Backtest #13' })).textContent).toBe('Backtest #13');
+    // It has its generated name from the start (#376).
+    expect((await screen.findByRole('heading', { level: 1, name: 'Silent Orion' })).textContent).toBe('Silent Orion');
+    expect(screen.getByText('#13')).toBeDefined();
     expect(screen.getByText(/^Running · /, { selector: 'span' })).toBeDefined();
     expect(sentBody(fetch, RUN)).toEqual({
       model: { id: CRYPTO.id },

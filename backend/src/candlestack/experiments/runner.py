@@ -18,6 +18,7 @@ shutdown fails the runs it stops.
 import asyncio
 import logging
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from functools import partial
 
@@ -39,6 +40,7 @@ from candlestack.experiments.assembly import (
     Run,
     align_of,
     equity_points,
+    main_benchmark,
     predictions_parquet,
     rows_of,
     run,
@@ -153,7 +155,7 @@ class BacktestRunner:
         steps = StepRecorder(partial(self._save_steps, backtest_id), spec.data.period.end)
         timings: dict[str, float | None] = {}
         clock = time.monotonic()
-        candles = await self._candles(spec, steps)
+        candles, held = await self._candles(spec, steps)
         timings["candles"] = _ms(clock)
         # The file as the model storage keeps it (ml.LocalModelStorage).
         model = model_file(backtest.user_id, backtest.model_id, spec.model.framework)
@@ -183,7 +185,7 @@ class BacktestRunner:
             runner=_runner(spec, result),
             timings=timings,
         )
-        await self._finish(backtest_id, done, report, blob, steps)
+        await self._finish(backtest_id, done, report, blob, steps, held=held)
 
     async def _save_steps(self, backtest_id: str, steps: Steps) -> None:
         """Stores the run's steps; Postgres out of reach is a warning, as the run goes on."""
@@ -197,9 +199,12 @@ class BacktestRunner:
                 "The steps of backtest %s were not saved (%s)", backtest_id, type(error).__name__
             )
 
-    async def _candles(self, spec: RunSpec, steps: StepRecorder) -> CandleSet:
+    async def _candles(
+        self, spec: RunSpec, steps: StepRecorder
+    ) -> tuple[CandleSet, dict[str, pl.DataFrame]]:
         """The candles with the warm-up, loaded in the background: a cold load of years of
-        stock candles waits for the source's request budget, minutes if need be."""
+        stock candles waits for the source's request budget, minutes if need be; and those of
+        the index fund each benchmark holds (``_benchmark_candles``)."""
         data = spec.data
         await steps.start("candles")
         try:
@@ -215,19 +220,21 @@ class BacktestRunner:
             raise RunFailed("candles", _source_unavailable(error)) from error
         except DataError as error:
             raise RunFailed("candles", error.detail) from error
-        await self._benchmark_candles(spec)
+        held = await self._benchmark_candles(spec)
         await steps.loaded(candles.frame.height)
-        return candles
+        return candles, held
 
-    async def _benchmark_candles(self, spec: RunSpec) -> None:
-        """Loads the candles of the index fund each benchmark holds, of the period, in the
-        background. The run stores nothing of them, but a fund that cannot be loaded fails the
-        run here rather than every view of its document, which then finds them in the cache."""
+    async def _benchmark_candles(self, spec: RunSpec) -> dict[str, pl.DataFrame]:
+        """The candles of the index fund each benchmark holds, of the period, by the benchmark's
+        ID, loaded in the background. The run stores only the fund's return and short equity
+        series from them, but a fund that cannot be loaded fails the run here rather than every
+        view of its document, which then finds them in the cache."""
         data = spec.data
-        for etf in spec.etf_benchmarks().values():
+        held: dict[str, pl.DataFrame] = {}
+        for benchmark, etf in spec.etf_benchmarks().items():
             failed = f"The candles of the benchmark {etf.symbol} could not be loaded."
             try:
-                await self._data.candles(
+                loaded = await self._data.candles(
                     etf,
                     Timeframe(data.timeframe),
                     data.period.start,
@@ -239,6 +246,8 @@ class BacktestRunner:
                 raise RunFailed("benchmark-candles", f"{failed} {source} {error.detail}") from error
             except DataError as error:
                 raise RunFailed("benchmark-candles", f"{failed} {error.detail}") from error
+            held[benchmark] = loaded.frame
+        return held
 
     async def _predict(
         self,
@@ -278,10 +287,19 @@ class BacktestRunner:
             return await BacktestStore(session).model_of(backtest_id) is None
 
     async def _finish(
-        self, backtest_id: str, done: Run, report: RunReport, blob: bytes, steps: StepRecorder
+        self,
+        backtest_id: str,
+        done: Run,
+        report: RunReport,
+        blob: bytes,
+        steps: StepRecorder,
+        *,
+        held: Mapping[str, pl.DataFrame],
     ) -> None:
         """Stores the results, and the steps all done, while the backtest is still running and
-        there (its account may have been deleted meanwhile)."""
+        there (its account may have been deleted meanwhile). ``held`` has the candles of the
+        index fund of each benchmark that holds one, by its ID."""
+        benchmark, benchmark_return = main_benchmark(done, held)
         now = _now()
         async with self._db.sessions() as session:
             backtest = await session.get(Backtest, backtest_id, with_for_update=True)
@@ -294,11 +312,12 @@ class BacktestRunner:
             backtest.predictions = blob
             backtest.total_return = shown["total_return"]
             backtest.buy_and_hold_return = shown["buy_and_hold_return"]
+            backtest.benchmark_return = benchmark_return
             backtest.sharpe = shown["sharpe"]
             backtest.max_drawdown = shown["max_drawdown"]
             backtest.win_rate = shown["win_rate"]
             backtest.num_trades = int(shown["num_trades"] or 0)
-            points = equity_points(done.result, done.rows, EQUITY_POINTS)
+            points = equity_points(done.result, done.rows, EQUITY_POINTS, benchmark)
             if points is not None:
                 backtest.set_equity(*points)
             backtest.engine_version = done.result.engine_version

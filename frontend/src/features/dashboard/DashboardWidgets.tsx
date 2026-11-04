@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { BestBacktests } from './BestBacktests';
 import { GetStarted } from './GetStarted';
 import { LastBacktests } from './LastBacktests';
+import { NewExperiments } from './NewExperiments';
 import { QuickActions } from './QuickActions';
 import { StarredBacktests } from './StarredBacktests';
 import { showsStarredModels } from './order';
@@ -37,7 +38,8 @@ type Props = { dashboard: Dashboard };
 
 // Everything under the greeting (mockups/app, ddDash). An account with backtests gets the quick
 // actions, Last and Best backtests and both starred lists; a new one Get started, and a starred
-// list once it has starred something.
+// list once it has starred something. Either gets New in Experiments on top of the right column
+// once anyone published a backtest (public-experiments).
 export function DashboardWidgets({ dashboard }: Props) {
   const { data, error } = useModels();
   const models = data?.models;
@@ -52,6 +54,9 @@ export function DashboardWidgets({ dashboard }: Props) {
     dashboard.best.sharpe.length > 0 && <BestBacktests key="best" best={dashboard.best} />,
   ].filter(Boolean);
   const right = [
+    dashboard.experiments.backtests.length > 0 && (
+      <NewExperiments key="experiments" experiments={dashboard.experiments} />
+    ),
     full && <StarredBacktests key="runs" starred={dashboard.starred} onStar={onStar} />,
     showsStarredModels(models, error !== null, full) && (
       <StarredModels key="models" models={models} error={error} onStar={starModel.mutate} />

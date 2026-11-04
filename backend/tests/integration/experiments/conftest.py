@@ -344,6 +344,15 @@ def real_worker(settings: Settings, market: FakeMarket) -> Iterator[None]:
     thread.join(timeout=30)
 
 
+def letters(number: int) -> str:
+    """`number` in the letters of column names: 1 is A, 26 Z, 27 AA."""
+    shown = ""
+    while number:
+        number, rest = divmod(number - 1, 26)
+        shown = chr(ord("A") + rest) + shown
+    return shown
+
+
 class BacktestsUser:
     """A signed-in user (the shared ``Account``: ``id``, ``email``, ``sql``, ``request``), the
     backtests API and rows made straight in the tables."""
@@ -363,6 +372,12 @@ class BacktestsUser:
 
     def rename(self, backtest_id: str, name: str | None) -> httpx2.Response:
         return self.request("PATCH", f"/api/v1/backtests/{backtest_id}", json={"name": name})
+
+    def publish(self, backtest_id: str, public: bool = True) -> httpx2.Response:
+        return self.request("PATCH", f"/api/v1/backtests/{backtest_id}", json={"public": public})
+
+    def experiments(self, **params: Any) -> httpx2.Response:
+        return self.request("GET", "/api/v1/experiments", params=params)
 
     def dashboard(self) -> httpx2.Response:
         return self.request("GET", "/api/v1/dashboard")
@@ -432,6 +447,9 @@ class BacktestsUser:
         *,
         status: str = "finished",
         symbols: tuple[str, ...] = ("AAPL",),
+        market: str = "stock",
+        representation: str = "renko",
+        timeframe: str = "30m",
         model_name: str = "lstm.keras",
         model_id: str | None = None,
         sharpe: float | None = 1.0,
@@ -439,32 +457,50 @@ class BacktestsUser:
         max_drawdown: float | None = -0.1,
         win_rate: float | None = 0.5,
         num_trades: int | None = 100,
+        benchmark_return: float | None = None,
+        input_shape: list[int] | None = None,
         starred: bool = False,
         seeded: bool = False,
         equity: dict[str, list[float]] | None = None,
+        spec: dict[str, Any] | None = None,
+        published: int | None = None,
+        name: str | None = None,
+        generated_name: str | None = None,
     ) -> str:
         """Adds a backtest straight in the table, started `number` hours after ``EPOCH``; its
-        ID. A failed one has no results."""
+        ID. A failed one has no results. ``published`` publishes it that many minutes after
+        ``EPOCH``; ``spec`` is what a backtest made in the app stores (test data has none).
+        Its generated name is ``generated_name``, by default ``Backtest A`` for #1, ``Backtest
+        B`` for #2 and so on (no search of the tests finds it), and ``name`` its custom one."""
         backtest_id = f"bt_{self.id[4:8]}{number:06d}"
         failed = status == "failed"
         created = EPOCH + timedelta(hours=number)
         self.sql(
             "INSERT INTO backtests (id, user_id, number, status, instruments, representation, "
             "model_id, model_name, model_framework, setup, total_return, buy_and_hold_return, "
-            "sharpe, max_drawdown, win_rate, num_trades, equity, duration_s, engine_version, "
-            "error, starred, seeded, created_at, finished_at) VALUES (:id, :user_id, :number, "
-            ":status, CAST(:instruments AS jsonb), 'renko', :model_id, :model_name, 'keras', "
-            "CAST(:setup AS jsonb), :total_return, 0.5, :sharpe, :max_drawdown, :win_rate, "
-            ":num_trades, CAST(:equity AS jsonb), 20, '0.2.0', :error, :starred, :seeded, "
-            ":created, :finished)",
+            "benchmark_return, sharpe, max_drawdown, win_rate, num_trades, equity, input_shape, "
+            "duration_s, engine_version, error, starred, seeded, spec, created_at, finished_at, "
+            "published_at, name, generated_name) VALUES (:id, :user_id, :number, :status, "
+            "CAST(:instruments AS jsonb), :representation, :model_id, :model_name, 'keras', "
+            "CAST(:setup AS jsonb), :total_return, 0.5, :benchmark_return, :sharpe, "
+            ":max_drawdown, :win_rate, :num_trades, CAST(:equity AS jsonb), "
+            "CAST(:input_shape AS jsonb), 20, '0.2.0', :error, :starred, :seeded, "
+            "CAST(:spec AS jsonb), :created, :finished, :published, :name, :generated_name)",
             id=backtest_id,
             user_id=self.id,
             number=number,
+            name=name,
+            generated_name=generated_name or f"Backtest {letters(number)}",
             status=status,
-            instruments=json.dumps([{"market": "stock", "symbol": s} for s in symbols]),
+            instruments=json.dumps([{"market": market, "symbol": s} for s in symbols]),
+            representation=representation,
             model_id=model_id,
             model_name=model_name,
-            setup=json.dumps(SETUP),
+            setup=json.dumps({**SETUP, "timeframe": timeframe}),
+            benchmark_return=benchmark_return,
+            input_shape=None if input_shape is None else json.dumps(input_shape),
+            spec=None if spec is None else json.dumps(spec),
+            published=None if published is None else EPOCH + timedelta(minutes=published),
             total_return=None if failed else total_return,
             sharpe=None if failed else sharpe,
             max_drawdown=None if failed else max_drawdown,
