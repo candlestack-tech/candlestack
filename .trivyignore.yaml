@@ -1,23 +1,9 @@
 # Findings the image scan in CI accepts for a while, each with the date to look again: after it
 # the scan fails on the finding. The weekly scan (security-scan.yml) reports them anyway.
 vulnerabilities:
-  # The Caddy binary of the frontend image. The newest official caddy:2 image (2.11.7) is built
-  # with Go 1.26.8 and golang.org/x/net 0.59.0; a Caddy release built with Go 1.26.10 and x/net
-  # 0.60.0 fixes these, and frontend/Dockerfile follows caddy:2. The frontend only serves static
-  # files behind the edge.
-  - id: CVE-2026-78667
+  # The Caddy binary of the frontend image. The newest official caddy:2 image (2.11.9) is built
+  # with golang.org/x/net 0.60.0; x/net 0.62.0 fixes this, and frontend/Dockerfile follows caddy:2.
+  # The frontend only serves static files behind the edge.
+  - id: CVE-2026-78661
     paths: [usr/bin/caddy]
-    expired_at: 2026-11-10
-  - id: CVE-2026-78669
-    paths: [usr/bin/caddy]
-    expired_at: 2026-11-10
-  - id: CVE-2026-97031
-    paths: [usr/bin/caddy]
-    expired_at: 2026-11-10
-  - id: CVE-2026-111943
-    paths: [usr/bin/caddy]
-    expired_at: 2026-11-10
-  # The same binary has go-jose 4.1.5, and only a new Caddy release can take the fixed 4.1.6.
-  - id: CVE-2026-116587
-    paths: [usr/bin/caddy]
-    expired_at: 2026-11-10
+    expired_at: 2026-11-21
