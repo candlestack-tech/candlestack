@@ -82,3 +82,43 @@ def test_parse_args_defaults_to_the_local_backend() -> None:
     assert args.base_url == "http://127.0.0.1:8000"
     assert args.container is None
     assert not args.rate_limit_probe
+
+
+def test_parse_args_picks_the_account_scenario() -> None:
+    assert load.parse_args([]).scenario == "market"
+    assert load.parse_args(["--scenario", "account"]).scenario == "account"
+
+
+class _Recorder:
+    """The API of a virtual user: records what it asked for and answers 200."""
+
+    def __init__(self) -> None:
+        self.asked: list[tuple[str, dict[str, str | int]]] = []
+
+    async def get(self, path: str, *, params: dict[str, str | int], headers: dict[str, str]):
+        del headers
+        self.asked.append((path, params))
+        return load.httpx.Response(200, json={})
+
+
+@pytest.mark.anyio
+async def test_account_user_goes_through_the_account_pages() -> None:
+    client = _Recorder()
+    stats = load.Stats()
+    user = load.AccountUser(client, stats, "198.18.0.1", think=0)
+
+    await user.session([])
+
+    paths = [path for path, _ in client.asked]
+    assert paths == ["/api/v1/dashboard"] + ["/api/v1/backtests"] * 4 + ["/api/v1/models"]
+    assert client.asked[2][1]["q"] in load.SEARCHES
+    assert client.asked[3][1]["sort"] in load.SORTS
+    assert 2 <= int(client.asked[4][1]["page"]) <= load.PAGES
+    assert sorted(stats.latencies) == [
+        "backtests",
+        "backtests page",
+        "backtests search",
+        "backtests sort",
+        "dashboard",
+        "models",
+    ]
