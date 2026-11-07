@@ -15,6 +15,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+import redis
 from fastapi.testclient import TestClient
 from redis.exceptions import ConnectionError as RedisConnectionError
 
@@ -33,6 +34,7 @@ from candlestack.experiments import store as store_module
 from candlestack.experiments.assembly import NothingToTest
 from candlestack.experiments.names import ADJECTIVES, NOUNS
 from candlestack.jobs import WORKER_STOPPED, JobClient, JobFiles, JobQueue
+from candlestack.jobs.protocol import QUEUE
 from candlestack.main import create_app
 
 pytestmark = pytest.mark.integration
@@ -778,15 +780,19 @@ def test_a_start_moves_on_a_queue_that_stood_still(ada) -> None:
     assert (third["status"], third["queue_position"]) == ("queued", 1)
 
 
-def test_one_users_queue_does_not_hold_back_another_users_backtest(ada, bob, worker) -> None:
+def test_one_users_queue_does_not_hold_back_another_users_backtest(
+    ada, bob, worker, settings
+) -> None:
     worker.gate.clear()  # ada's first run holds the worker
     adas_model = ada.runnable_model()
     for _ in range(21):
         ada.start(body(adas_model))
+    soon(lambda: worker.jobs)
 
     bobs = bob.start(body(bob.runnable_model())).json()["backtest"]
     # Its job waits for the worker, behind no other of ada's.
-    soon(lambda: step(bob.document(bobs["id"]).json(), "queue")["state"] == "running")
+    with redis.Redis.from_url(settings.jobs_redis_url.get_secret_value()) as jobs:
+        soon(lambda: jobs.llen(QUEUE) == 1)
     worker.gate.set()
     ended = bob.ended(bobs["id"])
 
