@@ -193,7 +193,7 @@ services:
   # container, which owns its volumes and reads the app's world-readable files, without any
   # capability.
   models-backup:
-    image: offen/docker-volume-backup:v2.49.2@sha256:6630d1f122f42ada84566550e47647d2e7488ac3775176ee654b64e489ab6e40
+    image: offen/docker-volume-backup:v2.50.1@sha256:06fccb4c6ff79c4d5e4a839ace17c174da82a9327f43594f8a2c6a15f43bc660
     restart: unless-stopped
     environment:
       BACKUP_CRON_EXPRESSION: "30 0 * * *"
