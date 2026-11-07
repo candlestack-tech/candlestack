@@ -145,13 +145,14 @@ export function BacktestNameLines({
 }
 
 const BADGES: Record<BacktestStatus, { text: string; tone: string }> = {
+  queued: { text: 'Queued', tone: 'text-muted-foreground border-border' },
   finished: { text: 'Finished', tone: 'text-up border-[color-mix(in_srgb,var(--up)_45%,var(--rule))]' },
   running: { text: 'Running', tone: 'text-primary border-[color-mix(in_srgb,var(--accent)_45%,var(--rule))]' },
   failed: { text: 'Failed', tone: 'text-down border-[color-mix(in_srgb,var(--down)_45%,var(--rule))]' },
 };
 
-// How far a backtest got (.badge.ok, .badge.run, .badge.bad): Finished in green, Running in the
-// accent, Failed in red; `detail` after a dot ("Running · 1 min 5 s").
+// How far a backtest got (.badge.ok, .badge.run, .badge.bad): Queued in grey, Finished in green,
+// Running in the accent, Failed in red; `detail` after a dot ("Running · 1 min 5 s").
 export function StatusBadge({ status, detail }: { status: BacktestStatus; detail?: string }) {
   const { text, tone } = BADGES[status];
   return (

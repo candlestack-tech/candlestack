@@ -12,8 +12,9 @@ import { PublishDialog, UnpublishDialog } from './PublishDialogs';
 const SMALL = cn(BUTTON_SIZES.sm, OUTLINE_BUTTON, 'font-medium');
 
 // Why a backtest that has not finished cannot be published.
-const NOT_YET: Record<'running' | 'failed', string> = {
+const NOT_YET: Record<'queued' | 'running' | 'failed', string> = {
   failed: 'A failed backtest has no results to publish. Only finished ones can go to Experiments.',
+  queued: 'You can publish it once it finishes.',
   running: 'You can publish it once it finishes.',
 };
 

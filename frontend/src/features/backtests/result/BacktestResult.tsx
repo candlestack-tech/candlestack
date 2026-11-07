@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 
-import type { BacktestDocument } from '@/api';
+import { isUnderway, type BacktestDocument } from '@/api';
 import { FactsStrip } from '@/components/FactsStrip';
 
 import { AuthorCard } from './AuthorCard';
@@ -73,8 +73,8 @@ function Finished({ doc, results }: Props) {
   );
 }
 
-// One backtest's page by its status: the results once it finished, its steps while it runs and
-// once it failed (only the error when it failed before steps were recorded); the setup with
+// One backtest's page by its status: the results once it finished, its steps while it waits or
+// runs and once it failed (only the error when it failed before steps were recorded); the setup with
 // either of the last two.
 export function BacktestResult({ doc }: { doc: BacktestDocument }) {
   const { backtest, results } = doc;
@@ -85,7 +85,7 @@ export function BacktestResult({ doc }: { doc: BacktestDocument }) {
         <Finished doc={doc} results={results} />
       ) : (
         <div className="flex flex-col gap-4">
-          {backtest.status === 'running' || backtest.steps.some((step) => step.state === 'failed') ? (
+          {isUnderway(backtest.status) || backtest.steps.some((step) => step.state === 'failed') ? (
             <RunSteps doc={doc} />
           ) : (
             <FailedNote error={backtest.error ?? 'The backtest failed.'} />

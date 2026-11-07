@@ -5,16 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { BacktestDocument } from '@/api';
 import { clearCompare } from '@/features/backtests/compare/selection';
-import {
-  ARSEN,
-  backtest,
-  backtestDocument,
-  problem,
-  runningDocument,
-  sentBody,
-  sessionWithPreferences,
-  stubApi,
-} from '@/test/api';
+import { ARSEN, backtest, backtestDocument, problem, sentBody, sessionWithPreferences, stubApi } from '@/test/api';
+import { runningDocument } from '@/test/runs';
 import { renderApp, viewerIn } from '@/test/app';
 import { candles } from '@/test/candles';
 import { othersDocument } from '@/test/experiments';

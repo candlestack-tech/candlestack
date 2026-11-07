@@ -242,7 +242,10 @@ const numberTitle = ({ number, author }: BacktestDocument['backtest']) =>
 // running one runs) and the Public pill of the user's own published one (backtest-names, .r7-t).
 function TitleRow({ backtest }: { backtest: BacktestDocument['backtest'] }) {
   const now = useNow(backtest.status === 'running');
-  const runs = backtest.status === 'running' ? durationText(secondsSince(backtest.created_at, now) ?? 0) : undefined;
+  const runs =
+    backtest.status === 'running'
+      ? durationText(secondsSince(backtest.started_at ?? backtest.created_at, now) ?? 0)
+      : undefined;
   return (
     <div className="flex min-w-0 flex-[1_1_420px] items-start gap-2.5">
       <BacktestTitle name={backtest.name} className="text-[22px]/7 font-semibold tracking-[-0.02em]" />

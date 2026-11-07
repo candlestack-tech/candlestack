@@ -18,6 +18,7 @@ export {
   backtestQueryOptions,
   backtestsQueryOptions,
   dashboardQueryOptions,
+  isUnderway,
   startBacktest,
   updateBacktest,
   type Backtest,
