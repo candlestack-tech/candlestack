@@ -111,6 +111,7 @@ def backtest_out(listed: Listed) -> BacktestOut:
         generated_name=backtest.generated_name,
         number=backtest.number,
         status=BacktestStatus(backtest.status),
+        queue_position=listed.queue_position,
         seeded=backtest.seeded,
         instruments=[BacktestInstrument.model_validate(item) for item in backtest.instruments],
         representation=Representation(backtest.representation),
@@ -239,7 +240,7 @@ class BacktestsService:
             NameTaken: Another backtest of the user has the name, as its own or its generated
                 name, in any case.
             NoDocument: Publishing test data, which has no result document.
-            BacktestNotFinished: Publishing a backtest that is running or failed.
+            BacktestNotFinished: Publishing a backtest that is queued, running or failed.
         """
         renamed = "name" in changes.model_fields_set
         if renamed:
@@ -264,7 +265,7 @@ class BacktestsService:
 
         Raises:
             NoDocument: Publishing test data, which has no result document.
-            BacktestNotFinished: Publishing a backtest that is running or failed.
+            BacktestNotFinished: Publishing a backtest that is queued, running or failed.
         """
         if public and backtest.published_at is None:
             if not await self._store.has_spec(backtest.id):
@@ -326,10 +327,10 @@ class BacktestsService:
         """What the Dashboard shows of the user's backtests, and the newest published ones of
         anyone."""
         counts = await self._counts(user_id)
-        # The newest that ended: a running one has nothing to show there yet.
+        # The newest that ended: a queued or running one has nothing to show there yet.
         last = await self._store.backtests(
             user_id,
-            [Backtest.status != BacktestStatus.running.value],
+            [Backtest.status.not_in([BacktestStatus.queued.value, BacktestStatus.running.value])],
             ordering(BacktestSort.default, SortOrder.desc),
             limit=DASHBOARD_LAST,
         )

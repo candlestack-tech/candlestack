@@ -24,9 +24,10 @@ EQUITY_POINTS = 60
 
 
 class BacktestStatus(StrEnum):
-    """`finished` (it has results) or `failed` (it has an error); `running` comes with the
-    backtest builder."""
+    """`queued` (it waits for the user's running backtest to end), `running`, `finished` (it
+    has results) or `failed` (it has an error, also when it was cancelled before it ran)."""
 
+    queued = "queued"
     running = "running"
     finished = "finished"
     failed = "failed"
@@ -186,6 +187,14 @@ class BacktestOut(BaseModel):
     )
     number: int = Field(description="The user's own number of the backtest, shown as #N", ge=1)
     status: BacktestStatus
+    queue_position: int | None = Field(
+        ge=1,
+        description=(
+            "Where a queued backtest is in the user's queue: 1 starts next, when the running "
+            "one ends; null for any other status"
+        ),
+        examples=[None],
+    )
     seeded: bool = Field(description="Test data of the seed command, with no result document")
     instruments: list[BacktestInstrument] = Field(
         description="The instruments, in the order chosen"
@@ -227,9 +236,9 @@ class BacktestOut(BaseModel):
     published_at: datetime | None = Field(
         description="When it was published (UTC); null while it is not"
     )
-    created_at: datetime = Field(description="When the backtest started (UTC)")
+    created_at: datetime = Field(description="When the backtest was started, queued or not (UTC)")
     finished_at: datetime | None = Field(
-        description="When it finished or failed (UTC); null while it runs"
+        description="When it finished or failed (UTC); null while it is queued or runs"
     )
 
 
@@ -460,7 +469,9 @@ class DashboardOut(BaseModel):
 
     counts: BacktestCounts
     last: list[BacktestOut] = Field(
-        description="The 6 newest backtests that ended, failed ones included (not running ones)"
+        description=(
+            "The 6 newest backtests that ended, failed ones included (not queued or running ones)"
+        )
     )
     best: BestBacktests
     starred: StarredBacktests

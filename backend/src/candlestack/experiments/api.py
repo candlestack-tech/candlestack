@@ -1,5 +1,6 @@
 """HTTP API of the experiments module: the signed-in user's backtests under
-``/api/v1/backtests`` (the list, starting one, its result document and its download), the
+``/api/v1/backtests`` (the list, starting one, cancelling a queued one, its result document and
+its download), the
 backtests every account published under ``/api/v1/experiments`` and the Dashboard under
 ``/api/v1/dashboard``.
 """
@@ -18,7 +19,7 @@ from candlestack.experiments.document import BacktestDocument, BacktestIn
 from candlestack.experiments.errors import (
     BacktestNotFinished,
     BacktestNotFound,
-    BacktestRunning,
+    BacktestNotQueued,
     BacktestsUnavailable,
     InstrumentNotForModel,
     InvalidBacktest,
@@ -26,6 +27,7 @@ from candlestack.experiments.errors import (
     ModelNotFound,
     NameTaken,
     NoDocument,
+    QueueFull,
 )
 from candlestack.experiments.schemas import (
     EXPERIMENTS_PAGE_SIZE,
@@ -46,6 +48,7 @@ from candlestack.experiments.schemas import (
     SortOrder,
 )
 from candlestack.experiments.service import ExperimentsQuery, ListQuery
+from candlestack.experiments.store import QUEUE_MAX
 
 router = APIRouter(tags=["backtests"])
 
@@ -117,10 +120,10 @@ async def list_backtests(
         **problem_doc(404, "The user has no backtest with this ID (`not-found`)."),
         **problem_doc(
             409,
-            "Publishing a backtest that is running or failed (`backtest-not-finished`), or test "
-            "data without a result document (`no-document`); a name another backtest of the "
-            "account has, ignoring case, as its name or generated name (`name-taken`, the detail "
-            "names that backtest and its number).",
+            "Publishing a backtest that is queued, running or failed (`backtest-not-finished`), "
+            "or test data without a result document (`no-document`); a name another backtest of "
+            "the account has, ignoring case, as its name or generated name (`name-taken`, the "
+            "detail names that backtest and its number).",
         ),
     },
     dependencies=[Depends(require_same_origin)],
@@ -272,7 +275,7 @@ _NOT_FOUND = problem_doc(
 )
 
 
-def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911 (one per error)
+def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911, PLR0912 (one per error)
     match error:
         case ModelNotFound() | BacktestNotFound():
             what = "model" if isinstance(error, ModelNotFound) else "backtest"
@@ -297,13 +300,22 @@ def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911 (o
             )
         case InvalidBacktest():
             return ProblemError(422, "validation", "Invalid request", error.detail)
-        case BacktestRunning():
+        case QueueFull():
             return ProblemError(
                 409,
-                "backtest-running",
-                "A backtest is running",
-                "Another backtest of yours is running. Start this one when it has finished.",
+                "queue-full",
+                "Queue full",
+                f"You have {QUEUE_MAX} backtests waiting already. Start this one when one of "
+                "them has started, or cancel one.",
+                extensions={"limit": QUEUE_MAX},
             )
+        case BacktestNotQueued():
+            detail = (
+                "The backtest is running already, so it can no longer be cancelled."
+                if error.status == "running"
+                else "The backtest has ended, so there is nothing to cancel."
+            )
+            return ProblemError(409, "backtest-not-queued", "Backtest not queued", detail)
         case BacktestsUnavailable():
             return ProblemError(
                 503,
@@ -321,11 +333,10 @@ def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911 (o
                 "result document.",
             )
         case BacktestNotFinished():
-            detail = (
-                "The backtest is still running. Download it once it has finished."
-                if error.status == "running"
-                else "The backtest failed, so it has no results to download."
-            )
+            detail = {
+                "queued": "The backtest is waiting in the queue. Download it once it has finished.",
+                "running": "The backtest is still running. Download it once it has finished.",
+            }.get(error.status, "The backtest failed, so it has no results to download.")
             return ProblemError(409, "backtest-not-finished", "Backtest not finished", detail)
     return None
 
@@ -374,8 +385,8 @@ def _json(
         ),
         **problem_doc(
             409,
-            "The model has no manifest (`model-needs-setup`), or another backtest of the user "
-            "is running (`backtest-running`).",
+            "The model has no manifest (`model-needs-setup`), or the user has "
+            f"{QUEUE_MAX} backtests waiting already (`queue-full`, with `limit`).",
         ),
         **problem_doc(
             422,
@@ -392,14 +403,42 @@ async def start_backtest(
     body: BacktestIn, user: CurrentUserDep, runs: BacktestRunsDep, response: Response
 ) -> Response:
     """Starts a backtest of one of the user's models on one instrument and period and returns
-    its document, `running`, with its number. Checked first: the model is the user's and has a
-    manifest, the instrument fits the model, the period with the candles the model needs before
-    it fits the data and the candle limit, the user has no other backtest running, and the
-    worker that runs the models can be reached. The run goes on after the response; the
-    document (`GET /api/v1/backtests/{backtest_id}`) has the results once it finished."""
+    its document with its number: `running`, or `queued` with its `queue_position` while
+    another backtest of the user runs (one runs at a time per user, up to 20 more wait, and
+    the oldest starts when the running one ends). Checked first: the model is the user's and
+    has a manifest, the instrument fits the model, the period with the candles the model needs
+    before it fits the data and the candle limit, the user's queue has room, and the worker
+    that runs the models can be reached. The run goes on after the response; the document
+    (`GET /api/v1/backtests/{backtest_id}`) has the results once it finished."""
     with _problems():
         backtest, content = await runs.start(user.id, body)
     return _json(content, response, 201, {"Location": f"/api/v1/backtests/{backtest.id}"})
+
+
+@router.post(
+    "/api/v1/backtests/{backtest_id}/cancel",
+    response_model=BacktestDocument,
+    responses={
+        **_NOT_SIGNED_IN,
+        **problem_doc(
+            403, "The request does not come from the app's own pages (`cross-origin-request`)."
+        ),
+        **problem_doc(404, "The user has no backtest with this ID (`not-found`)."),
+        **problem_doc(
+            409,
+            "The backtest is running or has ended, so it is not queued (`backtest-not-queued`).",
+        ),
+    },
+    dependencies=[Depends(require_same_origin)],
+)
+async def cancel_backtest(
+    backtest_id: BacktestId, user: CurrentUserDep, runs: BacktestRunsDep, response: Response
+) -> Response:
+    """Cancels the user's queued backtest, so it never runs, and returns its document: `failed`,
+    with an `error` that says it was cancelled. A running backtest cannot be cancelled."""
+    with _problems():
+        content = await runs.cancel(user.id, backtest_id)
+    return _json(content, response)
 
 
 @router.get(
@@ -434,7 +473,7 @@ async def get_backtest(
         **_NOT_FOUND,
         **problem_doc(
             409,
-            "The backtest is running or failed (`backtest-not-finished`), or is test data "
+            "The backtest is queued, running or failed (`backtest-not-finished`), or is test data "
             "without a result document (`no-document`).",
         ),
         **_SOURCE_ERRORS,

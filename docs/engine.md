@@ -823,9 +823,11 @@ The engine's worked example ([Worked example](#worked-example)) with `next_open`
     "number": 12,
     "author": {"id": "usr_7f3k2m9qx4", "name": "Tymur Tkach", "mine": true},   // never the email
     "public": false, "published_at": null,                        // published in Experiments, and when
-    "status": "finished",                                         // running, finished or failed
-    "created_at": "2026-10-25T14:02:11Z", "finished_at": "2026-10-25T14:04:53Z",
-    "duration_s": 162.0, "error": null,
+    "status": "finished",                                         // queued, running, finished or failed
+    "queue_position": null,                                       // 1 starts next, while it is queued
+    "created_at": "2026-10-25T14:02:11Z", "started_at": "2026-10-25T14:02:11Z",
+    "finished_at": "2026-10-25T14:04:53Z",
+    "duration_s": 162.0, "error": null,                           // seconds from started_at
     "steps": [                                                    // in their order, while it runs and after
       {"id": "candles", "state": "done", "started_at": "2026-10-25T14:02:11Z", "duration_s": 157.0,
        "loaded": 2, "total": 2, "cached": 0, "loaded_until": "2024-06-03", "candles": 29,
@@ -912,7 +914,7 @@ compares it with what is printed here; change both together.
 
 | Group | Fields | From |
 | --- | --- | --- |
-| `backtest` | ID, its name (the author's own after a Rename, else the generated one) and the generated name it got when it was created, the user's number, the author (their public user ID and display name, and whether it is the signed-in user's own), whether it is published in Experiments and since when, status, when it was created and finished (ISO 8601 UTC), seconds it took, the error of a failed run, the steps of the run ([architecture.md](architecture.md#backtests)) | the stored backtest, the author's account |
+| `backtest` | ID, its name (the author's own after a Rename, else the generated one) and the generated name it got when it was created, the user's number, the author (their public user ID and display name, and whether it is the signed-in user's own), whether it is published in Experiments and since when, status (`queued`, `running`, `finished` or `failed`), where a queued one is in its author's queue (`queue_position`, 1 starts next), when it was created, began to run and finished (ISO 8601 UTC), seconds it ran (the wait in the queue left out), the error of a failed run (also of one cancelled before it ran), the steps of the run ([architecture.md](architecture.md#backtests)) | the stored backtest, the author's account |
 | `software` | `ENGINE_VERSION`, the app's version, the versions of the model runner | the engine, the app, the worker |
 | `model` | ID (null once the model is deleted, and for another account's published backtest), file name, framework, SHA-256, size, the manifest copy | the model at run time |
 | `data` | the instrument, timeframe and session; `period`: the user's dates; `loaded`: the candles asked for, warm-up included, with their fingerprint; `changed`; `warm_up` as the preprocessing reports it; `rows`: what the engine ran on; the predictions' count and SHA-256; the `AlignReport` | the data module, the preprocessing, `align` |

@@ -1,13 +1,15 @@
 """Running backtests over HTTP against a real Postgres and the real job queue (conftest.py):
 what ``POST /api/v1/backtests`` checks and stores, the run to its results through a worker
-(the fake one, and once the real one with Keras), what fails it, the result document and its
-download, and what the list and the Dashboard show of a run."""
+(the fake one, and once the real one with Keras), what fails it, the queue of a user's
+backtests, the result document and its download, and what the list and the Dashboard show of
+a run."""
 
 import json
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -24,12 +26,13 @@ from candlestack.data import (
     WarmUpOutOfRange,
 )
 from candlestack.engine import ENGINE_VERSION
+from candlestack.experiments import BacktestRunner
 from candlestack.experiments import names as names_module
 from candlestack.experiments import runner as runner_module
 from candlestack.experiments import store as store_module
 from candlestack.experiments.assembly import NothingToTest
 from candlestack.experiments.names import ADJECTIVES, NOUNS
-from candlestack.jobs import JobClient, JobFiles, JobQueue
+from candlestack.jobs import WORKER_STOPPED, JobClient, JobFiles, JobQueue
 from candlestack.main import create_app
 
 pytestmark = pytest.mark.integration
@@ -72,6 +75,11 @@ def states(document: dict[str, Any]) -> list[str]:
 
 def step(document: dict[str, Any], step_id: str) -> dict[str, Any]:
     return next(step for step in document["backtest"]["steps"] if step["id"] == step_id)
+
+
+def at(document: dict[str, Any], field: str) -> datetime:
+    """A time of the document's ``backtest``."""
+    return datetime.fromisoformat(document["backtest"][field])
 
 
 def manifest(**inputs: Any) -> dict[str, Any]:
@@ -571,9 +579,10 @@ def test_one_backtest_runs_at_a_time_per_user(ada, bob) -> None:
     other_user = bob.start(body(bob.runnable_model()))
 
     assert first.status_code == 201
-    assert second.status_code == 409
-    assert second.json()["type"] == PROBLEMS + "backtest-running"
-    assert other_user.status_code == 201
+    assert first.json()["backtest"]["status"] == "running"
+    assert second.status_code == 201
+    assert second.json()["backtest"]["status"] == "queued"
+    assert other_user.json()["backtest"]["status"] == "running"
 
 
 @pytest.mark.usefixtures("market")
@@ -585,8 +594,206 @@ def test_two_starts_at_once_run_one_backtest(ada, market) -> None:
     with ThreadPoolExecutor(2) as pool:
         answers = list(pool.map(lambda _: ada.start(body(model_id)), range(2)))
 
-    assert sorted(answer.status_code for answer in answers) == [201, 409]
-    assert ada.sql("SELECT count(*) FROM backtests") == [(1,)]
+    assert [answer.status_code for answer in answers] == [201, 201]
+    assert sorted(answer.json()["backtest"]["status"] for answer in answers) == [
+        "queued",
+        "running",
+    ]
+    assert ada.sql("SELECT number, status FROM backtests ORDER BY number") == [
+        (1, "running"),
+        (2, "queued"),
+    ]
+
+
+# --- The queue ---------------------------------------------------------------------------------
+
+
+def test_a_start_while_one_runs_waits_and_runs_after_it_in_order(ada, worker) -> None:
+    worker.gate.clear()  # the first run holds the worker
+    model_id = ada.runnable_model()
+
+    first = ada.start(body(model_id)).json()
+    second = ada.start(body(model_id))
+    third = ada.start(body(model_id)).json()
+
+    queued = second.json()
+    ids = [document["backtest"]["id"] for document in (first, queued, third)]
+    assert (first["backtest"]["status"], first["backtest"]["queue_position"]) == ("running", None)
+    assert second.status_code == 201
+    assert second.headers["location"] == f"/api/v1/backtests/{ids[1]}"
+    assert queued["backtest"]["status"] == "queued"
+    assert queued["backtest"]["queue_position"] == 1
+    assert queued["backtest"]["started_at"] is None
+    assert states(queued) == ["pending"] * 4
+    assert third["backtest"]["queue_position"] == 2
+    listed = ada.backtests().json()["backtests"]
+    assert [(b["number"], b["status"], b["queue_position"]) for b in listed] == [
+        (3, "queued", 2),
+        (2, "queued", 1),
+        (1, "running", None),
+    ]
+    assert ada.document(ids[2]).json()["backtest"]["queue_position"] == 2
+    download = ada.download(ids[1])
+    assert download.status_code == 409
+    assert "waiting in the queue" in download.json()["detail"]
+    # Nothing ended yet.
+    assert ada.dashboard().json()["last"] == []
+
+    soon(lambda: worker.jobs)
+    worker.gate.set()
+    ended = [ada.ended(backtest_id) for backtest_id in ids]
+
+    assert [document["backtest"]["status"] for document in ended] == ["finished"] * 3
+    assert [document["backtest"]["queue_position"] for document in ended] == [None] * 3
+    assert len(worker.jobs) == 3
+    # Each began once the one before it had ended, and its time leaves out its wait.
+    for before, after in pairwise(ended):
+        assert at(after, "started_at") >= at(before, "finished_at")
+    last = ended[2]
+    ran = (at(last, "finished_at") - at(last, "started_at")).total_seconds()
+    assert last["backtest"]["duration_s"] == pytest.approx(ran, abs=0.01)
+    assert at(last, "started_at") > at(last, "created_at")
+
+
+@pytest.mark.usefixtures("market")
+def test_twenty_backtests_wait_at_most(ada) -> None:
+    model_id = ada.runnable_model()
+    # No worker answers: the first keeps running.
+    answers = [ada.start(body(model_id)) for _ in range(21)]
+
+    refused = ada.start(body(model_id))
+
+    assert [answer.status_code for answer in answers] == [201] * 21
+    assert answers[-1].json()["backtest"]["queue_position"] == 20
+    assert refused.status_code == 409
+    assert refused.json()["type"] == PROBLEMS + "queue-full"
+    assert refused.json()["limit"] == 20
+    assert ada.backtests().json()["total"] == 21
+
+
+@pytest.mark.usefixtures("market")
+def test_a_queued_backtest_can_be_cancelled_and_never_runs(ada, bob) -> None:
+    model_id = ada.runnable_model()
+    running = ada.start(body(model_id)).json()["backtest"]["id"]  # no worker answers
+    first = ada.start(body(model_id)).json()["backtest"]["id"]
+    second = ada.start(body(model_id)).json()["backtest"]["id"]
+
+    of_another = bob.cancel(first)
+    cancelled = ada.cancel(first)
+    again = ada.cancel(first)
+    of_running = ada.cancel(running)
+
+    assert of_another.status_code == 404
+    assert cancelled.status_code == 200
+    assert cancelled.headers["cache-control"] == "no-store"
+    document = cancelled.json()
+    assert document["backtest"]["status"] == "failed"
+    assert document["backtest"]["error"] == "You cancelled the backtest before it ran."
+    assert document["backtest"]["queue_position"] is None
+    assert document["backtest"]["started_at"] is None
+    assert document["backtest"]["duration_s"] is None
+    assert document["backtest"]["finished_at"] is not None
+    assert states(document) == ["pending"] * 4
+    assert again.status_code == 409
+    assert again.json()["type"] == PROBLEMS + "backtest-not-queued"
+    assert "has ended" in again.json()["detail"]
+    assert of_running.status_code == 409
+    assert of_running.json()["type"] == PROBLEMS + "backtest-not-queued"
+    assert "running already" in of_running.json()["detail"]
+    # The one behind it moved up, and the running one runs on.
+    assert ada.document(second).json()["backtest"]["queue_position"] == 1
+    assert ada.document(running).json()["backtest"]["status"] == "running"
+
+
+def test_the_next_backtest_runs_when_the_running_one_fails(ada, worker) -> None:
+    # A worker that stops, as in a restart, fails the job it ran.
+    worker.failure = ("worker-stopped", WORKER_STOPPED)
+    worker.gate.clear()
+    model_id = ada.runnable_model()
+    first = ada.start(body(model_id)).json()["backtest"]["id"]
+    second = ada.start(body(model_id)).json()["backtest"]["id"]
+    soon(lambda: worker.jobs)
+
+    worker.gate.set()
+    failed = ada.ended(first)
+    after = ada.ended(second)
+
+    assert failed["backtest"]["status"] == "failed"
+    assert failed["backtest"]["error"] == WORKER_STOPPED
+    # It ran: its job reached the worker, which failed it too.
+    assert after["backtest"]["error"] == WORKER_STOPPED
+    assert states(after) == ["done", "done", "failed", "pending"]
+    assert len(worker.jobs) == 2
+    assert at(after, "started_at") >= at(failed, "finished_at")
+
+
+@pytest.mark.usefixtures("market")
+def test_queued_backtests_outlive_a_restart_of_the_server(ada, app, client, market) -> None:
+    model_id = ada.runnable_model()
+    first = ada.start(body(model_id)).json()["backtest"]["id"]  # no worker answers
+    second = ada.start(body(model_id)).json()["backtest"]["id"]
+    soon(lambda: states(ada.document(first).json())[1] == "running")
+
+    stopping = app.state.backtest_runner
+    client.portal.call(stopping.close)
+    stopped = ada.document(second).json()["backtest"]
+    # The start of the next process.
+    restarted = BacktestRunner(app.state.db, market, stopping._jobs)
+    app.state.backtest_runner = restarted
+    try:
+        client.portal.call(restarted.recover)
+        resumed = ada.document(second).json()["backtest"]
+    finally:
+        client.portal.call(restarted.close)
+
+    assert ada.document(first).json()["backtest"]["status"] == "failed"
+    assert stopped["status"] == "queued"
+    assert resumed["status"] == "running"
+    assert resumed["started_at"] is not None
+
+
+@pytest.mark.usefixtures("market")
+def test_a_queue_that_stood_still_moves_on_at_the_next_check(ada, app, client) -> None:
+    model_id = ada.runnable_model()
+    first = ada.start(body(model_id)).json()["backtest"]["id"]  # no worker answers
+    second = ada.start(body(model_id)).json()["backtest"]["id"]
+    # The run ended, and its queue could not be moved on then.
+    ada.sql("UPDATE backtests SET status = 'failed' WHERE id = :id", id=first)
+
+    client.portal.call(app.state.backtest_runner.resume)
+
+    assert ada.document(second).json()["backtest"]["status"] == "running"
+
+
+@pytest.mark.usefixtures("market")
+def test_a_start_moves_on_a_queue_that_stood_still(ada) -> None:
+    model_id = ada.runnable_model()
+    first = ada.start(body(model_id)).json()["backtest"]["id"]  # no worker answers
+    second = ada.start(body(model_id)).json()["backtest"]["id"]
+    ada.sql("UPDATE backtests SET status = 'failed' WHERE id = :id", id=first)
+
+    third = ada.start(body(model_id)).json()["backtest"]
+
+    assert ada.document(second).json()["backtest"]["status"] == "running"
+    assert (third["status"], third["queue_position"]) == ("queued", 1)
+
+
+def test_one_users_queue_does_not_hold_back_another_users_backtest(ada, bob, worker) -> None:
+    worker.gate.clear()  # ada's first run holds the worker
+    adas_model = ada.runnable_model()
+    for _ in range(21):
+        ada.start(body(adas_model))
+
+    bobs = bob.start(body(bob.runnable_model())).json()["backtest"]
+    # Its job waits for the worker, behind no other of ada's.
+    soon(lambda: step(bob.document(bobs["id"]).json(), "queue")["state"] == "running")
+    worker.gate.set()
+    ended = bob.ended(bobs["id"])
+
+    assert bobs["status"] == "running"
+    assert ended["backtest"]["status"] == "finished"
+    owners = [job.model.split("/", 1)[0] for job in worker.jobs]
+    assert owners[:2] == [ada.id, bob.id]
 
 
 # --- The name it gets --------------------------------------------------------------------------

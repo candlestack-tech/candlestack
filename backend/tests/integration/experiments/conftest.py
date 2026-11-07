@@ -391,12 +391,16 @@ class BacktestsUser:
     def download(self, backtest_id: str) -> httpx2.Response:
         return self.request("GET", f"/api/v1/backtests/{backtest_id}/download")
 
+    def cancel(self, backtest_id: str) -> httpx2.Response:
+        return self.request("POST", f"/api/v1/backtests/{backtest_id}/cancel")
+
     def ended(self, backtest_id: str, timeout: float = 30) -> dict[str, Any]:
         """The backtest's document once it has ended (or after ``timeout`` seconds)."""
         deadline = time.monotonic() + timeout
         while True:
             document = self.document(backtest_id).json()
-            if document["backtest"]["status"] != "running" or time.monotonic() > deadline:
+            ended = document["backtest"]["status"] not in {"queued", "running"}
+            if ended or time.monotonic() > deadline:
                 return document
             time.sleep(0.05)
 

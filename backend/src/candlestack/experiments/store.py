@@ -20,6 +20,7 @@ from sqlalchemy import (
     String,
     TableValuedAlias,
     UnaryExpression,
+    case,
     cast,
     column,
     delete,
@@ -34,7 +35,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, aggregate_order_by, array_agg
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import InstrumentedAttribute, undefer
+from sqlalchemy.orm import InstrumentedAttribute, aliased, undefer
 from sqlalchemy.sql import visitors
 
 from candlestack.accounts import User
@@ -66,9 +67,30 @@ _NAME_INDEX = "uq_backtests_user_id_generated_name"
 _FINISHED = Backtest.status == BacktestStatus.finished.value
 _FAILED = Backtest.status == BacktestStatus.failed.value
 _RUNNING = Backtest.status == BacktestStatus.running.value
+_QUEUED = Backtest.status == BacktestStatus.queued.value
+# The most backtests a user can have waiting in their queue, besides the one running.
+QUEUE_MAX = 20
 # Only a finished backtest can be published, and it stays finished; the status is checked
 # anyway, so nothing else can ever show in Experiments.
 PUBLISHED = Backtest.published_at.is_not(None) & _FINISHED
+
+_AHEAD = aliased(Backtest)
+# Where a queued backtest is in its user's queue (1 starts next), null for any other: the user's
+# queued backtests up to its number, the oldest first.
+QUEUE_POSITION = case(
+    (
+        _QUEUED,
+        select(func.count())
+        .where(
+            _AHEAD.user_id == Backtest.user_id,
+            _AHEAD.status == BacktestStatus.queued.value,
+            _AHEAD.number <= Backtest.number,
+        )
+        .correlate(Backtest)
+        .scalar_subquery(),
+    ),
+    else_=None,
+)
 
 # The value each sort of the list orders by; `when` is the order they were made in, as `number`.
 _SORT_KEYS: dict[BacktestSort, SortKey] = {
@@ -94,10 +116,12 @@ _EXPERIMENT_SORT_KEYS: dict[ExperimentSort, SortKey] = {
 
 
 class Listed(NamedTuple):
-    """A backtest and the name its model shows (``MODEL_NAME``)."""
+    """A backtest, the name its model shows (``MODEL_NAME``) and where it is in the queue
+    while it is queued (``QUEUE_POSITION``)."""
 
     backtest: Backtest
     model_name: str
+    queue_position: int | None = None
 
 
 class Authored(NamedTuple):
@@ -291,8 +315,10 @@ def _reads_models(conditions: Sequence[ColumnElement[bool]]) -> bool:
     )
 
 
-def _listed() -> Select[Backtest, str]:
-    return select(Backtest, MODEL_NAME).outerjoin(Model, Model.id == Backtest.model_id)
+def _listed() -> Select[Backtest, str, int | None]:
+    return select(Backtest, MODEL_NAME, QUEUE_POSITION).outerjoin(
+        Model, Model.id == Backtest.model_id
+    )
 
 
 def _authored() -> Select[Backtest, str]:
@@ -393,7 +419,7 @@ class BacktestStore:
             .limit(limit)
             .offset(offset)
         )
-        return [Listed(backtest, name) for backtest, name in rows]
+        return [Listed(*row) for row in rows]
 
     async def best(self, user_id: str, result: SortKey, *, limit: int) -> list[Listed]:
         """The user's finished backtests with the highest `result`, ties newest first."""
@@ -564,6 +590,57 @@ class BacktestStore:
         )
         return found is not None
 
+    async def queued(self, user_id: str) -> int:
+        """How many backtests of the user wait in their queue."""
+        total = await self._db.scalar(
+            select(func.count()).select_from(Backtest).where(Backtest.user_id == user_id, _QUEUED)
+        )
+        return int(total or 0)
+
+    async def queue_position(self, backtest_id: str) -> int | None:
+        """Where the backtest is in its user's queue (1 starts next); None unless it is
+        queued."""
+        return await self._db.scalar(select(QUEUE_POSITION).where(Backtest.id == backtest_id))
+
+    async def take_next(self, user_id: str, now: datetime) -> Backtest | None:
+        """Marks the user's oldest queued backtest running from ``now`` and returns it, while
+        none of theirs runs; else None. Called under ``lock_user``, so two callers never start
+        two."""
+        if await self.running(user_id):
+            return None
+        backtest = await self._db.scalar(
+            select(Backtest)
+            .where(Backtest.user_id == user_id, _QUEUED)
+            .order_by(Backtest.number)
+            .limit(1)
+            .with_for_update()
+        )
+        if backtest is not None:
+            backtest.status = BacktestStatus.running.value
+            backtest.started_at = now
+        return backtest
+
+    async def waiting(self) -> list[str]:
+        """The users with a queued backtest and none running: whose queue should move on."""
+        running = select(literal(1)).where(
+            _AHEAD.user_id == Backtest.user_id, _AHEAD.status == BacktestStatus.running.value
+        )
+        rows = await self._db.scalars(
+            select(Backtest.user_id).where(_QUEUED, ~exists(running)).distinct()
+        )
+        return list(rows)
+
+    async def user_of(self, backtest_id: str) -> str | None:
+        """The ID of the backtest's user; None once it is gone (the account was deleted)."""
+        return await self._db.scalar(select(Backtest.user_id).where(Backtest.id == backtest_id))
+
+    async def cancel(self, backtest: Backtest, error: str, now: datetime) -> None:
+        """Fails the queued backtest with ``error``: it never ran, so its steps stay pending
+        and it took no time."""
+        backtest.status = BacktestStatus.failed.value
+        backtest.error = error
+        backtest.finished_at = now
+
     async def run_model(self, user_id: str, model_id: str) -> Model | None:
         """The user's model with the ID and its manifest; None also when it is another user's."""
         return await self._db.scalar(
@@ -633,7 +710,9 @@ class BacktestStore:
                 "error": error,
                 "finished_at": now,
                 "duration_s": func.extract(
-                    "epoch", literal(now, DateTime(timezone=True)) - Backtest.created_at
+                    "epoch",
+                    literal(now, DateTime(timezone=True))
+                    - func.coalesce(Backtest.started_at, Backtest.created_at),
                 ),
             }
             # Without steps (stored before they were recorded) the column stays null.
