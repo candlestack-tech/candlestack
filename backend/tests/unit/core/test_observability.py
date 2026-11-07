@@ -2,6 +2,7 @@ import json
 import logging
 import time
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Any, cast, override
 
 import httpx
@@ -9,11 +10,14 @@ import pytest
 import respx
 import sentry_sdk
 from fastapi import FastAPI
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.testclient import TestClient
 from sentry_sdk.envelope import Envelope
 from sentry_sdk.transport import Transport
 from sentry_sdk.types import Log
 
+from candlestack.accounts import Scope
+from candlestack.accounts.schemas import ApiKeyCreated
 from candlestack.core import ProblemError, Settings, setup_sentry
 from candlestack.core.logging import request_id_var
 from candlestack.core.observability import (
@@ -175,6 +179,36 @@ def test_sign_in_secrets_and_emails_are_not_sent(
     [event] = sentry.items("event")
     frame = event["exception"]["values"][-1]["stacktrace"]["frames"][-1]
     assert set(frame["vars"]["sign_in"].values()) == {"[Filtered]"}
+
+
+def test_an_api_key_is_not_sent(
+    sentry: CapturingTransport, app: FastAPI, client: TestClient
+) -> None:
+    # Named as the code names it: a variable of any other name would be sent.
+    api_key = "cs_sentryaa" + "q" * 32
+
+    @app.get("/api/test/key-crash")
+    async def key_crash() -> None:
+        token = secret = api_key
+        credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=api_key)
+        created = ApiKeyCreated(
+            id="key_aaaaaaaaaa",
+            name="laptop",
+            scopes=[Scope.read],
+            prefix=api_key[:11],
+            created_at=datetime(2026, 11, 8, tzinfo=UTC),
+            expires_at=None,
+            last_used_at=None,
+            secret=api_key,
+        )
+        raise RuntimeError(f"failed with {len(token + secret)} {credentials.scheme} {created.id}")
+
+    client.get("/api/test/key-crash", headers={"Authorization": f"Bearer {api_key}"})
+
+    [event] = sentry.items("event")
+    frame = event["exception"]["values"][-1]["stacktrace"]["frames"][-1]
+    assert {frame["vars"][name] for name in ("token", "secret", "credentials")} == {"[Filtered]"}
+    assert "q" * 32 not in json.dumps(_without_source(event))
 
 
 def test_a_token_in_an_outgoing_query_is_not_sent(

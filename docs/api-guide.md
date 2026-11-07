@@ -8,36 +8,64 @@ https://app.candlestack.tech/api/v1/docs.
 The ready example is [examples/download_candles.py](examples/download_candles.py) (httpx and
 polars); this guide explains what it does.
 
-## Sign in
+## Sign in with an API key
 
-The market data is for signed-in accounts: without a session the instrument list, an instrument
-and its candles answer 401 `not-signed-in`. An account exists only for someone on the beta list,
-so ask the team to add you if signing in is refused. The API has no keys; a script sends the
-session cookie of your browser:
+The market data is for signed-in accounts: without a key or a session the instrument list, an
+instrument and its candles answer 401 `not-signed-in`. An account exists only for someone on
+the beta list, so ask the team to add you if signing in is refused. A script signs in with an
+API key:
 
-1. Sign in at https://app.candlestack.tech.
-2. In the browser's developer tools (Application, then Cookies, in Chrome; Storage in Firefox)
-   copy the value of the cookie `__Host-session`.
-3. Put it into the environment variable `CANDLESTACK_SESSION` of the shell that runs the script.
+1. Sign in at https://app.candlestack.tech and open Settings, API and MCP.
+2. Create a key with the scope `read` (all this guide needs) and copy it: it starts with `cs_`
+   and is shown only once. CandleStack keeps just its SHA-256, so a lost key cannot be shown
+   again; revoke it and create a new one.
+3. Put it into the environment variable `CANDLESTACK_API_KEY` of the shell that runs the
+   script. The script sends it as `Authorization: Bearer cs_...`.
 
-The cookie is your account: never commit it, paste it into an issue or share it. A session lasts
-30 days from its last use; signing out ends it.
+Until the keys card is in Settings, create a key with `POST /api/v1/me/api-keys` from the
+browser's developer console on a page of the app, signed in:
+
+```js
+await (await fetch("/api/v1/me/api-keys", {method: "POST",
+  headers: {"Content-Type": "application/json"},
+  body: JSON.stringify({name: "my script", scopes: ["read"]})})).json()
+```
+
+The key is your account for what its scopes allow: never commit it, paste it into an issue or
+share it. Give a key only the scopes it needs:
+
+| Scope | What the key may do |
+| --- | --- |
+| `read` | every GET: market data, your models, backtests and their result documents, Experiments |
+| `backtests` | start, rename and star backtests |
+| `models` | upload models, add their manifests, rename, star and delete them |
+| `publish` | publish and unpublish backtests |
+
+Creating, listing and revoking keys, deleting the account, sign-in methods and signing out work
+only in the app, never with a key. A key stops working when you revoke it, when it expires (if
+you gave it an expiry) and when your account leaves the beta list. A request with a key sends no
+cookies: with a cookie, a change is accepted only from the app's own pages.
 
 The stock data comes from Alpaca, whose terms allow it for personal, noncommercial use only: keep
 the files you download to yourself, do not publish them or pass them on.
 
 On a local stack (`docker compose up`, see the [README](../README.md)) sign in as the dev user
-from the shell instead. The request must come from the app's origin:
+from the shell and create a key with that session. Both requests must come from the app's
+origin:
 
 ```sh
 curl -si -X POST -H 'Origin: http://localhost:5173' http://localhost:8000/api/v1/auth/dev
+curl -s -X POST -H 'Origin: http://localhost:5173' -H 'Cookie: session=<the session cookie>' \
+    -H 'Content-Type: application/json' -d '{"name": "local", "scopes": ["read"]}' \
+    http://localhost:8000/api/v1/me/api-keys
 ```
 
-Copy the value of `session` from its `Set-Cookie` header into `CANDLESTACK_SESSION` and pass
-`--base-url http://localhost:8000` to the example.
+The first prints the cookie `session` in its `Set-Cookie` header; the second answers the new
+key in `secret`. Put it into `CANDLESTACK_API_KEY` and pass `--base-url http://localhost:8000`
+to the example.
 
 ```sh
-export CANDLESTACK_SESSION='...'
+export CANDLESTACK_API_KEY='cs_...'
 uv run docs/examples/download_candles.py stock:AAPL 1h --since 2024-01-01 --out candles.parquet
 uv run --project backend candlestack-bt run --candles candles.parquet \
     --predictions predictions.parquet --out run
@@ -57,7 +85,7 @@ import httpx
 
 api = httpx.Client(
     base_url="https://app.candlestack.tech",
-    cookies={"__Host-session": os.environ["CANDLESTACK_SESSION"]},
+    headers={"Authorization": f"Bearer {os.environ['CANDLESTACK_API_KEY']}"},
     timeout=60,  # a cold request can take longer than httpx's default of 5 seconds
 )
 page = api.get("/api/v1/data/instruments", params={"q": "apple", "market": "stock"}).json()
@@ -127,8 +155,9 @@ the same `ts` ([engine.md](engine.md)).
 ## Rate limit
 
 The API takes 60 candle and instrument detail requests a minute from one IP address (the
-instrument search is not counted). Past that it answers 429 `rate-limited` with a `Retry-After`
-header: the seconds until the next minute. A cold request for a long stock history can also
+instrument search is not counted), and 120 requests a minute with one API key, whatever they
+ask for. Past either it answers 429 `rate-limited` with a `Retry-After` header: the seconds
+until the next minute. A cold request for a long stock history can also
 answer 503 `source-unavailable` with `Retry-After` while the source's budget is spent; what it
 fetched so far stays cached, so the same request continues from there. In both cases wait `Retry-After` seconds and send it again:
 
@@ -166,7 +195,10 @@ change. Some add fields, such as `errors` of a 422 `validation`:
 
 | Status | Slug | What to do |
 | --- | --- | --- |
-| 401 | `not-signed-in` | the cookie is missing, wrong or its session ended: copy it again |
+| 401 | `not-signed-in` | no `Authorization` header came with the request: set `CANDLESTACK_API_KEY` |
+| 401 | `invalid-api-key` | the key is wrong, revoked or expired, or your account left the beta list: create a new key |
+| 403 | `missing-scope` | the key lacks the scope `scope` names: create a key with it |
+| 403 | `session-required` | keys cannot do this: do it in the app |
 | 404 | `instrument-not-found` | check the id with the instrument search |
 | 422 | `validation` | fix the parameters `errors` names |
 | 422 | `period-out-of-range` | `start` before the first candle, `end` at or before it (paging past the start of the data) or `end` in the future: `available_from` and `available_to` say what fits |

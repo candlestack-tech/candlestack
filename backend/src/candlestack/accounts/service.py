@@ -72,6 +72,8 @@ SESSION_REFRESH = timedelta(days=1)
 # The fixed account of the dev sign-in (local runs and tests only).
 DEV_EMAIL = "dev@candlestack.tech"
 DEV_NAME = "Dev user"
+# Environments with the dev sign-in: never stage or prod, whatever their settings say.
+_DEV_SIGN_IN_ENVS = frozenset({"local", "test"})
 # Longer values than the app ever sends are not looked up.
 _MAX_STATE = 64
 _MAX_NEXT = 2048
@@ -81,6 +83,18 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 def _now() -> datetime:
     """The time; patched by tests to move the clock."""
     return datetime.now(UTC)
+
+
+def dev_sign_in_allowed(app_env: str) -> bool:
+    return app_env in _DEV_SIGN_IN_ENVS
+
+
+def admitted(settings: Settings, email: str) -> bool:
+    """Whether the user with `email` may use the app: on the beta list, or the dev user where
+    the dev sign-in is allowed."""
+    return email in settings.beta_allowlist or (
+        email == DEV_EMAIL and dev_sign_in_allowed(settings.app_env)
+    )
 
 
 def safe_next(path: str | None, default: str = DEFAULT_NEXT) -> str:

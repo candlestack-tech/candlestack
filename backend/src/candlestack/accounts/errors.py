@@ -39,3 +39,11 @@ class NoSuchSignInMethod(Exception):
 
 class LastSignInMethod(Exception):
     """Removing the sign-in method would leave the user no way to sign in."""
+
+
+class TooManyApiKeys(Exception):
+    """The user has as many keys as allowed that are neither revoked nor expired."""
+
+
+class NoSuchApiKey(Exception):
+    """The user has no key with the ID that is not revoked."""
