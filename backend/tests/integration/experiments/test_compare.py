@@ -50,7 +50,12 @@ def test_the_users_own_and_others_published_backtests_side_by_side(ada, bob, wor
     first, second, third = shown["backtests"]
     assert first["author"] == {"id": bob.id, "name": "Bob Stone", "mine": False}
     assert (first["public"], second["author"]["mine"]) == (True, True)
-    assert (third["status"], third["equity"], third["buy_and_hold"]) == ("failed", None, None)
+    assert (third["status"], third["equity"], third["drawdown"], third["buy_and_hold"]) == (
+        "failed",
+        None,
+        None,
+        None,
+    )
     assert third["error"]
     stats = [their_document["results"]["stats"], own_document["results"]["stats"]]
     for row in shown["metrics"]:
@@ -64,8 +69,12 @@ def test_the_users_own_and_others_published_backtests_side_by_side(ada, bob, wor
     series = own_document["results"]["series"]["columns"]
     assert (times[0], times[-1]) == (series["ts"][0], series["ts"][-1])
     assert second["equity"][0] == 0.0
-    assert second["equity"][-1] == pytest.approx(stats[1]["total_return"], abs=1e-4)
-    assert second["buy_and_hold"][-1] == pytest.approx(stats[1]["buy_and_hold_return"], abs=1e-4)
+    assert second["equity"][-1] == pytest.approx(stats[1]["total_return"], abs=1e-3)
+    assert second["buy_and_hold"][-1] == pytest.approx(stats[1]["buy_and_hold_return"], abs=1e-3)
+    falls = [value for value in second["drawdown"] if value is not None]
+    assert max(falls) <= 0
+    # Sampled, a fall never goes below the largest.
+    assert min(falls) >= stats[1]["max_drawdown"] - 1e-3
     assert bob.email not in response.text
 
 
@@ -79,7 +88,7 @@ def test_a_running_backtest_is_listed_without_values(ada, worker) -> None:
 
     second = shown["backtests"][1]
     assert (second["id"], second["status"], second["error"]) == (running, "running", None)
-    assert (second["equity"], second["buy_and_hold"]) == (None, None)
+    assert (second["equity"], second["drawdown"], second["buy_and_hold"]) == (None, None, None)
     assert second["setup"]["model"] == "raw-candles.keras"
     assert all(
         row["values"][1] is None and row["marks"] == [None, None] for row in shown["metrics"]

@@ -28,10 +28,12 @@ from candlestack.experiments.schemas import BacktestStatus
 
 COMPARE_MIN = 2
 COMPARE_MAX = 20
+# The longest ``ids``: 20 IDs of ``bt_`` and 10 characters, commas and spaces, with room.
+IDS_MAX_LENGTH = COMPARE_MAX * 20
 # The most times of the curves: enough for a chart, small enough for an agent to read.
 CURVE_POINTS = 200
-# A curve's values in fractions to 0.01 %: what a chart can show.
-_CURVE_DECIMALS = 4
+# A curve's values in fractions to 0.1 %: what the page's charts show of a line.
+_CURVE_DECIMALS = 3
 
 Mark = Literal["best", "worst"]
 Better = Literal["higher", "lower", "none"]
@@ -77,12 +79,18 @@ class ComparedBacktest(BaseModel):
         "`execution` and `benchmarks` (the instruments held) of its result document"
     )
     equity: list[float | None] | None = Field(
-        description="Its cumulative return (a fraction, 0 at its start) at each of `times`: "
-        "its last value up to then, null outside its period; null without results"
+        description="Its cumulative return (a fraction of its starting capital) at each of "
+        "`times`: its last value up to then, null outside its period; null without results. "
+        "A long backtest's series has a point per day, so its line begins at the end of its "
+        "first day"
+    )
+    drawdown: list[float | None] | None = Field(
+        description="Its fall from its highest equity (a fraction, 0 or below), at the same "
+        "times; per day, the day's lowest"
     )
     buy_and_hold: list[float | None] | None = Field(
         description="The cumulative return of holding its instrument over its period, at the "
-        "same times"
+        "same times: its last value is the `buy_and_hold_return` statistic"
     )
 
 
@@ -148,9 +156,9 @@ def compared(documents: Sequence[dict[str, Any]]) -> CompareOut:
     stats = [None if doc["results"] is None else doc["results"]["stats"] for doc in documents]
     setups = [setup_of(doc) for doc in documents]
     lines = [_lines(doc) for doc in documents]
-    times = time_axis([line for pair in lines for line in pair])
+    times = time_axis([line for each in lines for line in each])
     backtests = []
-    for doc, setup, (equity, held) in zip(documents, setups, lines, strict=True):
+    for doc, setup, (equity, fall, held) in zip(documents, setups, lines, strict=True):
         header = doc["backtest"]
         finished = doc["results"] is not None
         backtests.append(
@@ -164,6 +172,7 @@ def compared(documents: Sequence[dict[str, Any]]) -> CompareOut:
                 error=header["error"],
                 setup=setup,
                 equity=_curve(equity, times) if finished else None,
+                drawdown=_curve(fall, times) if finished else None,
                 buy_and_hold=_curve(held, times) if finished else None,
             )
         )
@@ -346,16 +355,30 @@ def _points(ts: Sequence[int], values: Sequence[float | None], base: float) -> l
     ]
 
 
-def _lines(document: dict[str, Any]) -> tuple[list[Point], list[Point]]:
-    """The equity of the backtest and of holding its instrument, as cumulative returns at the
-    times of its series; none without results."""
-    if document["results"] is None:
-        return [], []
-    columns = document["results"]["series"]["columns"]
+def _lines(document: dict[str, Any]) -> tuple[list[Point], list[Point], list[Point]]:
+    """The equity of the backtest as a cumulative return, its drawdown and the cumulative return
+    of holding its instrument, at the times of its series; none without results."""
+    results = document["results"]
+    if results is None:
+        return [], [], []
+    columns = results["series"]["columns"]
     ts, close = columns["ts"], columns["close"]
+    # A series of more than 10,000 rows has a point per day, the day's last close, so its first
+    # close is not the price held from: the line ends at the statistic, as the page reads it.
+    held_return = results["stats"].get("buy_and_hold_return")
+    last = next((value for value in reversed(close) if value), None)
     first = next((value for value in close if value), None)
-    held = [] if first is None else _points(ts, close, first)
-    return _points(ts, columns["equity"], 1.0), held
+    if held_return is not None and held_return > -1 and last is not None:
+        held = _points(ts, close, last / (1.0 + held_return))
+    else:
+        held = [] if first is None else _points(ts, close, first)
+    # A fall however it is stored, as the page draws it.
+    fall = [
+        (time, -abs(value))
+        for time, value in zip(ts, columns["drawdown"], strict=True)
+        if value is not None
+    ]
+    return _points(ts, columns["equity"], 1.0), fall, held
 
 
 def value_at(points: Sequence[Point], time: int) -> float | None:

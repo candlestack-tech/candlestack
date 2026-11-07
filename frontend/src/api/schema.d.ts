@@ -219,6 +219,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compare Backtests
+         * @description Backtests side by side, as the Compare page shows them: each statistic of each with the
+         *     best and the worst marked, the setups and which of their fields differ, and the equity and
+         *     the drawdown of each and the return of holding its instrument on one time axis of at most
+         *     200 times. A backtest that is running or failed is listed with its status and without
+         *     values. Access is that of `GET /api/v1/backtests/{backtest_id}`.
+         */
+        get: operations["compare_backtests_api_v1_compare_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dashboard": {
         parameters: {
             query?: never;
@@ -1617,6 +1641,129 @@ export interface components {
          * @enum {string}
          */
         CheckPart: "trial_run" | "example";
+        /**
+         * CompareMetric
+         * @description One statistic of every backtest, in the order of `backtests`.
+         */
+        CompareMetric: {
+            /**
+             * Better
+             * @description Which way is better: `higher`, `lower` (a fall by its size, whatever its sign; the fees) or `none` (more trades, time in the market and buy and hold are not better in themselves, so none is marked)
+             * @enum {string}
+             */
+            better: "higher" | "lower" | "none";
+            /**
+             * Key
+             * @description The statistic of `results.stats`
+             * @example total_return
+             */
+            key: string;
+            /**
+             * Label
+             * @description What the app calls it
+             * @example Total return
+             */
+            label: string;
+            /**
+             * Marks
+             * @description `best`, `worst` or null for each backtest. Values that read the same in the app count as equal (one decimal of a percent, two of the average trade and of a ratio), so two that look alike are never told apart; nothing is marked with fewer than two values or when all are equal
+             * @example [
+             *       "best",
+             *       "worst"
+             *     ]
+             */
+            marks: (("best" | "worst") | null)[];
+            /**
+             * Values
+             * @description The value of each backtest, as in `results.stats`; null without results (running, failed) or when undefined
+             * @example [
+             *       0.246,
+             *       -0.031
+             *     ]
+             */
+            values: (number | null)[];
+        };
+        /**
+         * CompareOut
+         * @description Backtests side by side, in the order asked for.
+         */
+        CompareOut: {
+            /** Backtests */
+            backtests: components["schemas"]["ComparedBacktest"][];
+            /**
+             * Differs
+             * @description The setup fields that differ between the backtests, as dotted paths into `setup` (a field only some have counts as differing)
+             * @example [
+             *       "period.start",
+             *       "decision.rule.limit"
+             *     ]
+             */
+            differs: string[];
+            /**
+             * Metrics
+             * @description The 12 statistics of the result document, in the app's order
+             */
+            metrics: components["schemas"]["CompareMetric"][];
+            /**
+             * Times
+             * @description The common time axis of the curves, at most 200 UTC epoch seconds: the first and the last time of each backtest's series and times evenly spaced between the earliest and the latest
+             */
+            times: number[];
+        };
+        /** ComparedBacktest */
+        ComparedBacktest: {
+            author: components["schemas"]["DocumentAuthor"];
+            /**
+             * Buy And Hold
+             * @description The cumulative return of holding its instrument over its period, at the same times: its last value is the `buy_and_hold_return` statistic
+             */
+            buy_and_hold: (number | null)[] | null;
+            /**
+             * Drawdown
+             * @description Its fall from its highest equity (a fraction, 0 or below), at the same times; per day, the day's lowest
+             */
+            drawdown: (number | null)[] | null;
+            /**
+             * Equity
+             * @description Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results. A long backtest's series has a point per day, so its line begins at the end of its first day
+             */
+            equity: (number | null)[] | null;
+            /**
+             * Error
+             * @description What went wrong, for a failed one
+             */
+            error: string | null;
+            /**
+             * Id
+             * @example bt_7f3k2m9qx4
+             */
+            id: string;
+            /**
+             * Name
+             * @example Silent Orion
+             */
+            name: string;
+            /**
+             * Number
+             * @description Its author's own number, shown as #N
+             * @example 12
+             */
+            number: number;
+            /**
+             * Public
+             * @description Published in Experiments
+             */
+            public: boolean;
+            /**
+             * Setup
+             * @description What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document
+             */
+            setup: {
+                [key: string]: unknown;
+            };
+            /** @description A running or failed backtest has no values, marks or curves */
+            status: components["schemas"]["BacktestStatus"];
+        };
         /**
          * DashboardOut
          * @description Everything the Dashboard shows, in one response.
@@ -3929,6 +4076,83 @@ export interface operations {
                 };
             };
             /** @description Invalid request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A data source sent candles that failed validation (`source-data-invalid`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    compare_backtests_api_v1_compare_get: {
+        parameters: {
+            query: {
+                /** @description 2 to 20 backtest IDs separated by commas: the user's own and published ones of other accounts */
+                ids: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompareOut"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Neither the user's backtest nor a published one has one of the IDs (`not-found`; `id` names it). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description One of them is test data without a result document (`no-document`; `id` names it). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Fewer than 2 or more than 20 IDs, an empty one or one twice (`validation`). */
             422: {
                 headers: {
                     [name: string]: unknown;

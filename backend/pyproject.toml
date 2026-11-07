@@ -371,8 +371,8 @@ layers = [
 ]
 
 # Inside experiments, the same: routes, the seed command and the result document's JSON
-# Schema, the routes' dependencies, the services (the list, and starting a backtest and building
-# its document), the runner of the backtests, the queries and the assembly of a run (signals,
+# Schema, the routes' dependencies, the comparison of backtests (from their documents), the
+# services (the list, and starting a backtest and building its document), the runner of the backtests, the queries and the assembly of a run (signals,
 # engine, metrics), then the table, the errors and what a run stores, the result document, and
 # the bodies at the bottom.
 [[tool.importlinter.contracts]]
@@ -382,6 +382,7 @@ containers = ["candlestack.experiments"]
 layers = [
     "api | seed | json_schema",
     "dependencies",
+    "compare",
     "service | runs",
     "runner",
     "store | assembly",

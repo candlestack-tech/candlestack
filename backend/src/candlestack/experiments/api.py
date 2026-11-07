@@ -13,7 +13,14 @@ from fastapi import APIRouter, Depends, Path, Query, Response
 from candlestack.accounts import CurrentUserDep
 from candlestack.core import NO_STORE, ProblemError, problem_doc, require_same_origin
 from candlestack.data import data_problems
-from candlestack.experiments.compare import COMPARE_MAX, COMPARE_MIN, CompareOut, compare, parse_ids
+from candlestack.experiments.compare import (
+    COMPARE_MAX,
+    COMPARE_MIN,
+    IDS_MAX_LENGTH,
+    CompareOut,
+    compare,
+    parse_ids,
+)
 from candlestack.experiments.dependencies import BacktestRunsDep, BacktestsServiceDep
 from candlestack.experiments.document import BacktestDocument, BacktestIn
 from candlestack.experiments.errors import (
@@ -478,7 +485,7 @@ async def compare_backtests(
     ids: Annotated[
         str,
         Query(
-            max_length=COMPARE_MAX * 20,
+            max_length=IDS_MAX_LENGTH,
             description=(
                 f"{COMPARE_MIN} to {COMPARE_MAX} backtest IDs separated by commas: the user's own "
                 "and published ones of other accounts"
@@ -491,10 +498,10 @@ async def compare_backtests(
     response: Response,
 ) -> CompareOut:
     """Backtests side by side, as the Compare page shows them: each statistic of each with the
-    best and the worst marked, the setups and which of their fields differ, and the equity of
-    each and of buying and holding its instrument on one time axis of at most 200 times. A
-    backtest that is running or failed is listed with its status and without values. Access is
-    that of `GET /api/v1/backtests/{backtest_id}`."""
+    best and the worst marked, the setups and which of their fields differ, and the equity and
+    the drawdown of each and the return of holding its instrument on one time axis of at most
+    200 times. A backtest that is running or failed is listed with its status and without
+    values. Access is that of `GET /api/v1/backtests/{backtest_id}`."""
     response.headers.update(NO_STORE)
     with _problems():
         try:

@@ -171,11 +171,16 @@ def document(
     ts: list[int] | None = None,
     equity: Sequence[float | None] | None = None,
     close: list[float] | None = None,
+    drawdown: Sequence[float | None] | None = None,
+    resolution: str = "candle",
     limit: float = 0.1,
     calibrate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """A result document with what the comparison reads of it."""
+    """A result document with what the comparison reads of it; buy and hold is its closes'
+    unless ``stats`` says otherwise."""
     ts = ts or [10, 20, 30]
+    close = close or [100.0, 50.0, 200.0][: len(ts)]
+    stats = stats or {**STATS, "buy_and_hold_return": close[-1] / close[0] - 1}
     finished = status == "finished"
     return {
         "backtest": {
@@ -200,13 +205,15 @@ def document(
         "execution": {"fee_bps": 5.0},
         "benchmarks": [{"id": "bh", "instrument": "stock:AAPL"}],
         "results": {
-            "stats": stats or STATS,
+            "stats": stats,
             "series": {
+                "resolution": resolution,
                 "columns": {
                     "ts": ts,
                     "equity": equity or [1.0, 1.1, 1.2][: len(ts)],
-                    "close": close or [100.0, 50.0, 200.0][: len(ts)],
-                }
+                    "drawdown": drawdown or [0.0] * len(ts),
+                    "close": close,
+                },
             },
         }
         if finished
@@ -273,7 +280,7 @@ def test_the_time_axis_has_each_lines_ends_and_even_times_up_to_its_points() -> 
 
 
 def test_a_comparison_lists_each_with_its_curves_on_one_axis() -> None:
-    early = document("bt_a", ts=[10, 20, 30], equity=[1.0, 1.1, 1.25])
+    early = document("bt_a", ts=[10, 20, 30], equity=[1.0, 1.1, 1.25], drawdown=[0, 0.2, -0.1])
     late = document("bt_b", ts=[20, 40], equity=[1.0, None], close=[10.0, 12.5], limit=0.2)
     failed = document("bt_c", status="failed")
 
@@ -290,12 +297,15 @@ def test_a_comparison_lists_each_with_its_curves_on_one_axis() -> None:
 
     assert at(first.equity) == [0.0, 0.1, 0.1, 0.25, None, None]
     assert at(first.buy_and_hold) == [0.0, -0.5, -0.5, 1.0, None, None]
+    # A fall however it is stored, as the page draws it.
+    assert at(first.drawdown) == [0.0, -0.2, -0.2, -0.1, None, None]
     # A row without a value is left out: the line ends at its last value.
     assert at(second.equity) == [None, 0.0, None, None, None, None]
     assert at(second.buy_and_hold) == [None, 0.0, 0.0, 0.0, 0.0, 0.25]
-    assert (third.status, third.error, third.equity, third.buy_and_hold) == (
+    assert (third.status, third.error, third.equity, third.drawdown, third.buy_and_hold) == (
         "failed",
         "It failed.",
+        None,
         None,
         None,
     )
@@ -303,14 +313,50 @@ def test_a_comparison_lists_each_with_its_curves_on_one_axis() -> None:
     assert shown.differs == ["decision.rule.limit"]
 
 
-def test_four_backtests_answer_in_a_few_kilobytes() -> None:
+def test_buy_and_hold_of_a_series_per_day_ends_at_its_statistic() -> None:
+    # A day's point is its last close: the first is not the price held from, 100.
+    daily = document(
+        "bt_a",
+        ts=[86_399, 172_799, 259_199],
+        close=[110.0, 99.0, 132.0],
+        stats={**STATS, "buy_and_hold_return": 0.32},
+        resolution="day",
+    )
+
+    held = compared([daily, document("bt_b", ts=[86_399, 259_199])]).backtests[0].buy_and_hold
+
+    assert held is not None
+    assert held[0] == 0.1
+    assert held[-1] == 0.32
+
+
+def test_buy_and_hold_without_its_statistic_is_of_the_first_close() -> None:
+    unknown = document(
+        "bt_a", close=[100.0, 50.0, 200.0], stats={**STATS, "buy_and_hold_return": None}
+    )
+
+    held = compared([unknown, document("bt_b")]).backtests[0].buy_and_hold
+
+    assert held is not None
+    assert (held[0], held[-1]) == (0.0, 1.0)
+
+
+def test_four_backtests_answer_in_about_twenty_kilobytes() -> None:
+    # Three curves of 200 times each, where the page loads four whole documents today.
     ts = list(range(0, 50_000 * 1800, 1800))
     wealth = [1 + index / 7_919 for index in range(len(ts))]
+    fall = [-(index % 997) / 7_919 for index in range(len(ts))]
     docs = [
-        document(f"bt_{n}", ts=ts, equity=wealth, close=[100 + value for value in wealth])
+        document(
+            f"bt_{n}",
+            ts=ts,
+            equity=wealth,
+            drawdown=fall,
+            close=[100 + value for value in wealth],
+        )
         for n in range(4)
     ]
 
     size = len(compared(docs).model_dump_json())
 
-    assert size < 20_000
+    assert size < 22_000

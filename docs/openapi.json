@@ -2059,8 +2059,30 @@
                 "type": "null"
               }
             ],
-            "description": "The cumulative return of holding its instrument over its period, at the same times",
+            "description": "The cumulative return of holding its instrument over its period, at the same times: its last value is the `buy_and_hold_return` statistic",
             "title": "Buy And Hold"
+          },
+          "drawdown": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its fall from its highest equity (a fraction, 0 or below), at the same times; per day, the day's lowest",
+            "title": "Drawdown"
           },
           "equity": {
             "anyOf": [
@@ -2081,7 +2103,7 @@
                 "type": "null"
               }
             ],
-            "description": "Its cumulative return (a fraction, 0 at its start) at each of `times`: its last value up to then, null outside its period; null without results",
+            "description": "Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results. A long backtest's series has a point per day, so its line begins at the end of its first day",
             "title": "Equity"
           },
           "error": {
@@ -2144,6 +2166,7 @@
           "error",
           "setup",
           "equity",
+          "drawdown",
           "buy_and_hold"
         ],
         "title": "ComparedBacktest",
@@ -6564,7 +6587,7 @@
     },
     "/api/v1/compare": {
       "get": {
-        "description": "Backtests side by side, as the Compare page shows them: each statistic of each with the\nbest and the worst marked, the setups and which of their fields differ, and the equity of\neach and of buying and holding its instrument on one time axis of at most 200 times. A\nbacktest that is running or failed is listed with its status and without values. Access is\nthat of `GET /api/v1/backtests/{backtest_id}`.",
+        "description": "Backtests side by side, as the Compare page shows them: each statistic of each with the\nbest and the worst marked, the setups and which of their fields differ, and the equity and\nthe drawdown of each and the return of holding its instrument on one time axis of at most\n200 times. A backtest that is running or failed is listed with its status and without\nvalues. Access is that of `GET /api/v1/backtests/{backtest_id}`.",
         "operationId": "compare_backtests_api_v1_compare_get",
         "parameters": [
           {

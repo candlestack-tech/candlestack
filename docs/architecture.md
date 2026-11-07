@@ -732,7 +732,9 @@ an agent gets the app's verdict without downloading and comparing the documents 
 - **Access** is that of `GET /api/v1/backtests/{backtest_id}`: the user's own, whatever their
   status, and others' while published. It builds each result document in the light view, in
   the order asked for, and reads it; an ID the user cannot see is `404 not-found` and test data
-  `409 no-document`, each with `id` naming that backtest. Fewer than 2 or more than 20 IDs, an
+  `409 no-document`, each with `id` naming that backtest. Each document is a rebuild of its
+  run (the engine and the candles), one after another, so 20 backtests make a slow request: the
+  per-key rate limit (#394) should weigh it. Fewer than 2 or more than 20 IDs, an
   empty one or one twice is `422 validation`.
 - **Statistics** (`metrics`): the 12 of `results.stats` in the Compare table's order, each with
   `better` (`higher`, `lower` or `none`), the value of each backtest and its mark, `best`,
@@ -746,10 +748,15 @@ an agent gets the app's verdict without downloading and comparing the documents 
   `decision`, `execution`, the benchmarks' instruments) and `differs`, the dotted paths of the
   fields whose values differ (one only some have counts).
 - **Curves**: `times`, at most 200 times shared by all (the first and the last of each series,
-  the rest evenly spaced from the earliest to the latest), and for each backtest `equity` and
-  `buy_and_hold` (holding its instrument) as cumulative returns to 0.01 % at those times: a
-  line's last value up to a time, null outside its period, as the page's charts read a line
-  (`chartLines.ts`, `valueAt`). About 16 KB for four backtests.
+  the rest evenly spaced from the earliest to the latest), and for each backtest `equity` (its
+  cumulative return), `drawdown` (its fall from the top, 0 or below) and `buy_and_hold` (the
+  return of holding its instrument) as fractions to 0.1 %, the precision of the page's charts,
+  at those times: a line's last value up to a time, null outside its period, as the page's
+  charts read a line (`chartLines.ts`, `valueAt`). The light document of a backtest of more than
+  10,000 candles has a point per UTC day (the day's last, the lowest drawdown), so its lines
+  begin at the end of its first day; buy and hold is measured from the price held from, so it
+  ends at the `buy_and_hold_return` statistic either way. About 20 KB for four backtests over
+  their whole axes, against the four whole documents the page loads today.
 
 ## Modules
 
