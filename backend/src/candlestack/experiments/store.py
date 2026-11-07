@@ -620,6 +620,15 @@ class BacktestStore:
             backtest.started_at = now
         return backtest
 
+    async def requeue(self, backtest_id: str) -> None:
+        """Puts the running backtest that never began back in its queue, where its number
+        keeps it first."""
+        await self._db.execute(
+            update(Backtest)
+            .where(Backtest.id == backtest_id, _RUNNING)
+            .values(status=BacktestStatus.queued.value, started_at=None)
+        )
+
     async def waiting(self) -> list[str]:
         """The users with a queued backtest and none running: whose queue should move on."""
         running = select(literal(1)).where(
@@ -696,13 +705,23 @@ class BacktestStore:
             update(Backtest).where(Backtest.id == backtest_id, _RUNNING).values(steps=steps)
         )
 
-    async def fail(self, error: str, now: datetime, backtest_id: str | None = None) -> int:
-        """Marks the running backtest with the ID (every running one without an ID) failed
-        with ``error``, and the step it was at; how many. One that has ended keeps what it
-        has."""
+    async def fail(
+        self,
+        error: str,
+        now: datetime,
+        backtest_id: str | None = None,
+        *,
+        before: datetime | None = None,
+    ) -> int:
+        """Marks the running backtest with the ID (every running one without an ID, or every
+        one that began to run before ``before``) failed with ``error``, and the step it was at;
+        how many. One that has ended keeps what it has."""
         query = select(Backtest.id, Backtest.steps).where(_RUNNING).with_for_update()
         if backtest_id is not None:
             query = query.where(Backtest.id == backtest_id)
+        if before is not None:
+            began = func.coalesce(Backtest.started_at, Backtest.created_at)
+            query = query.where(began < before)
         running = (await self._db.execute(query)).all()
         for found, steps in running:
             values: dict[str, Any] = {

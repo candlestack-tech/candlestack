@@ -33,8 +33,7 @@ from candlestack.experiments import runner as runner_module
 from candlestack.experiments import store as store_module
 from candlestack.experiments.assembly import NothingToTest
 from candlestack.experiments.names import ADJECTIVES, NOUNS
-from candlestack.jobs import WORKER_STOPPED, JobClient, JobFiles, JobQueue
-from candlestack.jobs.protocol import QUEUE
+from candlestack.jobs import QUEUE, WORKER_STOPPED, JobClient, JobFiles, JobQueue
 from candlestack.main import create_app
 
 pytestmark = pytest.mark.integration
@@ -778,6 +777,48 @@ def test_a_start_moves_on_a_queue_that_stood_still(ada) -> None:
 
     assert ada.document(second).json()["backtest"]["status"] == "running"
     assert (third["status"], third["queue_position"]) == ("queued", 1)
+
+
+@pytest.mark.usefixtures("market")
+def test_a_late_recovery_fails_only_the_runs_of_a_stopped_process(ada, app, client) -> None:
+    model_id = ada.runnable_model()
+    left = ada.start(body(model_id)).json()["backtest"]["id"]  # no worker answers
+    ours = ada.start(body(model_id)).json()["backtest"]["id"]
+    # ``left`` began before this process (as one a stopped process left), ``ours`` after.
+    ada.sql(
+        "UPDATE backtests SET started_at = started_at - interval '1 day' WHERE id = :id", id=left
+    )
+    ada.sql("UPDATE backtests SET status = 'running', started_at = now() WHERE id = :id", id=ours)
+    runner = app.state.backtest_runner
+    runner._recovered = False  # Postgres was out of reach at the start
+
+    client.portal.call(runner._check)
+
+    assert ada.document(left).json()["backtest"]["status"] == "failed"
+    assert ada.document(ours).json()["backtest"]["status"] == "running"
+    assert runner._recovered
+
+
+@pytest.mark.usefixtures("market")
+def test_a_backtest_handed_to_a_closed_runner_goes_back_to_its_queue(ada, app, client) -> None:
+    model_id = ada.runnable_model()
+    first = ada.start(body(model_id)).json()["backtest"]["id"]  # no worker answers
+    second = ada.start(body(model_id)).json()["backtest"]["id"]
+    runner = app.state.backtest_runner
+    # Taken from its queue, as ``_next`` does, when the shutdown began.
+    ada.sql("UPDATE backtests SET status = 'running', started_at = now() WHERE id = :id", id=second)
+
+    async def hand_over_after_close() -> None:
+        await runner.close()
+        runner.start(second)
+        await runner.close()  # waits for it to be put back
+
+    client.portal.call(hand_over_after_close)
+    requeued = ada.document(second).json()["backtest"]
+
+    assert ada.document(first).json()["backtest"]["status"] == "failed"
+    assert (requeued["status"], requeued["queue_position"]) == ("queued", 1)
+    assert requeued["started_at"] is None
 
 
 def test_one_users_queue_does_not_hold_back_another_users_backtest(

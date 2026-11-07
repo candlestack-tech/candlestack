@@ -650,7 +650,10 @@ checked at the next start.
   the stop fails only the runs it stops, and the next start, after failing those left
   running, starts the first of every queue (`resume`), which it also does every 30 seconds
   for a queue that stood still (its next could not be started, Postgres out of reach); a new
-  start of the user moves such a queue on too. Fairness comes from the one run per user: each
+  start of the user moves such a queue on too, unless 20 wait already. With Postgres out of
+  reach at the start, failing those left running is tried again at each check; it fails only
+  backtests that began to run before the process started. A backtest the runner is handed
+  after its shutdown began goes back to the head of its queue. Fairness comes from the one run per user: each
   user has at most one job in the worker's queue, which takes the oldest job first, so one
   user's 20 queued backtests never hold back another user's backtest. `queue_position` (in
   `BacktestOut` and the document's `backtest`, null for any other status) is 1 for the next to

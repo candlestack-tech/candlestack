@@ -14,6 +14,7 @@ from candlestack.jobs.files import CANDLES, PREDICTIONS, JobFiles
 from candlestack.jobs.protocol import (
     DEFAULT_WAIT,
     EXAMPLE_TOLERANCE,
+    QUEUE,
     Job,
     JobKind,
     JobResult,
@@ -31,6 +32,7 @@ __all__ = [
     "EXAMPLE_TOLERANCE",
     "NO_ANSWER",
     "PREDICTIONS",
+    "QUEUE",
     "WORKER_STOPPED",
     "Claimed",
     "Job",
