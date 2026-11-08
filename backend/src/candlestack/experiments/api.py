@@ -1,7 +1,8 @@
 """HTTP API of the experiments module: the signed-in user's backtests under
 ``/api/v1/backtests`` (the list, starting one, cancelling a queued one, its result document and
 its download), the backtests every account published under ``/api/v1/experiments``, the
-comparison of backtests under ``/api/v1/compare`` and the Dashboard under ``/api/v1/dashboard``.
+comparison of backtests under ``/api/v1/compare``, sweeps of many backtests under
+``/api/v1/sweeps`` and the Dashboard under ``/api/v1/dashboard``.
 """
 
 from collections.abc import Iterator
@@ -28,7 +29,7 @@ from candlestack.experiments.compare import (
     compare,
     parse_ids,
 )
-from candlestack.experiments.dependencies import BacktestRunsDep, BacktestsServiceDep
+from candlestack.experiments.dependencies import BacktestRunsDep, BacktestsServiceDep, SweepsDep
 from candlestack.experiments.document import BacktestCheck, BacktestDocument, BacktestIn
 from candlestack.experiments.errors import (
     BacktestNotFinished,
@@ -43,6 +44,10 @@ from candlestack.experiments.errors import (
     NoDocument,
     NotComparable,
     QueueFull,
+    SetupFailed,
+    SweepNotFound,
+    SweepQueueFull,
+    SweepTooLarge,
 )
 from candlestack.experiments.schemas import (
     EXPERIMENTS_PAGE_SIZE,
@@ -64,6 +69,14 @@ from candlestack.experiments.schemas import (
 )
 from candlestack.experiments.service import ExperimentsQuery, ListQuery
 from candlestack.experiments.store import QUEUE_MAX
+from candlestack.experiments.sweeps import (
+    SWEEP_MAX,
+    SWEEP_MIN,
+    SweepIn,
+    SweepMetric,
+    SweepOut,
+    SweepPlan,
+)
 
 router = APIRouter(tags=["backtests"])
 
@@ -619,3 +632,135 @@ async def compare_backtests(
     response.headers.update(NO_STORE)
     with backtest_problems():
         return await compare(runs, user.id, parse_ids(ids))
+
+
+# --- Sweeps -----------------------------------------------------------------------------------
+
+SweepId = Annotated[str, Path(description="Public ID of the sweep", examples=["sw_7f3k2m9qx4"])]
+
+
+def _sweep_problem(error: Exception) -> ProblemError | None:
+    match error:
+        case SweepTooLarge():
+            return ProblemError(
+                422,
+                "validation",
+                "Invalid request",
+                f"The lists make {error.count} backtests, and a sweep runs at most {SWEEP_MAX}. "
+                "Vary fewer values.",
+                extensions={"count": error.count, "limit": SWEEP_MAX},
+            )
+        case SweepQueueFull():
+            return ProblemError(
+                409,
+                "queue-full",
+                "Queue full",
+                f"The sweep has {error.count} backtests and your queue has room for "
+                f"{error.room} (up to {QUEUE_MAX} wait). Start it when more of them have "
+                "started, cancel some, or vary fewer values.",
+                extensions={"limit": QUEUE_MAX, "count": error.count, "room": error.room},
+            )
+        case SweepNotFound():
+            return ProblemError(404, "not-found", "Not Found", "You have no sweep with this ID.")
+    return None
+
+
+def _setup_problem(failed: SetupFailed) -> ProblemError:
+    """The problem of a setup's error, named with the setup (`setup`, from 1)."""
+    try:
+        with backtest_problems():
+            raise failed.error
+    except ProblemError as problem:
+        problem.detail = f"Setup {failed.index + 1} of the sweep: {problem.detail}"
+        problem.extensions["setup"] = failed.index + 1
+        return problem
+
+
+@contextmanager
+def sweep_problems() -> Iterator[None]:
+    """Raises the errors of a sweep, of its setups and of the market data as problem details."""
+    with backtest_problems():
+        try:
+            yield
+        except SetupFailed as failed:
+            raise _setup_problem(failed) from failed.error
+        except Exception as error:
+            problem = _sweep_problem(error)
+            if problem is None:
+                raise
+            raise problem from error
+
+
+@router.post(
+    "/api/v1/sweeps",
+    status_code=201,
+    response_model=SweepOut,
+    responses={
+        200: {"model": SweepPlan, "description": "`validate_only`: what the sweep would start"},
+        **_NOT_SIGNED_IN,
+        **problem_doc(
+            403, "The request does not come from the app's own pages (`cross-origin-request`)."
+        ),
+        **problem_doc(
+            404,
+            "The user has no model with an ID (`not-found`), or an instrument is not in the "
+            "catalog (`instrument-not-found`); `setup` names the setup.",
+        ),
+        **problem_doc(
+            409,
+            "A model has no manifest (`model-needs-setup`, with `setup`), or the user's queue has "
+            "room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count` "
+            "and `room`).",
+        ),
+        **problem_doc(
+            422,
+            f"An invalid body or fewer than {SWEEP_MIN} or more than {SWEEP_MAX} backtests "
+            "(`validation`, the latter with `count` and `limit`), or a setup that fails a check "
+            "of `POST /api/v1/backtests` (`instrument-not-for-model`, `period-out-of-range`, "
+            "`warm-up-out-of-range`, `too-many-candles`, `validation`; `setup` names it, from 1).",
+        ),
+        **_SOURCE_ERRORS,
+    },
+    dependencies=[Depends(require_same_origin)],
+)
+async def start_sweep(
+    body: SweepIn, user: BacktestsUserDep, sweeps: SweepsDep, response: Response
+) -> SweepOut | Response:
+    """Starts a backtest for every combination of the values in `vary` over the `base` setup
+    (the body of `POST /api/v1/backtests`): models, instruments, periods and decision rules,
+    2 to 20 backtests, in that order. Every setup is checked as `POST /api/v1/backtests`
+    checks one, and the user's queue must have room for all of them (up to 20 wait); then they
+    all go to the end of the queue, or none does. With `validate_only` nothing starts: the
+    answer is 200 with the count and each setup. The sweep's backtests are ordinary backtests
+    with its `sweep_id`. `GET /api/v1/sweeps/{sweep_id}` follows them and ranks them once all
+    ended."""
+    response.headers.update(NO_STORE)
+    with sweep_problems():
+        if body.validate_only:
+            plan = await sweeps.plan(user.id, body)
+            return _json(plan.model_dump_json().encode(), response)
+        sweep = await sweeps.start(user.id, body)
+    response.headers["Location"] = f"/api/v1/sweeps/{sweep.id}"
+    return sweep
+
+
+@router.get(
+    "/api/v1/sweeps/{sweep_id}",
+    responses={**_NOT_SIGNED_IN, **problem_doc(404, "The user has no sweep with this ID.")},
+)
+async def get_sweep(
+    sweep_id: SweepId,
+    user: CurrentUserDep,
+    sweeps: SweepsDep,
+    response: Response,
+    metric: Annotated[
+        SweepMetric | None,
+        Query(description="What the ranking orders by, instead of the sweep's own `metric`"),
+    ] = None,
+) -> SweepOut:
+    """The user's sweep: how many of its backtests are queued, running, finished and failed,
+    each backtest's ID, status and setup, and once none is queued or running (`done`) the
+    ranking by the metric, with the marking rules of `GET /api/v1/compare`."""
+    response.headers.update(NO_STORE)
+    with sweep_problems():
+        return await sweeps.sweep(user.id, sweep_id, metric)

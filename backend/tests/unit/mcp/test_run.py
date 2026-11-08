@@ -39,6 +39,7 @@ def header(
         "published_at": None,
         "status": status,
         "queue_position": 2 if status == "queued" else None,
+        "sweep_id": None,
         "created_at": CREATED.isoformat(),
         "started_at": None if status == "queued" else CREATED.isoformat(),
         "finished_at": None,

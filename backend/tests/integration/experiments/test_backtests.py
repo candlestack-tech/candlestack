@@ -40,6 +40,7 @@ def test_a_backtest_as_the_list_shows_it(ada) -> None:
                 "number": 1,
                 "status": "finished",
                 "queue_position": None,
+                "sweep_id": None,
                 "seeded": False,
                 "instruments": [
                     {"market": "stock", "symbol": "MSFT"},

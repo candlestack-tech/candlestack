@@ -213,6 +213,49 @@ backtest comes with its status and no values; an ID you cannot see is a 404 whos
 It reads only what each backtest stored, so comparing many loads no candles and spends none of
 the data sources' request budget. The fields: [architecture.md](architecture.md#compare).
 
+## Run a sweep
+
+`POST /api/v1/sweeps`, with a key of the scope `backtests`, starts a backtest for every
+combination of a base setup (the body of `POST /api/v1/backtests`) and the values to vary:
+`models`, `instruments`, `periods` and decision `rules`. Two models and three thresholds make
+six backtests:
+
+```json
+{
+  "base": {
+    "model": {"id": "mdl_k2m9qx47f3"},
+    "data": {"instrument": {"id": "stock:AAPL"}, "period": {"start": 1704067200, "end": 1735689600}},
+    "decision": {"rule": {"name": "threshold", "limit": 0.1}},
+    "benchmarks": [{"id": "bh", "kind": "buy_and_hold", "instrument": "stock:AAPL"}]
+  },
+  "vary": {
+    "models": ["mdl_k2m9qx47f3", "mdl_t9n8v7d6a5"],
+    "rules": [
+      {"name": "threshold", "limit": 0.05},
+      {"name": "threshold", "limit": 0.1},
+      {"name": "threshold", "limit": 0.2}
+    ]
+  },
+  "metric": "sharpe"
+}
+```
+
+A sweep runs 2 to 20 backtests, and your queue needs room for all of them (up to 20 wait):
+else 422 `validation` or 409 `queue-full`, with `count`. Add `"validate_only": true` to check
+every setup without starting anything: the answer is the `count` and each setup. A setup that
+fails a check answers with that check's problem and `setup`, its place in the grid from 1.
+To vary what a model reads or its timeframe, list models whose manifests read them. The base
+still needs a model and an instrument when you vary them. An unknown field, such as a mistyped
+`validate_only`, is a 422 `validation`, never a sweep started.
+
+`GET /api/v1/sweeps/<id>` has the `progress`, each backtest's ID, status and setup, and once
+`done` the `ranking` by the metric, best first, marked as Compare marks it. Ask with
+`?metric=max_drawdown` for another order. The backtests are ordinary ones with `sweep_id`, so
+`GET /api/v1/compare` with their IDs compares them in full. In an MCP client the same is
+`validate_sweep`, `run_sweep` and `get_sweep`. `validate_sweep` needs only the scope `read`,
+while the HTTP dry run needs `backtests`. The fields:
+[architecture.md](architecture.md#sweeps).
+
 ## Upload a model through a link
 
 A script can send the file itself (`POST /api/v1/models?name=lstm.keras` with the file as the
