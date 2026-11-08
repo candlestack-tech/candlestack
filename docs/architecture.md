@@ -927,7 +927,21 @@ call, as the routes' dependencies do), never the API over HTTP.
   docs pages, the tool reference, the manifest and backtest result references with their JSON
   Schemas, the problem pages and the API reference.
 - **Tools**: `get_me` (scope `read`): the key's user (ID, name, email, created) and the key's
-  scopes. The tools of the other areas come with #399 and #402 to #405.
+  scopes. The tools of the other areas come with #399 and #402 to #404.
+- **Backtests: list, manage, publish** (`mcp/manage.py`, #405), on `BacktestsService` and
+  `BacktestRuns` with the routes' problems (`experiments.update_problems`,
+  `backtest_problems`): `list_backtests` (`read`; search, show, model, sort, order and page as
+  `GET /backtests`), `rename_backtest` and `star_backtest` (`backtests`; idempotent),
+  `cancel_backtest` (`backtests`; queued ones only, else `backtest-not-queued`; destructive),
+  `list_experiments` (`read`; search, mine, author, market, symbol, representation, timeframe,
+  sort, order and page as `GET /experiments`), `publish_backtest` and `unpublish_backtest`
+  (`publish`; destructive, the description says the backtest becomes visible to every account
+  of the beta and asks the agent to check with the user first) and `get_dashboard` (`read`;
+  the counts, the 6 newest that ended, the 5 best by each result and the 4 best starred). They
+  answer a compact backtest: no equity series, generated name, duration or other fields only
+  the app's cards and charts use, the model by its name and ID; Experiments the same with the
+  author, never the model file. The Dashboard's newest published backtests are left out, as
+  `list_experiments` lists them.
 - **Parity table** (`mcp/parity.py`): every endpoint of the API reference, by method and path,
   maps to the tools that do the same, to `Planned` with the task that adds them, or to
   `WebOnly` with the reason (sign-in, sessions, the keys themselves, deleting the account,

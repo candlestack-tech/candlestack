@@ -4,7 +4,8 @@ Backtests page and summed up on the Dashboard. A backtest's run puts together th
 ``metrics``, in a task of the API process (``BacktestRunner``).
 
 Other modules import only from here (``from candlestack.experiments import backtests_router``),
-never from the submodules. ``candlestack.main`` puts a ``BacktestRunner`` on
+never from the submodules; the MCP tools take the services, their queries, bodies and enums and
+the problems of their errors from here too. ``candlestack.main`` puts a ``BacktestRunner`` on
 ``app.state.backtest_runner`` (and ``recover`` and ``close`` it with the app), and
 ``model_usage`` on ``app.state.model_usage``,
 so the models list of ``ml``, which cannot import this module, shows how the backtests used
@@ -15,8 +16,70 @@ Importing the module declares its table (``backend/migrations`` relies on it).
 (stage and local only).
 """
 
+from candlestack.experiments.api import PAGE_MAX, backtest_problems, update_problems
 from candlestack.experiments.api import router as backtests_router
+from candlestack.experiments.dependencies import backtest_runs, get_backtests_service
 from candlestack.experiments.runner import BacktestRunner
+from candlestack.experiments.schemas import (
+    BACKTEST_NAME_MAX,
+    EXPERIMENTS_PAGE_SIZE,
+    MODEL_NAME_MAX,
+    PAGE_SIZE,
+    QUERY_MAX,
+    Author,
+    BacktestCounts,
+    BacktestInstrument,
+    BacktestOut,
+    BacktestSetup,
+    BacktestShow,
+    BacktestSort,
+    BacktestStatus,
+    BacktestUpdate,
+    ExperimentCounts,
+    ExperimentFacets,
+    ExperimentOut,
+    ExperimentSort,
+    InstrumentMarket,
+    ModelCount,
+    Representation,
+    SetupTimeframe,
+    SortOrder,
+)
+from candlestack.experiments.service import ExperimentsQuery, ListQuery
 from candlestack.experiments.store import model_usage
 
-__all__ = ["BacktestRunner", "backtests_router", "model_usage"]
+__all__ = [
+    "BACKTEST_NAME_MAX",
+    "EXPERIMENTS_PAGE_SIZE",
+    "MODEL_NAME_MAX",
+    "PAGE_MAX",
+    "PAGE_SIZE",
+    "QUERY_MAX",
+    "Author",
+    "BacktestCounts",
+    "BacktestInstrument",
+    "BacktestOut",
+    "BacktestRunner",
+    "BacktestSetup",
+    "BacktestShow",
+    "BacktestSort",
+    "BacktestStatus",
+    "BacktestUpdate",
+    "ExperimentCounts",
+    "ExperimentFacets",
+    "ExperimentOut",
+    "ExperimentSort",
+    "ExperimentsQuery",
+    "InstrumentMarket",
+    "ListQuery",
+    "ModelCount",
+    "Representation",
+    "SetupTimeframe",
+    "SortOrder",
+    "backtest_problems",
+    "backtest_runs",
+    "backtests_router",
+    "get_backtests_service",
+    "model_usage",
+    "update_problems",
+]

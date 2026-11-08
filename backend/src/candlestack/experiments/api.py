@@ -124,6 +124,42 @@ async def list_backtests(
     return await service.backtests(user.id, query)
 
 
+@contextmanager
+def update_problems() -> Iterator[None]:
+    """Raises the errors of starring, renaming, publishing or unpublishing a backtest
+    (``BacktestsService.update``) as problem details: for the route and the MCP tools."""
+    try:
+        yield
+    except BacktestNotFound:
+        raise ProblemError(
+            404, "not-found", "Not Found", "You have no backtest with this ID."
+        ) from None
+    except NameTaken as taken:
+        raise ProblemError(
+            409,
+            "name-taken",
+            "Name taken",
+            f"You already have a backtest called {taken.name} (#{taken.number}). Pick another "
+            "name.",
+            headers=NO_STORE,  # it names a backtest of the user
+        ) from None
+    except NoDocument:
+        raise ProblemError(
+            409,
+            "no-document",
+            "No result document",
+            "This backtest is test data from before backtests ran in the app, so it cannot be "
+            "published.",
+        ) from None
+    except BacktestNotFinished:
+        raise ProblemError(
+            409,
+            "backtest-not-finished",
+            "Backtest not finished",
+            "Only a finished backtest can be published.",
+        ) from None
+
+
 @router.patch(
     "/api/v1/backtests/{backtest_id}",
     responses={
@@ -165,36 +201,8 @@ async def update_backtest(
     }
     caller.require(*(scope for scope in Scope if scope in needed))
     response.headers.update(NO_STORE)
-    try:
+    with update_problems():
         return await service.update(caller.user.id, backtest_id, body)
-    except BacktestNotFound:
-        raise ProblemError(
-            404, "not-found", "Not Found", "You have no backtest with this ID."
-        ) from None
-    except NameTaken as taken:
-        raise ProblemError(
-            409,
-            "name-taken",
-            "Name taken",
-            f"You already have a backtest called {taken.name} (#{taken.number}). Pick another "
-            "name.",
-            headers=NO_STORE,  # it names a backtest of the user
-        ) from None
-    except NoDocument:
-        raise ProblemError(
-            409,
-            "no-document",
-            "No result document",
-            "This backtest is test data from before backtests ran in the app, so it cannot be "
-            "published.",
-        ) from None
-    except BacktestNotFinished:
-        raise ProblemError(
-            409,
-            "backtest-not-finished",
-            "Backtest not finished",
-            "Only a finished backtest can be published.",
-        ) from None
 
 
 def experiments_query(  # noqa: PLR0913 (one argument per query parameter)
@@ -368,9 +376,9 @@ def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911, P
 
 
 @contextmanager
-def _problems() -> Iterator[None]:
-    """Raises the errors of starting a backtest, of its document and of the market data they
-    load as problem details."""
+def backtest_problems() -> Iterator[None]:
+    """Raises the errors of starting or cancelling a backtest, of its document and of the
+    market data they load as problem details: for the routes and the MCP tools."""
     with data_problems():
         try:
             yield
@@ -436,7 +444,7 @@ async def start_backtest(
     before it fits the data and the candle limit, the user's queue has room, and the worker
     that runs the models can be reached. The run goes on after the response; the document
     (`GET /api/v1/backtests/{backtest_id}`) has the results once it finished."""
-    with _problems():
+    with backtest_problems():
         backtest, content = await runs.start(user.id, body)
     return _json(content, response, 201, {"Location": f"/api/v1/backtests/{backtest.id}"})
 
@@ -462,7 +470,7 @@ async def cancel_backtest(
 ) -> Response:
     """Cancels the user's queued backtest, so it never runs, and returns its document: `failed`,
     with an `error` that says it was cancelled. A running backtest cannot be cancelled."""
-    with _problems():
+    with backtest_problems():
         content = await runs.cancel(user.id, backtest_id)
     return _json(content, response)
 
@@ -486,7 +494,7 @@ async def get_backtest(
     it finished), or of another account's while it is published (`backtest.author`, read only,
     `model.id` null), in the light view: a series of more than 10,000 rows has one point per
     UTC day, and only the newest 10,000 trades are in it (`trades.complete` false)."""
-    with _problems():
+    with backtest_problems():
         _, content = await runs.document(user.id, backtest_id, light=True)
     return _json(content, response)
 
@@ -510,7 +518,7 @@ async def download_backtest(
 ) -> Response:
     """The result document of a finished backtest, the user's or a published one of another
     account, with every row of its series and every trade, as a file to save."""
-    with _problems():
+    with backtest_problems():
         number, content = await runs.document(user.id, backtest_id, light=False)
     disposition = f'attachment; filename="candlestack-backtest-{number}.json"'
     return _json(content, response, headers={"Content-Disposition": disposition})
@@ -559,7 +567,7 @@ async def compare_backtests(
     is that of `GET /api/v1/backtests/{backtest_id}`. It reads only what each
     backtest stored when it ran, so it loads no candles from a data source."""
     response.headers.update(NO_STORE)
-    with _problems():
+    with backtest_problems():
         try:
             return await compare(runs, user.id, parse_ids(ids))
         except NotComparable as error:

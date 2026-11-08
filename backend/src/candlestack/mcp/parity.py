@@ -90,13 +90,13 @@ PARITY: dict[str, Entry] = {
         "with get_backtest."
     ),
     "GET /api/v1/compare": Planned(404, ("compare_backtests",)),
-    "GET /api/v1/backtests": Planned(405, ("list_backtests",)),
-    "PATCH /api/v1/backtests/{backtest_id}": Planned(
-        405, ("rename_backtest", "star_backtest", "publish_backtest", "unpublish_backtest")
+    "GET /api/v1/backtests": Tools(("list_backtests",)),
+    "PATCH /api/v1/backtests/{backtest_id}": Tools(
+        ("rename_backtest", "star_backtest", "publish_backtest", "unpublish_backtest")
     ),
-    "POST /api/v1/backtests/{backtest_id}/cancel": Planned(405, ("cancel_backtest",)),
-    "GET /api/v1/experiments": Planned(405, ("list_experiments",)),
-    "GET /api/v1/dashboard": Planned(405, ("get_dashboard",)),
+    "POST /api/v1/backtests/{backtest_id}/cancel": Tools(("cancel_backtest",)),
+    "GET /api/v1/experiments": Tools(("list_experiments",)),
+    "GET /api/v1/dashboard": Tools(("get_dashboard",)),
 }
 
 

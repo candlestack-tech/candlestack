@@ -105,6 +105,2616 @@
         "read"
       ],
       "title": "Who am I"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Lists the user's backtests as the Backtests page does: search, show the starred, failed or published ones, one model's, sort by a result, 10 a page. Use it to find a backtest's ID by its name, number, instrument or model, or the best ones by a result. Answers the page, how many match, the counts of all, starred, failed and published backtests and the models used. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_backtests",
+      "endpoints": [
+        "GET /api/v1/backtests"
+      ],
+      "example": {
+        "arguments": {
+          "query": "aapl",
+          "sort": "sharpe"
+        },
+        "result": {
+          "backtests": [
+            {
+              "buy_and_hold_return": 0.682,
+              "created_at": "2026-10-24T09:30:00Z",
+              "error": null,
+              "id": "bt_7f3k2m9qx4",
+              "instruments": [
+                {
+                  "market": "stock",
+                  "symbol": "AAPL"
+                }
+              ],
+              "max_drawdown": -0.197,
+              "model": "blesk-novol-8.keras",
+              "model_id": "mdl_k2m9qx47f3",
+              "name": "Silent Orion",
+              "num_trades": 1712,
+              "number": 12,
+              "public": false,
+              "queue_position": null,
+              "representation": "renko",
+              "setup": {
+                "benchmark": "bh",
+                "direction": "long",
+                "fees_pct": 0.1,
+                "period_end": "2025-12-31",
+                "period_start": "2023-01-02",
+                "slippage_pct": 0.02,
+                "stop_loss_pct": 7,
+                "threshold": 0.05,
+                "timeframe": "1h"
+              },
+              "sharpe": 0.79,
+              "starred": true,
+              "status": "finished",
+              "total_return": 0.246,
+              "win_rate": 0.512
+            }
+          ],
+          "counts": {
+            "all": 15,
+            "failed": 2,
+            "public": 3,
+            "starred": 5
+          },
+          "models": [
+            {
+              "count": 9,
+              "framework": "keras",
+              "name": "blesk-novol-8.keras"
+            }
+          ],
+          "page": 1,
+          "pages": 1,
+          "total": 1
+        }
+      },
+      "inputSchema": {
+        "$defs": {
+          "BacktestShow": {
+            "description": "Which backtests the list shows: all, the starred, the failed or the published ones.",
+            "enum": [
+              "all",
+              "starred",
+              "failed",
+              "public"
+            ],
+            "title": "BacktestShow",
+            "type": "string"
+          },
+          "BacktestSort": {
+            "description": "What the list is sorted by. `default` is newest first (`order` does not apply); `when`\nsorts like `number`; `name` by the name, in any case. Backtests without the value (failed\nones) come last either way, and ties go by number, newest first.",
+            "enum": [
+              "default",
+              "number",
+              "name",
+              "model",
+              "return",
+              "sharpe",
+              "max_drawdown",
+              "trades",
+              "when"
+            ],
+            "title": "BacktestSort",
+            "type": "string"
+          },
+          "SortOrder": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "SortOrder",
+            "type": "string"
+          }
+        },
+        "properties": {
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only the backtests of the model with this name (one of `models`)",
+            "title": "Model"
+          },
+          "order": {
+            "$ref": "#/$defs/SortOrder",
+            "default": "desc",
+            "description": "Direction of the sort; the default sort is newest first anyway"
+          },
+          "page": {
+            "default": 1,
+            "description": "The page, from 1",
+            "maximum": 100000,
+            "minimum": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "query": {
+            "default": "",
+            "description": "Search: part of the name, of the number (#12 or 12), of an instrument's symbol or of the model's name, in any case",
+            "maxLength": 100,
+            "title": "Query",
+            "type": "string"
+          },
+          "show": {
+            "$ref": "#/$defs/BacktestShow",
+            "default": "all",
+            "description": "All, the starred, the failed or the published ones"
+          },
+          "sort": {
+            "$ref": "#/$defs/BacktestSort",
+            "default": "default",
+            "description": "What to sort by; those without the value (failed ones) come last"
+          }
+        },
+        "title": "list_backtestsArguments",
+        "type": "object"
+      },
+      "name": "list_backtests",
+      "outputSchema": {
+        "$defs": {
+          "BacktestCounts": {
+            "description": "The user's backtests in all, starred, failed and published.",
+            "properties": {
+              "all": {
+                "examples": [
+                  15
+                ],
+                "title": "All",
+                "type": "integer"
+              },
+              "failed": {
+                "examples": [
+                  2
+                ],
+                "title": "Failed",
+                "type": "integer"
+              },
+              "public": {
+                "description": "Published in Experiments",
+                "examples": [
+                  3
+                ],
+                "title": "Public",
+                "type": "integer"
+              },
+              "starred": {
+                "examples": [
+                  5
+                ],
+                "title": "Starred",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "all",
+              "starred",
+              "failed",
+              "public"
+            ],
+            "title": "BacktestCounts",
+            "type": "object"
+          },
+          "BacktestInstrument": {
+            "properties": {
+              "market": {
+                "$ref": "#/$defs/InstrumentMarket"
+              },
+              "symbol": {
+                "description": "Symbol as the market data API names it",
+                "examples": [
+                  "AAPL"
+                ],
+                "title": "Symbol",
+                "type": "string"
+              }
+            },
+            "required": [
+              "market",
+              "symbol"
+            ],
+            "title": "BacktestInstrument",
+            "type": "object"
+          },
+          "BacktestSetup": {
+            "description": "The settings a backtest ran with: the fields of Settings, Backtest defaults.",
+            "properties": {
+              "benchmark": {
+                "$ref": "#/$defs/SetupBenchmark"
+              },
+              "direction": {
+                "$ref": "#/$defs/SetupDirection"
+              },
+              "fees_pct": {
+                "description": "Fees in percent per side",
+                "title": "Fees Pct",
+                "type": "number"
+              },
+              "period_end": {
+                "description": "Last day of the test",
+                "format": "date",
+                "title": "Period End",
+                "type": "string"
+              },
+              "period_start": {
+                "description": "First day of the test",
+                "format": "date",
+                "title": "Period Start",
+                "type": "string"
+              },
+              "slippage_pct": {
+                "description": "Slippage in percent",
+                "title": "Slippage Pct",
+                "type": "number"
+              },
+              "stop_loss_pct": {
+                "description": "Exit when a trade loses this many percent",
+                "title": "Stop Loss Pct",
+                "type": "integer"
+              },
+              "threshold": {
+                "description": "Signal strength to trade",
+                "title": "Threshold",
+                "type": "number"
+              },
+              "timeframe": {
+                "$ref": "#/$defs/SetupTimeframe"
+              }
+            },
+            "required": [
+              "timeframe",
+              "period_start",
+              "period_end",
+              "direction",
+              "threshold",
+              "stop_loss_pct",
+              "fees_pct",
+              "slippage_pct",
+              "benchmark"
+            ],
+            "title": "BacktestSetup",
+            "type": "object"
+          },
+          "BacktestStatus": {
+            "description": "`queued` (it waits for the user's running backtest to end), `running`, `finished` (it\nhas results) or `failed` (it has an error, also when it was cancelled before it ran).",
+            "enum": [
+              "queued",
+              "running",
+              "finished",
+              "failed"
+            ],
+            "title": "BacktestStatus",
+            "type": "string"
+          },
+          "BacktestSummary": {
+            "description": "A backtest of the user. Returns and rates are fractions (0.246 is 24.6 %); the results\nare null for a backtest that did not finish.",
+            "properties": {
+              "buy_and_hold_return": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Return of holding the instruments",
+                "title": "Buy And Hold Return"
+              },
+              "created_at": {
+                "description": "When it was started (UTC)",
+                "format": "date-time",
+                "title": "Created At",
+                "type": "string"
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "What went wrong, for a failed backtest; else null",
+                "title": "Error"
+              },
+              "id": {
+                "description": "Public ID of the backtest",
+                "title": "Id",
+                "type": "string"
+              },
+              "instruments": {
+                "items": {
+                  "$ref": "#/$defs/BacktestInstrument"
+                },
+                "title": "Instruments",
+                "type": "array"
+              },
+              "max_drawdown": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Largest fall from a peak, negative",
+                "title": "Max Drawdown"
+              },
+              "model": {
+                "description": "Name of the model it ran",
+                "title": "Model",
+                "type": "string"
+              },
+              "model_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Public ID of the model; null once it was deleted",
+                "title": "Model Id"
+              },
+              "name": {
+                "description": "Its name, unique in the account ignoring case",
+                "title": "Name",
+                "type": "string"
+              },
+              "num_trades": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Num Trades"
+              },
+              "number": {
+                "description": "The user's own number of the backtest, shown as #N",
+                "title": "Number",
+                "type": "integer"
+              },
+              "public": {
+                "description": "Published in Experiments, visible to every beta account",
+                "title": "Public",
+                "type": "boolean"
+              },
+              "queue_position": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Where a queued backtest is in the queue, 1 starts next; else null",
+                "title": "Queue Position"
+              },
+              "representation": {
+                "$ref": "#/$defs/Representation",
+                "description": "What the model reads"
+              },
+              "setup": {
+                "$ref": "#/$defs/BacktestSetup"
+              },
+              "sharpe": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Sharpe ratio, per year",
+                "title": "Sharpe"
+              },
+              "starred": {
+                "title": "Starred",
+                "type": "boolean"
+              },
+              "status": {
+                "$ref": "#/$defs/BacktestStatus"
+              },
+              "total_return": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Return of the strategy",
+                "title": "Total Return"
+              },
+              "win_rate": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Share of the trades that made money",
+                "title": "Win Rate"
+              }
+            },
+            "required": [
+              "id",
+              "number",
+              "name",
+              "status",
+              "queue_position",
+              "error",
+              "model",
+              "model_id",
+              "instruments",
+              "representation",
+              "setup",
+              "total_return",
+              "buy_and_hold_return",
+              "sharpe",
+              "max_drawdown",
+              "win_rate",
+              "num_trades",
+              "starred",
+              "public",
+              "created_at"
+            ],
+            "title": "BacktestSummary",
+            "type": "object"
+          },
+          "InstrumentMarket": {
+            "description": "The market of an instrument, as the market data API names it.",
+            "enum": [
+              "crypto",
+              "stock"
+            ],
+            "title": "InstrumentMarket",
+            "type": "string"
+          },
+          "ModelCount": {
+            "description": "A model the user's backtests used, by the name they show for it.",
+            "properties": {
+              "count": {
+                "description": "Backtests that used it",
+                "examples": [
+                  9
+                ],
+                "title": "Count",
+                "type": "integer"
+              },
+              "framework": {
+                "examples": [
+                  "keras"
+                ],
+                "title": "Framework",
+                "type": "string"
+              },
+              "name": {
+                "examples": [
+                  "blesk-novol-8.keras"
+                ],
+                "title": "Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "framework",
+              "count"
+            ],
+            "title": "ModelCount",
+            "type": "object"
+          },
+          "Representation": {
+            "description": "What the model reads: Renko bricks, a Kagi line or time windows of candles.",
+            "enum": [
+              "renko",
+              "kagi",
+              "windows"
+            ],
+            "title": "Representation",
+            "type": "string"
+          },
+          "SetupBenchmark": {
+            "description": "What a backtest is measured against: buy and hold of its own instruments, or an ETF.",
+            "enum": [
+              "bh",
+              "SPY",
+              "QQQ",
+              "DIA"
+            ],
+            "title": "SetupBenchmark",
+            "type": "string"
+          },
+          "SetupDirection": {
+            "enum": [
+              "long",
+              "both"
+            ],
+            "title": "SetupDirection",
+            "type": "string"
+          },
+          "SetupTimeframe": {
+            "description": "Timeframes a backtest runs on: those of the data.",
+            "enum": [
+              "1m",
+              "5m",
+              "15m",
+              "30m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "SetupTimeframe",
+            "type": "string"
+          }
+        },
+        "description": "A page of the user's backtests that match, and the filter choices.",
+        "properties": {
+          "backtests": {
+            "description": "At most 10 backtests",
+            "items": {
+              "$ref": "#/$defs/BacktestSummary"
+            },
+            "title": "Backtests",
+            "type": "array"
+          },
+          "counts": {
+            "$ref": "#/$defs/BacktestCounts",
+            "description": "All the user's backtests, whatever the filters"
+          },
+          "models": {
+            "description": "Every model the backtests used, the most used first: the values of `model`",
+            "items": {
+              "$ref": "#/$defs/ModelCount"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "description": "Pages of the backtests that match, at least 1",
+            "title": "Pages",
+            "type": "integer"
+          },
+          "total": {
+            "description": "Backtests that match the search and the filters",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "backtests",
+          "total",
+          "page",
+          "pages",
+          "counts",
+          "models"
+        ],
+        "title": "BacktestList",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "List backtests"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Renames one of the user's backtests, or with a name of null gives it back the name it got when it was created. Answers the problem name-taken when another backtest of the user has the name, in any case.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#rename_backtest",
+      "endpoints": [
+        "PATCH /api/v1/backtests/{backtest_id}"
+      ],
+      "example": {
+        "arguments": {
+          "backtest_id": "bt_7f3k2m9qx4",
+          "name": "AAPL renko, long only"
+        },
+        "result": {
+          "id": "bt_7f3k2m9qx4",
+          "name": "AAPL renko, long only",
+          "number": 12,
+          "public": false,
+          "starred": true,
+          "status": "finished"
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "backtest_id": {
+            "description": "Public ID of the backtest, from list_backtests",
+            "examples": [
+              "bt_7f3k2m9qx4"
+            ],
+            "title": "Backtest Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The new name, 1 to 80 characters, unique in the account ignoring case; null goes back to the name it got when it was created",
+            "title": "Name"
+          }
+        },
+        "required": [
+          "backtest_id",
+          "name"
+        ],
+        "title": "rename_backtestArguments",
+        "type": "object"
+      },
+      "name": "rename_backtest",
+      "outputSchema": {
+        "$defs": {
+          "BacktestStatus": {
+            "description": "`queued` (it waits for the user's running backtest to end), `running`, `finished` (it\nhas results) or `failed` (it has an error, also when it was cancelled before it ran).",
+            "enum": [
+              "queued",
+              "running",
+              "finished",
+              "failed"
+            ],
+            "title": "BacktestStatus",
+            "type": "string"
+          }
+        },
+        "description": "The backtest after the change.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its name now",
+            "title": "Name",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "public": {
+            "description": "Published in Experiments, visible to every beta account",
+            "title": "Public",
+            "type": "boolean"
+          },
+          "starred": {
+            "title": "Starred",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/$defs/BacktestStatus"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "name",
+          "status",
+          "starred",
+          "public"
+        ],
+        "title": "BacktestState",
+        "type": "object"
+      },
+      "scopes": [
+        "backtests"
+      ],
+      "title": "Rename a backtest"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Stars one of the user's backtests, or unstars it with starred false. Starred backtests are listed with show starred in list_backtests and on the Dashboard.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#star_backtest",
+      "endpoints": [
+        "PATCH /api/v1/backtests/{backtest_id}"
+      ],
+      "example": {
+        "arguments": {
+          "backtest_id": "bt_7f3k2m9qx4"
+        },
+        "result": {
+          "id": "bt_7f3k2m9qx4",
+          "name": "Silent Orion",
+          "number": 12,
+          "public": false,
+          "starred": true,
+          "status": "finished"
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "backtest_id": {
+            "description": "Public ID of the backtest, from list_backtests",
+            "examples": [
+              "bt_7f3k2m9qx4"
+            ],
+            "title": "Backtest Id",
+            "type": "string"
+          },
+          "starred": {
+            "default": true,
+            "description": "true stars it, false unstars it",
+            "title": "Starred",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "backtest_id"
+        ],
+        "title": "star_backtestArguments",
+        "type": "object"
+      },
+      "name": "star_backtest",
+      "outputSchema": {
+        "$defs": {
+          "BacktestStatus": {
+            "description": "`queued` (it waits for the user's running backtest to end), `running`, `finished` (it\nhas results) or `failed` (it has an error, also when it was cancelled before it ran).",
+            "enum": [
+              "queued",
+              "running",
+              "finished",
+              "failed"
+            ],
+            "title": "BacktestStatus",
+            "type": "string"
+          }
+        },
+        "description": "The backtest after the change.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its name now",
+            "title": "Name",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "public": {
+            "description": "Published in Experiments, visible to every beta account",
+            "title": "Public",
+            "type": "boolean"
+          },
+          "starred": {
+            "title": "Starred",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/$defs/BacktestStatus"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "name",
+          "status",
+          "starred",
+          "public"
+        ],
+        "title": "BacktestState",
+        "type": "object"
+      },
+      "scopes": [
+        "backtests"
+      ],
+      "title": "Star a backtest"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Cancels one of the user's queued backtests, so it never runs: it becomes failed, with an error that says it was cancelled, and stays in the list. Only a queued backtest can be cancelled; a running or ended one answers the problem backtest-not-queued.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#cancel_backtest",
+      "endpoints": [
+        "POST /api/v1/backtests/{backtest_id}/cancel"
+      ],
+      "example": {
+        "arguments": {
+          "backtest_id": "bt_t9n8v7d6a5"
+        },
+        "result": {
+          "error": "You cancelled the backtest before it ran.",
+          "id": "bt_t9n8v7d6a5",
+          "name": "Quiet Vega",
+          "number": 14,
+          "status": "failed"
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "backtest_id": {
+            "description": "Public ID of the backtest, from list_backtests",
+            "examples": [
+              "bt_7f3k2m9qx4"
+            ],
+            "title": "Backtest Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "backtest_id"
+        ],
+        "title": "cancel_backtestArguments",
+        "type": "object"
+      },
+      "name": "cancel_backtest",
+      "outputSchema": {
+        "$defs": {
+          "BacktestStatus": {
+            "description": "`queued` (it waits for the user's running backtest to end), `running`, `finished` (it\nhas results) or `failed` (it has an error, also when it was cancelled before it ran).",
+            "enum": [
+              "queued",
+              "running",
+              "finished",
+              "failed"
+            ],
+            "title": "BacktestStatus",
+            "type": "string"
+          }
+        },
+        "description": "The backtest after it was cancelled: `failed`, with an error that says so.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/$defs/BacktestStatus"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "name",
+          "status",
+          "error"
+        ],
+        "title": "CancelledBacktest",
+        "type": "object"
+      },
+      "scopes": [
+        "backtests"
+      ],
+      "title": "Cancel a queued backtest"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Lists Experiments: the backtests that accounts of the beta published, which every signed-in account can see, with search, filters (author, market, symbol, representation, timeframe), sort and 12 a page. Use it to find what others tried and how it did, then read one with its ID. Answers the page, how many match, the counts and the values each filter offers. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_experiments",
+      "endpoints": [
+        "GET /api/v1/experiments"
+      ],
+      "example": {
+        "arguments": {
+          "sort": "sharpe",
+          "symbol": "AAPL"
+        },
+        "result": {
+          "counts": {
+            "all": 25,
+            "mine": 2,
+            "people": 7
+          },
+          "experiments": [
+            {
+              "author": {
+                "id": "usr_7f3k2m9qx4",
+                "mine": false,
+                "name": "Tymur Tkach"
+              },
+              "benchmark_return": 0.682,
+              "buy_and_hold_return": 0.682,
+              "id": "bt_7f3k2m9qx4",
+              "instruments": [
+                {
+                  "market": "stock",
+                  "symbol": "AAPL"
+                }
+              ],
+              "max_drawdown": -0.197,
+              "model": "blesk-novol-8.keras",
+              "name": "Silent Orion",
+              "num_trades": 1712,
+              "number": 12,
+              "published_at": "2026-10-25T18:05:00Z",
+              "representation": "renko",
+              "setup": {
+                "benchmark": "bh",
+                "direction": "long",
+                "fees_pct": 0.1,
+                "period_end": "2025-12-31",
+                "period_start": "2023-01-02",
+                "slippage_pct": 0.02,
+                "stop_loss_pct": 7,
+                "threshold": 0.05,
+                "timeframe": "1h"
+              },
+              "sharpe": 0.79,
+              "total_return": 0.246,
+              "win_rate": 0.512
+            }
+          ],
+          "facets": {
+            "instruments": [
+              {
+                "count": 1,
+                "market": "stock",
+                "symbol": "AAPL"
+              }
+            ],
+            "markets": [
+              {
+                "count": 1,
+                "value": "stock"
+              }
+            ],
+            "representations": [
+              {
+                "count": 1,
+                "value": "renko"
+              }
+            ],
+            "timeframes": [
+              {
+                "count": 1,
+                "value": "1h"
+              }
+            ]
+          },
+          "page": 1,
+          "pages": 1,
+          "total": 1
+        }
+      },
+      "inputSchema": {
+        "$defs": {
+          "ExperimentSort": {
+            "description": "What Experiments is sorted by. `newest` is the newest published first (`order` does not\napply); `name` by the name, in any case; the others put those without the value last, and\nties go newest published first.",
+            "enum": [
+              "newest",
+              "name",
+              "return",
+              "sharpe",
+              "max_drawdown",
+              "trades"
+            ],
+            "title": "ExperimentSort",
+            "type": "string"
+          },
+          "InstrumentMarket": {
+            "description": "The market of an instrument, as the market data API names it.",
+            "enum": [
+              "crypto",
+              "stock"
+            ],
+            "title": "InstrumentMarket",
+            "type": "string"
+          },
+          "Representation": {
+            "description": "What the model reads: Renko bricks, a Kagi line or time windows of candles.",
+            "enum": [
+              "renko",
+              "kagi",
+              "windows"
+            ],
+            "title": "Representation",
+            "type": "string"
+          },
+          "SetupTimeframe": {
+            "description": "Timeframes a backtest runs on: those of the data.",
+            "enum": [
+              "1m",
+              "5m",
+              "15m",
+              "30m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "SetupTimeframe",
+            "type": "string"
+          },
+          "SortOrder": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "SortOrder",
+            "type": "string"
+          }
+        },
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only this account's (`author.id`, usr_...)",
+            "title": "Author"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InstrumentMarket"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only this market"
+          },
+          "mine": {
+            "default": false,
+            "description": "Only the user's own published backtests",
+            "title": "Mine",
+            "type": "boolean"
+          },
+          "order": {
+            "$ref": "#/$defs/SortOrder",
+            "default": "desc",
+            "description": "Direction of the sort; the default sort is newest first anyway"
+          },
+          "page": {
+            "default": 1,
+            "description": "The page, from 1",
+            "maximum": 100000,
+            "minimum": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "query": {
+            "default": "",
+            "description": "Search: part of the backtest's name, of an instrument's symbol, of the model's name or of the author's name, in any case",
+            "maxLength": 100,
+            "title": "Query",
+            "type": "string"
+          },
+          "representation": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Representation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only models that read this"
+          },
+          "sort": {
+            "$ref": "#/$defs/ExperimentSort",
+            "default": "newest",
+            "description": "What to sort by; newest is the newest published first"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only this instrument's symbol",
+            "title": "Symbol"
+          },
+          "timeframe": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SetupTimeframe"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only this timeframe"
+          }
+        },
+        "title": "list_experimentsArguments",
+        "type": "object"
+      },
+      "name": "list_experiments",
+      "outputSchema": {
+        "$defs": {
+          "Author": {
+            "description": "Who published a backtest: their display name, never their email.",
+            "properties": {
+              "id": {
+                "description": "Public ID of the account",
+                "examples": [
+                  "usr_7f3k2m9qx4"
+                ],
+                "title": "Id",
+                "type": "string"
+              },
+              "mine": {
+                "description": "The signed-in user published it",
+                "title": "Mine",
+                "type": "boolean"
+              },
+              "name": {
+                "description": "The account's display name",
+                "examples": [
+                  "Tymur Tkach"
+                ],
+                "title": "Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "mine"
+            ],
+            "title": "Author",
+            "type": "object"
+          },
+          "BacktestInstrument": {
+            "properties": {
+              "market": {
+                "$ref": "#/$defs/InstrumentMarket"
+              },
+              "symbol": {
+                "description": "Symbol as the market data API names it",
+                "examples": [
+                  "AAPL"
+                ],
+                "title": "Symbol",
+                "type": "string"
+              }
+            },
+            "required": [
+              "market",
+              "symbol"
+            ],
+            "title": "BacktestInstrument",
+            "type": "object"
+          },
+          "BacktestSetup": {
+            "description": "The settings a backtest ran with: the fields of Settings, Backtest defaults.",
+            "properties": {
+              "benchmark": {
+                "$ref": "#/$defs/SetupBenchmark"
+              },
+              "direction": {
+                "$ref": "#/$defs/SetupDirection"
+              },
+              "fees_pct": {
+                "description": "Fees in percent per side",
+                "title": "Fees Pct",
+                "type": "number"
+              },
+              "period_end": {
+                "description": "Last day of the test",
+                "format": "date",
+                "title": "Period End",
+                "type": "string"
+              },
+              "period_start": {
+                "description": "First day of the test",
+                "format": "date",
+                "title": "Period Start",
+                "type": "string"
+              },
+              "slippage_pct": {
+                "description": "Slippage in percent",
+                "title": "Slippage Pct",
+                "type": "number"
+              },
+              "stop_loss_pct": {
+                "description": "Exit when a trade loses this many percent",
+                "title": "Stop Loss Pct",
+                "type": "integer"
+              },
+              "threshold": {
+                "description": "Signal strength to trade",
+                "title": "Threshold",
+                "type": "number"
+              },
+              "timeframe": {
+                "$ref": "#/$defs/SetupTimeframe"
+              }
+            },
+            "required": [
+              "timeframe",
+              "period_start",
+              "period_end",
+              "direction",
+              "threshold",
+              "stop_loss_pct",
+              "fees_pct",
+              "slippage_pct",
+              "benchmark"
+            ],
+            "title": "BacktestSetup",
+            "type": "object"
+          },
+          "ExperimentCounts": {
+            "properties": {
+              "all": {
+                "description": "Every published backtest",
+                "examples": [
+                  25
+                ],
+                "title": "All",
+                "type": "integer"
+              },
+              "mine": {
+                "description": "Those the signed-in user published",
+                "examples": [
+                  2
+                ],
+                "title": "Mine",
+                "type": "integer"
+              },
+              "people": {
+                "description": "Accounts that published one",
+                "examples": [
+                  7
+                ],
+                "title": "People",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "all",
+              "mine",
+              "people"
+            ],
+            "title": "ExperimentCounts",
+            "type": "object"
+          },
+          "ExperimentFacets": {
+            "description": "What the filters offer, with the count of each choice: over the published backtests of\nthe scope (all, mine or one author) and the search, whatever the filters chosen.",
+            "properties": {
+              "instruments": {
+                "description": "The most published first",
+                "items": {
+                  "$ref": "#/$defs/InstrumentCount"
+                },
+                "title": "Instruments",
+                "type": "array"
+              },
+              "markets": {
+                "description": "`stock`, `crypto`",
+                "items": {
+                  "$ref": "#/$defs/FacetCount"
+                },
+                "title": "Markets",
+                "type": "array"
+              },
+              "representations": {
+                "description": "`renko`, `kagi`, `windows`",
+                "items": {
+                  "$ref": "#/$defs/FacetCount"
+                },
+                "title": "Representations",
+                "type": "array"
+              },
+              "timeframes": {
+                "description": "`1m` to `1d`, in that order",
+                "items": {
+                  "$ref": "#/$defs/FacetCount"
+                },
+                "title": "Timeframes",
+                "type": "array"
+              }
+            },
+            "required": [
+              "markets",
+              "instruments",
+              "representations",
+              "timeframes"
+            ],
+            "title": "ExperimentFacets",
+            "type": "object"
+          },
+          "ExperimentSummary": {
+            "description": "A published backtest as every beta account sees it: its setup and results, never the\nmodel file. Returns and rates are fractions.",
+            "properties": {
+              "author": {
+                "$ref": "#/$defs/Author"
+              },
+              "benchmark_return": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Return of `setup.benchmark`",
+                "title": "Benchmark Return"
+              },
+              "buy_and_hold_return": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Buy And Hold Return"
+              },
+              "id": {
+                "description": "Public ID of the backtest; get_backtest reads it",
+                "title": "Id",
+                "type": "string"
+              },
+              "instruments": {
+                "items": {
+                  "$ref": "#/$defs/BacktestInstrument"
+                },
+                "title": "Instruments",
+                "type": "array"
+              },
+              "max_drawdown": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Max Drawdown"
+              },
+              "model": {
+                "description": "Name of the model when it ran",
+                "title": "Model",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "num_trades": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Num Trades"
+              },
+              "number": {
+                "description": "The author's own number of the backtest",
+                "title": "Number",
+                "type": "integer"
+              },
+              "published_at": {
+                "format": "date-time",
+                "title": "Published At",
+                "type": "string"
+              },
+              "representation": {
+                "$ref": "#/$defs/Representation"
+              },
+              "setup": {
+                "$ref": "#/$defs/BacktestSetup"
+              },
+              "sharpe": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Sharpe"
+              },
+              "total_return": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Total Return"
+              },
+              "win_rate": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Win Rate"
+              }
+            },
+            "required": [
+              "id",
+              "number",
+              "name",
+              "author",
+              "model",
+              "instruments",
+              "representation",
+              "setup",
+              "total_return",
+              "benchmark_return",
+              "buy_and_hold_return",
+              "sharpe",
+              "max_drawdown",
+              "win_rate",
+              "num_trades",
+              "published_at"
+            ],
+            "title": "ExperimentSummary",
+            "type": "object"
+          },
+          "FacetCount": {
+            "description": "One choice of a filter and how many published backtests have it.",
+            "properties": {
+              "count": {
+                "examples": [
+                  9
+                ],
+                "title": "Count",
+                "type": "integer"
+              },
+              "value": {
+                "examples": [
+                  "renko"
+                ],
+                "title": "Value",
+                "type": "string"
+              }
+            },
+            "required": [
+              "value",
+              "count"
+            ],
+            "title": "FacetCount",
+            "type": "object"
+          },
+          "InstrumentCount": {
+            "properties": {
+              "count": {
+                "examples": [
+                  4
+                ],
+                "title": "Count",
+                "type": "integer"
+              },
+              "market": {
+                "$ref": "#/$defs/InstrumentMarket"
+              },
+              "symbol": {
+                "examples": [
+                  "AAPL"
+                ],
+                "title": "Symbol",
+                "type": "string"
+              }
+            },
+            "required": [
+              "market",
+              "symbol",
+              "count"
+            ],
+            "title": "InstrumentCount",
+            "type": "object"
+          },
+          "InstrumentMarket": {
+            "description": "The market of an instrument, as the market data API names it.",
+            "enum": [
+              "crypto",
+              "stock"
+            ],
+            "title": "InstrumentMarket",
+            "type": "string"
+          },
+          "Representation": {
+            "description": "What the model reads: Renko bricks, a Kagi line or time windows of candles.",
+            "enum": [
+              "renko",
+              "kagi",
+              "windows"
+            ],
+            "title": "Representation",
+            "type": "string"
+          },
+          "SetupBenchmark": {
+            "description": "What a backtest is measured against: buy and hold of its own instruments, or an ETF.",
+            "enum": [
+              "bh",
+              "SPY",
+              "QQQ",
+              "DIA"
+            ],
+            "title": "SetupBenchmark",
+            "type": "string"
+          },
+          "SetupDirection": {
+            "enum": [
+              "long",
+              "both"
+            ],
+            "title": "SetupDirection",
+            "type": "string"
+          },
+          "SetupTimeframe": {
+            "description": "Timeframes a backtest runs on: those of the data.",
+            "enum": [
+              "1m",
+              "5m",
+              "15m",
+              "30m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "SetupTimeframe",
+            "type": "string"
+          }
+        },
+        "description": "A page of Experiments that match, the counts and what the filters offer.",
+        "properties": {
+          "counts": {
+            "$ref": "#/$defs/ExperimentCounts"
+          },
+          "experiments": {
+            "description": "At most 12 published backtests",
+            "items": {
+              "$ref": "#/$defs/ExperimentSummary"
+            },
+            "title": "Experiments",
+            "type": "array"
+          },
+          "facets": {
+            "$ref": "#/$defs/ExperimentFacets",
+            "description": "The values each filter offers, with counts, over the scope and the search"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "description": "Pages of those that match, at least 1",
+            "title": "Pages",
+            "type": "integer"
+          },
+          "total": {
+            "description": "Published backtests that match",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "experiments",
+          "total",
+          "page",
+          "pages",
+          "counts",
+          "facets"
+        ],
+        "title": "ExperimentList",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "List Experiments"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Publishes one of the user's finished backtests in Experiments: it becomes visible to every account of the beta, with its name, the user's display name, its setup, results, charts and trades and its model's name and input (never the model file), and others can compare with it. Ask the user before publishing. Publishing one that is published already changes nothing. A queued, running or failed backtest answers backtest-not-finished.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#publish_backtest",
+      "endpoints": [
+        "PATCH /api/v1/backtests/{backtest_id}"
+      ],
+      "example": {
+        "arguments": {
+          "backtest_id": "bt_7f3k2m9qx4"
+        },
+        "result": {
+          "id": "bt_7f3k2m9qx4",
+          "name": "Silent Orion",
+          "number": 12,
+          "public": true,
+          "starred": true,
+          "status": "finished"
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "backtest_id": {
+            "description": "Public ID of the backtest, from list_backtests",
+            "examples": [
+              "bt_7f3k2m9qx4"
+            ],
+            "title": "Backtest Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "backtest_id"
+        ],
+        "title": "publish_backtestArguments",
+        "type": "object"
+      },
+      "name": "publish_backtest",
+      "outputSchema": {
+        "$defs": {
+          "BacktestStatus": {
+            "description": "`queued` (it waits for the user's running backtest to end), `running`, `finished` (it\nhas results) or `failed` (it has an error, also when it was cancelled before it ran).",
+            "enum": [
+              "queued",
+              "running",
+              "finished",
+              "failed"
+            ],
+            "title": "BacktestStatus",
+            "type": "string"
+          }
+        },
+        "description": "The backtest after the change.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its name now",
+            "title": "Name",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "public": {
+            "description": "Published in Experiments, visible to every beta account",
+            "title": "Public",
+            "type": "boolean"
+          },
+          "starred": {
+            "title": "Starred",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/$defs/BacktestStatus"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "name",
+          "status",
+          "starred",
+          "public"
+        ],
+        "title": "BacktestState",
+        "type": "object"
+      },
+      "scopes": [
+        "publish"
+      ],
+      "title": "Publish a backtest"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Takes one of the user's backtests out of Experiments: no other account can see it any more, and it leaves their comparisons. The backtest itself stays. Ask the user first.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#unpublish_backtest",
+      "endpoints": [
+        "PATCH /api/v1/backtests/{backtest_id}"
+      ],
+      "example": {
+        "arguments": {
+          "backtest_id": "bt_7f3k2m9qx4"
+        },
+        "result": {
+          "id": "bt_7f3k2m9qx4",
+          "name": "Silent Orion",
+          "number": 12,
+          "public": false,
+          "starred": true,
+          "status": "finished"
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "backtest_id": {
+            "description": "Public ID of the backtest, from list_backtests",
+            "examples": [
+              "bt_7f3k2m9qx4"
+            ],
+            "title": "Backtest Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "backtest_id"
+        ],
+        "title": "unpublish_backtestArguments",
+        "type": "object"
+      },
+      "name": "unpublish_backtest",
+      "outputSchema": {
+        "$defs": {
+          "BacktestStatus": {
+            "description": "`queued` (it waits for the user's running backtest to end), `running`, `finished` (it\nhas results) or `failed` (it has an error, also when it was cancelled before it ran).",
+            "enum": [
+              "queued",
+              "running",
+              "finished",
+              "failed"
+            ],
+            "title": "BacktestStatus",
+            "type": "string"
+          }
+        },
+        "description": "The backtest after the change.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its name now",
+            "title": "Name",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "public": {
+            "description": "Published in Experiments, visible to every beta account",
+            "title": "Public",
+            "type": "boolean"
+          },
+          "starred": {
+            "title": "Starred",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/$defs/BacktestStatus"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "name",
+          "status",
+          "starred",
+          "public"
+        ],
+        "title": "BacktestState",
+        "type": "object"
+      },
+      "scopes": [
+        "publish"
+      ],
+      "title": "Unpublish a backtest"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "The user's Dashboard in one call: the counts of all, starred, failed and published backtests, the 6 newest that ended, the 5 best finished ones by Sharpe ratio, return, drawdown and win rate, and the 4 best starred ones. Call it for an overview before digging in with list_backtests.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_dashboard",
+      "endpoints": [
+        "GET /api/v1/dashboard"
+      ],
+      "example": {
+        "arguments": {},
+        "result": {
+          "best": {
+            "max_drawdown": [
+              {
+                "buy_and_hold_return": 0.682,
+                "created_at": "2026-10-24T09:30:00Z",
+                "error": null,
+                "id": "bt_7f3k2m9qx4",
+                "instruments": [
+                  {
+                    "market": "stock",
+                    "symbol": "AAPL"
+                  }
+                ],
+                "max_drawdown": -0.197,
+                "model": "blesk-novol-8.keras",
+                "model_id": "mdl_k2m9qx47f3",
+                "name": "Silent Orion",
+                "num_trades": 1712,
+                "number": 12,
+                "public": false,
+                "queue_position": null,
+                "representation": "renko",
+                "setup": {
+                  "benchmark": "bh",
+                  "direction": "long",
+                  "fees_pct": 0.1,
+                  "period_end": "2025-12-31",
+                  "period_start": "2023-01-02",
+                  "slippage_pct": 0.02,
+                  "stop_loss_pct": 7,
+                  "threshold": 0.05,
+                  "timeframe": "1h"
+                },
+                "sharpe": 0.79,
+                "starred": true,
+                "status": "finished",
+                "total_return": 0.246,
+                "win_rate": 0.512
+              }
+            ],
+            "sharpe": [
+              {
+                "buy_and_hold_return": 0.682,
+                "created_at": "2026-10-24T09:30:00Z",
+                "error": null,
+                "id": "bt_7f3k2m9qx4",
+                "instruments": [
+                  {
+                    "market": "stock",
+                    "symbol": "AAPL"
+                  }
+                ],
+                "max_drawdown": -0.197,
+                "model": "blesk-novol-8.keras",
+                "model_id": "mdl_k2m9qx47f3",
+                "name": "Silent Orion",
+                "num_trades": 1712,
+                "number": 12,
+                "public": false,
+                "queue_position": null,
+                "representation": "renko",
+                "setup": {
+                  "benchmark": "bh",
+                  "direction": "long",
+                  "fees_pct": 0.1,
+                  "period_end": "2025-12-31",
+                  "period_start": "2023-01-02",
+                  "slippage_pct": 0.02,
+                  "stop_loss_pct": 7,
+                  "threshold": 0.05,
+                  "timeframe": "1h"
+                },
+                "sharpe": 0.79,
+                "starred": true,
+                "status": "finished",
+                "total_return": 0.246,
+                "win_rate": 0.512
+              }
+            ],
+            "total_return": [
+              {
+                "buy_and_hold_return": 0.682,
+                "created_at": "2026-10-24T09:30:00Z",
+                "error": null,
+                "id": "bt_7f3k2m9qx4",
+                "instruments": [
+                  {
+                    "market": "stock",
+                    "symbol": "AAPL"
+                  }
+                ],
+                "max_drawdown": -0.197,
+                "model": "blesk-novol-8.keras",
+                "model_id": "mdl_k2m9qx47f3",
+                "name": "Silent Orion",
+                "num_trades": 1712,
+                "number": 12,
+                "public": false,
+                "queue_position": null,
+                "representation": "renko",
+                "setup": {
+                  "benchmark": "bh",
+                  "direction": "long",
+                  "fees_pct": 0.1,
+                  "period_end": "2025-12-31",
+                  "period_start": "2023-01-02",
+                  "slippage_pct": 0.02,
+                  "stop_loss_pct": 7,
+                  "threshold": 0.05,
+                  "timeframe": "1h"
+                },
+                "sharpe": 0.79,
+                "starred": true,
+                "status": "finished",
+                "total_return": 0.246,
+                "win_rate": 0.512
+              }
+            ],
+            "win_rate": [
+              {
+                "buy_and_hold_return": 0.682,
+                "created_at": "2026-10-24T09:30:00Z",
+                "error": null,
+                "id": "bt_7f3k2m9qx4",
+                "instruments": [
+                  {
+                    "market": "stock",
+                    "symbol": "AAPL"
+                  }
+                ],
+                "max_drawdown": -0.197,
+                "model": "blesk-novol-8.keras",
+                "model_id": "mdl_k2m9qx47f3",
+                "name": "Silent Orion",
+                "num_trades": 1712,
+                "number": 12,
+                "public": false,
+                "queue_position": null,
+                "representation": "renko",
+                "setup": {
+                  "benchmark": "bh",
+                  "direction": "long",
+                  "fees_pct": 0.1,
+                  "period_end": "2025-12-31",
+                  "period_start": "2023-01-02",
+                  "slippage_pct": 0.02,
+                  "stop_loss_pct": 7,
+                  "threshold": 0.05,
+                  "timeframe": "1h"
+                },
+                "sharpe": 0.79,
+                "starred": true,
+                "status": "finished",
+                "total_return": 0.246,
+                "win_rate": 0.512
+              }
+            ]
+          },
+          "counts": {
+            "all": 15,
+            "failed": 2,
+            "public": 3,
+            "starred": 5
+          },
+          "newest": [
+            {
+              "buy_and_hold_return": 0.682,
+              "created_at": "2026-10-24T09:30:00Z",
+              "error": null,
+              "id": "bt_7f3k2m9qx4",
+              "instruments": [
+                {
+                  "market": "stock",
+                  "symbol": "AAPL"
+                }
+              ],
+              "max_drawdown": -0.197,
+              "model": "blesk-novol-8.keras",
+              "model_id": "mdl_k2m9qx47f3",
+              "name": "Silent Orion",
+              "num_trades": 1712,
+              "number": 12,
+              "public": false,
+              "queue_position": null,
+              "representation": "renko",
+              "setup": {
+                "benchmark": "bh",
+                "direction": "long",
+                "fees_pct": 0.1,
+                "period_end": "2025-12-31",
+                "period_start": "2023-01-02",
+                "slippage_pct": 0.02,
+                "stop_loss_pct": 7,
+                "threshold": 0.05,
+                "timeframe": "1h"
+              },
+              "sharpe": 0.79,
+              "starred": true,
+              "status": "finished",
+              "total_return": 0.246,
+              "win_rate": 0.512
+            }
+          ],
+          "starred": [
+            {
+              "buy_and_hold_return": 0.682,
+              "created_at": "2026-10-24T09:30:00Z",
+              "error": null,
+              "id": "bt_7f3k2m9qx4",
+              "instruments": [
+                {
+                  "market": "stock",
+                  "symbol": "AAPL"
+                }
+              ],
+              "max_drawdown": -0.197,
+              "model": "blesk-novol-8.keras",
+              "model_id": "mdl_k2m9qx47f3",
+              "name": "Silent Orion",
+              "num_trades": 1712,
+              "number": 12,
+              "public": false,
+              "queue_position": null,
+              "representation": "renko",
+              "setup": {
+                "benchmark": "bh",
+                "direction": "long",
+                "fees_pct": 0.1,
+                "period_end": "2025-12-31",
+                "period_start": "2023-01-02",
+                "slippage_pct": 0.02,
+                "stop_loss_pct": 7,
+                "threshold": 0.05,
+                "timeframe": "1h"
+              },
+              "sharpe": 0.79,
+              "starred": true,
+              "status": "finished",
+              "total_return": 0.246,
+              "win_rate": 0.512
+            }
+          ]
+        }
+      },
+      "inputSchema": {
+        "properties": {},
+        "title": "get_dashboardArguments",
+        "type": "object"
+      },
+      "name": "get_dashboard",
+      "outputSchema": {
+        "$defs": {
+          "BacktestCounts": {
+            "description": "The user's backtests in all, starred, failed and published.",
+            "properties": {
+              "all": {
+                "examples": [
+                  15
+                ],
+                "title": "All",
+                "type": "integer"
+              },
+              "failed": {
+                "examples": [
+                  2
+                ],
+                "title": "Failed",
+                "type": "integer"
+              },
+              "public": {
+                "description": "Published in Experiments",
+                "examples": [
+                  3
+                ],
+                "title": "Public",
+                "type": "integer"
+              },
+              "starred": {
+                "examples": [
+                  5
+                ],
+                "title": "Starred",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "all",
+              "starred",
+              "failed",
+              "public"
+            ],
+            "title": "BacktestCounts",
+            "type": "object"
+          },
+          "BacktestInstrument": {
+            "properties": {
+              "market": {
+                "$ref": "#/$defs/InstrumentMarket"
+              },
+              "symbol": {
+                "description": "Symbol as the market data API names it",
+                "examples": [
+                  "AAPL"
+                ],
+                "title": "Symbol",
+                "type": "string"
+              }
+            },
+            "required": [
+              "market",
+              "symbol"
+            ],
+            "title": "BacktestInstrument",
+            "type": "object"
+          },
+          "BacktestSetup": {
+            "description": "The settings a backtest ran with: the fields of Settings, Backtest defaults.",
+            "properties": {
+              "benchmark": {
+                "$ref": "#/$defs/SetupBenchmark"
+              },
+              "direction": {
+                "$ref": "#/$defs/SetupDirection"
+              },
+              "fees_pct": {
+                "description": "Fees in percent per side",
+                "title": "Fees Pct",
+                "type": "number"
+              },
+              "period_end": {
+                "description": "Last day of the test",
+                "format": "date",
+                "title": "Period End",
+                "type": "string"
+              },
+              "period_start": {
+                "description": "First day of the test",
+                "format": "date",
+                "title": "Period Start",
+                "type": "string"
+              },
+              "slippage_pct": {
+                "description": "Slippage in percent",
+                "title": "Slippage Pct",
+                "type": "number"
+              },
+              "stop_loss_pct": {
+                "description": "Exit when a trade loses this many percent",
+                "title": "Stop Loss Pct",
+                "type": "integer"
+              },
+              "threshold": {
+                "description": "Signal strength to trade",
+                "title": "Threshold",
+                "type": "number"
+              },
+              "timeframe": {
+                "$ref": "#/$defs/SetupTimeframe"
+              }
+            },
+            "required": [
+              "timeframe",
+              "period_start",
+              "period_end",
+              "direction",
+              "threshold",
+              "stop_loss_pct",
+              "fees_pct",
+              "slippage_pct",
+              "benchmark"
+            ],
+            "title": "BacktestSetup",
+            "type": "object"
+          },
+          "BacktestStatus": {
+            "description": "`queued` (it waits for the user's running backtest to end), `running`, `finished` (it\nhas results) or `failed` (it has an error, also when it was cancelled before it ran).",
+            "enum": [
+              "queued",
+              "running",
+              "finished",
+              "failed"
+            ],
+            "title": "BacktestStatus",
+            "type": "string"
+          },
+          "BacktestSummary": {
+            "description": "A backtest of the user. Returns and rates are fractions (0.246 is 24.6 %); the results\nare null for a backtest that did not finish.",
+            "properties": {
+              "buy_and_hold_return": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Return of holding the instruments",
+                "title": "Buy And Hold Return"
+              },
+              "created_at": {
+                "description": "When it was started (UTC)",
+                "format": "date-time",
+                "title": "Created At",
+                "type": "string"
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "What went wrong, for a failed backtest; else null",
+                "title": "Error"
+              },
+              "id": {
+                "description": "Public ID of the backtest",
+                "title": "Id",
+                "type": "string"
+              },
+              "instruments": {
+                "items": {
+                  "$ref": "#/$defs/BacktestInstrument"
+                },
+                "title": "Instruments",
+                "type": "array"
+              },
+              "max_drawdown": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Largest fall from a peak, negative",
+                "title": "Max Drawdown"
+              },
+              "model": {
+                "description": "Name of the model it ran",
+                "title": "Model",
+                "type": "string"
+              },
+              "model_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Public ID of the model; null once it was deleted",
+                "title": "Model Id"
+              },
+              "name": {
+                "description": "Its name, unique in the account ignoring case",
+                "title": "Name",
+                "type": "string"
+              },
+              "num_trades": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Num Trades"
+              },
+              "number": {
+                "description": "The user's own number of the backtest, shown as #N",
+                "title": "Number",
+                "type": "integer"
+              },
+              "public": {
+                "description": "Published in Experiments, visible to every beta account",
+                "title": "Public",
+                "type": "boolean"
+              },
+              "queue_position": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Where a queued backtest is in the queue, 1 starts next; else null",
+                "title": "Queue Position"
+              },
+              "representation": {
+                "$ref": "#/$defs/Representation",
+                "description": "What the model reads"
+              },
+              "setup": {
+                "$ref": "#/$defs/BacktestSetup"
+              },
+              "sharpe": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Sharpe ratio, per year",
+                "title": "Sharpe"
+              },
+              "starred": {
+                "title": "Starred",
+                "type": "boolean"
+              },
+              "status": {
+                "$ref": "#/$defs/BacktestStatus"
+              },
+              "total_return": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Return of the strategy",
+                "title": "Total Return"
+              },
+              "win_rate": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Share of the trades that made money",
+                "title": "Win Rate"
+              }
+            },
+            "required": [
+              "id",
+              "number",
+              "name",
+              "status",
+              "queue_position",
+              "error",
+              "model",
+              "model_id",
+              "instruments",
+              "representation",
+              "setup",
+              "total_return",
+              "buy_and_hold_return",
+              "sharpe",
+              "max_drawdown",
+              "win_rate",
+              "num_trades",
+              "starred",
+              "public",
+              "created_at"
+            ],
+            "title": "BacktestSummary",
+            "type": "object"
+          },
+          "BestBacktests": {
+            "description": "The 5 best finished backtests by each result, the best first (for `max_drawdown` the\nsmallest fall).",
+            "properties": {
+              "max_drawdown": {
+                "items": {
+                  "$ref": "#/$defs/BacktestSummary"
+                },
+                "title": "Max Drawdown",
+                "type": "array"
+              },
+              "sharpe": {
+                "items": {
+                  "$ref": "#/$defs/BacktestSummary"
+                },
+                "title": "Sharpe",
+                "type": "array"
+              },
+              "total_return": {
+                "items": {
+                  "$ref": "#/$defs/BacktestSummary"
+                },
+                "title": "Total Return",
+                "type": "array"
+              },
+              "win_rate": {
+                "items": {
+                  "$ref": "#/$defs/BacktestSummary"
+                },
+                "title": "Win Rate",
+                "type": "array"
+              }
+            },
+            "required": [
+              "sharpe",
+              "total_return",
+              "max_drawdown",
+              "win_rate"
+            ],
+            "title": "BestBacktests",
+            "type": "object"
+          },
+          "InstrumentMarket": {
+            "description": "The market of an instrument, as the market data API names it.",
+            "enum": [
+              "crypto",
+              "stock"
+            ],
+            "title": "InstrumentMarket",
+            "type": "string"
+          },
+          "Representation": {
+            "description": "What the model reads: Renko bricks, a Kagi line or time windows of candles.",
+            "enum": [
+              "renko",
+              "kagi",
+              "windows"
+            ],
+            "title": "Representation",
+            "type": "string"
+          },
+          "SetupBenchmark": {
+            "description": "What a backtest is measured against: buy and hold of its own instruments, or an ETF.",
+            "enum": [
+              "bh",
+              "SPY",
+              "QQQ",
+              "DIA"
+            ],
+            "title": "SetupBenchmark",
+            "type": "string"
+          },
+          "SetupDirection": {
+            "enum": [
+              "long",
+              "both"
+            ],
+            "title": "SetupDirection",
+            "type": "string"
+          },
+          "SetupTimeframe": {
+            "description": "Timeframes a backtest runs on: those of the data.",
+            "enum": [
+              "1m",
+              "5m",
+              "15m",
+              "30m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "SetupTimeframe",
+            "type": "string"
+          }
+        },
+        "description": "The Dashboard of the user's backtests.",
+        "properties": {
+          "best": {
+            "$ref": "#/$defs/BestBacktests"
+          },
+          "counts": {
+            "$ref": "#/$defs/BacktestCounts"
+          },
+          "newest": {
+            "description": "The 6 newest backtests that ended, failed ones included",
+            "items": {
+              "$ref": "#/$defs/BacktestSummary"
+            },
+            "title": "Newest",
+            "type": "array"
+          },
+          "starred": {
+            "description": "The 4 starred backtests with the best Sharpe ratio",
+            "items": {
+              "$ref": "#/$defs/BacktestSummary"
+            },
+            "title": "Starred",
+            "type": "array"
+          }
+        },
+        "required": [
+          "counts",
+          "newest",
+          "best",
+          "starred"
+        ],
+        "title": "Dashboard",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Dashboard"
     }
   ],
   "webOnly": [
