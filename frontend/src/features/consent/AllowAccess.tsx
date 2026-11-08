@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Info, Lock, ShieldCheck } from 'lucide-react';
+import { Globe, Info, Lock } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import {
@@ -89,7 +89,7 @@ type WhoProps = { client: AppClient; me: Me; disabled: boolean; onNotYou: () => 
 // Who vouches for the app's name: the host of the client ID metadata document that names it, else
 // nobody, as an app that registered itself picks its own name.
 function NamedBy({ documentHost }: { documentHost: string | null }) {
-  const Icon = documentHost === null ? Info : ShieldCheck;
+  const Icon = documentHost === null ? Info : Globe;
   return (
     <p className="mt-1.5 flex items-center justify-center gap-1.5 text-[12.5px] text-muted-foreground">
       <Icon aria-hidden="true" className="size-3.5 flex-none" />
@@ -182,8 +182,9 @@ type Props = { requestId: string; request: AuthorizationRequest; me: Me };
 
 // #consent: who asks, from where, as whom; the scopes in plain words with their boxes, what an app
 // can never do, Cancel and Allow, and where the browser goes then. The host is named, as anyone
-// can register an app called Claude, and so is the host that names the app, if any. Not you? signs out and shows the sign-in on this page. A
-// request that ended meanwhile says so; an account off the beta list gets the sign-in page's words.
+// can register an app called Claude, and so is the host that names the app, if any. Not you? signs
+// out and shows the sign-in on this page. A request that ended meanwhile says so; an account off
+// the beta list gets the sign-in page's words.
 export function AllowAccess({ requestId, request, me }: Props) {
   const { client } = request;
   const rows = scopeRows(request);

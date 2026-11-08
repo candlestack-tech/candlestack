@@ -34,6 +34,15 @@ describe('AppTile', () => {
     expect(tile({ ...CLAUDE, redirect_host: 'claude.ai.example', document_host: null })).not.toContain('<svg');
   });
 
+  it('shows the logo of an app named by a document, never that of an app that registered itself', () => {
+    const logo = 'https://notes.example/logo.png';
+    const notes = { ...CLAUDE, name: 'Notes', logo_uri: logo, redirect_host: 'notes.example' };
+    expect(tile({ ...notes, document_host: 'notes.example' })).toContain(`src="${logo}"`);
+    const own = tile({ ...notes, document_host: null });
+    expect(own).not.toContain('<img');
+    expect(own).toContain('>N</span>');
+  });
+
   it('takes no mark from the names every object has', () => {
     const html = tile({ ...CLAUDE, name: 'Proto', redirect_host: 'constructor', document_host: null });
     expect(html).toContain('>P</span>');

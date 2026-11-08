@@ -191,7 +191,7 @@ describe('Consent page, signed in', () => {
     );
   });
 
-  it('draws the mark of a known app, the logo another gave, else its initial', async () => {
+  it('draws the mark of a known app, the logo a documented app gave, else its initial', async () => {
     await open({ ...session(ARSEN), ...requestAnswer() });
     await heading();
     const tile = () =>
@@ -205,7 +205,7 @@ describe('Consent page, signed in', () => {
       logo_uri: logo,
       client_uri: null,
       redirect_host: 'notes.example',
-      document_host: null,
+      document_host: 'notes.example',
     };
     await open({ ...session(ARSEN), ...requestAnswer({ ...CLAUDE, client: notes }) });
     await heading();

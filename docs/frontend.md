@@ -309,8 +309,10 @@ The two sections with the account's preferences load them in the route's loader
   (claude.ai, chatgpt.com) by the host that vouches for it: for an app named by a client ID
   metadata document that document's host (`document_host`; a document elsewhere that returns to
   claude.ai gets no mark), else the host it returns to (the API checks that host against the
-  registered redirect URIs, so a name cannot borrow it); else the `logo_uri` the app gave (sent
-  without a referrer), else its initial; a logo that does not load falls back to the initial.
+  registered redirect URIs, so a name cannot borrow it); else, for an app named by a metadata
+  document, the `logo_uri` it gave (sent without a referrer); else its initial. An app that
+  registered itself never shows its `logo_uri`, which could be a picture of anyone's mark; a logo
+  that does not load falls back to the initial.
 - Account: Sign out everywhere (`POST /api/v1/auth/sign-out-everywhere`) and Delete account
   (`DELETE /api/v1/me`, after the app's dialog). Both then forget the user and their data and go
   to the home page, as Sign out does (`useLeaveAccount.ts`).
