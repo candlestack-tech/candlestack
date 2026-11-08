@@ -197,12 +197,14 @@ curl -s -X POST -H "Authorization: Bearer $CANDLESTACK_API_KEY"     -H 'Content-
 ```
 
 The answer holds the link's `id`, its `url`, `expires_at` (15 minutes) and the `command` that
-sends the file from the folder it is in: `curl -T lstm.keras https://app.candlestack.tech/api/v1/uploads/<token>`.
-That request needs no key: the token in the link is its only sign-in, so treat the link like a
+sends the file from the folder it is in:
+`curl --fail-with-body -T lstm.keras https://app.candlestack.tech/api/v1/uploads/<token>`
+(it exits with an error and prints the problem when the upload is refused). That request needs
+no key: the token in the link is its only sign-in, so treat the link like a
 key until it is used. A link takes one file of the name's format, no larger than `size_bytes`,
 and the file is checked as any upload. `GET /api/v1/models/uploads/<id>` says how it stands:
 `waiting`, `checking`, `done` with the `model_id`, `failed` with the `problem` and the `check`
-that failed, or `expired`. A used or expired link answers 410 `upload-link-gone`: ask for a new
+that failed (`upload-interrupted` when the upload stopped midway), or `expired`. A used or expired link answers 410 `upload-link-gone`: ask for a new
 one.
 
 ## Errors
@@ -228,7 +230,9 @@ change. Some add fields, such as `errors` of a 422 `validation`:
 | 403 | `missing-scope` | the key lacks the scope `scope` names: create a key with it |
 | 403 | `session-required` | keys cannot do this: do it in the app |
 | 404 | `instrument-not-found` | check the id with the instrument search |
+| 404 | `upload-link-not-found` | no upload link has the token: copy the whole link or ask for a new one |
 | 410 | `upload-link-gone` | the upload link was used or expired: ask for a new one |
+| 413 | `larger-than-link` | the file is larger than the upload link's `size_bytes`: ask for a new link with its size |
 | 422 | `validation` | fix the parameters `errors` names |
 | 422 | `period-out-of-range` | `start` before the first candle, `end` at or before it (paging past the start of the data) or `end` in the future: `available_from` and `available_to` say what fits |
 | 422 | `too-many-candles` | a shorter period, a longer timeframe or paging (`suggestion`) |

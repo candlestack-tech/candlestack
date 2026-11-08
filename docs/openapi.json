@@ -4765,9 +4765,9 @@
             ]
           },
           "command": {
-            "description": "The `curl` command that uploads the file from the folder it is in",
+            "description": "The `curl` command that uploads the file from the folder it is in; it exits with an error and prints the problem when the upload is refused",
             "examples": [
-              "curl -T lstm-signals.keras https://app.candlestack.tech/api/v1/uploads/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              "curl --fail-with-body -T lstm-signals.keras https://app.candlestack.tech/api/v1/uploads/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
             ],
             "title": "Command",
             "type": "string"
@@ -4887,11 +4887,11 @@
         "description": "The file an upload link is made for.",
         "properties": {
           "name": {
-            "description": "Name of the file, extension included (`.keras` or `.onnx`); the model gets it, as an upload's name",
+            "description": "Name of the file, extension included (`.keras` or `.onnx`), or its path; the model gets the base name, as an upload's name",
             "examples": [
               "lstm-signals.keras"
             ],
-            "maxLength": 255,
+            "maxLength": 4096,
             "minLength": 1,
             "title": "Name",
             "type": "string"
@@ -9396,7 +9396,7 @@
     },
     "/api/v1/models/uploads/{upload_id}": {
       "get": {
-        "description": "How the upload through the link stands: `waiting` for the file, `checking` while it\ncomes in and is checked, `done` with the model it made (`model_id`), `failed` with the\nproblem it answered (`problem`, `check`, `error`), or `expired` unused. A link stays\nreadable for a day after it expired.",
+        "description": "How the upload through the link stands: `waiting` for the file, `checking` while it\ncomes in and is checked, `done` with the model it made (`model_id`), `failed` with the\nproblem it answered (`problem`, `check`, `error`), or `expired` unused. A link stays\nreadable for at least a day after it expired.",
         "operationId": "get_model_upload_api_v1_models_uploads__upload_id__get",
         "parameters": [
           {
@@ -9960,6 +9960,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The client went away before the whole file came (`upload-interrupted`); the link is used and reads `failed`."
           },
           "404": {
             "content": {

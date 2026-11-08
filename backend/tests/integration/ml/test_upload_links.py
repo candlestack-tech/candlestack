@@ -12,6 +12,7 @@ import httpx2
 import pytest
 from fastapi.testclient import TestClient
 from redis import Redis
+from starlette.requests import ClientDisconnect
 
 from candlestack.core import Settings
 from candlestack.ml.schemas import QUOTA_BYTES
@@ -92,7 +93,7 @@ def test_a_link_is_made_and_keeps_only_its_hash(ada, sql) -> None:
     assert link["id"].startswith("upl_")
     assert link["url"] == f"http://testserver/api/v1/uploads/{secret}"
     assert len(secret) == 40
-    assert link["command"] == f"curl -T 'C:\\models\\my lstm.keras' {link['url']}"
+    assert link["command"] == f"curl --fail-with-body -T 'C:\\models\\my lstm.keras' {link['url']}"
     created = datetime.fromisoformat(link["created_at"])
     assert datetime.fromisoformat(link["expires_at"]) - created == timedelta(minutes=15)
     assert {key: link[key] for key in ("name", "size_bytes", "status", "model_id", "problem")} == {
@@ -127,6 +128,12 @@ def test_a_link_must_fit_the_storage(ada, sql) -> None:
     assert body["used_bytes"] == QUOTA_BYTES - 100
     assert sql("SELECT id FROM model_uploads") == []
     assert ada.request("POST", LINKS, json={"name": "lstm.keras", "size_bytes": 100}).is_success
+
+
+def test_a_link_is_made_for_a_long_path(ada) -> None:
+    path = "/home/agent/" + "runs/" * 60 + "lstm.keras"
+
+    assert make_link(ada, name=path)["name"] == "lstm.keras"
 
 
 def test_a_key_with_the_scope_models_makes_a_link(ada, client) -> None:
@@ -298,16 +305,56 @@ def test_the_quota_is_checked_again_when_the_file_comes(ada, client, sql) -> Non
     assert status(ada, link)["problem"] == "storage-full"
 
 
-def test_another_upload_in_progress_leaves_the_link_unused(ada, client, redis_url) -> None:
+def test_another_upload_in_progress_leaves_the_link_unused(ada, client, redis_url, caplog) -> None:
     link = make_link(ada)
-    with Redis.from_url(redis_url) as redis:
+    with Redis.from_url(redis_url) as redis, caplog.at_level(logging.INFO):
         redis.set(f"ml:upload:{ada.id}", "another", ex=60)
         response = put(client, link, FUNCTIONAL)
         redis.delete(f"ml:upload:{ada.id}")
 
     problem(response, 409, "upload-in-progress")
+    assert (
+        f"An upload of user {ada.id} through the link {link['id']} was refused "
+        "(another upload in progress)"
+    ) in caplog.messages
     assert status(ada, link)["status"] == "waiting"
     assert put(client, link, FUNCTIONAL).status_code == 201
+
+
+@pytest.mark.parametrize(
+    ("stop", "status_code"),
+    [
+        # The client went away (Starlette's error for it): an answer nobody reads.
+        (ClientDisconnect(), 400),
+        # Anything else that breaks the stream: an internal error.
+        (ConnectionResetError("reset by peer"), 500),
+    ],
+)
+def test_an_upload_that_stops_midway_is_recorded_as_interrupted(
+    ada, client, storage, redis_url, stop: Exception, status_code: int
+) -> None:
+    link = make_link(ada)
+
+    def stops() -> Any:
+        yield FUNCTIONAL[:1024]
+        yield FUNCTIONAL[1024:2048]
+        raise stop
+
+    response = put(client, link, stops())
+
+    assert response.status_code == status_code
+    failed = status(ada, link)
+    assert (failed["status"], failed["problem"], failed["model_id"]) == (
+        "failed",
+        "upload-interrupted",
+        None,
+    )
+    assert failed["error"].startswith("The upload stopped before the file was checked.")
+    assert storage.incoming() == []
+    with Redis.from_url(redis_url) as redis:
+        assert redis.get(f"ml:upload:{ada.id}") is None
+    problem(put(client, link, FUNCTIONAL), 410, "upload-link-gone")
+    assert put(client, make_link(ada), FUNCTIONAL).status_code == 201
 
 
 def test_an_upload_being_checked(ada, sql) -> None:

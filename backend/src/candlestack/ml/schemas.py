@@ -207,9 +207,10 @@ class ModelUploadIn(BaseModel):
 
     name: str = Field(
         min_length=1,
-        max_length=255,
-        description="Name of the file, extension included (`.keras` or `.onnx`); the model "
-        "gets it, as an upload's name",
+        # A path is fine: the model gets its base name, cut as an upload's name is.
+        max_length=4096,
+        description="Name of the file, extension included (`.keras` or `.onnx`), or its path; "
+        "the model gets the base name, as an upload's name",
         examples=["lstm-signals.keras"],
     )
     size_bytes: int = Field(
@@ -271,8 +272,10 @@ class ModelUploadCreated(ModelUploadOut):
     )
     command: str = Field(
         repr=False,
-        description="The `curl` command that uploads the file from the folder it is in",
+        description="The `curl` command that uploads the file from the folder it is in; it "
+        "exits with an error and prints the problem when the upload is refused",
         examples=[
-            "curl -T lstm-signals.keras https://app.candlestack.tech/api/v1/uploads/" + "x" * 40
+            "curl --fail-with-body -T lstm-signals.keras https://app.candlestack.tech/api/v1/uploads/"
+            + "x" * 40
         ],
     )

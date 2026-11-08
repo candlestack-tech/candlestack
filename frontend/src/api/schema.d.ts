@@ -671,7 +671,7 @@ export interface paths {
          * @description How the upload through the link stands: `waiting` for the file, `checking` while it
          *     comes in and is checked, `done` with the model it made (`model_id`), `failed` with the
          *     problem it answered (`problem`, `check`, `error`), or `expired` unused. A link stays
-         *     readable for a day after it expired.
+         *     readable for at least a day after it expired.
          */
         get: operations["get_model_upload_api_v1_models_uploads__upload_id__get"];
         put?: never;
@@ -3244,8 +3244,8 @@ export interface components {
             check: components["schemas"]["ModelCheck"] | null;
             /**
              * Command
-             * @description The `curl` command that uploads the file from the folder it is in
-             * @example curl -T lstm-signals.keras https://app.candlestack.tech/api/v1/uploads/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+             * @description The `curl` command that uploads the file from the folder it is in; it exits with an error and prints the problem when the upload is refused
+             * @example curl --fail-with-body -T lstm-signals.keras https://app.candlestack.tech/api/v1/uploads/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
              */
             command: string;
             /**
@@ -3311,7 +3311,7 @@ export interface components {
         ModelUploadIn: {
             /**
              * Name
-             * @description Name of the file, extension included (`.keras` or `.onnx`); the model gets it, as an upload's name
+             * @description Name of the file, extension included (`.keras` or `.onnx`), or its path; the model gets the base name, as an upload's name
              * @example lstm-signals.keras
              */
             name: string;
@@ -6446,6 +6446,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelOut"];
+                };
+            };
+            /** @description The client went away before the whole file came (`upload-interrupted`); the link is used and reads `failed`. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description No upload link has this token (`upload-link-not-found`). */

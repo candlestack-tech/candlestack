@@ -47,6 +47,7 @@ from candlestack.ml.errors import (
     StorageFull,
     TooManyModels,
     UnsupportedModelFormat,
+    UploadInProgress,
     UploadLinkGone,
     UploadLinkNotFound,
     UploadNotFound,
@@ -121,7 +122,8 @@ _EMPTY = "The file is empty. Choose the model's {suffix} file and upload it agai
 # Where an upload link points, after the public URL.
 UPLOAD_PATH = "/api/v1/uploads/"
 _TOKEN = re.compile(rf"[a-z2-7]{{{UPLOAD_TOKEN_LENGTH}}}")
-# How long a link that expired stays readable; older ones go when the user makes a new one.
+# How long a link that expired stays readable at least; older ones go when the user makes a new
+# one.
 UPLOAD_KEPT = timedelta(days=1)
 
 
@@ -148,6 +150,13 @@ INTERRUPTED = UploadFailure(
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _refused(link: ModelUpload, why: str) -> None:
+    """Logs an upload through `link` refused before it started, which leaves the link unused."""
+    logger.info(
+        "An upload of user %s through the link %s was refused (%s)", link.user_id, link.id, why
+    )
 
 
 def upload_name(file_name: str) -> tuple[str, Framework]:
@@ -302,20 +311,24 @@ async def _receive(
     """
     digest = hashlib.sha256()
     size = 0
+    file = await anyio.open_file(path, "wb")
     try:
-        # The file is closed outside the time limit: a close it cancelled would leave it open.
-        async with await anyio.open_file(path, "wb") as file:
-            with anyio.fail_after(RECEIVE_TIMEOUT):
-                async for chunk in chunks:
-                    size += len(chunk)
-                    if limit is not None and size > limit:
-                        raise LargerThanLink(limit)
-                    if size > FILE_MAX_BYTES:
-                        raise ModelTooLarge
-                    digest.update(chunk)
-                    await file.write(chunk)
+        with anyio.fail_after(RECEIVE_TIMEOUT):
+            async for chunk in chunks:
+                size += len(chunk)
+                if limit is not None and size > limit:
+                    raise LargerThanLink(limit)
+                if size > FILE_MAX_BYTES:
+                    raise ModelTooLarge
+                digest.update(chunk)
+                await file.write(chunk)
     except TimeoutError:
         raise UploadTimeout from None
+    finally:
+        # Outside the time limit and shielded from the request's cancellation (the client went
+        # away): a close they cancelled would leave the file open, and it could not go.
+        with anyio.CancelScope(shield=True):
+            await file.aclose()
     if size == 0:
         raise ModelCheckFailed(ModelCheck.opens, _EMPTY.format(suffix=SUFFIXES[framework]))
     return size, digest.digest()
@@ -562,7 +575,8 @@ class ModelsService:
         return ModelUploadCreated(
             **_upload_out(upload, now).model_dump(),
             url=public_url + UPLOAD_PATH + token,
-            command=f"curl -T {shlex.quote(new.name)} {public_url}{UPLOAD_PATH}{token}",
+            command=f"curl --fail-with-body -T {shlex.quote(new.name)} "
+            f"{public_url}{UPLOAD_PATH}{token}",
         )
 
     async def upload_status(self, user_id: str, upload_id: str) -> ModelUploadOut:
@@ -601,25 +615,14 @@ class ModelsService:
         if link is None:
             raise UploadLinkNotFound
         if declared_size is not None and declared_size > link.size_bytes:
+            _refused(link, "the file is larger than the link")
             raise LargerThanLink(link.size_bytes)
-        async with self._uploads.hold(link.user_id):
-            now = _now()
-            claimed = await self._store.claim_upload(link.id, now)
-            await self._store.commit()
-            if not claimed:
-                raise UploadLinkGone("expired" if link.expires_at <= now else "used")
-            try:
-                used, count = await self._store.usage(link.user_id)
-                await self._store.commit()
-                _check_room(used, count, declared_size or 1)
-                model = await self._receive_and_keep(
-                    link.user_id, link.name, Framework(link.framework), chunks, link
-                )
-            except BaseException as error:
-                failure = describe(error) if isinstance(error, Exception) else None
-                with anyio.CancelScope(shield=True):
-                    await self._fail_upload(link, failure or INTERRUPTED)
-                raise
+        try:
+            async with self._uploads.hold(link.user_id):
+                model = await self._upload_through(link, declared_size, chunks, describe)
+        except UploadInProgress:
+            _refused(link, "another upload in progress")
+            raise
         logger.info(
             "User %s uploaded model %s through the link %s (%d bytes)",
             model.user_id,
@@ -628,6 +631,37 @@ class ModelsService:
             model.size_bytes,
         )
         return _out(model)
+
+    async def _upload_through(
+        self,
+        link: ModelUpload,
+        declared_size: int | None,
+        chunks: AsyncIterable[bytes],
+        describe: DescribeFailure,
+    ) -> Model:
+        """Takes `link` and keeps its file, under the lock of the user's uploads; the link
+        records how the upload failed whatever stops it, the request's cancellation included.
+
+        Raises:
+            UploadLinkGone: Another request took the link first, or it expired.
+        """
+        now = _now()
+        claimed = await self._store.claim_upload(link.id, now)
+        await self._store.commit()
+        if not claimed:
+            raise UploadLinkGone("expired" if link.expires_at <= now else "used")
+        try:
+            used, count = await self._store.usage(link.user_id)
+            await self._store.commit()
+            _check_room(used, count, declared_size or 1)
+            return await self._receive_and_keep(
+                link.user_id, link.name, Framework(link.framework), chunks, link
+            )
+        except BaseException as error:
+            failure = describe(error) if isinstance(error, Exception) else None
+            with anyio.CancelScope(shield=True):
+                await self._fail_upload(link, failure or INTERRUPTED)
+            raise
 
     async def _link(self, token: str) -> ModelUpload | None:
         """The link with `token` while it may still take its file; None when no link has it.

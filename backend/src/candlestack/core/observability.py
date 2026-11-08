@@ -103,6 +103,15 @@ def _redact_url(request: Any) -> None:
         request["url"] = f"{scheme}://{host}{redacted_path('/' + path)}"
 
 
+def _redact_paths(event: Event) -> None:
+    """Filters the secret of the incoming request's recorded URL, and of the transaction's
+    name when it is the path itself (no route matched; a route's template ends in ``}``)."""
+    _redact_url(event.get("request"))
+    name = event.get("transaction")
+    if isinstance(name, str) and not name.endswith("}"):
+        event["transaction"] = redacted_path(name)
+
+
 class ErrorBudget:
     """Allows at most `limit` events per `window` seconds; the ones over it are dropped."""
 
@@ -158,7 +167,7 @@ def _before_send(budget: ErrorBudget) -> Callable[[Event, Hint], Event | None]:
             return None
         _drop_request_variables(event)
         _hide_query_secrets(event.get("request"), _REQUEST_QUERY)
-        _redact_url(event.get("request"))
+        _redact_paths(event)
         return event
 
     return before_send
@@ -184,7 +193,7 @@ def _before_breadcrumb(crumb: Breadcrumb, _hint: BreadcrumbHint) -> Breadcrumb |
 
 def _before_send_transaction(event: Event, _hint: Hint) -> Event | None:
     _hide_query_secrets(event.get("request"), _REQUEST_QUERY)
-    _redact_url(event.get("request"))
+    _redact_paths(event)
     spans = event.get("spans")
     if isinstance(spans, list):
         for span in spans:

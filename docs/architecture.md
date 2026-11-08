@@ -88,7 +88,7 @@ flowchart LR
 | `PATCH /api/v1/me/preferences/appearance` | changes the appearance settings it is given; an unknown field is a 422 |
 | `GET /api/v1/models` | the user's uploaded models, oldest first, and the storage they take (`used_bytes`, `quota_bytes`, `file_max_bytes`) |
 | `POST /api/v1/models?name=<file name>` | uploads a model: the body is the file (`application/octet-stream`); checked before it is kept ([Models](#models)); a name the user has already gets a number (`lstm (2).keras`); one upload at a time per user, 100 models at most |
-| `POST /api/v1/models/uploads` | makes a one-time link to upload a model through (`name`, `size_bytes`): 201 with its `url` and a ready `curl -T` `command`, shown only here, and its expiry in 15 minutes; the name and size must fit now (415, 413, `409 storage-full`, `409 too-many-models`) ([Models](#models)) |
+| `POST /api/v1/models/uploads` | makes a one-time link to upload a model through (`name`, `size_bytes`): 201 with its `url` and a ready `curl --fail-with-body -T` `command`, shown only here, and its expiry in 15 minutes; the name and size must fit now (415, 413, `409 storage-full`, `409 too-many-models`) ([Models](#models)) |
 | `GET /api/v1/models/uploads/{upload_id}` | how the upload through the user's link stands: `waiting`, `checking`, `done` (`model_id`), `failed` (`problem`, `check`, `error`) or `expired` |
 | `PUT /api/v1/uploads/{token}` | the upload through a link: the body is the file, the token the only sign-in (no session, key or origin check); single use, then checked as `POST /api/v1/models`; 201 with the model, `404 upload-link-not-found`, `410 upload-link-gone` (used or expired) |
 | `PATCH /api/v1/models/{model_id}` | renames a model (the extension stays; `409 model-name-taken`) or stars and unstars it |
@@ -128,12 +128,13 @@ flowchart LR
   soon"), `model-check-failed` (422: a check failed, `check` names it, `opens` or `weights`)
   `model-name-taken` (409: renaming to a name the user has, rarely an upload's numbered name),
   `too-many-models` (409: the user
-  has 100 models, with `limit`), `upload-in-progress` (409: another upload of the user runs)
+  has 100 models, with `limit`), `upload-in-progress` (409: another upload of the user runs),
   `upload-timeout` (408: the file did not arrive within 2 minutes), and for the upload links
   `upload-link-not-found` (404: no link has the token), `upload-link-gone` (410: the link took
   its file already or expired, `reason` says `used` or `expired`; also its account was deleted
   during the upload) and `larger-than-link` (413: the file is larger than the size the link was
-  made for, with `size_bytes`), and uses `not-found`
+  made for, with `size_bytes`); a link's status says `upload-interrupted` in `problem` when its
+  upload stopped midway (also a `400` for the client that went away), and it uses `not-found`
   (404: no model of the user with the ID, another user's included) and `not-signed-in` (401:
   also the account was deleted while its file uploaded). Each `type` URI opens a page on the
   website that says what the problem means and what the client should do. The experiments
@@ -275,11 +276,14 @@ flowchart LR
 - **Upload link** (for agents, which cannot pass a file through a chat):
   `POST /api/v1/models/uploads` (scope `models`) with the file's `name` and `size_bytes` makes a link
   `<PUBLIC_URL>/api/v1/uploads/<token>` that takes one upload within 15 minutes, and answers it
-  with the `curl -T <name> <url>` that sends the file. The name must be a `.keras` or `.onnx`
+  with the `curl --fail-with-body -T <name> <url>` that sends the file (`name` may be a path; the
+  model gets its base name). The name must be a `.keras` or `.onnx`
   one (415), the size at most 50 MB (413) and fit the user's storage and model count now
   (409). The token is 40 random characters of the IDs' alphabet (200 bits); the table
   `model_uploads` keeps only its SHA-256, with the user, the name the model gets, the size, the
-  status and the expiry, so the URL is shown once. A user's links that expired more than a day
+  status and the expiry, so the URL is shown once. A link is not tied to the key or session that
+  made it: revoking the key, or taking the user off the beta list, leaves the links already made
+  working until they expire. A user's links that expired more than a day
   ago are deleted when they make a new one. `PUT /api/v1/uploads/{token}` takes the file as the
   body with the token as its only sign-in: it depends on no session or key, so neither stands in
   for the token, and has no same-origin check, as no cookie signs it in (another site cannot
@@ -292,11 +296,13 @@ flowchart LR
   user, the stream stopping where it passes the link's size (`larger-than-link`), and the link
   is used whatever comes of it: `done` with `model_id` in the transaction that keeps the model,
   or `failed` with the problem the request answered (`problem`, `check`, `error`), also
-  `upload-interrupted` when the client went away. A link `checking` for longer than the upload
+  `upload-interrupted` when the client went away or the stream broke (the failure is recorded in
+  a shielded scope, after a rollback, and only over `checking`, so a link whose model was
+  committed stays `done`). A link `checking` for longer than the upload
   lock lasts (5 minutes) reads as interrupted. `GET /api/v1/models/uploads/{upload_id}` shows
   the user's link, without its URL: `waiting`, `checking`, `done`, `failed`, or `expired` for a
   waiting one past its expiry. The token never reaches the logs: the access line and the URLs
-  sent to Sentry show `/api/v1/uploads/[Filtered]` (`redacted_path` in
+  sent to Sentry, and a transaction named by its path, show `/api/v1/uploads/[Filtered]` (`redacted_path` in
   `core/observability.py`). The upload page for the browser (#406) and the MCP tools (#403)
   build on these routes.
 - **The check** (`ml/inspect.py`) reads the file and never loads it: a `.keras` file is a zip of

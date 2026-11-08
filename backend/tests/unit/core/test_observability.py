@@ -24,6 +24,7 @@ from candlestack.core.observability import (
     ErrorBudget,
     _before_send_log,
     _hide_query_secrets,
+    _redact_paths,
     _redact_url,
     _traces_sampler,
     redacted_path,
@@ -291,6 +292,23 @@ def test_an_upload_links_token_is_not_sent(
 )
 def test_redacted_path(path: str, kept: str) -> None:
     assert redacted_path(path) == kept
+
+
+@pytest.mark.parametrize(
+    ("name", "kept"),
+    [
+        # No route matched (a trailing slash): the name is the path, token and all.
+        ("/api/v1/uploads/" + "q" * 40 + "/", "/api/v1/uploads/[Filtered]"),
+        ("/api/v1/uploads/{token}", "/api/v1/uploads/{token}"),
+    ],
+)
+def test_a_transaction_named_by_its_path_loses_the_token(name: str, kept: str) -> None:
+    event: Any = {"transaction": name, "request": {"url": "http://testserver" + name}}
+
+    _redact_paths(event)
+
+    assert event["transaction"] == kept
+    assert "q" * 40 not in event["request"]["url"]
 
 
 def test_redact_url_ignores_what_is_no_url() -> None:

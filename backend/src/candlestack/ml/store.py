@@ -214,9 +214,11 @@ class ModelStore:
     async def fail_upload(
         self, upload_id: str, *, problem: str, check: str | None, error: str, now: datetime
     ) -> None:
+        """Records that the upload of the link failed, while it is ``checking``: a link whose
+        model was committed stays ``done`` though the request failed after the commit."""
         await self._db.execute(
             update(ModelUpload)
-            .where(ModelUpload.id == upload_id)
+            .where(ModelUpload.id == upload_id, ModelUpload.status == "checking")
             .values(
                 status="failed",
                 problem=problem,

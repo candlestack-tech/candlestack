@@ -9,14 +9,22 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+import anyio
+import anyio.lowlevel
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from candlestack.ml.errors import ModelNameTaken, UploadLinkGone
+from candlestack.ml.errors import ModelNameTaken, UploadLinkGone, UploadTimeout
 from candlestack.ml.inspect import ModelFacts
 from candlestack.ml.models import Model, ModelUpload
 from candlestack.ml.schemas import CheckPart, Framework, ModelCheck, ModelState, UploadStatus
-from candlestack.ml.service import ModelsService, _checked_alone, _out, _upload_out
+from candlestack.ml.service import (
+    ModelsService,
+    UploadFailure,
+    _checked_alone,
+    _out,
+    _upload_out,
+)
 from candlestack.preprocessing import Manifest, ManifestProblem, parse_manifest
 
 if TYPE_CHECKING:
@@ -336,3 +344,128 @@ async def test_a_link_another_request_started_first_is_gone(
 
 async def empty() -> AsyncIterator[bytes]:
     yield b""
+
+
+class LinkStore:
+    """A waiting link whose upload starts; it records the calls that end the upload. Each call
+    is a checkpoint, so one made in a cancelled scope that is not shielded raises."""
+
+    def __init__(self) -> None:
+        self.calls: list[object] = []
+
+    async def _call(self, call: object) -> None:
+        await anyio.lowlevel.checkpoint()
+        self.calls.append(call)
+
+    async def upload_by_token(self, token_hash: bytes) -> ModelUpload:
+        return link(expires_at=datetime.now(UTC) + timedelta(minutes=10))
+
+    async def claim_upload(self, upload_id: str, now: datetime) -> bool:
+        await self._call("claim_upload")
+        return True
+
+    async def usage(self, user_id: str) -> tuple[int, int]:
+        return 0, 0
+
+    async def commit(self) -> None:
+        await self._call("commit")
+
+    async def rollback(self) -> None:
+        await self._call("rollback")
+
+    async def fail_upload(self, upload_id: str, *, problem: str, **_fields: object) -> None:
+        await self._call(("fail_upload", upload_id, problem))
+
+
+class Incoming:
+    """The incoming files of the storage, in a folder."""
+
+    def __init__(self, folder: Path) -> None:
+        self._folder = folder
+        self._made = 0
+
+    def incoming_path(self) -> Path:
+        self._made += 1
+        return self._folder / f"{self._made}.part"
+
+    async def discard(self, incoming: Path) -> None:
+        await anyio.Path(incoming).unlink(missing_ok=True)
+
+    async def left(self) -> list[anyio.Path]:
+        return [path async for path in anyio.Path(self._folder).iterdir()]
+
+
+class RecordedLock:
+    def __init__(self) -> None:
+        self.held = False
+        self.released = False
+
+    @asynccontextmanager
+    async def hold(self, user_id: str) -> AsyncIterator[None]:
+        self.held = True
+        try:
+            yield
+        finally:
+            self.released = True
+
+
+def link_service(tmp_path: Path) -> tuple[ModelsService, LinkStore, RecordedLock, Incoming]:
+    store, lock, incoming = LinkStore(), RecordedLock(), Incoming(tmp_path)
+    service = ModelsService(
+        cast("ModelStore", store),
+        cast("ModelStorage", incoming),
+        cast("UploadLocks", lock),
+    )
+    return service, store, lock, incoming
+
+
+def timeout_failure(error: Exception) -> UploadFailure | None:
+    return (
+        UploadFailure("upload-timeout", "Too slow.") if isinstance(error, UploadTimeout) else None
+    )
+
+
+async def test_a_link_whose_file_came_too_late_records_the_timeout(tmp_path: Path) -> None:
+    service, store, lock, incoming = link_service(tmp_path)
+
+    async def late() -> AsyncIterator[bytes]:
+        yield b"PK"
+        raise TimeoutError
+
+    with pytest.raises(UploadTimeout):
+        await service.upload_by_link("q" * 40, None, late(), timeout_failure)
+
+    assert store.calls == [
+        "commit",  # the link read
+        "claim_upload",
+        "commit",
+        "commit",  # the usage read
+        "rollback",
+        ("fail_upload", "upl_7f3k2m9qx4", "upload-timeout"),
+        "commit",
+    ]
+    assert lock.released
+    assert await incoming.left() == []
+
+
+async def test_a_cancelled_link_upload_is_recorded_as_interrupted(tmp_path: Path) -> None:
+    service, store, lock, incoming = link_service(tmp_path)
+
+    with anyio.CancelScope() as scope:
+
+        async def client_gone() -> AsyncIterator[bytes]:
+            yield b"PK"
+            scope.cancel()
+            await anyio.sleep_forever()
+
+        await service.upload_by_link("q" * 40, None, client_gone(), timeout_failure)
+
+    assert scope.cancelled_caught
+    # Shielded: the cancellation does not stop the link from recording it.
+    assert store.calls[-3:] == [
+        "rollback",
+        ("fail_upload", "upl_7f3k2m9qx4", "upload-interrupted"),
+        "commit",
+    ]
+    assert lock.released
+    assert await incoming.left() == []

@@ -23,6 +23,7 @@ from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
+from starlette.requests import ClientDisconnect
 
 from candlestack.accounts import CurrentUserDep, ModelsUserDep
 from candlestack.core import (
@@ -65,7 +66,7 @@ from candlestack.ml.schemas import (
     ModelUploadIn,
     ModelUploadOut,
 )
-from candlestack.ml.service import RECEIVE_TIMEOUT, UploadFailure
+from candlestack.ml.service import INTERRUPTED, RECEIVE_TIMEOUT, UploadFailure
 from candlestack.preprocessing import CatalogOut, Manifest, describe_catalog
 
 logger = logging.getLogger(__name__)
@@ -451,7 +452,7 @@ async def get_model_upload(
     """How the upload through the link stands: `waiting` for the file, `checking` while it
     comes in and is checked, `done` with the model it made (`model_id`), `failed` with the
     problem it answered (`problem`, `check`, `error`), or `expired` unused. A link stays
-    readable for a day after it expired."""
+    readable for at least a day after it expired."""
     response.headers.update(NO_STORE)
     try:
         return await service.upload_status(user.id, upload_id)
@@ -465,6 +466,11 @@ async def get_model_upload(
     "/api/v1/uploads/{token}",
     status_code=201,
     responses={
+        **problem_doc(
+            400,
+            "The client went away before the whole file came (`upload-interrupted`); the link "
+            "is used and reads `failed`.",
+        ),
         **problem_doc(
             404,
             "No upload link has this token (`upload-link-not-found`).",
@@ -520,6 +526,11 @@ async def upload_by_link(
         ) from None
     except UploadLinkGone as gone:
         raise _link_gone(gone) from None
+    except ClientDisconnect:
+        # The service recorded it on the link; an answer, not an error, as nothing is wrong here.
+        raise ProblemError(
+            400, INTERRUPTED.problem, "Upload interrupted", INTERRUPTED.error
+        ) from None
     except tuple(_LINK_PROBLEMS) as error:
         # The service logged the failure with the link's user.
         raise _LINK_PROBLEMS[type(error)](error) from None
