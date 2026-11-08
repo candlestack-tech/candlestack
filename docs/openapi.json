@@ -531,11 +531,13 @@
         "properties": {
           "benchmark": {
             "$ref": "#/components/schemas/Benchmark",
-            "default": "bh"
+            "default": "bh",
+            "description": "What the result is measured against: bh buy and hold of the backtest's own instrument, or the ETF SPY, QQQ or DIA"
           },
           "direction": {
             "$ref": "#/components/schemas/Direction",
-            "default": "long"
+            "default": "long",
+            "description": "long: long trades only, flat on a sell signal; both: long and short"
           },
           "fees_pct": {
             "default": 0.1,
@@ -586,7 +588,8 @@
           },
           "timeframe": {
             "$ref": "#/components/schemas/BacktestTimeframe",
-            "default": "30m"
+            "default": "30m",
+            "description": "Length of one candle the model sees"
           }
         },
         "title": "BacktestDefaults",
@@ -597,10 +600,12 @@
         "description": "The backtest defaults to save (Save defaults): every field, and no other. The same\nchecks as `BacktestDefaults`, but no defaults, so a body that leaves a field out is\nrefused instead of filled in.",
         "properties": {
           "benchmark": {
-            "$ref": "#/components/schemas/Benchmark"
+            "$ref": "#/components/schemas/Benchmark",
+            "description": "What the result is measured against: bh buy and hold of the backtest's own instrument, or the ETF SPY, QQQ or DIA"
           },
           "direction": {
-            "$ref": "#/components/schemas/Direction"
+            "$ref": "#/components/schemas/Direction",
+            "description": "long: long trades only, flat on a sell signal; both: long and short"
           },
           "fees_pct": {
             "description": "Fees in percent per side",
@@ -644,7 +649,8 @@
             "type": "number"
           },
           "timeframe": {
-            "$ref": "#/components/schemas/BacktestTimeframe"
+            "$ref": "#/components/schemas/BacktestTimeframe",
+            "description": "Length of one candle the model sees"
           }
         },
         "required": [
@@ -5861,7 +5867,7 @@
         "type": "object"
       },
       "Scope": {
-        "description": "What an API key may do. `read`: every GET; `backtests`: start, rename and star\nbacktests; `models`: upload models, add their manifests, rename, star and delete them;\n`publish`: publish and unpublish backtests. Managing keys, deleting the account, sign-in\nmethods and signing out need the browser session whatever the scopes.",
+        "description": "What an API key may do. `read`: every GET; `backtests`: start, rename and star\nbacktests and save the backtest defaults; `models`: upload models, add their manifests,\nrename, star and delete them; `publish`: publish and unpublish backtests. Managing keys,\ndeleting the account, sign-in methods and signing out need the browser session whatever\nthe scopes.",
         "enum": [
           "read",
           "backtests",
@@ -7344,7 +7350,7 @@
     "securitySchemes": {
       "apiKey": {
         "bearerFormat": "cs_...",
-        "description": "An API key from Settings, API and MCP: `Authorization: Bearer cs_...`. Its scopes decide what it may do: `read` every GET, `backtests` start, rename and star backtests, `models` upload models, add their manifests, rename, star and delete them, `publish` publish and unpublish backtests. Managing keys, deleting the account, sign-in methods and signing out need the browser session. The web app signs in with its session cookie instead.",
+        "description": "An API key from Settings, API and MCP: `Authorization: Bearer cs_...`. Its scopes decide what it may do: `read` every GET, `backtests` start, rename and star backtests and save the backtest defaults, `models` upload models, add their manifests, rename, star and delete them, `publish` publish and unpublish backtests. Managing keys, deleting the account, sign-in methods and signing out need the browser session. The web app signs in with its session cookie instead.",
         "scheme": "bearer",
         "type": "http"
       }
@@ -9933,7 +9939,7 @@
     },
     "/api/v1/me/preferences/backtest-defaults": {
       "put": {
-        "description": "Saves how new backtests start (Save defaults): every setting, as a whole.",
+        "description": "Saves how new backtests start (Save defaults): every setting, as a whole. An API key\nneeds the scope `backtests`.",
         "operationId": "save_backtest_defaults_api_v1_me_preferences_backtest_defaults_put",
         "requestBody": {
           "content": {
@@ -9964,7 +9970,7 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
           },
           "403": {
             "content": {
@@ -9974,7 +9980,7 @@
                 }
               }
             },
-            "description": "The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`)."
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "422": {
             "content": {
@@ -9985,8 +9991,25 @@
               }
             },
             "description": "Invalid request"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "backtests"
+            ]
+          }
+        ],
         "summary": "Save Backtest Defaults",
         "tags": [
           "accounts"

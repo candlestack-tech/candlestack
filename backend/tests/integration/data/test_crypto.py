@@ -142,6 +142,40 @@ async def test_last_candles_before_end(service: DataService, upstream):
     assert (last.gaps, last.gaps_total) == ([], 0)
 
 
+async def test_first_candles_from_start(service: DataService, upstream):
+    upstream.exchange_info()
+    upstream.first_kline(LISTED_MS)
+    upstream.fixture_archive("monthly", "BTCUSDT-1h-2024-01.zip")
+
+    # From the first hour that opens at or after start.
+    first = await service.first_candles(
+        BTC, Timeframe.H1, utc("2024-01-10T05:30"), utc("2024-01-20"), 3
+    )
+    # A period with fewer candles ends at its end.
+    short = await service.first_candles(
+        BTC, Timeframe.H1, utc("2024-01-10"), utc("2024-01-10T02:00"), 3
+    )
+
+    assert first.frame["ts"].to_list() == [utc("2024-01-10T06:00") + i * HOUR for i in range(3)]
+    assert (first.start, first.end) == (utc("2024-01-10T05:30"), utc("2024-01-10T09:00"))
+    assert short.frame.height == 2
+    assert short.end == utc("2024-01-10T02:00")
+
+
+async def test_first_candles_checks(service: DataService, upstream):
+    upstream.exchange_info()
+    upstream.first_kline(LISTED_MS)
+
+    with pytest.raises(InvalidRequest):
+        await service.first_candles(BTC, Timeframe.H1, utc("2024-01-02"), utc("2024-01-01"), 3)
+    with pytest.raises(PeriodOutOfRange, match="Set start"):
+        await service.first_candles(BTC, Timeframe.H1, utc("2017-01-01"), utc("2024-01-01"), 3)
+    with pytest.raises(PeriodOutOfRange, match="Set end to"):
+        await service.first_candles(BTC, Timeframe.H1, utc("2024-01-01"), utc("2100-01-01"), 3)
+    with pytest.raises(TooManyCandles, match="Use a limit of 50000 or less"):
+        await service.first_candles(BTC, Timeframe.H1, utc("2024-01-01"), utc("2025-01-01"), 50001)
+
+
 async def test_last_candles_up_to_now_are_closed_ones(
     settings: Settings, redis, http: httpx.AsyncClient, upstream, monkeypatch: pytest.MonkeyPatch
 ):

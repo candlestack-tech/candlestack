@@ -28,7 +28,7 @@ share it. Give a key only the scopes it needs:
 | Scope | What the key may do |
 | --- | --- |
 | `read` | every GET: market data, your models, backtests and their result documents, Experiments |
-| `backtests` | start, rename and star backtests |
+| `backtests` | start, rename and star backtests, save your backtest defaults |
 | `models` | upload models, add their manifests, rename, star and delete them |
 | `publish` | publish and unpublish backtests |
 

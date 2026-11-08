@@ -84,7 +84,7 @@ flowchart LR
 | `POST /api/v1/me/api-keys` | creates an API key (`name`, `scopes`, optional `expires_in_days` 1 to 365); 201 with its `secret`, the only time it is shown; `409 too-many-api-keys` beyond 10 that are neither revoked nor expired; session only |
 | `DELETE /api/v1/me/api-keys/{key_id}` | revokes an API key: it stops working at once; session only |
 | `GET /api/v1/me/preferences` | the user's settings (backtest defaults, appearance), defaults included |
-| `PUT /api/v1/me/preferences/backtest-defaults` | replaces the backtest defaults: every field, no other (`period_start` before `period_end`), else 422 |
+| `PUT /api/v1/me/preferences/backtest-defaults` | replaces the backtest defaults: every field, no other (`period_start` before `period_end`), else 422; an API key needs `backtests` |
 | `PATCH /api/v1/me/preferences/appearance` | changes the appearance settings it is given; an unknown field is a 422 |
 | `GET /api/v1/models` | the user's uploaded models, oldest first, and the storage they take (`used_bytes`, `quota_bytes`, `file_max_bytes`) |
 | `POST /api/v1/models?name=<file name>` | uploads a model: the body is the file (`application/octet-stream`); checked before it is kept ([Models](#models)); a name the user has already gets a number (`lstm (2).keras`); one upload at a time per user, 100 models at most |
@@ -249,7 +249,8 @@ flowchart LR
 - **Scopes**: the dependency a route takes decides what a key may do there
   (`accounts.dependencies`), and a new route is closed to keys until it says otherwise.
   `CurrentUserDep` lets a key with `read` call a GET and nothing else (403
-  `session-required` on a change); `BacktestsUserDep` (starting a backtest) and
+  `session-required` on a change); `BacktestsUserDep` (starting a backtest, saving the
+  backtest defaults) and
   `ModelsUserDep` (upload, manifest, rename, star, delete a model) need that scope;
   `ReaderDep` lets a key with `read` call a POST that changes nothing (the check of a new
   backtest); the backtest PATCH takes `CallerDep` and needs `publish` for `public`, `backtests` for the rest;
@@ -1017,6 +1018,30 @@ call, as the routes' dependencies do), never the API over HTTP.
 - **Tools**: one module per area, each with its `TOOLS`, which `server.TOOLS` puts together.
   - `account`: `get_me` (scope `read`): the key's user (ID, name, email, created) and the
     key's scopes.
+  - `market` (scope `read`, but `update_backtest_defaults`): `search_instruments` (a query,
+    optional market and exchange, pages with `offset` and `next_offset`), `top_instruments` (the most traded, the top
+    gainers or losers, of a market or both: the list without a query), `get_instrument` (its
+    timeframes and the period of its candles), `get_candles`, `preprocessing_catalog` (the
+    blocks of a manifest, optionally of one step, without the app's `group` and `tunable`
+    and without the bounds and options a parameter does not have), `get_backtest_defaults` (as
+    saved in Settings), `update_backtest_defaults` (scope `backtests`, as its route; replaces
+    every setting, so destructive and idempotent) and `get_preferences` (time zone, date and
+    time format, so an agent writes times as the app shows them; not the theme). The
+    instruments are compact: ID, name, exchange, price, 24 h change and volume, first candle;
+    no symbol, source, feed or mini chart. They call the `DataService` of the routes and answer
+    the data module's problems (`data_problems`); `get_instrument` and `get_candles` count
+    against the same per-minute limit per client address as the routes
+    (`client_rate_limit`). `get_candles` answers at most 500 candles a call (default 200) as
+    rows `[t, o, h, l, c, v]` with the gaps of the page; `start` and `end` take ISO 8601 or
+    epoch seconds, as the candles route does. A client shows a result a second time as
+    indented text, about 56 KB for a full page, which stays under the 25k tokens of tool output
+    that Claude Code accepts by default. Without `start`: the newest `limit` candles before
+    `end` (default now, `DataService.last_candles`) and `next_end`, the page's start, for the
+    earlier page; it is null only when the page's candles and gaps are fewer than `limit`,
+    that is when the data begins in it. With `start`: the first `limit` candles from there
+    (`DataService.first_candles`, which counts the session candles of a stock exactly with
+    `latest_end`) and `next_start`, where they end, for the next page. Its description says
+    the data terms (Alpaca's data for the user's personal, noncommercial use only).
   - `models` (#403), on the models service and its problems (`ml.problems`):
     `list_models` (the models in short: ID, name, format, state, star, the manifest's
     timeframe and session, backtests, best Sharpe; and the storage), `get_model` (one in
@@ -1078,13 +1103,13 @@ call, as the routes' dependencies do), never the API over HTTP.
     the app's cards and charts use, the model by its name and ID; Experiments the same with the
     author, never the model file. The Dashboard's newest published backtests are left out, as
     `list_experiments` lists them.
-  - The tools of the other areas come with #399 and #402.
+  - The tools of the other areas come with #399.
 - **Parity table** (`mcp/parity.py`): every endpoint of the API reference, by method and path,
   maps to the tools that do the same, to `Planned` with the task that adds them, or to
   `WebOnly` with the reason (sign-in, sessions, the keys themselves, deleting the account,
-  sign-in methods, the theme, health, icons, the file download). A unit test fails when an
-  endpoint has no entry, an entry names an endpoint or tool that does not exist, or a planned
-  tool exists already.
+  sign-in methods, the theme, health, icons, the file
+  download). A unit test fails when an endpoint has no entry, an entry names an endpoint or
+  tool that does not exist, or a planned tool exists already.
 - **Tool reference**: `uv run python -m candlestack.mcp.reference > ../docs/mcp-tools.json`
   writes each tool as `tools/list` sends it (name, title, description, annotations, input and
   output schemas) with its scopes, example and endpoints, the instructions and resources, and

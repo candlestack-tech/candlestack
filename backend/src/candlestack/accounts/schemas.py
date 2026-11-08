@@ -117,20 +117,32 @@ _StopLossPct = Annotated[
 ]
 _FeesPct = Annotated[float, Field(ge=0, le=5, description="Fees in percent per side")]
 _SlippagePct = Annotated[float, Field(ge=0, le=5, description="Slippage in percent")]
+_Timeframe = Annotated[BacktestTimeframe, Field(description="Length of one candle the model sees")]
+_Direction = Annotated[
+    Direction,
+    Field(description="long: long trades only, flat on a sell signal; both: long and short"),
+]
+_Benchmark = Annotated[
+    Benchmark,
+    Field(
+        description="What the result is measured against: bh buy and hold of the backtest's own "
+        "instrument, or the ETF SPY, QQQ or DIA"
+    ),
+]
 
 
 class BacktestDefaults(BaseModel):
     """How new backtests start (Settings, Backtest defaults)."""
 
-    timeframe: BacktestTimeframe = BacktestTimeframe.m30
+    timeframe: _Timeframe = BacktestTimeframe.m30
     period_start: _PeriodStart = date(2021, 1, 4)
     period_end: _PeriodEnd = date(2024, 12, 31)
-    direction: Direction = Direction.long
+    direction: _Direction = Direction.long
     threshold: _Threshold = 0.05
     stop_loss_pct: _StopLossPct = 7
     fees_pct: _FeesPct = 0.1
     slippage_pct: _SlippagePct = 0.02
-    benchmark: Benchmark = Benchmark.buy_and_hold
+    benchmark: _Benchmark = Benchmark.buy_and_hold
 
     @model_validator(mode="after")
     def _period_moves_forward(self) -> Self:
@@ -146,15 +158,15 @@ class BacktestDefaultsIn(BacktestDefaults):
 
     model_config = ConfigDict(extra="forbid")
 
-    timeframe: BacktestTimeframe
+    timeframe: _Timeframe
     period_start: _PeriodStart
     period_end: _PeriodEnd
-    direction: Direction
+    direction: _Direction
     threshold: _Threshold
     stop_loss_pct: _StopLossPct
     fees_pct: _FeesPct
     slippage_pct: _SlippagePct
-    benchmark: Benchmark
+    benchmark: _Benchmark
 
 
 class Theme(StrEnum):
@@ -224,9 +236,10 @@ API_KEY_DAYS_MAX = 365
 
 class Scope(StrEnum):
     """What an API key may do. `read`: every GET; `backtests`: start, rename and star
-    backtests; `models`: upload models, add their manifests, rename, star and delete them;
-    `publish`: publish and unpublish backtests. Managing keys, deleting the account, sign-in
-    methods and signing out need the browser session whatever the scopes."""
+    backtests and save the backtest defaults; `models`: upload models, add their manifests,
+    rename, star and delete them; `publish`: publish and unpublish backtests. Managing keys,
+    deleting the account, sign-in methods and signing out need the browser session whatever
+    the scopes."""
 
     read = "read"
     backtests = "backtests"
