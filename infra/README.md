@@ -387,7 +387,9 @@ The edge Caddy adds to every response HSTS (a year; no subdomains or preload, si
 microphone and location, and drops the `Via` header. A Content-Security-Policy runs in
 report-only mode: browsers report what it would block to the Sentry project `frontend`
 (environments `prod`, `stage`), and once the reports show nothing the pages need, it
-becomes enforcing. The smoke test checks these headers after every deploy.
+becomes enforcing. The upload page of a one-time link (`/upload/<token>`) gets no policy: a
+report carries the page's address, which holds the link's secret. The smoke test checks these
+headers after every deploy.
 
 Trivy scans the images for vulnerabilities. In CI the backend and worker images (job `e2e`) and
 the frontend and agent images (job `infra`) fail on a HIGH or CRITICAL one that has a fix,
