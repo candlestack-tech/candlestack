@@ -37,7 +37,29 @@ def new_backtest_id() -> str:
     return "bt_" + "".join(secrets.choice(_ID_ALPHABET) for _ in range(_ID_LENGTH))
 
 
+def new_sweep_id() -> str:
+    """A public sweep ID such as ``sw_7f3k2m9qx4`` (50 random bits)."""
+    return "sw_" + "".join(secrets.choice(_ID_ALPHABET) for _ in range(_ID_LENGTH))
+
+
 BACKTEST_NAME_MAX = 80
+
+
+class Sweep(Base):
+    """A grid of backtests a user started in one request (``POST /api/v1/sweeps``). Its
+    backtests are ordinary rows of ``backtests`` with its ``sweep_id``; it keeps what each of
+    them varied and the statistic it ranks them by."""
+
+    __tablename__ = "sweeps"
+
+    id: Mapped[str] = mapped_column(String(14), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # The statistic of ``results.stats`` the ranking uses unless a request names another.
+    metric: Mapped[str] = mapped_column(String(32))
+    # The setups of the grid in its order, each with its backtest's ID (sweeps.SweepSetup and
+    # ``backtest_id``): what the sweep shows of each backtest without reading its spec.
+    grid: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Backtest(Base):
@@ -119,6 +141,8 @@ class Backtest(Base):
     curves: Mapped[bytes | None] = mapped_column(
         LargeBinary, deferred=True, deferred_raiseload=True
     )
+    # The sweep that started it; null for a backtest started alone.
+    sweep_id: Mapped[str | None] = mapped_column(ForeignKey("sweeps.id", ondelete="SET NULL"))
     # The steps of the run (document.BacktestStep, in their order), written as it goes, so its
     # page shows where it is: null for a backtest stored before they were recorded.
     steps: Mapped[list[dict[str, Any]] | None] = mapped_column(
@@ -171,6 +195,12 @@ Index(
     Backtest.user_id,
     Backtest.number,
     postgresql_where=Backtest.status == "queued",
+)
+# A sweep reads its backtests: a few among all the rows.
+Index(
+    "ix_backtests_sweep_id",
+    Backtest.sweep_id,
+    postgresql_where=Backtest.sweep_id.is_not(None),
 )
 # Experiments and the Dashboard read the published backtests of everyone, newest first: a few
 # among all the rows.

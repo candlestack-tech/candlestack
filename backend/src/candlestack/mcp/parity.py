@@ -97,6 +97,8 @@ PARITY: dict[str, Entry] = {
     "POST /api/v1/backtests/{backtest_id}/cancel": Tools(("cancel_backtest",)),
     "GET /api/v1/experiments": Tools(("list_experiments",)),
     "GET /api/v1/dashboard": Tools(("get_dashboard",)),
+    "POST /api/v1/sweeps": Tools(("validate_sweep", "run_sweep")),
+    "GET /api/v1/sweeps/{sweep_id}": Tools(("get_sweep",)),
 }
 
 

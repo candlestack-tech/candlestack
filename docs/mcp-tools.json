@@ -2715,6 +2715,2543 @@
         "read"
       ],
       "title": "Dashboard"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Checks a sweep without starting anything: every combination of `base` (the setup of one backtest: model, data, decision, execution, benchmarks) and the values in `vary` (models, instruments, periods, decision rules) passes the checks of a new backtest, and the user's queue has room for all of them. Use it before run_sweep to see how many backtests a grid makes and what each one runs.\n\nAnswers the count, the limit of 20, the queue's room and each setup in the grid's order. A setup that fails a check is the problem of that check with `setup`, its place from 1.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#validate_sweep",
+      "endpoints": [
+        "POST /api/v1/sweeps"
+      ],
+      "example": {
+        "arguments": {
+          "base": {
+            "benchmarks": [
+              {
+                "id": "bh",
+                "instrument": "stock:AAPL",
+                "kind": "buy_and_hold"
+              }
+            ],
+            "data": {
+              "instrument": {
+                "id": "stock:AAPL"
+              },
+              "period": {
+                "end": 1735689600,
+                "start": 1704067200
+              }
+            },
+            "decision": {
+              "rule": {
+                "limit": 0.1,
+                "name": "threshold"
+              }
+            },
+            "model": {
+              "id": "mdl_k2m9qx47f3"
+            }
+          },
+          "vary": {
+            "rules": [
+              {
+                "limit": 0.05,
+                "name": "threshold"
+              },
+              {
+                "limit": 0.2,
+                "name": "threshold"
+              }
+            ]
+          }
+        },
+        "result": {
+          "count": 2,
+          "limit": 20,
+          "queue_room": 20,
+          "setups": [
+            {
+              "instrument": "stock:AAPL",
+              "model": "mdl_k2m9qx47f3",
+              "model_name": "lstm.keras",
+              "period": {
+                "end": 1735689600,
+                "start": 1704067200
+              },
+              "representation": "windows",
+              "rule": {
+                "limit": 0.05,
+                "name": "threshold"
+              },
+              "timeframe": "30m"
+            },
+            {
+              "instrument": "stock:AAPL",
+              "model": "mdl_k2m9qx47f3",
+              "model_name": "lstm.keras",
+              "period": {
+                "end": 1735689600,
+                "start": 1704067200
+              },
+              "representation": "windows",
+              "rule": {
+                "limit": 0.2,
+                "name": "threshold"
+              },
+              "timeframe": "30m"
+            }
+          ]
+        }
+      },
+      "inputSchema": {
+        "$defs": {
+          "BacktestIn": {
+            "description": "A new backtest: the setup groups of the result document. The document of a backtest can\nbe sent back as it is to run it again; its other groups are ignored.",
+            "properties": {
+              "benchmarks": {
+                "description": "Buy and hold of the instrument, or of SPY, QQQ or DIA for a stock backtest, or nothing",
+                "items": {
+                  "$ref": "#/$defs/BenchmarkIn"
+                },
+                "maxItems": 1,
+                "title": "Benchmarks",
+                "type": "array"
+              },
+              "data": {
+                "$ref": "#/$defs/DataIn"
+              },
+              "decision": {
+                "$ref": "#/$defs/Decision",
+                "default": {
+                  "calibrate": null,
+                  "confirm": null,
+                  "ema": null,
+                  "long_only": false,
+                  "min_hold": null,
+                  "rule": {
+                    "limit": 0.0,
+                    "name": "threshold"
+                  }
+                }
+              },
+              "execution": {
+                "$ref": "#/$defs/Execution",
+                "default": {
+                  "drawdown_stop": null,
+                  "fee_bps": 0.0,
+                  "fill": "next_open",
+                  "position_size": 1.0,
+                  "slippage_bps": 0.0,
+                  "stop_loss": null
+                }
+              },
+              "model": {
+                "$ref": "#/$defs/ModelRef"
+              }
+            },
+            "required": [
+              "model",
+              "data"
+            ],
+            "title": "BacktestIn",
+            "type": "object"
+          },
+          "BenchmarkIn": {
+            "additionalProperties": false,
+            "description": "What the run is compared with: buy and hold of the backtest's instrument, or of SPY,\nQQQ or DIA for a stock backtest.",
+            "properties": {
+              "id": {
+                "examples": [
+                  "bh"
+                ],
+                "pattern": "^[a-z0-9_-]{1,16}$",
+                "title": "Id",
+                "type": "string"
+              },
+              "instrument": {
+                "description": "The backtest's instrument, or `stock:SPY`, `stock:QQQ` or `stock:DIA` for a stock backtest",
+                "examples": [
+                  "stock:AAPL"
+                ],
+                "title": "Instrument",
+                "type": "string"
+              },
+              "kind": {
+                "const": "buy_and_hold",
+                "title": "Kind",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "instrument"
+            ],
+            "title": "BenchmarkIn",
+            "type": "object"
+          },
+          "CalibrateStep": {
+            "additionalProperties": false,
+            "description": "`zscore` or `rank` over the `window` predictions ending at each one.",
+            "properties": {
+              "name": {
+                "enum": [
+                  "zscore",
+                  "rank"
+                ],
+                "title": "Name",
+                "type": "string"
+              },
+              "window": {
+                "maximum": 1000,
+                "minimum": 2,
+                "title": "Window",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "name",
+              "window"
+            ],
+            "title": "CalibrateStep",
+            "type": "object"
+          },
+          "CandlesStep": {
+            "additionalProperties": false,
+            "properties": {
+              "candles": {
+                "minimum": 1,
+                "title": "Candles",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "candles"
+            ],
+            "title": "CandlesStep",
+            "type": "object"
+          },
+          "DataIn": {
+            "description": "One instrument and the period; the timeframe and session are the model's. The document's\nother fields of the group are ignored.",
+            "properties": {
+              "instrument": {
+                "$ref": "#/$defs/InstrumentRef"
+              },
+              "period": {
+                "$ref": "#/$defs/Period"
+              }
+            },
+            "required": [
+              "instrument",
+              "period"
+            ],
+            "title": "DataIn",
+            "type": "object"
+          },
+          "Decision": {
+            "additionalProperties": false,
+            "description": "How the predictions become a signal: each step of docs/engine.md (Signals) in the order\napplied, null when off; exactly what the command's `run.json` records.",
+            "properties": {
+              "calibrate": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CalibrateStep"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "confirm": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CandlesStep"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Count a value only once it held this many candles"
+              },
+              "ema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/EmaStep"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "long_only": {
+                "default": false,
+                "description": "Flat instead of short",
+                "title": "Long Only",
+                "type": "boolean"
+              },
+              "min_hold": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CandlesStep"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Keep each new position for at least this many candles"
+              },
+              "rule": {
+                "default": {
+                  "limit": 0.0,
+                  "name": "threshold"
+                },
+                "discriminator": {
+                  "mapping": {
+                    "hysteresis": "#/$defs/HysteresisRule",
+                    "kmeans": "#/$defs/KmeansRule",
+                    "threshold": "#/$defs/ThresholdRule"
+                  },
+                  "propertyName": "name"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/ThresholdRule"
+                  },
+                  {
+                    "$ref": "#/$defs/HysteresisRule"
+                  },
+                  {
+                    "$ref": "#/$defs/KmeansRule"
+                  }
+                ],
+                "title": "Rule"
+              }
+            },
+            "title": "Decision",
+            "type": "object"
+          },
+          "EmaStep": {
+            "additionalProperties": false,
+            "properties": {
+              "span": {
+                "description": "The span of the exponential moving average",
+                "minimum": 1,
+                "title": "Span",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "span"
+            ],
+            "title": "EmaStep",
+            "type": "object"
+          },
+          "Execution": {
+            "additionalProperties": false,
+            "description": "How the engine fills orders and what they cost: the engine's `Settings`\n(docs/engine.md, Settings). Fractions: 0.05 is 5%; a basis point is 0.01%.",
+            "properties": {
+              "drawdown_stop": {
+                "anyOf": [
+                  {
+                    "exclusiveMaximum": 1,
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Drawdown Stop"
+              },
+              "fee_bps": {
+                "default": 0.0,
+                "minimum": 0,
+                "title": "Fee Bps",
+                "type": "number"
+              },
+              "fill": {
+                "default": "next_open",
+                "enum": [
+                  "next_open",
+                  "signal_close"
+                ],
+                "title": "Fill",
+                "type": "string"
+              },
+              "position_size": {
+                "default": 1.0,
+                "exclusiveMinimum": 0,
+                "maximum": 1,
+                "title": "Position Size",
+                "type": "number"
+              },
+              "slippage_bps": {
+                "default": 0.0,
+                "minimum": 0,
+                "title": "Slippage Bps",
+                "type": "number"
+              },
+              "stop_loss": {
+                "anyOf": [
+                  {
+                    "exclusiveMaximum": 1,
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Stop Loss"
+              }
+            },
+            "title": "Execution",
+            "type": "object"
+          },
+          "HysteresisRule": {
+            "additionalProperties": false,
+            "properties": {
+              "enter": {
+                "description": "The limit a position opens at",
+                "minimum": 0,
+                "title": "Enter",
+                "type": "number"
+              },
+              "exit": {
+                "description": "The limit it closes below, at most `enter`",
+                "minimum": 0,
+                "title": "Exit",
+                "type": "number"
+              },
+              "name": {
+                "const": "hysteresis",
+                "title": "Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "enter",
+              "exit"
+            ],
+            "title": "HysteresisRule",
+            "type": "object"
+          },
+          "InstrumentRef": {
+            "description": "The instrument to run on; the document's other fields of it are ignored.",
+            "properties": {
+              "id": {
+                "description": "`<market>:<symbol>`",
+                "examples": [
+                  "stock:AAPL"
+                ],
+                "title": "Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "title": "InstrumentRef",
+            "type": "object"
+          },
+          "KmeansRule": {
+            "additionalProperties": false,
+            "properties": {
+              "k": {
+                "description": "Groups: long in the highest, short in the lowest",
+                "maximum": 5,
+                "minimum": 2,
+                "title": "K",
+                "type": "integer"
+              },
+              "name": {
+                "const": "kmeans",
+                "title": "Name",
+                "type": "string"
+              },
+              "refit_every": {
+                "description": "Rows a fit is used for, at least `window / 20`",
+                "minimum": 1,
+                "title": "Refit Every",
+                "type": "integer"
+              },
+              "window": {
+                "description": "Earlier predictions a fit uses, at least `2 * k`",
+                "maximum": 5000,
+                "title": "Window",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "name",
+              "k",
+              "window",
+              "refit_every"
+            ],
+            "title": "KmeansRule",
+            "type": "object"
+          },
+          "ModelRef": {
+            "description": "The model to run; the other fields of the document's `model` group are ignored, so the\ngroup can be sent back as it is.",
+            "properties": {
+              "id": {
+                "description": "Public ID of one of the user's models",
+                "examples": [
+                  "mdl_k2m9qx47f3"
+                ],
+                "title": "Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "title": "ModelRef",
+            "type": "object"
+          },
+          "Period": {
+            "additionalProperties": false,
+            "description": "The test period `[start, end)` in UTC epoch seconds of a candle's open.",
+            "properties": {
+              "end": {
+                "description": "End of the test, excluded",
+                "examples": [
+                  1717459200
+                ],
+                "minimum": 0,
+                "title": "End",
+                "type": "integer"
+              },
+              "start": {
+                "description": "First second of the test",
+                "examples": [
+                  1717372800
+                ],
+                "minimum": 0,
+                "title": "Start",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "start",
+              "end"
+            ],
+            "title": "Period",
+            "type": "object"
+          },
+          "SweepVary": {
+            "additionalProperties": false,
+            "description": "The values to vary, each list in place of the base's value; a list left out or empty\nkeeps the base's. Every combination is one backtest.",
+            "properties": {
+              "instruments": {
+                "description": "`<market>:<symbol>` IDs. A benchmark that holds the base's instrument holds each backtest's own",
+                "examples": [
+                  [
+                    "stock:AAPL",
+                    "stock:MSFT"
+                  ]
+                ],
+                "items": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "title": "Instruments",
+                "type": "array"
+              },
+              "models": {
+                "description": "Public IDs of the user's models. A model's manifest sets what it reads (the representation) and its timeframe, so list models to vary those",
+                "examples": [
+                  [
+                    "mdl_k2m9qx47f3",
+                    "mdl_t9n8v7d6a5"
+                  ]
+                ],
+                "items": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "title": "Models",
+                "type": "array"
+              },
+              "periods": {
+                "items": {
+                  "$ref": "#/$defs/Period"
+                },
+                "maxItems": 20,
+                "title": "Periods",
+                "type": "array"
+              },
+              "rules": {
+                "description": "Decision rules in place of `decision.rule`: other limits of one rule, or other rules",
+                "examples": [
+                  [
+                    {
+                      "limit": 0.1,
+                      "name": "threshold"
+                    },
+                    {
+                      "limit": 0.2,
+                      "name": "threshold"
+                    }
+                  ]
+                ],
+                "items": {
+                  "discriminator": {
+                    "mapping": {
+                      "hysteresis": "#/$defs/HysteresisRule",
+                      "kmeans": "#/$defs/KmeansRule",
+                      "threshold": "#/$defs/ThresholdRule"
+                    },
+                    "propertyName": "name"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/ThresholdRule"
+                    },
+                    {
+                      "$ref": "#/$defs/HysteresisRule"
+                    },
+                    {
+                      "$ref": "#/$defs/KmeansRule"
+                    }
+                  ]
+                },
+                "maxItems": 20,
+                "title": "Rules",
+                "type": "array"
+              }
+            },
+            "title": "SweepVary",
+            "type": "object"
+          },
+          "ThresholdRule": {
+            "additionalProperties": false,
+            "properties": {
+              "limit": {
+                "description": "Long at a prediction of `limit` or more, short at `-limit` or less",
+                "minimum": 0,
+                "title": "Limit",
+                "type": "number"
+              },
+              "name": {
+                "const": "threshold",
+                "title": "Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "limit"
+            ],
+            "title": "ThresholdRule",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "base": {
+            "$ref": "#/$defs/BacktestIn"
+          },
+          "vary": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SweepVary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "base"
+        ],
+        "title": "validate_sweepArguments",
+        "type": "object"
+      },
+      "name": "validate_sweep",
+      "outputSchema": {
+        "$defs": {
+          "Period": {
+            "additionalProperties": false,
+            "description": "The test period `[start, end)` in UTC epoch seconds of a candle's open.",
+            "properties": {
+              "end": {
+                "description": "End of the test, excluded",
+                "examples": [
+                  1717459200
+                ],
+                "minimum": 0,
+                "title": "End",
+                "type": "integer"
+              },
+              "start": {
+                "description": "First second of the test",
+                "examples": [
+                  1717372800
+                ],
+                "minimum": 0,
+                "title": "Start",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "start",
+              "end"
+            ],
+            "title": "Period",
+            "type": "object"
+          },
+          "Representation": {
+            "description": "What the model reads: Renko bricks, a Kagi line or time windows of candles.",
+            "enum": [
+              "renko",
+              "kagi",
+              "windows"
+            ],
+            "title": "Representation",
+            "type": "string"
+          },
+          "SweepSetup": {
+            "description": "What one backtest of the sweep runs on and with.",
+            "properties": {
+              "instrument": {
+                "description": "`<market>:<symbol>`",
+                "examples": [
+                  "stock:AAPL"
+                ],
+                "title": "Instrument",
+                "type": "string"
+              },
+              "model": {
+                "description": "Public ID of the model",
+                "examples": [
+                  "mdl_k2m9qx47f3"
+                ],
+                "title": "Model",
+                "type": "string"
+              },
+              "model_name": {
+                "description": "Its name when the sweep started",
+                "examples": [
+                  "lstm.keras"
+                ],
+                "title": "Model Name",
+                "type": "string"
+              },
+              "period": {
+                "$ref": "#/$defs/Period"
+              },
+              "representation": {
+                "$ref": "#/$defs/Representation"
+              },
+              "rule": {
+                "additionalProperties": true,
+                "description": "The decision rule, as `decision.rule` of the result document",
+                "examples": [
+                  {
+                    "limit": 0.1,
+                    "name": "threshold"
+                  }
+                ],
+                "title": "Rule",
+                "type": "object"
+              },
+              "timeframe": {
+                "description": "The model's timeframe",
+                "examples": [
+                  "30m"
+                ],
+                "title": "Timeframe",
+                "type": "string"
+              }
+            },
+            "required": [
+              "model",
+              "model_name",
+              "representation",
+              "timeframe",
+              "instrument",
+              "period",
+              "rule"
+            ],
+            "title": "SweepSetup",
+            "type": "object"
+          }
+        },
+        "description": "The answer of a dry run (`validate_only`): what the sweep would start.",
+        "properties": {
+          "count": {
+            "description": "Backtests the sweep would start",
+            "examples": [
+              6
+            ],
+            "title": "Count",
+            "type": "integer"
+          },
+          "limit": {
+            "description": "The most a sweep starts",
+            "examples": [
+              20
+            ],
+            "title": "Limit",
+            "type": "integer"
+          },
+          "queue_room": {
+            "description": "Backtests the user's queue has room for now",
+            "examples": [
+              20
+            ],
+            "title": "Queue Room",
+            "type": "integer"
+          },
+          "setups": {
+            "description": "Each backtest's setup, in the grid's order",
+            "items": {
+              "$ref": "#/$defs/SweepSetup"
+            },
+            "title": "Setups",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "limit",
+          "queue_room",
+          "setups"
+        ],
+        "title": "SweepPlan",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Check a sweep"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Starts a backtest for every combination of `base` (the setup of one backtest) and the values in `vary`: models (each model's manifest sets what it reads and its timeframe, so list models to vary those), instruments, periods and decision rules, 2 to 20 backtests. All go to the end of the user's queue, which runs one at a time, or none does. `metric` is the statistic the ranking orders by.\n\nAnswers the sweep: its ID, each backtest's ID, status and setup, and the progress. Follow it with get_sweep until `done`. The backtests are ordinary ones, with the sweep's ID.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#run_sweep",
+      "endpoints": [
+        "POST /api/v1/sweeps"
+      ],
+      "example": {
+        "arguments": {
+          "base": {
+            "benchmarks": [
+              {
+                "id": "bh",
+                "instrument": "stock:AAPL",
+                "kind": "buy_and_hold"
+              }
+            ],
+            "data": {
+              "instrument": {
+                "id": "stock:AAPL"
+              },
+              "period": {
+                "end": 1735689600,
+                "start": 1704067200
+              }
+            },
+            "decision": {
+              "rule": {
+                "limit": 0.1,
+                "name": "threshold"
+              }
+            },
+            "model": {
+              "id": "mdl_k2m9qx47f3"
+            }
+          },
+          "metric": "sharpe",
+          "vary": {
+            "rules": [
+              {
+                "limit": 0.05,
+                "name": "threshold"
+              },
+              {
+                "limit": 0.2,
+                "name": "threshold"
+              }
+            ]
+          }
+        },
+        "result": {
+          "backtests": [
+            {
+              "error": null,
+              "id": "bt_7f3k2m9qx4",
+              "name": "Silent Orion",
+              "number": 12,
+              "queue_position": null,
+              "setup": {
+                "instrument": "stock:AAPL",
+                "model": "mdl_k2m9qx47f3",
+                "model_name": "lstm.keras",
+                "period": {
+                  "end": 1735689600,
+                  "start": 1704067200
+                },
+                "representation": "windows",
+                "rule": {
+                  "limit": 0.05,
+                  "name": "threshold"
+                },
+                "timeframe": "30m"
+              },
+              "status": "running"
+            },
+            {
+              "error": null,
+              "id": "bt_t9n8v7d6a5",
+              "name": "Bright Vega",
+              "number": 13,
+              "queue_position": 1,
+              "setup": {
+                "instrument": "stock:AAPL",
+                "model": "mdl_k2m9qx47f3",
+                "model_name": "lstm.keras",
+                "period": {
+                  "end": 1735689600,
+                  "start": 1704067200
+                },
+                "representation": "windows",
+                "rule": {
+                  "limit": 0.2,
+                  "name": "threshold"
+                },
+                "timeframe": "30m"
+              },
+              "status": "queued"
+            }
+          ],
+          "count": 2,
+          "created_at": "2026-11-08T10:00:00Z",
+          "done": false,
+          "id": "sw_7f3k2m9qx4",
+          "metric": "sharpe",
+          "progress": {
+            "failed": 0,
+            "finished": 0,
+            "queued": 1,
+            "running": 1
+          },
+          "ranking": null
+        }
+      },
+      "inputSchema": {
+        "$defs": {
+          "BacktestIn": {
+            "description": "A new backtest: the setup groups of the result document. The document of a backtest can\nbe sent back as it is to run it again; its other groups are ignored.",
+            "properties": {
+              "benchmarks": {
+                "description": "Buy and hold of the instrument, or of SPY, QQQ or DIA for a stock backtest, or nothing",
+                "items": {
+                  "$ref": "#/$defs/BenchmarkIn"
+                },
+                "maxItems": 1,
+                "title": "Benchmarks",
+                "type": "array"
+              },
+              "data": {
+                "$ref": "#/$defs/DataIn"
+              },
+              "decision": {
+                "$ref": "#/$defs/Decision",
+                "default": {
+                  "calibrate": null,
+                  "confirm": null,
+                  "ema": null,
+                  "long_only": false,
+                  "min_hold": null,
+                  "rule": {
+                    "limit": 0.0,
+                    "name": "threshold"
+                  }
+                }
+              },
+              "execution": {
+                "$ref": "#/$defs/Execution",
+                "default": {
+                  "drawdown_stop": null,
+                  "fee_bps": 0.0,
+                  "fill": "next_open",
+                  "position_size": 1.0,
+                  "slippage_bps": 0.0,
+                  "stop_loss": null
+                }
+              },
+              "model": {
+                "$ref": "#/$defs/ModelRef"
+              }
+            },
+            "required": [
+              "model",
+              "data"
+            ],
+            "title": "BacktestIn",
+            "type": "object"
+          },
+          "BenchmarkIn": {
+            "additionalProperties": false,
+            "description": "What the run is compared with: buy and hold of the backtest's instrument, or of SPY,\nQQQ or DIA for a stock backtest.",
+            "properties": {
+              "id": {
+                "examples": [
+                  "bh"
+                ],
+                "pattern": "^[a-z0-9_-]{1,16}$",
+                "title": "Id",
+                "type": "string"
+              },
+              "instrument": {
+                "description": "The backtest's instrument, or `stock:SPY`, `stock:QQQ` or `stock:DIA` for a stock backtest",
+                "examples": [
+                  "stock:AAPL"
+                ],
+                "title": "Instrument",
+                "type": "string"
+              },
+              "kind": {
+                "const": "buy_and_hold",
+                "title": "Kind",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "instrument"
+            ],
+            "title": "BenchmarkIn",
+            "type": "object"
+          },
+          "CalibrateStep": {
+            "additionalProperties": false,
+            "description": "`zscore` or `rank` over the `window` predictions ending at each one.",
+            "properties": {
+              "name": {
+                "enum": [
+                  "zscore",
+                  "rank"
+                ],
+                "title": "Name",
+                "type": "string"
+              },
+              "window": {
+                "maximum": 1000,
+                "minimum": 2,
+                "title": "Window",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "name",
+              "window"
+            ],
+            "title": "CalibrateStep",
+            "type": "object"
+          },
+          "CandlesStep": {
+            "additionalProperties": false,
+            "properties": {
+              "candles": {
+                "minimum": 1,
+                "title": "Candles",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "candles"
+            ],
+            "title": "CandlesStep",
+            "type": "object"
+          },
+          "DataIn": {
+            "description": "One instrument and the period; the timeframe and session are the model's. The document's\nother fields of the group are ignored.",
+            "properties": {
+              "instrument": {
+                "$ref": "#/$defs/InstrumentRef"
+              },
+              "period": {
+                "$ref": "#/$defs/Period"
+              }
+            },
+            "required": [
+              "instrument",
+              "period"
+            ],
+            "title": "DataIn",
+            "type": "object"
+          },
+          "Decision": {
+            "additionalProperties": false,
+            "description": "How the predictions become a signal: each step of docs/engine.md (Signals) in the order\napplied, null when off; exactly what the command's `run.json` records.",
+            "properties": {
+              "calibrate": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CalibrateStep"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "confirm": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CandlesStep"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Count a value only once it held this many candles"
+              },
+              "ema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/EmaStep"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "long_only": {
+                "default": false,
+                "description": "Flat instead of short",
+                "title": "Long Only",
+                "type": "boolean"
+              },
+              "min_hold": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CandlesStep"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Keep each new position for at least this many candles"
+              },
+              "rule": {
+                "default": {
+                  "limit": 0.0,
+                  "name": "threshold"
+                },
+                "discriminator": {
+                  "mapping": {
+                    "hysteresis": "#/$defs/HysteresisRule",
+                    "kmeans": "#/$defs/KmeansRule",
+                    "threshold": "#/$defs/ThresholdRule"
+                  },
+                  "propertyName": "name"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/ThresholdRule"
+                  },
+                  {
+                    "$ref": "#/$defs/HysteresisRule"
+                  },
+                  {
+                    "$ref": "#/$defs/KmeansRule"
+                  }
+                ],
+                "title": "Rule"
+              }
+            },
+            "title": "Decision",
+            "type": "object"
+          },
+          "EmaStep": {
+            "additionalProperties": false,
+            "properties": {
+              "span": {
+                "description": "The span of the exponential moving average",
+                "minimum": 1,
+                "title": "Span",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "span"
+            ],
+            "title": "EmaStep",
+            "type": "object"
+          },
+          "Execution": {
+            "additionalProperties": false,
+            "description": "How the engine fills orders and what they cost: the engine's `Settings`\n(docs/engine.md, Settings). Fractions: 0.05 is 5%; a basis point is 0.01%.",
+            "properties": {
+              "drawdown_stop": {
+                "anyOf": [
+                  {
+                    "exclusiveMaximum": 1,
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Drawdown Stop"
+              },
+              "fee_bps": {
+                "default": 0.0,
+                "minimum": 0,
+                "title": "Fee Bps",
+                "type": "number"
+              },
+              "fill": {
+                "default": "next_open",
+                "enum": [
+                  "next_open",
+                  "signal_close"
+                ],
+                "title": "Fill",
+                "type": "string"
+              },
+              "position_size": {
+                "default": 1.0,
+                "exclusiveMinimum": 0,
+                "maximum": 1,
+                "title": "Position Size",
+                "type": "number"
+              },
+              "slippage_bps": {
+                "default": 0.0,
+                "minimum": 0,
+                "title": "Slippage Bps",
+                "type": "number"
+              },
+              "stop_loss": {
+                "anyOf": [
+                  {
+                    "exclusiveMaximum": 1,
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Stop Loss"
+              }
+            },
+            "title": "Execution",
+            "type": "object"
+          },
+          "HysteresisRule": {
+            "additionalProperties": false,
+            "properties": {
+              "enter": {
+                "description": "The limit a position opens at",
+                "minimum": 0,
+                "title": "Enter",
+                "type": "number"
+              },
+              "exit": {
+                "description": "The limit it closes below, at most `enter`",
+                "minimum": 0,
+                "title": "Exit",
+                "type": "number"
+              },
+              "name": {
+                "const": "hysteresis",
+                "title": "Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "enter",
+              "exit"
+            ],
+            "title": "HysteresisRule",
+            "type": "object"
+          },
+          "InstrumentRef": {
+            "description": "The instrument to run on; the document's other fields of it are ignored.",
+            "properties": {
+              "id": {
+                "description": "`<market>:<symbol>`",
+                "examples": [
+                  "stock:AAPL"
+                ],
+                "title": "Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "title": "InstrumentRef",
+            "type": "object"
+          },
+          "KmeansRule": {
+            "additionalProperties": false,
+            "properties": {
+              "k": {
+                "description": "Groups: long in the highest, short in the lowest",
+                "maximum": 5,
+                "minimum": 2,
+                "title": "K",
+                "type": "integer"
+              },
+              "name": {
+                "const": "kmeans",
+                "title": "Name",
+                "type": "string"
+              },
+              "refit_every": {
+                "description": "Rows a fit is used for, at least `window / 20`",
+                "minimum": 1,
+                "title": "Refit Every",
+                "type": "integer"
+              },
+              "window": {
+                "description": "Earlier predictions a fit uses, at least `2 * k`",
+                "maximum": 5000,
+                "title": "Window",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "name",
+              "k",
+              "window",
+              "refit_every"
+            ],
+            "title": "KmeansRule",
+            "type": "object"
+          },
+          "ModelRef": {
+            "description": "The model to run; the other fields of the document's `model` group are ignored, so the\ngroup can be sent back as it is.",
+            "properties": {
+              "id": {
+                "description": "Public ID of one of the user's models",
+                "examples": [
+                  "mdl_k2m9qx47f3"
+                ],
+                "title": "Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "title": "ModelRef",
+            "type": "object"
+          },
+          "Period": {
+            "additionalProperties": false,
+            "description": "The test period `[start, end)` in UTC epoch seconds of a candle's open.",
+            "properties": {
+              "end": {
+                "description": "End of the test, excluded",
+                "examples": [
+                  1717459200
+                ],
+                "minimum": 0,
+                "title": "End",
+                "type": "integer"
+              },
+              "start": {
+                "description": "First second of the test",
+                "examples": [
+                  1717372800
+                ],
+                "minimum": 0,
+                "title": "Start",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "start",
+              "end"
+            ],
+            "title": "Period",
+            "type": "object"
+          },
+          "SweepMetric": {
+            "description": "A statistic of `results.stats` the ranking can use: one that is better higher or lower.",
+            "enum": [
+              "total_return",
+              "max_drawdown",
+              "sharpe",
+              "sortino",
+              "win_rate",
+              "avg_trade_return",
+              "best_trade_return",
+              "worst_trade_return",
+              "fees_paid"
+            ],
+            "title": "SweepMetric",
+            "type": "string"
+          },
+          "SweepVary": {
+            "additionalProperties": false,
+            "description": "The values to vary, each list in place of the base's value; a list left out or empty\nkeeps the base's. Every combination is one backtest.",
+            "properties": {
+              "instruments": {
+                "description": "`<market>:<symbol>` IDs. A benchmark that holds the base's instrument holds each backtest's own",
+                "examples": [
+                  [
+                    "stock:AAPL",
+                    "stock:MSFT"
+                  ]
+                ],
+                "items": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "title": "Instruments",
+                "type": "array"
+              },
+              "models": {
+                "description": "Public IDs of the user's models. A model's manifest sets what it reads (the representation) and its timeframe, so list models to vary those",
+                "examples": [
+                  [
+                    "mdl_k2m9qx47f3",
+                    "mdl_t9n8v7d6a5"
+                  ]
+                ],
+                "items": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "title": "Models",
+                "type": "array"
+              },
+              "periods": {
+                "items": {
+                  "$ref": "#/$defs/Period"
+                },
+                "maxItems": 20,
+                "title": "Periods",
+                "type": "array"
+              },
+              "rules": {
+                "description": "Decision rules in place of `decision.rule`: other limits of one rule, or other rules",
+                "examples": [
+                  [
+                    {
+                      "limit": 0.1,
+                      "name": "threshold"
+                    },
+                    {
+                      "limit": 0.2,
+                      "name": "threshold"
+                    }
+                  ]
+                ],
+                "items": {
+                  "discriminator": {
+                    "mapping": {
+                      "hysteresis": "#/$defs/HysteresisRule",
+                      "kmeans": "#/$defs/KmeansRule",
+                      "threshold": "#/$defs/ThresholdRule"
+                    },
+                    "propertyName": "name"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/ThresholdRule"
+                    },
+                    {
+                      "$ref": "#/$defs/HysteresisRule"
+                    },
+                    {
+                      "$ref": "#/$defs/KmeansRule"
+                    }
+                  ]
+                },
+                "maxItems": 20,
+                "title": "Rules",
+                "type": "array"
+              }
+            },
+            "title": "SweepVary",
+            "type": "object"
+          },
+          "ThresholdRule": {
+            "additionalProperties": false,
+            "properties": {
+              "limit": {
+                "description": "Long at a prediction of `limit` or more, short at `-limit` or less",
+                "minimum": 0,
+                "title": "Limit",
+                "type": "number"
+              },
+              "name": {
+                "const": "threshold",
+                "title": "Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "limit"
+            ],
+            "title": "ThresholdRule",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "base": {
+            "$ref": "#/$defs/BacktestIn"
+          },
+          "metric": {
+            "$ref": "#/$defs/SweepMetric",
+            "default": "sharpe"
+          },
+          "vary": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SweepVary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "base"
+        ],
+        "title": "run_sweepArguments",
+        "type": "object"
+      },
+      "name": "run_sweep",
+      "outputSchema": {
+        "$defs": {
+          "BacktestStatus": {
+            "description": "`queued` (it waits for the user's running backtest to end), `running`, `finished` (it\nhas results) or `failed` (it has an error, also when it was cancelled before it ran).",
+            "enum": [
+              "queued",
+              "running",
+              "finished",
+              "failed"
+            ],
+            "title": "BacktestStatus",
+            "type": "string"
+          },
+          "Period": {
+            "additionalProperties": false,
+            "description": "The test period `[start, end)` in UTC epoch seconds of a candle's open.",
+            "properties": {
+              "end": {
+                "description": "End of the test, excluded",
+                "examples": [
+                  1717459200
+                ],
+                "minimum": 0,
+                "title": "End",
+                "type": "integer"
+              },
+              "start": {
+                "description": "First second of the test",
+                "examples": [
+                  1717372800
+                ],
+                "minimum": 0,
+                "title": "Start",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "start",
+              "end"
+            ],
+            "title": "Period",
+            "type": "object"
+          },
+          "Representation": {
+            "description": "What the model reads: Renko bricks, a Kagi line or time windows of candles.",
+            "enum": [
+              "renko",
+              "kagi",
+              "windows"
+            ],
+            "title": "Representation",
+            "type": "string"
+          },
+          "SweepBacktest": {
+            "properties": {
+              "error": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "What went wrong, for a failed one",
+                "title": "Error"
+              },
+              "id": {
+                "examples": [
+                  "bt_7f3k2m9qx4"
+                ],
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "examples": [
+                  "Silent Orion"
+                ],
+                "title": "Name",
+                "type": "string"
+              },
+              "number": {
+                "description": "The user's own number, shown as #N",
+                "examples": [
+                  12
+                ],
+                "title": "Number",
+                "type": "integer"
+              },
+              "queue_position": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Where a queued backtest is in the user's queue: 1 starts next",
+                "title": "Queue Position"
+              },
+              "setup": {
+                "$ref": "#/$defs/SweepSetup"
+              },
+              "status": {
+                "$ref": "#/$defs/BacktestStatus"
+              }
+            },
+            "required": [
+              "id",
+              "number",
+              "name",
+              "status",
+              "queue_position",
+              "error",
+              "setup"
+            ],
+            "title": "SweepBacktest",
+            "type": "object"
+          },
+          "SweepMetric": {
+            "description": "A statistic of `results.stats` the ranking can use: one that is better higher or lower.",
+            "enum": [
+              "total_return",
+              "max_drawdown",
+              "sharpe",
+              "sortino",
+              "win_rate",
+              "avg_trade_return",
+              "best_trade_return",
+              "worst_trade_return",
+              "fees_paid"
+            ],
+            "title": "SweepMetric",
+            "type": "string"
+          },
+          "SweepProgress": {
+            "description": "How many of the sweep's backtests have each status.",
+            "properties": {
+              "failed": {
+                "title": "Failed",
+                "type": "integer"
+              },
+              "finished": {
+                "title": "Finished",
+                "type": "integer"
+              },
+              "queued": {
+                "title": "Queued",
+                "type": "integer"
+              },
+              "running": {
+                "title": "Running",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "queued",
+              "running",
+              "finished",
+              "failed"
+            ],
+            "title": "SweepProgress",
+            "type": "object"
+          },
+          "SweepRanked": {
+            "properties": {
+              "id": {
+                "examples": [
+                  "bt_7f3k2m9qx4"
+                ],
+                "title": "Id",
+                "type": "string"
+              },
+              "mark": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "best",
+                      "worst"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "`best` or `worst` as `GET /api/v1/compare` marks it, else null",
+                "title": "Mark"
+              },
+              "name": {
+                "examples": [
+                  "Silent Orion"
+                ],
+                "title": "Name",
+                "type": "string"
+              },
+              "number": {
+                "examples": [
+                  12
+                ],
+                "title": "Number",
+                "type": "integer"
+              },
+              "rank": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "1 for the best; values that read the same in the app share a rank (1, 1, 3); null without a value (failed, or the statistic is undefined)",
+                "examples": [
+                  1
+                ],
+                "title": "Rank"
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The statistic, as in `results.stats`",
+                "examples": [
+                  1.42
+                ],
+                "title": "Value"
+              }
+            },
+            "required": [
+              "rank",
+              "id",
+              "number",
+              "name",
+              "value",
+              "mark"
+            ],
+            "title": "SweepRanked",
+            "type": "object"
+          },
+          "SweepRanking": {
+            "description": "The backtests by one statistic, the best first, those without a value last.",
+            "properties": {
+              "backtests": {
+                "items": {
+                  "$ref": "#/$defs/SweepRanked"
+                },
+                "title": "Backtests",
+                "type": "array"
+              },
+              "better": {
+                "description": "Which way is better: `lower` for a fall by its size and for the fees",
+                "enum": [
+                  "higher",
+                  "lower"
+                ],
+                "title": "Better",
+                "type": "string"
+              },
+              "label": {
+                "description": "What the app calls it",
+                "examples": [
+                  "Sharpe"
+                ],
+                "title": "Label",
+                "type": "string"
+              },
+              "metric": {
+                "$ref": "#/$defs/SweepMetric"
+              }
+            },
+            "required": [
+              "metric",
+              "label",
+              "better",
+              "backtests"
+            ],
+            "title": "SweepRanking",
+            "type": "object"
+          },
+          "SweepSetup": {
+            "description": "What one backtest of the sweep runs on and with.",
+            "properties": {
+              "instrument": {
+                "description": "`<market>:<symbol>`",
+                "examples": [
+                  "stock:AAPL"
+                ],
+                "title": "Instrument",
+                "type": "string"
+              },
+              "model": {
+                "description": "Public ID of the model",
+                "examples": [
+                  "mdl_k2m9qx47f3"
+                ],
+                "title": "Model",
+                "type": "string"
+              },
+              "model_name": {
+                "description": "Its name when the sweep started",
+                "examples": [
+                  "lstm.keras"
+                ],
+                "title": "Model Name",
+                "type": "string"
+              },
+              "period": {
+                "$ref": "#/$defs/Period"
+              },
+              "representation": {
+                "$ref": "#/$defs/Representation"
+              },
+              "rule": {
+                "additionalProperties": true,
+                "description": "The decision rule, as `decision.rule` of the result document",
+                "examples": [
+                  {
+                    "limit": 0.1,
+                    "name": "threshold"
+                  }
+                ],
+                "title": "Rule",
+                "type": "object"
+              },
+              "timeframe": {
+                "description": "The model's timeframe",
+                "examples": [
+                  "30m"
+                ],
+                "title": "Timeframe",
+                "type": "string"
+              }
+            },
+            "required": [
+              "model",
+              "model_name",
+              "representation",
+              "timeframe",
+              "instrument",
+              "period",
+              "rule"
+            ],
+            "title": "SweepSetup",
+            "type": "object"
+          }
+        },
+        "description": "A sweep: its backtests, how far they are, and once all ended the ranking.",
+        "properties": {
+          "backtests": {
+            "description": "In the grid's order",
+            "items": {
+              "$ref": "#/$defs/SweepBacktest"
+            },
+            "title": "Backtests",
+            "type": "array"
+          },
+          "count": {
+            "description": "Its backtests",
+            "examples": [
+              6
+            ],
+            "title": "Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "description": "When it was started (UTC)",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "done": {
+            "description": "None of its backtests is queued or running",
+            "title": "Done",
+            "type": "boolean"
+          },
+          "id": {
+            "examples": [
+              "sw_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "metric": {
+            "$ref": "#/$defs/SweepMetric",
+            "description": "What the ranking orders by"
+          },
+          "progress": {
+            "$ref": "#/$defs/SweepProgress"
+          },
+          "ranking": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SweepRanking"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null until every backtest ended. For every statistic, the setups and the curves, ask `GET /api/v1/compare` with the IDs of `backtests`"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "metric",
+          "count",
+          "done",
+          "progress",
+          "backtests",
+          "ranking"
+        ],
+        "title": "SweepOut",
+        "type": "object"
+      },
+      "scopes": [
+        "backtests"
+      ],
+      "title": "Run a sweep"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "A sweep of the user: how many of its backtests are queued, running, finished and failed, each backtest's ID, status and setup, and once none is queued or running (`done`) the ranking, best first, by `metric` or else the sweep's own. Values that read the same in the app share a rank, and the best and the worst are marked as the Compare page marks them.\n\nCall it again while it runs; a backtest takes a minute or a few. For every statistic of the backtests, compare them with their IDs.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_sweep",
+      "endpoints": [
+        "GET /api/v1/sweeps/{sweep_id}"
+      ],
+      "example": {
+        "arguments": {
+          "sweep_id": "sw_7f3k2m9qx4"
+        },
+        "result": {
+          "backtests": [
+            {
+              "error": null,
+              "id": "bt_7f3k2m9qx4",
+              "name": "Silent Orion",
+              "number": 12,
+              "queue_position": null,
+              "setup": {
+                "instrument": "stock:AAPL",
+                "model": "mdl_k2m9qx47f3",
+                "model_name": "lstm.keras",
+                "period": {
+                  "end": 1735689600,
+                  "start": 1704067200
+                },
+                "representation": "windows",
+                "rule": {
+                  "limit": 0.05,
+                  "name": "threshold"
+                },
+                "timeframe": "30m"
+              },
+              "status": "finished"
+            },
+            {
+              "error": null,
+              "id": "bt_t9n8v7d6a5",
+              "name": "Bright Vega",
+              "number": 13,
+              "queue_position": null,
+              "setup": {
+                "instrument": "stock:AAPL",
+                "model": "mdl_k2m9qx47f3",
+                "model_name": "lstm.keras",
+                "period": {
+                  "end": 1735689600,
+                  "start": 1704067200
+                },
+                "representation": "windows",
+                "rule": {
+                  "limit": 0.2,
+                  "name": "threshold"
+                },
+                "timeframe": "30m"
+              },
+              "status": "finished"
+            }
+          ],
+          "count": 2,
+          "created_at": "2026-11-08T10:00:00Z",
+          "done": true,
+          "id": "sw_7f3k2m9qx4",
+          "metric": "sharpe",
+          "progress": {
+            "failed": 0,
+            "finished": 2,
+            "queued": 0,
+            "running": 0
+          },
+          "ranking": {
+            "backtests": [
+              {
+                "id": "bt_t9n8v7d6a5",
+                "mark": "best",
+                "name": "Bright Vega",
+                "number": 13,
+                "rank": 1,
+                "value": 1.42
+              },
+              {
+                "id": "bt_7f3k2m9qx4",
+                "mark": "worst",
+                "name": "Silent Orion",
+                "number": 12,
+                "rank": 2,
+                "value": 0.81
+              }
+            ],
+            "better": "higher",
+            "label": "Sharpe",
+            "metric": "sharpe"
+          }
+        }
+      },
+      "inputSchema": {
+        "$defs": {
+          "SweepMetric": {
+            "description": "A statistic of `results.stats` the ranking can use: one that is better higher or lower.",
+            "enum": [
+              "total_return",
+              "max_drawdown",
+              "sharpe",
+              "sortino",
+              "win_rate",
+              "avg_trade_return",
+              "best_trade_return",
+              "worst_trade_return",
+              "fees_paid"
+            ],
+            "title": "SweepMetric",
+            "type": "string"
+          }
+        },
+        "properties": {
+          "metric": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SweepMetric"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "sweep_id": {
+            "title": "Sweep Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sweep_id"
+        ],
+        "title": "get_sweepArguments",
+        "type": "object"
+      },
+      "name": "get_sweep",
+      "outputSchema": {
+        "$defs": {
+          "BacktestStatus": {
+            "description": "`queued` (it waits for the user's running backtest to end), `running`, `finished` (it\nhas results) or `failed` (it has an error, also when it was cancelled before it ran).",
+            "enum": [
+              "queued",
+              "running",
+              "finished",
+              "failed"
+            ],
+            "title": "BacktestStatus",
+            "type": "string"
+          },
+          "Period": {
+            "additionalProperties": false,
+            "description": "The test period `[start, end)` in UTC epoch seconds of a candle's open.",
+            "properties": {
+              "end": {
+                "description": "End of the test, excluded",
+                "examples": [
+                  1717459200
+                ],
+                "minimum": 0,
+                "title": "End",
+                "type": "integer"
+              },
+              "start": {
+                "description": "First second of the test",
+                "examples": [
+                  1717372800
+                ],
+                "minimum": 0,
+                "title": "Start",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "start",
+              "end"
+            ],
+            "title": "Period",
+            "type": "object"
+          },
+          "Representation": {
+            "description": "What the model reads: Renko bricks, a Kagi line or time windows of candles.",
+            "enum": [
+              "renko",
+              "kagi",
+              "windows"
+            ],
+            "title": "Representation",
+            "type": "string"
+          },
+          "SweepBacktest": {
+            "properties": {
+              "error": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "What went wrong, for a failed one",
+                "title": "Error"
+              },
+              "id": {
+                "examples": [
+                  "bt_7f3k2m9qx4"
+                ],
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "examples": [
+                  "Silent Orion"
+                ],
+                "title": "Name",
+                "type": "string"
+              },
+              "number": {
+                "description": "The user's own number, shown as #N",
+                "examples": [
+                  12
+                ],
+                "title": "Number",
+                "type": "integer"
+              },
+              "queue_position": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Where a queued backtest is in the user's queue: 1 starts next",
+                "title": "Queue Position"
+              },
+              "setup": {
+                "$ref": "#/$defs/SweepSetup"
+              },
+              "status": {
+                "$ref": "#/$defs/BacktestStatus"
+              }
+            },
+            "required": [
+              "id",
+              "number",
+              "name",
+              "status",
+              "queue_position",
+              "error",
+              "setup"
+            ],
+            "title": "SweepBacktest",
+            "type": "object"
+          },
+          "SweepMetric": {
+            "description": "A statistic of `results.stats` the ranking can use: one that is better higher or lower.",
+            "enum": [
+              "total_return",
+              "max_drawdown",
+              "sharpe",
+              "sortino",
+              "win_rate",
+              "avg_trade_return",
+              "best_trade_return",
+              "worst_trade_return",
+              "fees_paid"
+            ],
+            "title": "SweepMetric",
+            "type": "string"
+          },
+          "SweepProgress": {
+            "description": "How many of the sweep's backtests have each status.",
+            "properties": {
+              "failed": {
+                "title": "Failed",
+                "type": "integer"
+              },
+              "finished": {
+                "title": "Finished",
+                "type": "integer"
+              },
+              "queued": {
+                "title": "Queued",
+                "type": "integer"
+              },
+              "running": {
+                "title": "Running",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "queued",
+              "running",
+              "finished",
+              "failed"
+            ],
+            "title": "SweepProgress",
+            "type": "object"
+          },
+          "SweepRanked": {
+            "properties": {
+              "id": {
+                "examples": [
+                  "bt_7f3k2m9qx4"
+                ],
+                "title": "Id",
+                "type": "string"
+              },
+              "mark": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "best",
+                      "worst"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "`best` or `worst` as `GET /api/v1/compare` marks it, else null",
+                "title": "Mark"
+              },
+              "name": {
+                "examples": [
+                  "Silent Orion"
+                ],
+                "title": "Name",
+                "type": "string"
+              },
+              "number": {
+                "examples": [
+                  12
+                ],
+                "title": "Number",
+                "type": "integer"
+              },
+              "rank": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "1 for the best; values that read the same in the app share a rank (1, 1, 3); null without a value (failed, or the statistic is undefined)",
+                "examples": [
+                  1
+                ],
+                "title": "Rank"
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The statistic, as in `results.stats`",
+                "examples": [
+                  1.42
+                ],
+                "title": "Value"
+              }
+            },
+            "required": [
+              "rank",
+              "id",
+              "number",
+              "name",
+              "value",
+              "mark"
+            ],
+            "title": "SweepRanked",
+            "type": "object"
+          },
+          "SweepRanking": {
+            "description": "The backtests by one statistic, the best first, those without a value last.",
+            "properties": {
+              "backtests": {
+                "items": {
+                  "$ref": "#/$defs/SweepRanked"
+                },
+                "title": "Backtests",
+                "type": "array"
+              },
+              "better": {
+                "description": "Which way is better: `lower` for a fall by its size and for the fees",
+                "enum": [
+                  "higher",
+                  "lower"
+                ],
+                "title": "Better",
+                "type": "string"
+              },
+              "label": {
+                "description": "What the app calls it",
+                "examples": [
+                  "Sharpe"
+                ],
+                "title": "Label",
+                "type": "string"
+              },
+              "metric": {
+                "$ref": "#/$defs/SweepMetric"
+              }
+            },
+            "required": [
+              "metric",
+              "label",
+              "better",
+              "backtests"
+            ],
+            "title": "SweepRanking",
+            "type": "object"
+          },
+          "SweepSetup": {
+            "description": "What one backtest of the sweep runs on and with.",
+            "properties": {
+              "instrument": {
+                "description": "`<market>:<symbol>`",
+                "examples": [
+                  "stock:AAPL"
+                ],
+                "title": "Instrument",
+                "type": "string"
+              },
+              "model": {
+                "description": "Public ID of the model",
+                "examples": [
+                  "mdl_k2m9qx47f3"
+                ],
+                "title": "Model",
+                "type": "string"
+              },
+              "model_name": {
+                "description": "Its name when the sweep started",
+                "examples": [
+                  "lstm.keras"
+                ],
+                "title": "Model Name",
+                "type": "string"
+              },
+              "period": {
+                "$ref": "#/$defs/Period"
+              },
+              "representation": {
+                "$ref": "#/$defs/Representation"
+              },
+              "rule": {
+                "additionalProperties": true,
+                "description": "The decision rule, as `decision.rule` of the result document",
+                "examples": [
+                  {
+                    "limit": 0.1,
+                    "name": "threshold"
+                  }
+                ],
+                "title": "Rule",
+                "type": "object"
+              },
+              "timeframe": {
+                "description": "The model's timeframe",
+                "examples": [
+                  "30m"
+                ],
+                "title": "Timeframe",
+                "type": "string"
+              }
+            },
+            "required": [
+              "model",
+              "model_name",
+              "representation",
+              "timeframe",
+              "instrument",
+              "period",
+              "rule"
+            ],
+            "title": "SweepSetup",
+            "type": "object"
+          }
+        },
+        "description": "A sweep: its backtests, how far they are, and once all ended the ranking.",
+        "properties": {
+          "backtests": {
+            "description": "In the grid's order",
+            "items": {
+              "$ref": "#/$defs/SweepBacktest"
+            },
+            "title": "Backtests",
+            "type": "array"
+          },
+          "count": {
+            "description": "Its backtests",
+            "examples": [
+              6
+            ],
+            "title": "Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "description": "When it was started (UTC)",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "done": {
+            "description": "None of its backtests is queued or running",
+            "title": "Done",
+            "type": "boolean"
+          },
+          "id": {
+            "examples": [
+              "sw_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "metric": {
+            "$ref": "#/$defs/SweepMetric",
+            "description": "What the ranking orders by"
+          },
+          "progress": {
+            "$ref": "#/$defs/SweepProgress"
+          },
+          "ranking": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SweepRanking"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null until every backtest ended. For every statistic, the setups and the curves, ask `GET /api/v1/compare` with the IDs of `backtests`"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "metric",
+          "count",
+          "done",
+          "progress",
+          "backtests",
+          "ranking"
+        ],
+        "title": "SweepOut",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Get a sweep"
     }
   ],
   "webOnly": [

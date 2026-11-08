@@ -76,6 +76,7 @@ def backtest(number: int = 12, **changes: Any) -> BacktestOut:
             "number": number,
             "status": "finished",
             "queue_position": None,
+            "sweep_id": None,
             "seeded": False,
             "instruments": [{"market": "stock", "symbol": "AAPL"}],
             "representation": "renko",

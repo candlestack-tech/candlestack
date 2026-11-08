@@ -311,6 +311,31 @@ def metric_rows(stats: Sequence[dict[str, Any] | None]) -> list[CompareMetric]:
     return [_metric_row(metric, stats) for metric in _METRICS]
 
 
+# The statistics a ranking can use: those with a better direction.
+RANKABLE = tuple(metric.key for metric in _METRICS if metric.better != 0)
+
+
+def ranks(stats: Sequence[dict[str, Any] | None], key: str) -> list[int | None]:
+    """The rank of each backtest by the statistic ``key`` (one of ``RANKABLE``), 1 the best, in
+    the order of ``stats``: values that read the same in the app share a rank, as the marks
+    count them equal, and the next rank skips past them (1, 1, 3). None without a value."""
+    metric = next(metric for metric in _METRICS if metric.key == key)
+    size = abs if key == "max_drawdown" else float
+    known = [
+        (index, metric.write(value), size(value))
+        for index, value in enumerate(None if each is None else each.get(key) for each in stats)
+        if value is not None
+    ]
+    known.sort(key=lambda item: item[2], reverse=metric.better == 1)
+    ranked: list[int | None] = [None] * len(stats)
+    rank, last = 0, None
+    for place, (index, text, _) in enumerate(known, start=1):
+        if text != last:
+            rank, last = place, text
+        ranked[index] = rank
+    return ranked
+
+
 # --- The setups -------------------------------------------------------------------------------
 
 

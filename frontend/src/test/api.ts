@@ -154,6 +154,7 @@ export const backtest = (fields: Partial<Backtest> = {}): Backtest => ({
   public: false,
   published_at: null,
   queue_position: null,
+  sweep_id: null,
   total_return: 0.246,
   buy_and_hold_return: 0.682,
   sharpe: 0.79,
@@ -385,6 +386,12 @@ const EXAMPLE_DECISION: BacktestDocument['decision'] = {
   min_hold: null,
 };
 
+const EXAMPLE_SOFTWARE: BacktestDocument['software'] = {
+  engine_version: '0.3.0',
+  app_version: 'dev',
+  runner: { format: 'keras', keras: '3.15.1', backend: 'jax 0.7.2' },
+};
+
 // The worked example of docs/engine.md as the result document of #12, Bright Vega: AAPL, 30-minute candles,
 // one long trade stopped out, 5 % stop and 10 bps fees, against buy and hold.
 export const backtestDocument = (fields: Partial<BacktestDocument> = {}): BacktestDocument => ({
@@ -399,6 +406,7 @@ export const backtestDocument = (fields: Partial<BacktestDocument> = {}): Backte
     published_at: null,
     status: 'finished',
     queue_position: null,
+    sweep_id: null,
     created_at: '2026-10-17T14:05:00Z',
     started_at: '2026-10-17T14:05:00Z',
     finished_at: '2026-10-17T14:07:42Z',
@@ -406,11 +414,7 @@ export const backtestDocument = (fields: Partial<BacktestDocument> = {}): Backte
     error: null,
     steps: FINISHED_STEPS,
   },
-  software: {
-    engine_version: '0.3.0',
-    app_version: 'dev',
-    runner: { format: 'keras', keras: '3.15.1', backend: 'jax 0.7.2' },
-  },
+  software: EXAMPLE_SOFTWARE,
   model: {
     id: 'mdl_7f3k2m9qx4',
     name: 'raw-candles.keras',
