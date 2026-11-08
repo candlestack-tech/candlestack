@@ -27,18 +27,15 @@ from candlestack.experiments.schemas import (
     BacktestStatus,
     BacktestUpdate,
     BestBacktests,
-    DashboardOut,
     ExperimentCounts,
     ExperimentFacets,
     ExperimentOut,
     ExperimentSort,
     InstrumentMarket,
     ModelCount,
-    NewExperiments,
     Representation,
     SetupTimeframe,
     SortOrder,
-    StarredBacktests,
 )
 from candlestack.experiments.service import (
     BacktestFacets,
@@ -47,6 +44,7 @@ from candlestack.experiments.service import (
     FoundBacktests,
     FoundExperiments,
     ListQuery,
+    OwnDashboard,
 )
 from candlestack.experiments.store import BacktestFilters
 from candlestack.mcp import http, manage
@@ -183,19 +181,20 @@ class FakeService:
             counts=ExperimentCounts(all=1, mine=0, people=1), facets=FACETS
         )
 
-    async def dashboard(self, user_id: str) -> DashboardOut:
-        self.calls.append(("dashboard", user_id, None))
-        return DashboardOut(
+    async def own_dashboard(self, user_id: str) -> OwnDashboard:
+        self.calls.append(("own_dashboard", user_id, None))
+        # The best by Sharpe ratio is also the best by return and starred: listed once.
+        best = backtest(3, sharpe=1.4, starred=True)
+        return OwnDashboard(
             counts=COUNTS,
             last=[backtest(1), backtest(2)],
             best=BestBacktests(
-                sharpe=[backtest(3)],
-                total_return=[backtest(4)],
+                sharpe=[best, backtest(4, sharpe=0.9)],
+                total_return=[best],
                 max_drawdown=[],
-                win_rate=[backtest(5)],
+                win_rate=[backtest(5, win_rate=0.7)],
             ),
-            starred=StarredBacktests(backtests=[backtest(6, starred=True)], total=5),
-            experiments=NewExperiments(backtests=[EXPERIMENT], total=1),
+            starred=[best, backtest(6, starred=True, sharpe=None)],
         )
 
 
@@ -623,30 +622,29 @@ def test_reading_needs_the_scope_read(mcp, service, tool: str) -> None:
     assert service.calls == []
 
 
-def test_get_dashboard(mcp, service) -> None:
+def test_get_dashboard_lists_each_backtest_once(mcp, service) -> None:
     result = call(mcp, "get_dashboard", {}, READ)
 
     assert not result.is_error, result.content
-    assert service.calls == [("dashboard", ADA.id, None)]
+    # The user's own backtests only: not the queries of the published ones of anyone.
+    assert service.calls == [("own_dashboard", ADA.id, None)]
     dashboard = result.structured_content
-    assert set(dashboard) == {"counts", "newest", "best", "starred"}
+    assert set(dashboard) == {"counts", "backtests", "newest", "best", "starred"}
     assert dashboard["counts"]["all"] == 15
-    assert [item["number"] for item in dashboard["newest"]] == [1, 2]
-    assert {
-        name: [item["number"] for item in items] for name, items in dashboard["best"].items()
-    } == {
-        "sharpe": [3],
-        "total_return": [4],
+    assert dashboard["newest"] == ["bt_0000000001", "bt_0000000002"]
+    assert dashboard["best"] == {
+        "sharpe": [{"id": "bt_0000000003", "value": 1.4}, {"id": "bt_0000000004", "value": 0.9}],
+        "total_return": [{"id": "bt_0000000003", "value": 0.246}],
         "max_drawdown": [],
-        "win_rate": [5],
+        "win_rate": [{"id": "bt_0000000005", "value": 0.7}],
     }
-    [starred] = dashboard["starred"]
-    assert starred["starred"] is True
-    assert "equity" not in starred
+    assert dashboard["starred"] == ["bt_0000000003", "bt_0000000006"]
+    backtests = dashboard["backtests"]
+    assert sorted(backtests) == [f"bt_{number:010d}" for number in range(1, 7)]
+    best = backtests["bt_0000000003"]
+    assert (best["id"], best["starred"], best["sharpe"]) == ("bt_0000000003", True, 1.4)
+    assert "equity" not in best
     # Every backtest it names has its page, to show the user.
-    listed = [*dashboard["newest"], *dashboard["starred"]]
-    listed += [item for items in dashboard["best"].values() for item in items]
-    assert len(listed) == 6
-    assert [item["url"] for item in listed] == [
-        f"http://testserver/backtests/{item['id']}" for item in listed
+    assert [item["url"] for item in backtests.values()] == [
+        f"http://testserver/backtests/{backtest_id}" for backtest_id in backtests
     ]

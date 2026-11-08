@@ -1278,7 +1278,7 @@ export interface components {
             /**
              * Name
              * @description The account's display name
-             * @example Tymur Tkach
+             * @example Grace Hopper
              */
             name: string;
         };
@@ -2763,7 +2763,7 @@ export interface components {
             /**
              * Name
              * @description The account's display name
-             * @example Tymur Tkach
+             * @example Grace Hopper
              */
             name: string;
         };

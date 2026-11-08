@@ -22,7 +22,6 @@ from candlestack.ml import (
     ModelNameTaken,
     ModelNotFound,
     ModelOut,
-    ModelsOut,
     ModelState,
     ModelUpdate,
     ModelUploadIn,
@@ -32,6 +31,7 @@ from candlestack.ml import (
 )
 from candlestack.ml.errors import StorageFull
 from candlestack.ml.schemas import ModelUploadCreated, ModelUploadOut, StorageUsage
+from candlestack.ml.service import ModelsPage
 from candlestack.preprocessing import InvalidManifest, parse_manifest
 
 PROBLEMS = "https://candlestack.tech/problems/"
@@ -91,12 +91,20 @@ class FakeService:
         if self.error is not None:
             raise self.error
 
-    async def models(self, user_id: str) -> ModelsOut:
-        self.calls.append(("models", user_id))
-        return ModelsOut(
-            models=self.models_,
+    async def models_page(
+        self, user_id: str, *, offset: int = 0, limit: int | None = None
+    ) -> ModelsPage:
+        self.calls.append(("models_page", user_id, offset, limit))
+        end = None if limit is None else offset + limit
+        return ModelsPage(
+            models=self.models_[offset:end],
+            total=len(self.models_),
             usage=StorageUsage(used_bytes=2000, quota_bytes=100, file_max_bytes=50),
         )
+
+    async def model(self, user_id: str, model_id: str) -> ModelOut:
+        self.calls.append(("model", user_id, model_id))
+        return self._model(model_id)
 
     def _model(self, model_id: str) -> ModelOut:
         for item in self.models_:
@@ -320,7 +328,24 @@ def test_list_models_answers_them_in_short(mcp, service: FakeService) -> None:
         "created_at": "2026-11-02T09:30:00Z",
     }
     assert listed["models"][1]["timeframe"] is None
-    assert service.calls == [("models", ADA.id)]
+    assert listed["total"] == 2
+    assert service.calls == [("models_page", ADA.id, 0, None)]
+
+
+def test_list_models_answers_a_page_when_asked(mcp, service: FakeService) -> None:
+    listed = answer(call(mcp, "list_models", {"page": 2, "per_page": 1}))
+
+    assert [item["name"] for item in listed["models"]] == ["mixer.onnx"]
+    assert (listed["total"], listed["used_bytes"]) == (2, 2000)
+    assert service.calls == [("models_page", ADA.id, 1, 1)]
+
+
+@pytest.mark.parametrize("arguments", [{"per_page": 0}, {"per_page": 101}, {"page": 0}])
+def test_list_models_refuses_a_page_out_of_range(
+    mcp, service: FakeService, arguments: dict[str, int]
+) -> None:
+    assert problem(call(mcp, "list_models", arguments))["type"] == PROBLEMS + "validation"
+    assert service.calls == []
 
 
 def test_get_model_answers_one_model_in_full(mcp, service: FakeService) -> None:
@@ -328,6 +353,8 @@ def test_get_model_answers_one_model_in_full(mcp, service: FakeService) -> None:
 
     assert got["name"] == "mixer.onnx"
     assert got["input_shape"] == [25, 1]
+    # It reads that one model, not the whole list.
+    assert service.calls == [("model", ADA.id, "mdl_secondxxxx")]
 
 
 def test_get_model_says_it_counts_the_backtests() -> None:

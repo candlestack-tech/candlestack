@@ -54,6 +54,9 @@ SIGN_IN_RATE_LIMIT = 20
 # Requests per minute and API key, or connected app: a script or an agent at a steady two a
 # second.
 API_KEY_RATE_LIMIT = 120
+# What only connects or lists (the MCP server's initialize, tools/list, ping) counts against a
+# limit of its own this many times looser, so it neither spends the key's limit nor goes free.
+LIGHT_RATE_LIMIT_FACTOR = 10
 # Client registrations per minute and client address: an MCP client registers once.
 REGISTER_RATE_LIMIT = 10
 # The name of the API key scheme in the API reference.
@@ -147,14 +150,26 @@ async def browser_session(
 
 
 @dataclass(frozen=True, slots=True)
+class RateLimit:
+    """The rate limit of an API key or a connected app: its counters in Redis, for the requests
+    that do work and for the light ones, and what the problem calls the key."""
+
+    counter: str
+    light_counter: str
+    what: str
+
+
+@dataclass(frozen=True, slots=True)
 class Caller:
     """Who sent a request: the user, and the scopes of the API key or OAuth access token it
     came with; ``scopes`` is None for the browser session, which may do everything. ``app`` is
-    True for an access token of a connected app."""
+    True for an access token of a connected app. ``rate_limit`` is the key's or the connected
+    app's, None for the browser session."""
 
     user: User
     scopes: frozenset[Scope] | None = None
     app: bool = False
+    rate_limit: RateLimit | None = None
 
     def require(self, *scopes: Scope) -> None:
         """403 ``missing-scope``, naming the first scope the key or app lacks; the session
@@ -216,9 +231,12 @@ async def _session_user(
     return session.user
 
 
-async def _key_caller(token: str, keys: ApiKeys, limiter: RateLimiter) -> Caller:
+async def _key_caller(
+    token: str, keys: ApiKeys, limiter: RateLimiter, *, counted: bool = True
+) -> Caller:
     """The caller of a request with the API key `token`: 401 ``invalid-api-key`` unless it
-    signs in, 429 ``rate-limited`` beyond ``API_KEY_RATE_LIMIT`` requests a minute."""
+    signs in, 429 ``rate-limited`` beyond ``API_KEY_RATE_LIMIT`` requests a minute unless
+    `counted` is false (then ``count_request`` counts it)."""
     signed_in = await keys.sign_in(token)
     if signed_in is None:
         raise ProblemError(
@@ -229,45 +247,80 @@ async def _key_caller(token: str, keys: ApiKeys, limiter: RateLimiter) -> Caller
             "list. Create a new key in Settings, API and MCP.",
             headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
         )
-    wait = await limiter.hit(f"accounts:key-rl:{signed_in.key.id}", API_KEY_RATE_LIMIT)
-    if wait > 0:
-        raise _rate_limited(wait, "API key")
+    key_id = signed_in.key.id
+    limit = RateLimit(f"accounts:key-rl:{key_id}", f"accounts:key-rl-free:{key_id}", "API key")
+    if counted:
+        await _count(limiter, limit, light=False)
     await keys.mark_used(signed_in.key)
-    return Caller(signed_in.user, signed_in.scopes)
+    return Caller(signed_in.user, signed_in.scopes, rate_limit=limit)
 
 
 async def key_caller(
-    token: str, *, settings: Settings, db: AsyncSession, limiter: RateLimiter
+    token: str,
+    *,
+    settings: Settings,
+    db: AsyncSession,
+    limiter: RateLimiter,
+    counted: bool = True,
 ) -> Caller:
     """The caller of a request with the API key `token`, for what signs requests in outside the
     routes' dependencies (the MCP server): the same checks, rate limit and last use as a route's,
-    on the session `db`. Scopes are not checked here.
+    on the session `db`. With `counted` false the request is not counted yet: the caller counts
+    it with ``count_request`` once it knows what it asks. Scopes are not checked here.
 
     Raises:
         ProblemError: 401 ``invalid-api-key`` or 429 ``rate-limited``.
     """
-    return await _key_caller(token, ApiKeys(settings, AccountStore(db)), limiter)
+    keys = ApiKeys(settings, AccountStore(db))
+    return await _key_caller(token, keys, limiter, counted=counted)
 
 
-def _rate_limited(wait: float, what: str) -> ProblemError:
+async def count_request(limiter: RateLimiter, caller: Caller, *, light: bool = False) -> None:
+    """Counts a request of `caller`, signed in without counting it, against the rate limit of
+    its key or connected app: ``API_KEY_RATE_LIMIT`` a minute, or for a `light` request (one
+    that only connects or lists) a limit of its own ``LIGHT_RATE_LIMIT_FACTOR`` times looser.
+    The browser session's requests are not counted.
+
+    Raises:
+        ProblemError: 429 ``rate-limited``.
+    """
+    if caller.rate_limit is not None:
+        await _count(limiter, caller.rate_limit, light=light)
+
+
+async def _count(limiter: RateLimiter, limit: RateLimit, *, light: bool) -> None:
+    allowed = API_KEY_RATE_LIMIT * LIGHT_RATE_LIMIT_FACTOR if light else API_KEY_RATE_LIMIT
+    wait = await limiter.hit(limit.light_counter if light else limit.counter, allowed)
+    if wait > 0:
+        raise _rate_limited(wait, limit.what, allowed, light=light)
+
+
+def _rate_limited(wait: float, what: str, limit: int, *, light: bool = False) -> ProblemError:
     seconds = max(1, math.ceil(wait))
+    requests = "requests that connect or list" if light else "requests"
     return ProblemError(
         429,
         "rate-limited",
         "Too many requests",
-        f"More than {API_KEY_RATE_LIMIT} requests in one minute with this {what}. Retry in "
-        f"{seconds} seconds.",
+        f"More than {limit} {requests} in one minute with this {what}. Retry in {seconds} seconds.",
         headers={"Retry-After": str(seconds)},
-        extensions={"limit": API_KEY_RATE_LIMIT},
+        extensions={"limit": limit, "retry_after_s": seconds},
     )
 
 
 async def token_caller(
-    token: str, *, resource: str, settings: Settings, db: AsyncSession, limiter: RateLimiter
+    token: str,
+    *,
+    resource: str,
+    settings: Settings,
+    db: AsyncSession,
+    limiter: RateLimiter,
+    counted: bool = True,
 ) -> Caller:
     """The caller of a request to `resource` (the MCP server) with the OAuth access token
-    `token`: its user and scopes, ``API_KEY_RATE_LIMIT`` requests a minute per connected app,
-    and the app's last use, on the session `db`. Scopes are not checked here.
+    `token`: its user and scopes, ``API_KEY_RATE_LIMIT`` requests a minute per connected app
+    (with `counted` false, counted later by ``count_request``), and the app's last use, on the
+    session `db`. Scopes are not checked here.
 
     Raises:
         ProblemError: 401 ``invalid-access-token`` or 429 ``rate-limited``.
@@ -283,11 +336,14 @@ async def token_caller(
             "the beta list. Sign in again from the app.",
             headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
         )
-    wait = await limiter.hit(f"accounts:app-rl:{signed_in.app.id}", API_KEY_RATE_LIMIT)
-    if wait > 0:
-        raise _rate_limited(wait, "connected app")
+    app_id = signed_in.app.id
+    limit = RateLimit(
+        f"accounts:app-rl:{app_id}", f"accounts:app-rl-free:{app_id}", "connected app"
+    )
+    if counted:
+        await _count(limiter, limit, light=False)
     await tokens.mark_used(signed_in.app)
-    return Caller(signed_in.user, signed_in.scopes, app=True)
+    return Caller(signed_in.user, signed_in.scopes, app=True, rate_limit=limit)
 
 
 async def authenticate(  # noqa: PLR0913 (the request and what signs it in)

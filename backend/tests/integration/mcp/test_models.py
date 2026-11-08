@@ -12,6 +12,7 @@ from mcp.types import CallToolResult
 from pydantic import SecretStr
 
 from candlestack.core import Settings
+from candlestack.ml import ModelUsageStats
 
 pytestmark = pytest.mark.integration
 
@@ -176,3 +177,40 @@ def test_a_link_needs_the_scope_models(mcp, keys) -> None:
     )
 
     assert problem(result)["scope"] == "models"
+
+
+class RecordedUsage:
+    """The usage of every model as two backtests, recording the models it was asked about."""
+
+    def __init__(self) -> None:
+        self.asked: list[list[str]] = []
+
+    async def __call__(self, _db, _user_id, model_ids):
+        self.asked.append(list(model_ids))
+        return {model_id: ModelUsageStats(2, 1.5) for model_id in model_ids}
+
+
+def test_get_model_reads_that_model_alone(mcp, keys, ada, app) -> None:
+    upload(ada, "first.keras")
+    model_id = upload(ada, "second.keras")["id"]
+    usage = RecordedUsage()
+    app.state.model_usage = usage
+
+    got = answer(mcp(tool("get_model", {"model_id": model_id}), keys("read")))
+
+    assert (got["id"], got["name"], got["backtest_count"]) == (model_id, "second.keras", 2)
+    assert usage.asked == [[model_id]]
+
+
+def test_list_models_answers_a_page_when_asked(mcp, keys, ada, app) -> None:
+    upload(ada, "first.keras")
+    second = upload(ada, "second.keras")["id"]
+    usage = RecordedUsage()
+    app.state.model_usage = usage
+
+    page = answer(mcp(tool("list_models", {"page": 2, "per_page": 1}), keys("read")))
+
+    assert [item["id"] for item in page["models"]] == [second]
+    assert page["total"] == 2
+    assert page["used_bytes"] == 2 * len(RAW_CANDLES)
+    assert usage.asked == [[second]]

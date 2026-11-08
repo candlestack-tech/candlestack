@@ -800,7 +800,7 @@
         "name": {
           "description": "The account's display name",
           "examples": [
-            "Tymur Tkach"
+            "Grace Hopper"
           ],
           "title": "Name",
           "type": "string"

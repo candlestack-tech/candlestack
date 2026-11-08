@@ -135,6 +135,16 @@ class ExperimentsQuery:
     page: int = 1
 
 
+@dataclass(frozen=True)
+class OwnDashboard:
+    """What the Dashboard shows of the user's own backtests."""
+
+    counts: BacktestCounts
+    last: list[BacktestOut]
+    best: BestBacktests
+    starred: list[BacktestOut]
+
+
 def _equity(backtest: Backtest) -> EquitySeries | None:
     """The backtest's equity series; only a finished backtest shows one."""
     if backtest.equity is None or backtest.status != BacktestStatus.finished.value:
@@ -394,6 +404,26 @@ class BacktestsService:
     async def dashboard(self, user_id: str) -> DashboardOut:
         """What the Dashboard shows of the user's backtests, and the newest published ones of
         anyone."""
+        own = await self.own_dashboard(user_id)
+        published = await self._store.experiments(
+            experiment_scope(user_id),
+            experiment_ordering(ExperimentSort.newest, SortOrder.desc),
+            limit=DASHBOARD_EXPERIMENTS,
+        )
+        everyone = await self._store.experiment_counts(user_id)
+        return DashboardOut(
+            counts=own.counts,
+            last=own.last,
+            best=own.best,
+            starred=StarredBacktests(backtests=own.starred, total=own.counts.starred),
+            experiments=NewExperiments(
+                backtests=[experiment_out(row, user_id) for row in published], total=everyone.all
+            ),
+        )
+
+    async def own_dashboard(self, user_id: str) -> OwnDashboard:
+        """What the Dashboard shows of the user's own backtests, without the queries of the
+        published ones of anyone (the MCP server's Dashboard)."""
         counts = await self._counts(user_id)
         # The newest that ended: a queued or running one has nothing to show there yet.
         last = await self._store.backtests(
@@ -420,20 +450,9 @@ class BacktestsService:
             ordering(BacktestSort.sharpe, SortOrder.desc),
             limit=DASHBOARD_STARRED,
         )
-        published = await self._store.experiments(
-            experiment_scope(user_id),
-            experiment_ordering(ExperimentSort.newest, SortOrder.desc),
-            limit=DASHBOARD_EXPERIMENTS,
-        )
-        everyone = await self._store.experiment_counts(user_id)
-        return DashboardOut(
+        return OwnDashboard(
             counts=counts,
             last=[backtest_out(row) for row in last],
             best=BestBacktests(**best),
-            starred=StarredBacktests(
-                backtests=[backtest_out(row) for row in starred], total=counts.starred
-            ),
-            experiments=NewExperiments(
-                backtests=[experiment_out(row, user_id) for row in published], total=everyone.all
-            ),
+            starred=[backtest_out(row) for row in starred],
         )

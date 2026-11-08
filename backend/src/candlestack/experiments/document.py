@@ -291,7 +291,7 @@ class DocumentAuthor(BaseModel):
     """Who the backtest belongs to: their display name, never their email."""
 
     id: str = Field(description="Public ID of the account", examples=["usr_7f3k2m9qx4"])
-    name: str = Field(description="The account's display name", examples=["Tymur Tkach"])
+    name: str = Field(description="The account's display name", examples=["Grace Hopper"])
     mine: bool = Field(description="The signed-in user's own backtest")
 
 

@@ -42,6 +42,30 @@ async def count_to(n: int, ctx: Context) -> Count:
     return Count(count=n + len(tool_call(ctx).scopes) * 0)
 
 
+class Part(BaseModel):
+    name: str
+    size: int | None
+
+
+class Described(BaseModel):
+    count: int
+    note: str | None
+    parts: dict[str, int | None]
+    values: list[int | None]
+    part: Part
+
+
+async def describe_count(ctx: Context) -> Described:
+    """Describes a count with null fields, for the tests."""
+    return Described(
+        count=len(tool_call(ctx).scopes),
+        note=None,
+        parts={"a": None, "b": 2},
+        values=[1, None],
+        part=Part(name="p", size=None),
+    )
+
+
 async def start_count(ctx: Context) -> Count:
     """Starts a count, for the tests."""
     return Count(count=len(tool_call(ctx).scopes))
@@ -55,6 +79,16 @@ TEST_TOOLS = (
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example({"n": 1}, Count(count=1)),
+    ),
+    ToolSpec(
+        describe_count,
+        name="describe_count",
+        title="Describe a count",
+        scopes=(Scope.read,),
+        annotations=reads(),
+        example=Example(
+            {}, Described(count=1, note=None, parts={}, values=[], part=Part(name="p", size=1))
+        ),
     ),
     ToolSpec(
         start_count,
@@ -132,6 +166,26 @@ def test_a_tool_answers_structured_content(mcp) -> None:
 
     assert not result.is_error
     assert result.structured_content == {"count": 3}
+
+
+def test_a_result_s_text_is_compact_json_without_the_null_fields(mcp) -> None:
+    result = mcp(lambda session: session.call_tool("describe_count", {}))
+
+    assert not result.is_error
+    [content] = result.content
+    assert content.type == "text"
+    # A model's null fields are left out of the text only; a null in a list or as the value of
+    # a map stays, as its place there means something.
+    assert content.text == (
+        '{"count":1,"parts":{"a":null,"b":2},"values":[1,null],"part":{"name":"p"}}'
+    )
+    assert result.structured_content == {
+        "count": 1,
+        "note": None,
+        "parts": {"a": None, "b": 2},
+        "values": [1, None],
+        "part": {"name": "p", "size": None},
+    }
 
 
 def test_a_problem_the_tool_raises_is_its_error(mcp) -> None:

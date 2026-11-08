@@ -167,9 +167,9 @@ the same `ts` ([engine.md](engine.md)).
 
 The API takes 60 candle and instrument detail requests a minute from one IP address (the
 instrument search is not counted), and 120 requests a minute with one API key, whatever they
-ask for. Past either it answers 429 `rate-limited` with a `Retry-After` header: the seconds
-until the next minute. A cold request for a long stock history can also
-answer 503 `source-unavailable` with `Retry-After` while the source's budget is spent; what it
+ask for. Past either it answers 429 `rate-limited` with a `Retry-After` header and
+`retry_after_s` in the body: the seconds until the next minute. A cold request for a long stock
+history can also answer 503 `source-unavailable` with `Retry-After` while the source's budget is spent; what it
 fetched so far stays cached, so the same request continues from there. In both cases wait `Retry-After` seconds and send it again:
 
 ```python
@@ -350,7 +350,8 @@ change. Some add fields, such as `errors` of a 422 `validation`:
   "title": "Too many requests",
   "status": 429,
   "detail": "More than 60 candle and instrument requests in one minute from this address. Retry in 12 seconds.",
-  "limit": 60
+  "limit": 60,
+  "retry_after_s": 12
 }
 ```
 
@@ -367,7 +368,7 @@ change. Some add fields, such as `errors` of a 422 `validation`:
 | 422 | `validation` | fix the parameters `errors` names |
 | 422 | `period-out-of-range` | `start` before the first candle, `end` at or before it (paging past the start of the data) or `end` in the future: `available_from` and `available_to` say what fits |
 | 422 | `too-many-candles` | a shorter period, a longer timeframe or paging (`suggestion`) |
-| 429 | `rate-limited` | wait `Retry-After` seconds |
+| 429 | `rate-limited` | wait `Retry-After` (`retry_after_s`) seconds |
 | 502 | `source-data-invalid` | the source sent bad data: try later, or report it |
 | 503 | `source-unavailable` | wait `Retry-After` seconds when it is there; without it the source is down |
 
