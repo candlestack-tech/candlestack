@@ -6689,7 +6689,7 @@
                 }
               }
             },
-            "description": "The request does not come from the app's own pages (`cross-origin-request`)."
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`)."
           },
           "404": {
             "content": {

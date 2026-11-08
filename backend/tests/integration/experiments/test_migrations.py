@@ -24,7 +24,7 @@ BEFORE_PUBLICATION = "9c2e4f7a1b36"
 # The revision before the generated names.
 BEFORE_NAMES = "e4b7a2c9d013"
 # The revision before the queue of backtests.
-BEFORE_QUEUE = "d990b92fe1cd"
+BEFORE_QUEUE = "57317f52f476"
 
 
 def _migrate(database_url: str, revision: str, *, down: bool = False) -> None:

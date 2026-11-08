@@ -4165,6 +4165,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     cancel_backtest_api_v1_backtests__backtest_id__cancel_post: {
@@ -4197,7 +4206,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The request does not come from the app's own pages (`cross-origin-request`). */
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4226,15 +4235,6 @@ export interface operations {
             };
             /** @description Invalid request */
             422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["Problem"];
-                };
-            };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
-            429: {
                 headers: {
                     [name: string]: unknown;
                 };

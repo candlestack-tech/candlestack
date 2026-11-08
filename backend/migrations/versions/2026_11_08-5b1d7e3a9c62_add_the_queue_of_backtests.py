@@ -5,7 +5,7 @@ A backtest stored before began to run when it was created, so ``started_at`` is 
 the rows.
 
 Revision ID: 5b1d7e3a9c62
-Revises: d990b92fe1cd
+Revises: 57317f52f476
 Create Date: 2026-11-08 12:00:00.000000
 """
 
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "5b1d7e3a9c62"
-down_revision: str | None = "d990b92fe1cd"
+down_revision: str | None = "57317f52f476"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
