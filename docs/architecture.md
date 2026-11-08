@@ -219,8 +219,10 @@ flowchart LR
   (the dev user's keys work where the dev sign-in does). A request with a key ignores any
   cookie; a wrong key is 401 `invalid-api-key`, whatever is wrong with it. Each key has 120
   requests a minute (Redis, 429 `rate-limited` with `Retry-After`), and its `last_used_at`
-  is written at most once a minute. At most 10 keys of a user are neither revoked nor
-  expired; creating one locks the user's row, so two at once cannot pass the limit. A revoked
+  is written at most once a minute, in a transaction of its own on another connection: best
+  effort, a failed write is a warning and the request goes on. At most 10 keys of a user are
+  neither revoked nor expired; creating one locks the user's row, so two at once cannot pass
+  the limit, and draws a second key when the first one's prefix is taken. A revoked
   key keeps its row and leaves the list; an expired one stays listed until it is revoked.
 - **Scopes**: the dependency a route takes decides what a key may do there
   (`accounts.dependencies`), and a new route is closed to keys until it says otherwise.
@@ -230,8 +232,8 @@ flowchart LR
   backtest PATCH takes `CallerDep` and needs `publish` for `public`, `backtests` for the rest;
   `SessionUserDep` refuses every key (the keys themselves, deleting the account, sign-in
   methods, signing out everywhere; signing out refuses keys too). The API reference shows
-  the scheme `apiKey` with the scope of each route, rewritten from the dependencies by
-  `accounts.document_api_keys`.
+  the scheme `apiKey` (`accounts.API_KEY_SCHEME`) with the scope of each route, rewritten from
+  the dependencies by `accounts.document_api_keys`.
 - Every route of the signed-in user that returns user data sends `Cache-Control: no-store`, and
   every change requires the app's own origin, except a request with an API key and no cookie
   at all (`core.require_same_origin`): nothing the browser adds by itself signs it in, and no

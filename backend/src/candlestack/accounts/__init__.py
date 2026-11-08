@@ -18,6 +18,7 @@ it returns, once the deletion is committed.
 from candlestack.accounts.api import dev_router as dev_sign_in_router
 from candlestack.accounts.api import router as accounts_router
 from candlestack.accounts.dependencies import (
+    API_KEY_SCHEME,
     BacktestsUserDep,
     Caller,
     CallerDep,
@@ -30,6 +31,7 @@ from candlestack.accounts.schemas import DeniedSignInOut, MeOut, Provider, Scope
 from candlestack.accounts.service import AccountDeletionHook, AfterDeletion, dev_sign_in_allowed
 
 __all__ = [
+    "API_KEY_SCHEME",
     "AccountDeletionHook",
     "AfterDeletion",
     "BacktestsUserDep",

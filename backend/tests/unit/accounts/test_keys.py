@@ -2,11 +2,13 @@
 integration tests (tests/integration/accounts/test_api_keys.py)."""
 
 import hashlib
+import logging
 import re
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from candlestack.accounts import keys
 from candlestack.accounts.errors import NoSuchApiKey, TooManyApiKeys
@@ -34,6 +36,8 @@ class FakeStore:
         self.commits = 0
         self.locked: list[str] = []
         self.lookups = 0
+        self.touches: list[tuple[str, datetime]] = []
+        self.touch_fails = False
 
     def add(self, row: ApiKey) -> None:
         self.keys.append(row)
@@ -62,6 +66,11 @@ class FakeStore:
         self.lookups += 1
         found = [key for key in self.keys if key.prefix == prefix]
         return (found[0], self.users[found[0].user_id]) if found else None
+
+    async def touch_api_key(self, key_id: str, when: datetime) -> None:
+        if self.touch_fails:
+            raise OperationalError("UPDATE api_keys", None, ConnectionResetError("reset"))
+        self.touches.append((key_id, when))
 
 
 def _keys(settings: Settings, store: "FakeStore") -> ApiKeys:
@@ -258,9 +267,41 @@ async def test_last_use_is_written_at_most_once_a_minute(
     await service.mark_used(key)
 
     assert key.last_used_at == NOW
-    assert store.commits == commits + 1
+    assert store.touches == [(key.id, NOW)]
+    assert store.commits == commits
     clock[0] = NOW + timedelta(minutes=1)
     await service.mark_used(key)
     assert key.last_used_at == NOW + timedelta(minutes=1)
     assert (await service.list_keys(ADA)).items[0].last_used_at == key.last_used_at
     assert created.id == key.id
+
+
+async def test_last_use_is_best_effort(
+    service: ApiKeys, store: FakeStore, clock, caplog: pytest.LogCaptureFixture
+) -> None:
+    await service.create(ADA, _new())
+    [key] = store.keys
+    store.touch_fails = True
+
+    with caplog.at_level(logging.WARNING, logger="candlestack.accounts.keys"):
+        await service.mark_used(key)
+
+    assert key.last_used_at is None
+    [record] = caplog.records
+    assert record.levelno == logging.WARNING
+    assert record.getMessage() == f"Could not record the last use of API key {key.id}"
+
+
+async def test_create_draws_again_when_the_prefix_is_taken(
+    service: ApiKeys, store: FakeStore, clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = await service.create(ADA, _new())
+    taken = first.prefix + "b" * 32
+    fresh = "cs_freshaaa" + "c" * 32
+    drawn = iter([taken, fresh])
+    monkeypatch.setattr(keys, "new_key", lambda: next(drawn))
+
+    second = await service.create(ADA, _new())
+
+    assert second.secret == fresh
+    assert [key.prefix for key in store.keys] == [first.prefix, "cs_freshaaa"]
