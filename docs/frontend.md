@@ -177,7 +177,10 @@ names the layout: `useSearch({ from: '/_app/instruments' })`.
 
 - `/signin?next=&error=` shows the start (GitHub, Google, the beta note) or, after
   `error=denied`, who was turned away with Use another account (back to the start, `next`
-  kept) and Contact the team. A clicked button stays busy ("Opening GitHub", a spinner) while
+  kept) and Contact the team. When `next` is an app's consent page, the loader also reads that
+  request (`GET /api/v1/oauth/requests/{id}`) and the page shows the consent page's
+  not-on-the-beta-list card naming the app, whose Use another account goes back to the consent
+  page; a request that is gone (404) gets the plain card. A clicked button stays busy ("Opening GitHub", a spinner) while
   the browser leaves; Back from the provider offers the buttons again. An open session skips
   the page and goes to `next` or `/dashboard`.
 - `/dashboard`, `/backtests`, `/experiments`, `/models`, `/upload/$token`, `/instruments`,

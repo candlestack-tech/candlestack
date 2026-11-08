@@ -324,6 +324,21 @@ def test_a_native_client_may_return_to_any_loopback_port(browser, app_client) ->
     problem(other_path, 400, "invalid-authorization-request")
 
 
+def test_a_loopback_redirect_uri_longer_than_allowed_is_refused(browser, app_client) -> None:
+    # Another port can make a registered loopback URI of 512 characters longer than that.
+    browser.sign_in("github")
+    base = "http://127.0.0.1:1/"
+    registered = base + "a" * (512 - len(base))
+    client_id = app_client.register(redirect_uris=[registered])["client_id"]
+
+    same_port = authorize(browser, client_id, redirect_uri=registered)
+    longer = authorize(browser, client_id, redirect_uri=registered.replace(":1/", ":65535/"))
+
+    assert same_port.headers["location"].startswith("/oauth/consent?")
+    problem(longer, 400, "invalid-authorization-request")
+    assert "location" not in longer.headers
+
+
 # --- Authorize ----------------------------------------------------------------------------------
 
 

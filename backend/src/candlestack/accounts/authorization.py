@@ -37,6 +37,7 @@ from urllib.parse import unquote, urlencode, urlsplit, urlunsplit
 from sqlalchemy.orm.attributes import set_committed_value
 
 from candlestack.accounts.client_metadata import (
+    URI_MAX,
     ClientDocumentFailed,
     ClientDocuments,
     is_document_url,
@@ -383,7 +384,12 @@ class AuthorizationServer:
         """
         client = await self._client_of(params.client_id)
         redirect_uri = params.redirect_uri
-        if not redirect_uri or not redirect_uri_matches(client.redirect_uris, redirect_uri):
+        # A loopback URI may come back with another port (RFC 8252), so longer than registered.
+        if (
+            not redirect_uri
+            or len(redirect_uri) > URI_MAX
+            or not redirect_uri_matches(client.redirect_uris, redirect_uri)
+        ):
             raise AuthorizeRefused("The redirect_uri is missing or not one the app registered.")
         if browser is None or not _BROWSER.fullmatch(browser):
             browser = secrets.token_urlsafe(32)

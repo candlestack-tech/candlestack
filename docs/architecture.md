@@ -1189,7 +1189,7 @@ backend like the rest of the API; the metadata (RFC 8414) is served at
   seconds; the document's `client_id` must be its URL, it may hold no secret and its method must
   be `none`. Redirect URIs are https, or http on a loopback address
   (RFC 8252), without fragments, and must match a registered one exactly; on a loopback address
-  the port may differ.
+  the port may differ, but the URI an authorize request gives is at most 512 characters too.
 - **Authorize** (`GET /api/v1/oauth/authorize`): every error is a `400
   invalid-authorization-request` problem whose `error` is the OAuth error, shown in the browser,
   and nothing goes back to the redirect URI before the user acted on the consent page: anyone
@@ -1218,8 +1218,8 @@ backend like the rest of the API; the metadata (RFC 8414) is served at
   the chosen scopes, each one the app asked for (else `422 scope-not-requested`), read always,
   and only for an account on the beta list; `deny` answers `error=access_denied`. The answer's
   `redirect_to` is where the page sends the browser: always the redirect URI the authorize
-  request named, which the app had registered and must still have when the user decides
-  (else `404 authorization-request-not-found`: a metadata document refreshed meanwhile may
+  request named, which the app had registered and must still have when the page reads or
+  decides it (else `404 authorization-request-not-found`: a metadata document refreshed meanwhile may
   have dropped it). The logo is an address the app chose:
   loading it tells that host the page was shown, and the CSP's `img-src 'self' data:` blocks it
   once enforced (the consent page, #409, decides how to show it).

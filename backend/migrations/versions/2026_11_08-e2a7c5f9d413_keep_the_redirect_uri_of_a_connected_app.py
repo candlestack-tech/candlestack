@@ -20,7 +20,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.add_column("connected_apps", sa.Column("redirect_uri", sa.String(length=512), nullable=True))
+    # 512 and a loopback URI's port that came back longer than registered (":65535").
+    op.add_column("connected_apps", sa.Column("redirect_uri", sa.String(length=518), nullable=True))
 
 
 def downgrade() -> None:
