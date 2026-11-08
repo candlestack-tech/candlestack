@@ -17,7 +17,7 @@ it and every other failure into a tool error whose text is the problem as JSON
 import inspect
 import json
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Annotated, Any
@@ -43,6 +43,9 @@ CALLER_STATE = "mcp_caller"
 # and the transport answers JSON at the end of the call, so the agent calls again.
 WAIT_MAX_S = 60
 WAIT_DEFAULT_S = 50
+# The most backtests the app's compare page shows side by side, its slots (`COMPARE_SLOTS` in
+# frontend/src/routes/compareSearch.ts); the API compares more.
+COMPARE_PAGE_MAX = 4
 # How often a wait reads the backtests' rows again when nothing told it of a change: the runner
 # tells it when one starts, ends or is cancelled (``BacktestRunner.watch``).
 POLL_S = 2.5
@@ -173,6 +176,19 @@ def tool_call(ctx: Context) -> ToolCall:
 def backtest_url(call: ToolCall, backtest_id: str) -> str:
     """The backtest's page in the app, which the agent gives the user to open."""
     return f"{call.settings.public_url}/backtests/{backtest_id}"
+
+
+def model_url(call: ToolCall, model_id: str) -> str:
+    """The model's page in the app, which the agent gives the user to open."""
+    return f"{call.settings.public_url}/models/{model_id}"
+
+
+def compare_url(call: ToolCall, backtest_ids: Sequence[str]) -> str | None:
+    """The app's compare page with the backtests side by side, in their order, which the agent
+    gives the user to open; None for fewer than 2 or more than the page shows."""
+    if not 2 <= len(backtest_ids) <= COMPARE_PAGE_MAX:
+        return None
+    return f"{call.settings.public_url}/backtests/compare?ids={','.join(backtest_ids)}"
 
 
 def problem_body(problem: ProblemError) -> dict[str, Any]:

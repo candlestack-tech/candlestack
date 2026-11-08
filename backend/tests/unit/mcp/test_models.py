@@ -86,6 +86,8 @@ class FakeService:
         self.calls: list[tuple[Any, ...]] = []
         self.error: Exception | None = None
         self.stored_manifest: dict[str, Any] | None = MANIFEST
+        # The upload made its model, instead of failing its check.
+        self.upload_done = False
 
     def _raise(self) -> None:
         if self.error is not None:
@@ -182,7 +184,7 @@ class FakeService:
         self.calls.append(("upload_status", user_id, upload_id))
         if upload_id != "upl_7f3k2m9qx4":
             raise UploadNotFound
-        return ModelUploadOut(
+        failed = ModelUploadOut(
             id=upload_id,
             name="lstm.keras",
             size_bytes=1000,
@@ -194,6 +196,16 @@ class FakeService:
             problem="model-check-failed",
             check=None,
             error="The file holds no trained weights.",
+        )
+        if not self.upload_done:
+            return failed
+        return failed.model_copy(
+            update={
+                "status": UploadStatus.done,
+                "model_id": "mdl_7f3k2m9qx4",
+                "problem": None,
+                "error": None,
+            }
         )
 
 
@@ -326,6 +338,8 @@ def test_list_models_answers_them_in_short(mcp, service: FakeService) -> None:
         "backtest_count": 2,
         "best_sharpe": 1.5,
         "created_at": "2026-11-02T09:30:00Z",
+        # Its page, to show the user.
+        "url": "http://testserver/models/mdl_7f3k2m9qx4",
     }
     assert listed["models"][1]["timeframe"] is None
     assert listed["total"] == 2
@@ -353,6 +367,7 @@ def test_get_model_answers_one_model_in_full(mcp, service: FakeService) -> None:
 
     assert got["name"] == "mixer.onnx"
     assert got["input_shape"] == [25, 1]
+    assert got["url"] == "http://testserver/models/mdl_secondxxxx"
     # It reads that one model, not the whole list.
     assert service.calls == [("model", ADA.id, "mdl_secondxxxx")]
 
@@ -455,6 +470,7 @@ def test_set_manifest_keeps_it_and_starts_the_trial_run(
     )
 
     assert answer(result)["state"] == "ready"
+    assert answer(result)["url"] == "http://testserver/models/mdl_7f3k2m9qx4"
     assert service.calls == [("set_manifest", ADA.id, "mdl_7f3k2m9qx4", MANIFEST)]
     assert checks.started == [(ADA.id, "mdl_7f3k2m9qx4")]
 
@@ -496,6 +512,7 @@ def test_rename_model_keeps_the_extension(mcp, service: FakeService) -> None:
     )
 
     assert answer(result)["name"] == "lstm-v2.keras"
+    assert answer(result)["url"] == "http://testserver/models/mdl_7f3k2m9qx4"
     assert service.calls == [
         ("update", ADA.id, "mdl_7f3k2m9qx4", ModelUpdate(name="lstm-v2", starred=None))
     ]
@@ -639,9 +656,19 @@ def test_get_model_upload_answers_how_it_stands(mcp, service: FakeService) -> No
         "status": "failed",
         "expires_at": "2026-11-02T09:45:00Z",
         "model_id": None,
+        "model_url": None,
         "problem": "model-check-failed",
         "error": "The file holds no trained weights.",
     }
+
+
+def test_a_done_upload_answers_the_new_model_s_page(mcp, service: FakeService) -> None:
+    service.upload_done = True
+
+    got = answer(call(mcp, "get_model_upload", {"upload_id": "upl_7f3k2m9qx4"}))
+
+    assert (got["status"], got["model_id"]) == ("done", "mdl_7f3k2m9qx4")
+    assert got["model_url"] == "http://testserver/models/mdl_7f3k2m9qx4"
 
 
 def test_an_unknown_upload_is_not_found(mcp, service: FakeService) -> None:

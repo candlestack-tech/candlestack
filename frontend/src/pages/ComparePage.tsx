@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { useCanGoBack, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
+import { useCanGoBack, useNavigate, useRouter, useRouterState, useSearch } from '@tanstack/react-router';
 import { Scale, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { compareQueryOptions, type CompareMetric } from '@/api';
 import { ErrorNote } from '@/components/ErrorNote';
@@ -15,6 +15,7 @@ import {
   SLOTS,
   SLOT_COLORS,
   clearCompare,
+  comparedIds,
   isMissing,
   lineOf,
   pickName,
@@ -44,6 +45,25 @@ function useColumns() {
   });
   const failed = error !== null && !isMissing(error);
   return { columns, metrics: data?.metrics ?? [], times: data?.times ?? [], picks, full, failed };
+}
+
+// The URL names the backtests compared (?ids=bt_12,bt_11), so a copied address opens the same
+// comparison: every change of the choice, here or in another tab, writes it in place, keeping the
+// back link's page.
+function useComparedInUrl(picks: readonly ComparePick[]) {
+  const { ids } = useSearch({ from: '/_app/backtests/compare' });
+  const navigate = useNavigate();
+  const chosen = comparedIds(picks) || undefined;
+  useEffect(() => {
+    if (chosen === ids) return;
+    void navigate({
+      to: '/backtests/compare',
+      search: { ids: chosen },
+      state: (state) => ({ ...state, comparedInUrl: true }),
+      replace: true,
+      resetScroll: false,
+    });
+  }, [chosen, ids, navigate]);
 }
 
 // "← Dashboard": back where the page was opened from, the Backtests page when it was opened
@@ -144,6 +164,7 @@ export function ComparePage() {
   usePageTitle('Compare backtests');
   const { columns, metrics, times, picks, full, failed } = useColumns();
   const { gone } = useCompareSelection();
+  useComparedInUrl(picks);
   const [adding, setAdding] = useState(false);
   const open = () => {
     setAdding(true);

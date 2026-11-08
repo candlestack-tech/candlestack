@@ -45,6 +45,7 @@ from candlestack.experiments import (
     idempotent,
 )
 from candlestack.mcp.convention import (
+    COMPARE_PAGE_MAX,
     POLL_S,
     WAIT_DEFAULT_S,
     WAIT_MAX_S,
@@ -54,6 +55,7 @@ from candlestack.mcp.convention import (
     ToolSpec,
     backtest_url,
     changes,
+    compare_url,
     reads,
     runner_of,
     tool_call,
@@ -171,6 +173,10 @@ class CompareResult(CompareOut):
     """Backtests side by side, in the order asked for, each with its page in the app."""
 
     backtests: list[ComparedBacktestOut]
+    url: str | None = Field(
+        description=f"The app's Compare page with these backtests side by side, to show the "
+        f"user; null for one, or for more than {COMPARE_PAGE_MAX}, which the page does not show"
+    )
 
 
 class ModelOut(BaseModel):
@@ -720,7 +726,8 @@ async def compare_backtests(
     equal), their setups and which setup fields differ. Use it to pick the best of several
     runs; it reads only what each stored, so it is quick. A running or failed backtest is
     listed with its status and no values. Each backtest has its `url`, the page to show the
-    user.
+    user, and `url` is the app's Compare page with 2 to 4 of them: give it to the user to see
+    the curves and the table.
 
     For the equity, drawdown and buy and hold of each on one time axis pass `curve_points` (up
     to 200); without it the curves are null and `times` empty. With many similar backtests
@@ -740,6 +747,7 @@ async def compare_backtests(
             ComparedBacktestOut(**backtest.model_dump(), url=backtest_url(call, backtest.id))
             for backtest in compared.backtests
         ],
+        url=compare_url(call, [backtest.id for backtest in compared.backtests]),
     )
 
 
@@ -973,6 +981,7 @@ _COMPARE = CompareResult.model_validate(
         ],
         "differs": ["decision.rule.limit"],
         "times": [_START, _END - 1_800],
+        "url": f"https://app.candlestack.tech/backtests/compare?ids={_ID},bt_t9n8v7d6a5",
     }
 )
 

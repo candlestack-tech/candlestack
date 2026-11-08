@@ -24,6 +24,7 @@ import { SignInPage } from '@/pages/SignInPage';
 import { requireSignedIn, skipSignInWhenSignedIn } from '@/routes/accountGuards';
 import { validateBacktestsSearch } from '@/routes/backtestsSearch';
 import { validateBuilderSearch } from '@/routes/builderSearch';
+import { validateCompareSearch } from '@/routes/compareSearch';
 import { consentRequestOf, isConsentPath, validateConsentSearch } from '@/routes/consentSearch';
 import { validateExperimentsSearch } from '@/routes/experimentsSearch';
 import { validateInstrumentSearch } from '@/routes/instrumentSearch';
@@ -164,11 +165,20 @@ const newBacktestRoute = createRoute({
   component: lazyRouteComponent(() => import('@/pages/NewBacktestPage'), 'NewBacktestPage'),
 });
 
-// /backtests/compare: the chosen backtests side by side, without the sidebar.
+// /backtests/compare?ids=bt_7f3k2m9qx4,bt_t9n8v7d6a5: the chosen backtests side by side, without the
+// sidebar. A link from elsewhere (an agent's, a copied address) chooses the backtests it names before
+// the page shows; from then on the page writes the choice into the URL (useComparedInUrl).
 const compareRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/backtests/compare',
+  validateSearch: validateCompareSearch,
   staticData: { sidebar: false },
+  loaderDeps: ({ search }) => ({ ids: search.ids }),
+  loader: async ({ deps, cause, location }) => {
+    if (cause !== 'enter' || deps.ids === undefined || location.state.comparedInUrl) return;
+    const { openInCompare } = await import('@/features/backtests');
+    openInCompare(deps.ids.split(','));
+  },
   component: lazyRouteComponent(() => import('@/pages/ComparePage'), 'ComparePage'),
 });
 

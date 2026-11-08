@@ -31,6 +31,11 @@ A tool answers JSON; its text leaves out the fields that are null. A failed tool
 problem as JSON: its type (https://candlestack.tech/problems/<slug>) names what went wrong and its \
 detail says what to do; rate-limited also gives retry_after_s, the seconds to wait.
 
+Answers about a backtest or a model carry its `url`, its page in the app; a comparison and a \
+sweep of 2 to 4 backtests (a ranked sweep: its best 4) carry `url`, the app's Compare page with \
+them side by side. Give the user these links whenever you show results, so they can see the \
+charts and the details themselves.
+
 Docs for agents: {AGENTS_DOCS} and for this server: {MCP_DOCS}. The resource {DOCS_URI} lists \
 every docs page and reference."""
 

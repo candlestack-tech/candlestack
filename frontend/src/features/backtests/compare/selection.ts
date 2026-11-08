@@ -1,10 +1,12 @@
 import { useSyncExternalStore } from 'react';
 
+import { COMPARE_SLOTS } from '@/routes/compareSearch';
+
 // The backtests chosen to compare, up to four, kept in this browser so they stay after a reload.
 // A backtest keeps its slot while it is chosen, and its colour with it, so removing another moves
 // nothing. The choice belongs to the account that made it: another one signing in starts empty.
 
-export const SLOTS = 4;
+export const SLOTS = COMPARE_SLOTS;
 
 // What the Compare panel names a backtest by, without asking the API for it: its name and
 // "AAPL · Kagi · 1h" (backtest-names, .tray-r). A choice kept before backtests had names has
@@ -122,6 +124,29 @@ export function nameInCompare(id: string, name: string, description?: string) {
   publish({ ...selection, slots: slots.map((each) => (each?.id === id ? named : each)) });
 }
 
+// A link to the compare page (?ids=) chooses its backtests, in its order, in place of the choice.
+// One chosen already keeps what the panel knew of it, and one unpublished since is asked again;
+// the comparison names a new one (useComparedNames) and leaves out one that is gone.
+export function openInCompare(ids: readonly string[]) {
+  const known = new Map(selection.slots.flatMap((slot) => (slot ? [[slot.id, slot] as const] : [])));
+  const slots = NO_SLOTS.map((_, index) => {
+    const id = ids[index];
+    if (id === undefined) return null;
+    const { gone: _gone, ...pick } = known.get(id) ?? { id, number: 0, symbol: '' };
+    return pick;
+  });
+  if (JSON.stringify(slots) !== JSON.stringify(selection.slots)) publish({ ...selection, slots });
+}
+
+// What the comparison tells of a backtest a link chose (openInCompare): its number, and its
+// author's name when it is another account's, so it counts as from Experiments.
+export function creditInCompare(id: string, number: number, author: string | undefined) {
+  const { slots } = selection;
+  const slot = slots.find((each) => each?.id === id);
+  if (!slot || (slot.number === number && slot.author === author)) return;
+  publish({ ...selection, slots: slots.map((each) => (each?.id === id ? { ...each, number, author } : each)) });
+}
+
 export function removeFromCompare(id: string) {
   publish({ ...selection, slots: selection.slots.map((slot) => (slot?.id === id ? null : slot)) });
 }
@@ -150,6 +175,10 @@ export function claimCompare(owner: string) {
   if (selection.owner === owner) return;
   publish(selection.owner === null ? { ...selection, owner } : { ...EMPTY, owner });
 }
+
+// The IDs of the backtests compared, in the order of their slots, as the compare page's URL names
+// them: `bt_12,bt_11`, or '' with none.
+export const comparedIds = (picks: readonly ComparePick[]) => picks.map((pick) => pick.id).join(',');
 
 // The tint of a row whose backtest is in the comparison.
 export function useComparedRow(id: string) {

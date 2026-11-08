@@ -144,6 +144,8 @@ def test_a_client_gets_the_instructions_and_the_tools(mcp, mode: str, protocol: 
     assert instructions is not None
     assert AGENTS_DOCS in instructions
     assert MCP_DOCS in instructions
+    # It asks the agent to give the user the app's pages the answers link.
+    assert "Give the user these links" in instructions
     assert info.name == "candlestack"
     assert info.version == "1.2.3"
     assert info.title == "CandleStack"

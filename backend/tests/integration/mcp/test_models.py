@@ -169,6 +169,9 @@ def test_an_agent_uploads_a_model_through_a_link(mcp, keys, client) -> None:
     assert sent.status_code == 201, sent.text
     assert done["status"] == "done"
     assert done["model_id"] == sent.json()["id"]
+    # The new model's page, to show the user.
+    assert done["model_url"] == f"http://testserver/models/{done['model_id']}"
+    assert waiting["model_url"] is None
 
 
 def test_a_link_needs_the_scope_models(mcp, keys) -> None:
@@ -199,6 +202,7 @@ def test_get_model_reads_that_model_alone(mcp, keys, ada, app) -> None:
     got = answer(mcp(tool("get_model", {"model_id": model_id}), keys("read")))
 
     assert (got["id"], got["name"], got["backtest_count"]) == (model_id, "second.keras", 2)
+    assert got["url"] == f"http://testserver/models/{model_id}"
     assert usage.asked == [[model_id]]
 
 

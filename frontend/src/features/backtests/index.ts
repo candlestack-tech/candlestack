@@ -19,6 +19,8 @@ export {
   SLOTS,
   clearCompare,
   comparedFromOf,
+  comparedIds,
+  openInCompare,
   pickName,
   removeFromCompare,
   useComparedRow,
