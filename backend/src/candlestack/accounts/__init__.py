@@ -3,11 +3,11 @@
 Other modules import only from here (``from candlestack.accounts import CurrentUserDep``),
 never from the submodules. A route of the signed-in user takes ``user: CurrentUserDep``, and
 one that changes something also depends on ``core.require_same_origin``.
-``CurrentUserDep`` lets an API key read (GET) but change nothing; a route that a key with a
-scope may change takes ``BacktestsUserDep`` or ``ModelsUserDep`` instead, or ``CallerDep``
-and checks the scopes itself (``Caller.require``). Such a route returns
-its data, not a ``Response`` of its own: FastAPI drops the renewed session cookie that
-``CurrentUserDep`` sets from a response the route builds itself.
+``CurrentUserDep`` lets an API key read (GET) but change nothing, ``SessionUserDep`` lets no
+key in at all; a route that a key with a scope may change takes ``BacktestsUserDep`` or
+``ModelsUserDep`` instead, or ``CallerDep`` and checks the scopes itself (``Caller.require``).
+Such a route returns its data, not a ``Response`` of its own: FastAPI drops the renewed session
+cookie that ``CurrentUserDep`` sets from a response the route builds itself.
 
 A module that keeps data of a user deletes it with the account through an
 ``AccountDeletionHook``, which ``candlestack.main`` puts on ``app.state.account_deletion_hooks``:
@@ -27,6 +27,7 @@ from candlestack.accounts.dependencies import (
     CallerDep,
     CurrentUserDep,
     ModelsUserDep,
+    SessionUserDep,
     get_accounts_service,
     key_caller,
 )
@@ -54,6 +55,7 @@ __all__ = [
     "ModelsUserDep",
     "Provider",
     "Scope",
+    "SessionUserDep",
     "User",
     "accounts_router",
     "dev_sign_in_allowed",

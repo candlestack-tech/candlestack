@@ -10,7 +10,9 @@ answers 422 ``model-check-failed`` naming the check.
 An agent that cannot send a file uploads it through a one-time link instead: it asks for one
 with ``POST /api/v1/models/uploads`` (the file's name and size), the file goes to the link with
 ``PUT /api/v1/uploads/{token}`` (``curl -T``), whose token is its only sign-in, and
-``GET /api/v1/models/uploads/{upload_id}`` says how the upload stands.
+``GET /api/v1/models/uploads/{upload_id}`` says how the upload stands. The upload page the link
+opens in the browser reads the link with ``GET /api/v1/uploads/{token}``, for its user's session
+only.
 
 A model's manifest is its own resource, ``/api/v1/models/{model_id}/manifest``: added or
 replaced with PUT, which keeps it only when every check passed (else 422
@@ -25,7 +27,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from starlette.requests import ClientDisconnect
 
-from candlestack.accounts import CurrentUserDep, ModelsUserDep
+from candlestack.accounts import CurrentUserDep, ModelsUserDep, SessionUserDep
 from candlestack.core import (
     NO_STORE,
     ProblemError,
@@ -50,6 +52,7 @@ from candlestack.ml.errors import (
     UploadInProgress,
     UploadLinkGone,
     UploadLinkNotFound,
+    UploadLinkOfAnotherUser,
     UploadNotFound,
     UploadTimeout,
 )
@@ -301,6 +304,16 @@ def _link_gone(error: UploadLinkGone) -> ProblemError:
     )
 
 
+def _link_not_found() -> ProblemError:
+    return ProblemError(
+        404,
+        "upload-link-not-found",
+        "Upload link not found",
+        "No upload link has this token. Check that the whole link was copied, or ask for a new "
+        "one.",
+    )
+
+
 def _upload_problem(user_id: str, error: Exception) -> ProblemError:
     """The problem of an upload that failed with `error`, one of the service's errors; logged
     with the user's ID only."""
@@ -427,11 +440,11 @@ async def create_model_upload(
 ) -> ModelUploadCreated:
     """Makes a one-time link to upload a model file through, for a client that cannot send
     the file itself (an agent in a chat): `PUT` the file to `url` within 15 minutes, as
-    `command` does with `curl -T`. The link takes one upload of a file no larger than
-    `size_bytes`, with no other sign-in, and the upload is checked as `POST /api/v1/models`
-    checks it. The URL is shown only here; `GET /api/v1/models/uploads/{upload_id}` says how
-    the upload stands. The name and the size must fit now, and are checked again when the file
-    comes."""
+    `command` does with `curl -T`, or have the user drop it on the upload page `page_url` in
+    the browser. The link takes one upload of a file no larger than `size_bytes`, with no other
+    sign-in, and the upload is checked as `POST /api/v1/models` checks it. The URLs are shown
+    only here; `GET /api/v1/models/uploads/{upload_id}` says how the upload stands. The name
+    and the size must fit now, and are checked again when the file comes."""
     response.headers.update(NO_STORE)
     try:
         return await service.create_upload(user.id, body, settings.public_url)
@@ -459,6 +472,42 @@ async def get_model_upload(
     except UploadNotFound:
         raise ProblemError(
             404, "not-found", "Not Found", "You have no upload link with this ID."
+        ) from None
+
+
+@router.get(
+    "/api/v1/uploads/{token}",
+    responses={
+        **_NOT_SIGNED_IN,
+        **problem_doc(
+            403,
+            "Another user made this upload link (`upload-link-of-another-user`): sign in with "
+            "the account that asked for it.",
+        ),
+        **problem_doc(404, "No upload link has this token (`upload-link-not-found`)."),
+    },
+)
+async def get_upload_by_token(
+    token: UploadToken, user: SessionUserDep, service: ModelsServiceDep, response: Response
+) -> ModelUploadOut:
+    """The upload link of the token for the upload page it opens in the browser: the file it
+    is made for (`name`, `size_bytes`) and how its upload stands, as
+    `GET /api/v1/models/uploads/{upload_id}` says it. Only the session of the user who made the
+    link reads it: an API key is refused, and another user learns nothing of the link. The file
+    itself never comes back."""
+    response.headers.update(NO_STORE)
+    try:
+        return await service.upload_of_token(user.id, token)
+    except UploadLinkNotFound:
+        raise _link_not_found() from None
+    except UploadLinkOfAnotherUser:
+        logger.info("User %s opened the upload link of another user", user.id)
+        raise ProblemError(
+            403,
+            "upload-link-of-another-user",
+            "Upload link of another account",
+            "Another account asked for this upload link. Sign in with the account that asked "
+            "for it, then open the link again.",
         ) from None
 
 
@@ -517,13 +566,7 @@ async def upload_by_link(
             token, _declared_size(request), request.stream(), _link_failure
         )
     except UploadLinkNotFound:
-        raise ProblemError(
-            404,
-            "upload-link-not-found",
-            "Upload link not found",
-            "No upload link has this token. Check that the whole link was copied, or ask for a "
-            "new one.",
-        ) from None
+        raise _link_not_found() from None
     except UploadLinkGone as gone:
         raise _link_gone(gone) from None
     except ClientDisconnect:

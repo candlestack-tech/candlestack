@@ -11,4 +11,5 @@ export { StorageMeter } from './StorageMeter';
 export { UploadCard } from './UploadCard';
 export { formatGrid, representationName as manifestRepresentation } from './manifest';
 export { ManifestDialog, UploadDialog } from './UploadDialog';
+export { UploadLink } from './UploadLink';
 export { useManifest, useModels, useStarModel } from './useModels';

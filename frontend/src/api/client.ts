@@ -1,4 +1,4 @@
-// The only place that calls fetch. Every request to the CandleStack API goes through here, so
+// The only place that calls fetch (and XMLHttpRequest, for an upload's progress). Every request to the CandleStack API goes through here, so
 // when the API changes (#104-#109) the fix is in src/api/ and nowhere else.
 
 // Relative on purpose: in prod the page and the API share a host, in dev the Vite proxy
@@ -50,25 +50,38 @@ export function parseRetryAfter(value: string | null, now: number = Date.now()):
 
 type Problem = { type?: unknown; title?: unknown; detail?: unknown };
 
-function errorFromResponse(res: Response, body: unknown): ApiError {
+// The error of an answer with `status`, its JSON body (null when it had none) and its Retry-After.
+function problemError(status: number, body: unknown, retryAfter: string | null): ApiError {
   const problem: Problem = typeof body === 'object' && body !== null ? body : {};
   const text = (value: unknown) => (typeof value === 'string' && value !== '' ? value : undefined);
-  const message = text(problem.detail) ?? text(problem.title) ?? `The server answered ${res.status}.`;
+  const message = text(problem.detail) ?? text(problem.title) ?? `The server answered ${status}.`;
   const slug = text(problem.type)?.split('/problems/')[1];
-  return new ApiError(res.status, message, {
-    body,
-    retryAfter: parseRetryAfter(res.headers.get('Retry-After')),
-    problem: slug,
-  });
+  return new ApiError(status, message, { body, retryAfter: parseRetryAfter(retryAfter), problem: slug });
 }
 
-async function readJson(res: Response): Promise<{ ok: true; body: unknown } | { ok: false }> {
+const errorFromResponse = (res: Response, body: unknown) =>
+  problemError(res.status, body, res.headers.get('Retry-After'));
+
+type Json = { ok: true; body: unknown } | { ok: false };
+
+async function readJson(res: Response): Promise<Json> {
   try {
     return { ok: true, body: await res.json() };
   } catch {
     return { ok: false };
   }
 }
+
+function parseJson(text: string): Json {
+  try {
+    return { ok: true, body: JSON.parse(text) as unknown };
+  } catch {
+    return { ok: false };
+  }
+}
+
+const UNREADABLE = 'The server sent an answer the app cannot read.';
+const UNREACHABLE = 'Cannot reach the server. Check your connection.';
 
 // The URL of an API path, e.g. for an <img> that the browser loads itself.
 export function apiUrl(path: string): string {
@@ -83,7 +96,7 @@ async function send(path: string, init: RequestInit): Promise<Response> {
     res = await fetch(apiUrl(path), init);
   } catch (error) {
     if (init.signal?.aborted) throw error;
-    throw new ApiError(0, 'Cannot reach the server. Check your connection.');
+    throw new ApiError(0, UNREACHABLE);
   }
   if (!res.ok) {
     const json = await readJson(res);
@@ -96,7 +109,7 @@ async function send(path: string, init: RequestInit): Promise<Response> {
 // the page can use.
 async function readBody<T>(res: Response): Promise<T> {
   const json = await readJson(res);
-  if (!json.ok) throw new ApiError(res.status, 'The server sent an answer the app cannot read.');
+  if (!json.ok) throw new ApiError(res.status, UNREADABLE);
   return json.body as T;
 }
 
@@ -152,4 +165,42 @@ export async function postFile<T>(path: string, file: Blob): Promise<T> {
     headers: { Accept: 'application/json', 'Content-Type': 'application/octet-stream' },
   });
   return readBody<T>(res);
+}
+
+type Progress = {
+  // The bytes sent so far and the whole file's, as the browser reports them while it sends.
+  onProgress: (sent: number, total: number) => void;
+  // Aborting stops the upload: the promise rejects with the AbortError.
+  signal?: AbortSignal;
+};
+
+// PUTs a file as the raw body with its progress, which fetch cannot report, and returns the JSON
+// answer; its errors are ApiErrors like those of get.
+export function putFileWithProgress<T>(path: string, file: Blob, { onProgress, signal }: Progress): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open('PUT', apiUrl(path));
+    request.setRequestHeader('Accept', 'application/json');
+    request.setRequestHeader('Content-Type', 'application/octet-stream');
+    request.upload.addEventListener('progress', (event) => {
+      onProgress(event.loaded, event.lengthComputable ? event.total : file.size);
+    });
+    request.addEventListener('load', () => {
+      const json = parseJson(request.responseText);
+      if (request.status >= 200 && request.status < 300) {
+        if (json.ok) resolve(json.body as T);
+        else reject(new ApiError(request.status, UNREADABLE));
+        return;
+      }
+      reject(problemError(request.status, json.ok ? json.body : null, request.getResponseHeader('Retry-After')));
+    });
+    request.addEventListener('error', () => reject(new ApiError(0, UNREACHABLE)));
+    request.addEventListener('abort', () => reject(new DOMException('The upload was cancelled.', 'AbortError')));
+    if (signal?.aborted) {
+      reject(new DOMException('The upload was cancelled.', 'AbortError'));
+      return;
+    }
+    signal?.addEventListener('abort', () => request.abort(), { once: true });
+    request.send(file);
+  });
 }
