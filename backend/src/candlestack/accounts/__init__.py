@@ -4,7 +4,8 @@ Other modules import only from here (``from candlestack.accounts import CurrentU
 never from the submodules. A route of the signed-in user takes ``user: CurrentUserDep``, and
 one that changes something also depends on ``core.require_same_origin``.
 ``CurrentUserDep`` lets an API key read (GET) but change nothing; a route that a key with a
-scope may change takes ``BacktestsUserDep`` or ``ModelsUserDep`` instead, or ``CallerDep``
+scope may change takes ``BacktestsUserDep`` or ``ModelsUserDep`` instead (a POST that
+changes nothing ``ReaderDep``), or ``CallerDep``
 and checks the scopes itself (``Caller.require``). Such a route returns
 its data, not a ``Response`` of its own: FastAPI drops the renewed session cookie that
 ``CurrentUserDep`` sets from a response the route builds itself.
@@ -27,6 +28,7 @@ from candlestack.accounts.dependencies import (
     CallerDep,
     CurrentUserDep,
     ModelsUserDep,
+    ReaderDep,
     get_accounts_service,
     key_caller,
 )
@@ -53,6 +55,7 @@ __all__ = [
     "MeOut",
     "ModelsUserDep",
     "Provider",
+    "ReaderDep",
     "Scope",
     "User",
     "accounts_router",

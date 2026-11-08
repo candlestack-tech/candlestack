@@ -95,6 +95,7 @@ flowchart LR
 | `DELETE /api/v1/models/{model_id}` | deletes a model and its file |
 | `GET /api/v1/preprocessing/catalog` | the blocks a model's manifest can name, by step: id, description, the display group of a feature (`Candle`, `Bands`, `Momentum`, `Trend`, `Volume`, `Brick`, `Line`), warm-up and parameters (type, range, default, `tunable`); public, served by `ml` ([preprocessing.md](preprocessing.md#the-blocks)) |
 | `POST /api/v1/backtests` | starts a backtest of one of the user's models: the body is the setup groups of the result document (`model`, `data`, `decision`, `execution`, `benchmarks`); checked first, then stored `running` and run after the response, or `queued` while another backtest of the user runs (1 runs and up to 20 wait per user, `409 queue-full` beyond); 201 with its result document ([Backtests](#backtests)) |
+| `POST /api/v1/backtests/check` | checks a new backtest as `POST /api/v1/backtests` does, with the same body and the same problems, and stores nothing: 200 with what would run (the model, the instrument as the catalog has it, the model's timeframe and session, the warm-up and where the load starts, the benchmarks) and whether it would wait (`starts` `now` or `queued`, `queue_position`); a key needs only `read` ([Backtests](#backtests)) |
 | `POST /api/v1/backtests/{backtest_id}/cancel` | cancels the user's queued backtest: it fails as cancelled and never runs; 200 with its result document, `409 backtest-not-queued` for one that runs or has ended ([Backtests](#backtests)) |
 | `GET /api/v1/backtests/{backtest_id}` | the result document in the light view of the user's backtest, whatever its status, or of another account's while it is published ([engine.md](engine.md#the-result-document)) |
 | `GET /api/v1/backtests/{backtest_id}/download` | the result document of a finished backtest, the user's or a published one of another account, with every row and trade, as an attachment |
@@ -238,8 +239,9 @@ flowchart LR
   (`accounts.dependencies`), and a new route is closed to keys until it says otherwise.
   `CurrentUserDep` lets a key with `read` call a GET and nothing else (403
   `session-required` on a change); `BacktestsUserDep` (starting a backtest) and
-  `ModelsUserDep` (upload, manifest, rename, star, delete a model) need that scope; the
-  backtest PATCH takes `CallerDep` and needs `publish` for `public`, `backtests` for the rest;
+  `ModelsUserDep` (upload, manifest, rename, star, delete a model) need that scope;
+  `ReaderDep` lets a key with `read` call a POST that changes nothing (the check of a new
+  backtest); the backtest PATCH takes `CallerDep` and needs `publish` for `public`, `backtests` for the rest;
   `SessionUserDep` refuses every key (the keys themselves, deleting the account, sign-in
   methods, signing out everywhere; signing out refuses keys too). The API reference shows
   the scheme `apiKey` (`accounts.API_KEY_SCHEME`) with the scope of each route, rewritten from
@@ -723,7 +725,9 @@ checked at the next start.
   backtest is stored, so one deleted meanwhile is `404 not-found`. The
   reads end before the queue and the data module are asked, so no connection waits on them.
   The answer is the result document of the new backtest, `running` or `queued` with its
-  `queue_position`, with `Location`.
+  `queue_position`, with `Location`. `POST /api/v1/backtests/check` runs the same checks up to
+  the lock (`BacktestRuns.check`) and answers what would run and where it would wait, so an
+  agent can fix a setup before it starts anything.
 - **The queue**: a user's backtests run one at a time. A new backtest is stored `queued`, at
   the end of the user's queue, and in the same transaction, under the lock of the user, the
   oldest queued one (lowest number) becomes `running` with `started_at` when none of theirs
@@ -927,7 +931,28 @@ call, as the routes' dependencies do), never the API over HTTP.
   docs pages, the tool reference, the manifest and backtest result references with their JSON
   Schemas, the problem pages and the API reference.
 - **Tools**: `get_me` (scope `read`): the key's user (ID, name, email, created) and the key's
-  scopes. The tools of the other areas come with #399 and #402 to #405.
+  scopes. The tools of the other areas come with #399, #402, #403 and #405.
+- **Running and reading backtests** (`mcp/run.py`, #404), on `experiments.backtest_runs` and
+  the problems of the routes (`experiments.backtest_problems`): `validate_backtest` (`read`,
+  `POST /api/v1/backtests/check`) and `start_backtest` (`backtests`, not idempotent) take the
+  body of `POST /api/v1/backtests` as their arguments (`model`, `data`, and `decision`,
+  `execution` and `benchmarks` with the API's defaults); `start_backtest` answers the status:
+  `running`, or `queued` with `queue_position`. `get_backtest_status` (`read`) answers the
+  status from the backtest's row alone (`BacktestRuns.header`, no candles): `ended`, the
+  queue position, the steps with the progress of the candles' load, the error and the link
+  to the backtest's page (`<PUBLIC_URL>/backtests/<id>`). `wait_for_backtest` (`read`) reads
+  the row again every second until the backtest has ended or `timeout_s` passed (50 by
+  default, 60 at most: the transport answers JSON at the end of the call, so a call never
+  outlasts a client's timeout) and answers the same status, so the agent calls it again while
+  `ended` is false. `get_backtest` (`read`) answers the light result document cut down: the
+  summary with the link, the setup in the shape of `start_backtest`'s arguments (so it runs
+  again as it is, or changed), the candles it ran on, the 12 statistics, each benchmark's
+  return, one page of trades (`trades_page`, `trades_per_page` up to 500, oldest first, with
+  `count`, `total` and `complete`) and the equity, drawdown and benchmarks at most 200 rows
+  (evenly spaced, the first, the last and the deepest fall included, six decimals).
+  `compare_backtests` (`read`) answers `GET /api/v1/compare` for a list of 1 to 20 IDs, as it
+  is. The access is that of the routes: the user's own backtests and other accounts' while
+  they are published.
 - **Parity table** (`mcp/parity.py`): every endpoint of the API reference, by method and path,
   maps to the tools that do the same, to `Planned` with the task that adds them, or to
   `WebOnly` with the reason (sign-in, sessions, the keys themselves, deleting the account,

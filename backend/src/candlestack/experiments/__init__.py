@@ -11,12 +11,52 @@ so the models list of ``ml``, which cannot import this module, shows how the bac
 each model. A user's backtests go with the account by the foreign key's cascade: no hook.
 Importing the module declares its table (``backend/migrations`` relies on it).
 
+The MCP tools (``candlestack.mcp``) build the same services as the routes (``backtest_runs``),
+take the same setup (``BacktestIn`` and its groups) and raise the same problems
+(``backtest_problems``).
+
 ``python -m candlestack.experiments.seed --email <email>`` fills an account with test backtests
 (stage and local only).
 """
 
+from candlestack.experiments.api import backtest_problems
 from candlestack.experiments.api import router as backtests_router
+from candlestack.experiments.compare import COMPARE_MAX, CompareOut, check_ids
+from candlestack.experiments.compare import compare as compare_backtests
+from candlestack.experiments.dependencies import backtest_runs
+from candlestack.experiments.document import (
+    BacktestCheck,
+    BacktestHeader,
+    BacktestIn,
+    BenchmarkIn,
+    DataIn,
+    Decision,
+    Execution,
+    ModelRef,
+    Stats,
+)
 from candlestack.experiments.runner import BacktestRunner
+from candlestack.experiments.runs import BacktestRuns
 from candlestack.experiments.store import model_usage
 
-__all__ = ["BacktestRunner", "backtests_router", "model_usage"]
+__all__ = [
+    "COMPARE_MAX",
+    "BacktestCheck",
+    "BacktestHeader",
+    "BacktestIn",
+    "BacktestRunner",
+    "BacktestRuns",
+    "BenchmarkIn",
+    "CompareOut",
+    "DataIn",
+    "Decision",
+    "Execution",
+    "ModelRef",
+    "Stats",
+    "backtest_problems",
+    "backtest_runs",
+    "backtests_router",
+    "check_ids",
+    "compare_backtests",
+    "model_usage",
+]

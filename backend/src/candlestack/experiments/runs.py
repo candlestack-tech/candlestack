@@ -15,7 +15,7 @@ are now. The comparison reads only what the run stored (``stored``), so it never
 from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from functools import partial
-from typing import Any
+from typing import Any, NamedTuple
 
 import anyio
 import numpy as np
@@ -49,10 +49,14 @@ from candlestack.experiments.assembly import (
 )
 from candlestack.experiments.document import (
     BENCHMARK_ETFS,
+    BacktestCheck,
     BacktestHeader,
     BacktestIn,
     BacktestModel,
     BenchmarkIn,
+    BenchmarkOut,
+    CheckedModel,
+    CheckedWarmUp,
     DataOut,
     DocumentAuthor,
     HysteresisRule,
@@ -99,6 +103,15 @@ _REPRESENTATIONS = {"renko": Representation.renko, "kagi": Representation.kagi}
 CANCELLED = "You cancelled the backtest before it ran."
 
 
+class _Checked(NamedTuple):
+    """A new backtest that passed the checks before the lock."""
+
+    model: Model
+    manifest: Manifest
+    instrument_id: InstrumentId
+    spec: RunSpec
+
+
 class BacktestRuns:
     def __init__(
         self, store: BacktestStore, data: DataService, runner: BacktestRunner, app_version: str
@@ -107,6 +120,35 @@ class BacktestRuns:
         self._data = data
         self._runner = runner
         self._app_version = app_version
+
+    async def check(self, user_id: str, body: BacktestIn) -> BacktestCheck:
+        """Checks a new backtest of the user as ``start`` does, stores nothing, and says what
+        would run and whether it would wait in the user's queue.
+
+        Raises:
+            The errors of ``start`` but none of the lock (the model deleted meanwhile).
+        """
+        model, _, _, spec = await self._checked(user_id, body)
+        queued = await self._store.queued(user_id)
+        waits = queued > 0 or await self._store.running(user_id)
+        data = spec.data
+        return BacktestCheck(
+            model=CheckedModel(id=model.id, name=model.name, framework=model.framework),
+            instrument=data.instrument,
+            timeframe=data.timeframe,
+            session=data.session,
+            period=data.period,
+            warm_up=CheckedWarmUp(
+                candles=data.warm_up.candles,
+                kind="estimate" if data.warm_up.kind == "estimate" else "exact",
+                load_start=data.load_start,
+            ),
+            benchmarks=[
+                BenchmarkOut.model_validate(benchmark.model_dump()) for benchmark in spec.benchmarks
+            ],
+            starts="queued" if waits else "now",
+            queue_position=queued + 1 if waits else None,
+        )
 
     async def start(self, user_id: str, body: BacktestIn) -> tuple[Backtest, bytes]:
         """Checks a new backtest of the user, stores it, and returns it with its document: it
@@ -118,25 +160,8 @@ class BacktestRuns:
             BacktestsUnavailable, and the data module's errors of the instrument and the
             period (``data.DataError``).
         """
-        instrument_id = InstrumentId.parse(body.data.instrument.id)
-        body = body.model_copy(
-            update={"benchmarks": _check_benchmarks(body.benchmarks, instrument_id)}
-        )
-        model = await self._store.run_model(user_id, body.model.id)
-        if model is None:
-            raise ModelNotFound
-        manifest = _manifest(model, instrument_id)
+        model, manifest, instrument_id, spec = await self._checked(user_id, body)
         author = DocumentAuthor(id=user_id, name=await self._store.author_name(user_id), mine=True)
-        # Before the slower checks; again under the lock below, where it counts.
-        if await self._store.queued(user_id) >= QUEUE_MAX:
-            raise QueueFull
-        # The reads so far end here, so no connection waits on the queue and the data module.
-        await self._store.commit()
-        try:
-            await self._runner.ping()
-        except RedisError as error:
-            raise BacktestsUnavailable from error
-        spec = await self._spec(model, manifest, instrument_id, body)
         await self._store.lock_user(user_id)
         if await self._store.queued(user_id) >= QUEUE_MAX:
             raise QueueFull
@@ -169,6 +194,34 @@ class BacktestRuns:
             self._runner.start(started.id)
         document = _document(backtest, spec, author=author, queue_position=position)
         return backtest, dumps(document)
+
+    async def _checked(self, user_id: str, body: BacktestIn) -> _Checked:
+        """The user's model and the setup to store of a new backtest, once every check before
+        the lock passed: the benchmarks, the model and its manifest, the queue's room, the
+        worker's queue and the period against the data.
+
+        Raises:
+            The errors of ``start``.
+        """
+        instrument_id = InstrumentId.parse(body.data.instrument.id)
+        body = body.model_copy(
+            update={"benchmarks": _check_benchmarks(body.benchmarks, instrument_id)}
+        )
+        model = await self._store.run_model(user_id, body.model.id)
+        if model is None:
+            raise ModelNotFound
+        manifest = _manifest(model, instrument_id)
+        # Before the slower checks; again under the lock of a start, where it counts.
+        if await self._store.queued(user_id) >= QUEUE_MAX:
+            raise QueueFull
+        # The reads so far end here, so no connection waits on the queue and the data module.
+        await self._store.commit()
+        try:
+            await self._runner.ping()
+        except RedisError as error:
+            raise BacktestsUnavailable from error
+        spec = await self._spec(model, manifest, instrument_id, body)
+        return _Checked(model, manifest, instrument_id, spec)
 
     async def cancel(self, user_id: str, backtest_id: str) -> bytes:
         """Cancels the user's queued backtest: it fails, as cancelled, and never runs. Returns
@@ -285,6 +338,29 @@ class BacktestRuns:
         )
         return backtest.number, await anyio.to_thread.run_sync(build)
 
+    async def header(self, user_id: str, backtest_id: str) -> BacktestHeader:
+        """The ``backtest`` group of the document of the user's backtest, or of another
+        account's while it is published, from its row alone: its status, its place in the queue
+        and its steps, without building the results (what an agent polls).
+
+        Raises:
+            BacktestNotFound, NoDocument.
+        """
+        found = await self._store.with_run(user_id, backtest_id)
+        if found is None:
+            raise BacktestNotFound
+        backtest = found.backtest
+        if backtest.spec is None:
+            raise NoDocument
+        author = DocumentAuthor(
+            id=backtest.user_id, name=found.author, mine=backtest.user_id == user_id
+        )
+        report = None if backtest.report is None else RunReport.model_validate(backtest.report)
+        position = None
+        if backtest.status == BacktestStatus.queued.value:
+            position = await self._store.queue_position(backtest.id)
+        return _header(backtest, report, author=author, queue_position=position)
+
     async def stored(self, user_id: str, backtest_id: str) -> dict[str, Any]:
         """The light result document of the user's backtest, or of another account's while it
         is published, from what its run stored and never the data source: what the comparison
@@ -383,23 +459,7 @@ def _document(  # noqa: PLR0913 (the document's sources)
     queue_position: int | None = None,
 ) -> dict[str, Any]:
     return document(
-        backtest=BacktestHeader(
-            id=backtest.id,
-            name=backtest.shown_name,
-            generated_name=backtest.generated_name,
-            number=backtest.number,
-            author=author,
-            public=backtest.published_at is not None,
-            published_at=backtest.published_at,
-            status=BacktestStatus(backtest.status),
-            queue_position=queue_position,
-            created_at=backtest.created_at,
-            started_at=backtest.started_at,
-            finished_at=backtest.finished_at,
-            duration_s=backtest.duration_s,
-            error=backtest.error,
-            steps=shown_steps(backtest.steps, None if report is None else report.timings),
-        ),
+        backtest=_header(backtest, report, author=author, queue_position=queue_position),
         software=Software(
             engine_version=ENGINE_VERSION,
             app_version=spec.app_version,
@@ -420,6 +480,32 @@ def _document(  # noqa: PLR0913 (the document's sources)
         benchmarks=spec.benchmarks,
         metrics=spec.metrics,
         results=shown,
+    )
+
+
+def _header(
+    backtest: Backtest,
+    report: RunReport | None,
+    *,
+    author: DocumentAuthor,
+    queue_position: int | None,
+) -> BacktestHeader:
+    return BacktestHeader(
+        id=backtest.id,
+        name=backtest.shown_name,
+        generated_name=backtest.generated_name,
+        number=backtest.number,
+        author=author,
+        public=backtest.published_at is not None,
+        published_at=backtest.published_at,
+        status=BacktestStatus(backtest.status),
+        queue_position=queue_position,
+        created_at=backtest.created_at,
+        started_at=backtest.started_at,
+        finished_at=backtest.finished_at,
+        duration_s=backtest.duration_s,
+        error=backtest.error,
+        steps=shown_steps(backtest.steps, None if report is None else report.timings),
     )
 
 

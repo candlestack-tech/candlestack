@@ -129,16 +129,26 @@ def parse_ids(ids: str) -> list[str]:
     Raises:
         InvalidBacktest: More than 20, an empty one, or one twice.
     """
-    parsed = [part.strip() for part in ids.split(",")]
-    if not COMPARE_MIN <= len(parsed) <= COMPARE_MAX:
+    parts = [part.strip() for part in ids.split(",")]
+    return check_ids(parts, name="`ids`", empty=": separate the IDs by single commas")
+
+
+def check_ids(ids: Sequence[str], *, name: str = "The list", empty: str = "") -> list[str]:
+    """The backtest IDs to compare, checked: ``name`` is what a problem calls the list and
+    ``empty`` what it adds about an empty ID.
+
+    Raises:
+        InvalidBacktest: None or more than 20, an empty one, or one twice.
+    """
+    if not COMPARE_MIN <= len(ids) <= COMPARE_MAX:
         raise InvalidBacktest(
-            f"Compare {COMPARE_MIN} to {COMPARE_MAX} backtests: `ids` has {len(parsed)}."
+            f"Compare {COMPARE_MIN} to {COMPARE_MAX} backtests: {name} has {len(ids)}."
         )
-    if not all(parsed):
-        raise InvalidBacktest("`ids` has an empty ID: separate the IDs by single commas.")
-    if len(set(parsed)) < len(parsed):
-        raise InvalidBacktest("Each backtest can be compared once: `ids` has one twice.")
-    return parsed
+    if not all(ids):
+        raise InvalidBacktest(f"{name} has an empty ID{empty}.")
+    if len(set(ids)) < len(ids):
+        raise InvalidBacktest(f"Each backtest can be compared once: {name} has one twice.")
+    return list(ids)
 
 
 async def compare(runs: BacktestRuns, user_id: str, ids: Sequence[str]) -> CompareOut:

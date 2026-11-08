@@ -37,6 +37,7 @@ def signed_in(app: FastAPI) -> FastAPI:
         ("GET", "/api/v1/dashboard"),
         ("GET", "/api/v1/experiments"),
         ("POST", "/api/v1/backtests"),
+        ("POST", "/api/v1/backtests/check"),
         ("GET", "/api/v1/backtests/bt_7f3k2m9qx4"),
         ("GET", "/api/v1/backtests/bt_7f3k2m9qx4/download"),
         ("POST", "/api/v1/backtests/bt_7f3k2m9qx4/cancel"),
@@ -45,7 +46,7 @@ def signed_in(app: FastAPI) -> FastAPI:
 )
 def test_the_backtests_need_a_session(client: TestClient, method: str, path: str) -> None:
     json = {"starred": True} if method == "PATCH" else None
-    if path == "/api/v1/backtests":
+    if path in {"/api/v1/backtests", "/api/v1/backtests/check"}:
         json = {
             "model": {"id": "mdl_7f3k2m9qx4"},
             "data": {"instrument": {"id": "stock:AAPL"}, "period": {"start": 0, "end": 86400}},
@@ -58,7 +59,10 @@ def test_the_backtests_need_a_session(client: TestClient, method: str, path: str
 
 
 @pytest.mark.usefixtures("signed_in")
-@pytest.mark.parametrize("path", ["/api/v1/backtests", "/api/v1/backtests/bt_7f3k2m9qx4/cancel"])
+@pytest.mark.parametrize(
+    "path",
+    ["/api/v1/backtests", "/api/v1/backtests/check", "/api/v1/backtests/bt_7f3k2m9qx4/cancel"],
+)
 def test_starting_or_cancelling_a_backtest_needs_the_apps_own_origin(
     client: TestClient, path: str
 ) -> None:
@@ -80,10 +84,11 @@ def test_starting_or_cancelling_a_backtest_needs_the_apps_own_origin(
         },
     ],
 )
+@pytest.mark.parametrize("path", ["/api/v1/backtests", "/api/v1/backtests/check"])
 def test_a_new_backtest_without_its_groups_is_a_422(
-    client: TestClient, body: dict[str, object]
+    client: TestClient, body: dict[str, object], path: str
 ) -> None:
-    response = client.post("/api/v1/backtests", json=body, headers=ORIGIN)
+    response = client.post(path, json=body, headers=ORIGIN)
 
     assert response.status_code == 422
     assert response.json()["type"] == PROBLEMS + "validation"
