@@ -256,7 +256,8 @@ export interface paths {
          *     best and the worst marked, the setups and which of their fields differ, and the equity and
          *     the drawdown of each and the return of holding its instrument on one time axis of at most
          *     200 times. A backtest that is running or failed is listed with its status and without
-         *     values. Access is that of `GET /api/v1/backtests/{backtest_id}`.
+         *     values. Access is that of `GET /api/v1/backtests/{backtest_id}`. It reads only what each
+         *     backtest stored when it ran, so it loads no candles from a data source.
          */
         get: operations["compare_backtests_api_v1_compare_get"];
         put?: never;
@@ -2033,7 +2034,7 @@ export interface components {
             drawdown: (number | null)[] | null;
             /**
              * Equity
-             * @description Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results. A long backtest's series has a point per day, so its line begins at the end of its first day
+             * @description Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results. A long backtest's series has a point per day, so its line begins at the end of its first day. One that finished before its curves were stored is drawn from its short series of at most 60 points, with buy and hold only when its benchmark held its own instrument
              */
             equity: (number | null)[] | null;
             /**
@@ -4800,24 +4801,6 @@ export interface operations {
             };
             /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
             429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["Problem"];
-                };
-            };
-            /** @description A data source sent candles that failed validation (`source-data-invalid`). */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["Problem"];
-                };
-            };
-            /** @description A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`). */
-            503: {
                 headers: {
                     [name: string]: unknown;
                 };

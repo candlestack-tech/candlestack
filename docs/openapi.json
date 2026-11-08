@@ -2417,7 +2417,7 @@
                 "type": "null"
               }
             ],
-            "description": "Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results. A long backtest's series has a point per day, so its line begins at the end of its first day",
+            "description": "Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results. A long backtest's series has a point per day, so its line begins at the end of its first day. One that finished before its curves were stored is drawn from its short series of at most 60 points, with buy and hold only when its benchmark held its own instrument",
             "title": "Equity"
           },
           "error": {
@@ -7448,7 +7448,7 @@
     },
     "/api/v1/compare": {
       "get": {
-        "description": "Backtests side by side, as the Compare page shows them: each statistic of each with the\nbest and the worst marked, the setups and which of their fields differ, and the equity and\nthe drawdown of each and the return of holding its instrument on one time axis of at most\n200 times. A backtest that is running or failed is listed with its status and without\nvalues. Access is that of `GET /api/v1/backtests/{backtest_id}`.",
+        "description": "Backtests side by side, as the Compare page shows them: each statistic of each with the\nbest and the worst marked, the setups and which of their fields differ, and the equity and\nthe drawdown of each and the return of holding its instrument on one time axis of at most\n200 times. A backtest that is running or failed is listed with its status and without\nvalues. Access is that of `GET /api/v1/backtests/{backtest_id}`. It reads only what each\nbacktest stored when it ran, so it loads no candles from a data source.",
         "operationId": "compare_backtests_api_v1_compare_get",
         "parameters": [
           {
@@ -7537,26 +7537,6 @@
               }
             },
             "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
-          },
-          "502": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "A data source sent candles that failed validation (`source-data-invalid`)."
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`)."
           }
         },
         "security": [

@@ -112,6 +112,13 @@ class Backtest(Base):
     predictions: Mapped[bytes | None] = mapped_column(
         LargeBinary, deferred=True, deferred_raiseload=True
     )
+    # The curves of the light result document (``ts``, ``close``, ``equity`` and ``drawdown`` of
+    # its series, a point per day past 10,000 candles) as zstd Parquet: what the comparison
+    # draws without loading the candles again. Null for a backtest that finished before they
+    # were stored, and until one finishes.
+    curves: Mapped[bytes | None] = mapped_column(
+        LargeBinary, deferred=True, deferred_raiseload=True
+    )
     # The steps of the run (document.BacktestStep, in their order), written as it goes, so its
     # page shows where it is: null for a backtest stored before they were recorded.
     steps: Mapped[list[dict[str, Any]] | None] = mapped_column(

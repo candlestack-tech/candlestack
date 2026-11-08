@@ -1,10 +1,14 @@
 """Comparing backtests over HTTP (``GET /api/v1/compare``) against a real Postgres and the job
-queue (conftest.py): the user's own and others' published backtests, from their documents; the
-marking rules themselves are unit tests (tests/unit/experiments/test_compare.py)."""
+queue (conftest.py): the user's own and others' published backtests, from what each stored when
+it ran and never the data module; the marking rules themselves are unit tests
+(tests/unit/experiments/test_compare.py)."""
 
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
+
+from candlestack.experiments.compare import compared
 
 pytestmark = pytest.mark.integration
 
@@ -13,16 +17,17 @@ DAY = 86_400
 START = 1_704_067_200 + 10 * DAY  # 2024-01-11, ten days after the fake market's first candle
 END = START + 5 * DAY
 BH = {"id": "bh", "kind": "buy_and_hold", "instrument": "stock:AAPL"}
+SPY = {"id": "spy", "kind": "buy_and_hold", "instrument": "stock:SPY"}
 
 
-def body(model_id: str, limit: float = 0.1) -> dict[str, Any]:
+def body(model_id: str, limit: float = 0.1, benchmark: dict[str, str] = BH) -> dict[str, Any]:
     """A new backtest of the model on stock:AAPL over five days."""
     return {
         "model": {"id": model_id},
         "data": {"instrument": {"id": "stock:AAPL"}, "period": {"start": START, "end": END}},
         "decision": {"rule": {"name": "threshold", "limit": limit}},
         "execution": {"fill": "next_open", "fee_bps": 5.0},
-        "benchmarks": [BH],
+        "benchmarks": [benchmark],
     }
 
 
@@ -77,6 +82,73 @@ def test_the_users_own_and_others_published_backtests_side_by_side(ada, bob, wor
     # Sampled, a fall never goes below the largest.
     assert min(falls) >= stats[1]["max_drawdown"] - 1e-3
     assert bob.email not in response.text
+
+
+class NoData:
+    """The data module of an app whose comparison must not reach it: any use fails the test."""
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"The comparison used the data module ({name}).")
+
+
+def test_the_comparison_reads_what_was_stored_never_the_data_module(
+    ada, bob, app: FastAPI, worker
+) -> None:
+    own = ada.start(body(ada.runnable_model())).json()["backtest"]["id"]
+    ada.ended(own)
+    theirs = bob.start(body(bob.runnable_model(), 0.3, SPY)).json()["backtest"]["id"]
+    bob.ended(theirs)
+    bob.publish(theirs)
+    # The documents as the page reads them, built again from the candles.
+    documents = [ada.document(backtest_id).json() for backtest_id in (own, theirs)]
+    app.state.data_service = NoData()
+
+    response = compare(ada, own, theirs)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == compared(documents).model_dump(mode="json")
+
+
+@pytest.mark.parametrize(("benchmark", "held"), [(BH, True), (SPY, False)])
+def test_a_backtest_from_before_the_curves_is_drawn_from_its_short_series(
+    ada, worker, benchmark: dict[str, str], held: bool
+) -> None:
+    model_id = ada.runnable_model()
+    old = ada.start(body(model_id, benchmark=benchmark)).json()["backtest"]["id"]
+    stats = ada.ended(old)["results"]["stats"]
+    new = ada.start(body(model_id, 0.3)).json()["backtest"]["id"]
+    ada.ended(new)
+    ada.sql("UPDATE backtests SET curves = NULL WHERE id = :id", id=old)
+
+    shown = compare(ada, old, new).json()
+
+    first = shown["backtests"][0]
+    assert len({value for value in first["equity"] if value is not None}) <= 60
+    assert first["equity"][-1] == pytest.approx(stats["total_return"], abs=1e-3)
+    falls = [value for value in first["drawdown"] if value is not None]
+    assert max(falls) <= 0
+    assert min(falls) >= stats["max_drawdown"] - 1e-3
+    if held:
+        assert first["buy_and_hold"][-1] == pytest.approx(stats["buy_and_hold_return"], abs=1e-3)
+    else:
+        assert set(first["buy_and_hold"]) == {None}
+    assert [row["values"][0] for row in shown["metrics"]] == [
+        stats[row["key"]] for row in shown["metrics"]
+    ]
+
+
+def test_a_backtest_without_curves_or_a_short_series_has_no_lines(ada, worker) -> None:
+    model_id = ada.runnable_model()
+    old = ada.start(body(model_id)).json()["backtest"]["id"]
+    ada.ended(old)
+    new = ada.start(body(model_id, 0.3)).json()["backtest"]["id"]
+    ada.ended(new)
+    ada.sql("UPDATE backtests SET curves = NULL, equity = NULL WHERE id = :id", id=old)
+
+    first, second = compare(ada, old, new).json()["backtests"]
+
+    assert {*first["equity"], *first["drawdown"], *first["buy_and_hold"]} == {None}
+    assert second["equity"][-1] is not None
 
 
 def test_a_running_backtest_is_listed_without_values(ada, worker) -> None:
