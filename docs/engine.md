@@ -806,15 +806,17 @@ loads candles:
 | the curves: `ts`, `close`, `equity` and `drawdown` of the light series cut to 1,000 points, Parquet | about 10 to 30 KB | comparing backtests loads no candles |
 | the fingerprint and range of the loaded candles | under 1 KB | tells whether the candles changed since |
 
-The light view is what the run stored, read back as the same columns, so it is the document a
-build gives, byte for byte, with `data.changed` null. The download is built when it is asked
+The light view is what the run stored, read back as the same columns, so while the engine and
+the assembly of the document are unchanged it is the document a build gives, with
+`data.changed` null and the engine version of the run. The download is built when it is asked
 for: the candles from the cache (and those of the index fund a benchmark holds), the stored
 predictions, then `signals`, `backtest` and `metrics`, well under a second. A source can
 re-adjust old prices (after a split or a dividend); then the candles' fingerprint differs, the
 download says so (`data.changed` is true) and is built from the candles as they are now, so its
 `results.stats` can differ from the stored ones. A backtest that finished before its light view
 was stored builds it the same way on its first read and stores it, unless its candles changed
-(then every read builds it, `data.changed` true).
+or the build's statistics differ from the stored ones (then every read builds it, and
+`data.changed` says whether the candles changed).
 
 ### The shape
 

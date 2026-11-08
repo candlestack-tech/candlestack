@@ -245,6 +245,24 @@ def test_a_backtest_from_before_the_light_results_stores_them_on_its_first_read(
 
 
 @pytest.mark.usefixtures("worker")
+def test_a_backtest_from_before_whose_build_counts_otherwise_stores_nothing(ada) -> None:
+    """A build that gives other statistics than the run's (the engine changed since) is
+    answered, never stored with the run's statistics."""
+    backtest_id = ada.start(body(ada.runnable_model())).json()["backtest"]["id"]
+    before = ada.ended(backtest_id)
+    ada.sql(FORGET, id=backtest_id)
+    ada.sql(
+        "UPDATE backtests SET stats = jsonb_set(stats, '{num_trades}', '999') WHERE id = :id",
+        id=backtest_id,
+    )
+
+    after = ada.document(backtest_id).json()
+
+    assert after["results"]["stats"] == before["results"]["stats"]  # the build's
+    assert ada.sql(KEPT, id=backtest_id) == [(False, False, False, None)]
+
+
+@pytest.mark.usefixtures("worker")
 def test_a_backtest_from_before_whose_candles_changed_stores_nothing(ada, market) -> None:
     backtest_id = ada.start(body(ada.runnable_model())).json()["backtest"]["id"]
     ada.ended(backtest_id)

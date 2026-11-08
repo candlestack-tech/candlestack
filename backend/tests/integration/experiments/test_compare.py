@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from fastapi import FastAPI
+from sqlalchemy import event
 
 from candlestack.experiments.compare import compared
 
@@ -235,3 +236,26 @@ def test_curve_points_and_the_setup_shown_once(ada, worker) -> None:
     assert 2 <= len(few["times"]) <= 5
     assert few["shared_setup"] is None
     assert few["backtests"][0]["setup"]["decision"]["rule"]["limit"] == 0.1
+
+
+def test_the_comparison_reads_all_backtests_in_one_query(ada, app: FastAPI, worker) -> None:
+    model_id = ada.runnable_model()
+    ids = []
+    for limit in (0.1, 0.2, 0.3):
+        ids.append(ada.start(body(model_id, limit)).json()["backtest"]["id"])
+        ada.ended(ids[-1])
+    statements: list[str] = []
+
+    def count(_conn: Any, _cursor: Any, statement: str, *_args: Any) -> None:
+        if "backtests" in statement:
+            statements.append(statement)
+
+    engine = app.state.db.engine.sync_engine
+    event.listen(engine, "before_cursor_execute", count)
+    try:
+        response = compare(ada, *ids)
+    finally:
+        event.remove(engine, "before_cursor_execute", count)
+
+    assert response.status_code == 200, response.text
+    assert len(statements) == 1, statements

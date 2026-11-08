@@ -21,6 +21,7 @@ from functools import partial
 from typing import Any, NamedTuple
 
 import anyio
+import orjson
 import polars as pl
 from redis.exceptions import RedisError
 
@@ -436,12 +437,14 @@ class BacktestRuns:
         self, backtest: Backtest, spec: RunSpec, report: RunReport, author: DocumentAuthor
     ) -> dict[str, Any]:
         """The light document of a backtest that finished before its light results were
-        stored, built from the candles; stored while the candles are still the run's."""
+        stored, built from the candles; stored only while the build gives the run's statistics
+        (the candles are still the run's, and the engine counts as it did), so the stored
+        series and trades never go with statistics of another build."""
         blob, candles, held = await self._inputs(backtest, spec, report)
         changed = candles.fingerprint != report.loaded.fingerprint
         build = partial(_again, spec, candles.frame, blob, held, light=True)
         done, shown = await anyio.to_thread.run_sync(build)
-        if done is None or shown is None or changed:
+        if done is None or shown is None or changed or not _same_stats(shown, backtest):
             return _document(backtest, spec, report, done, shown, author=author, changed=changed)
         kept = await anyio.to_thread.run_sync(stored_results, shown)
         report = report.model_copy(update={"benchmarks": kept.benchmarks})
@@ -526,6 +529,11 @@ def _read_light(series: bytes | None, trades: bytes | None) -> dict[str, Any]:
     return shown
 
 
+def _same_stats(shown: dict[str, Any], backtest: Backtest) -> bool:
+    """Whether a build's statistics are the ones its run stored, as their JSON reads them."""
+    return orjson.loads(dumps(shown["stats"])) == backtest.stats
+
+
 def _stored_document(
     backtest: Backtest,
     spec: RunSpec,
@@ -535,6 +543,8 @@ def _stored_document(
 ) -> dict[str, Any]:
     """The light document of a finished backtest from what its run stored."""
     built = _document(backtest, spec, report, shown=shown, author=author)
+    # The engine that made what it stored.
+    built["software"]["engine_version"] = backtest.engine_version or ENGINE_VERSION
     # The rows and the alignment the run found, as a build from the candles finds them again.
     built["data"]["rows"] = report.rows.model_dump(mode="json")
     built["data"]["align"] = report.align.model_dump(mode="json")
