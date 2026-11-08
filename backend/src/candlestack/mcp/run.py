@@ -127,6 +127,10 @@ class BacktestSummary(BaseModel):
     public: bool = Field(description="Published in Experiments")
     queue_position: int | None
     error: str | None
+    sweep_id: str | None = Field(
+        description="The sweep it was started in (get_sweep); null for one started alone and "
+        "for another account's"
+    )
     created_at: datetime
     finished_at: datetime | None
     duration_s: float | None
@@ -390,6 +394,7 @@ def backtest_result(
             public=header["public"],
             queue_position=header["queue_position"],
             error=header["error"],
+            sweep_id=header.get("sweep_id"),
             created_at=header["created_at"],
             finished_at=header["finished_at"],
             duration_s=header["duration_s"],
@@ -742,6 +747,7 @@ _RESULT = BacktestResult(
         public=False,
         queue_position=None,
         error=None,
+        sweep_id=None,
         created_at=_CREATED,
         finished_at=datetime(2026, 11, 2, 9, 33, 42, tzinfo=UTC),
         duration_s=162.0,

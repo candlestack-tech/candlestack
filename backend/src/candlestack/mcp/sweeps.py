@@ -1,18 +1,24 @@
-"""The tools of sweeps: a grid of backtests from one call, checked first or started, and
-followed until it is ranked. They call the service of ``POST /api/v1/sweeps`` and
-``GET /api/v1/sweeps/{sweep_id}``."""
+"""The tools of sweeps: a grid of backtests from one call, checked first or started,
+followed until it is ranked, and the list of the user's sweeps. They call the service of
+``POST /api/v1/sweeps``, ``GET /api/v1/sweeps`` and ``GET /api/v1/sweeps/{sweep_id}``."""
 
 from datetime import UTC, datetime
+from typing import Annotated
 
 from mcp.server.mcpserver import Context
+from pydantic import Field
 
 from candlestack.accounts import Scope
 from candlestack.experiments import (
+    PAGE_MAX,
+    PAGE_SIZE,
+    PER_PAGE_MAX,
     BacktestIn,
     SweepIn,
     SweepMetric,
     SweepOut,
     SweepPlan,
+    SweepsPage,
     SweepVary,
     build_sweeps,
     sweep_problems,
@@ -87,6 +93,25 @@ async def get_sweep(sweep_id: str, ctx: Context, metric: SweepMetric | None = No
             return await build_sweeps(call.state, db, call.settings.app_version).sweep(
                 call.user.id, sweep_id, metric
             )
+
+
+async def list_sweeps(
+    ctx: Context,
+    page: Annotated[int, Field(ge=1, le=PAGE_MAX, description="The page, from 1")] = 1,
+    per_page: Annotated[
+        int, Field(ge=1, le=PER_PAGE_MAX, description="Sweeps per page")
+    ] = PAGE_SIZE,
+) -> SweepsPage:
+    """Lists the user's sweeps, newest first: each one's ID, metric, how many of its
+    backtests are queued, running, finished and failed, whether it is done, and its best
+    finished backtest so far by the metric. Use it to find a sweep again; get_sweep ranks one,
+    and list_backtests with `sweep_id` lists its backtests. A page past the last one is
+    empty."""
+    call = tool_call(ctx)
+    async with call.db() as db:
+        return await build_sweeps(call.state, db, call.settings.app_version).sweeps(
+            call.user.id, page, per_page
+        )
 
 
 def _setups() -> list[dict[str, object]]:
@@ -167,6 +192,25 @@ _STARTED = SweepOut.model_validate(
     }
 )
 
+_LISTED = SweepsPage.model_validate(
+    {
+        "sweeps": [
+            {
+                "id": _SWEEP.id,
+                "created_at": _SWEEP.created_at,
+                "metric": "sharpe",
+                "count": 2,
+                "done": True,
+                "progress": _SWEEP.progress,
+                "best": {"id": "bt_t9n8v7d6a5", "number": 13, "name": "Bright Vega", "value": 1.42},
+            }
+        ],
+        "total": 1,
+        "page": 1,
+        "pages": 1,
+    }
+)
+
 TOOLS = (
     ToolSpec(
         validate_sweep,
@@ -193,5 +237,13 @@ TOOLS = (
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(arguments={"sweep_id": "sw_7f3k2m9qx4"}, result=_SWEEP),
+    ),
+    ToolSpec(
+        list_sweeps,
+        name="list_sweeps",
+        title="List sweeps",
+        scopes=(Scope.read,),
+        annotations=reads(),
+        example=Example(arguments={}, result=_LISTED),
     ),
 )

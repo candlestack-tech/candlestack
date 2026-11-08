@@ -10,6 +10,7 @@ It never reads the author's email, and shows the model's name of when the backte
 """
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, NamedTuple
 
@@ -36,7 +37,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, aggregate_order_by, array_agg
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import InstrumentedAttribute, aliased, undefer
+from sqlalchemy.orm import InstrumentedAttribute, aliased, load_only, undefer
 from sqlalchemy.sql import visitors
 
 from candlestack.accounts import User
@@ -103,6 +104,10 @@ _SORT_KEYS: dict[BacktestSort, SortKey] = {
     BacktestSort.sharpe: Backtest.sharpe,
     BacktestSort.max_drawdown: Backtest.max_drawdown,
     BacktestSort.trades: Backtest.num_trades,
+    BacktestSort.win_rate: Backtest.win_rate,
+    # Read from the small statistics document: a user's backtests are a few thousand at most,
+    # so a column of its own would buy nothing.
+    BacktestSort.sortino: Backtest.stats["sortino"].as_float(),
 }
 
 
@@ -227,8 +232,63 @@ def search(query: str) -> ColumnElement[bool] | None:
     return number | name | symbol | MODEL_NAME.ilike(pattern, escape="\\")
 
 
+@dataclass(frozen=True)
+class BacktestFilters:
+    """The filters of the list beyond the Backtests page's own (search, show, model), for the
+    API and the agents; a value left None filters nothing. Every condition also holds the
+    user's ID, so Postgres reads only the user's rows (an index of each kind leads with it),
+    a few thousand at most: no filter needs an index of its own."""
+
+    statuses: tuple[BacktestStatus, ...] = ()
+    sweep_id: str | None = None
+    model_id: str | None = None
+    # ``<market>:<symbol>`` as ``InstrumentId`` writes it: lowercase market, uppercase symbol.
+    instrument: str | None = None
+    timeframe: SetupTimeframe | None = None
+    representation: Representation | None = None
+    created_after: datetime | None = None
+    created_before: datetime | None = None
+    min_sharpe: float | None = None
+    min_total_return: float | None = None
+    # The deepest fall allowed: max_drawdown is 0 or below, so -0.2 keeps falls up to 20 %.
+    min_max_drawdown: float | None = None
+    starred: bool | None = None
+    public: bool | None = None
+
+    def conditions(self) -> list[ColumnElement[bool]]:
+        """The condition of each filter that is set."""
+        market, _, symbol = (self.instrument or "").partition(":")
+        timeframe = Backtest.setup["timeframe"].astext
+        each: list[tuple[object, Callable[[], ColumnElement[bool]]]] = [
+            (self.statuses or None, lambda: Backtest.status.in_(self.statuses)),
+            (self.sweep_id, lambda: Backtest.sweep_id == self.sweep_id),
+            (self.model_id, lambda: Backtest.model_id == self.model_id),
+            (
+                self.instrument,
+                lambda: Backtest.instruments.contains([{"market": market, "symbol": symbol}]),
+            ),
+            (self.timeframe, lambda: timeframe == self.timeframe),
+            (self.representation, lambda: Backtest.representation == self.representation),
+            (self.created_after, lambda: Backtest.created_at >= self.created_after),
+            (self.created_before, lambda: Backtest.created_at < self.created_before),
+            (self.min_sharpe, lambda: Backtest.sharpe >= self.min_sharpe),
+            (self.min_total_return, lambda: Backtest.total_return >= self.min_total_return),
+            (self.min_max_drawdown, lambda: Backtest.max_drawdown >= self.min_max_drawdown),
+            (self.starred, lambda: Backtest.starred.is_(self.starred)),
+            (
+                self.public,
+                lambda: PUBLISHED if self.public else Backtest.published_at.is_(None),
+            ),
+        ]
+        return [condition() for value, condition in each if value is not None]
+
+
 def filters(
-    *, query: str = "", show: BacktestShow = BacktestShow.all, model: str | None = None
+    *,
+    query: str = "",
+    show: BacktestShow = BacktestShow.all,
+    model: str | None = None,
+    more: BacktestFilters | None = None,
 ) -> list[ColumnElement[bool]]:
     """The conditions of the list's search and filters (all of them must hold)."""
     conditions: list[ColumnElement[bool]] = []
@@ -242,6 +302,8 @@ def filters(
         conditions.append(PUBLISHED)
     if model is not None:
         conditions.append(func.lower(MODEL_NAME) == func.lower(model))
+    if more is not None:
+        conditions.extend(more.conditions())
     return conditions
 
 
@@ -645,6 +707,38 @@ class BacktestStore:
             _listed()
             .options(undefer(Backtest.stats))
             .where(Backtest.user_id == sweep.user_id, Backtest.sweep_id == sweep.id)
+            .order_by(Backtest.number)
+        )
+        return [Listed(*row) for row in rows]
+
+    async def sweep_total(self, user_id: str) -> int:
+        """How many sweeps the user started."""
+        total = await self._db.scalar(
+            select(func.count()).select_from(Sweep).where(Sweep.user_id == user_id)
+        )
+        return int(total or 0)
+
+    async def sweeps(self, user_id: str, *, limit: int, offset: int = 0) -> list[Sweep]:
+        """The user's sweeps, newest first, from `offset` on, without their grids."""
+        rows = await self._db.scalars(
+            select(Sweep)
+            .options(load_only(Sweep.id, Sweep.user_id, Sweep.metric, Sweep.created_at))
+            .where(Sweep.user_id == user_id)
+            .order_by(Sweep.created_at.desc(), Sweep.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(rows)
+
+    async def backtests_of_sweeps(self, user_id: str, sweep_ids: Sequence[str]) -> list[Listed]:
+        """The backtests of the user's sweeps in one query, in the order they were made, with
+        their statistics (``stats``, null until one finished)."""
+        if not sweep_ids:
+            return []
+        rows = await self._db.execute(
+            _listed()
+            .options(undefer(Backtest.stats))
+            .where(Backtest.user_id == user_id, Backtest.sweep_id.in_(sweep_ids))
             .order_by(Backtest.number)
         )
         return [Listed(*row) for row in rows]

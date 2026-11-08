@@ -257,10 +257,31 @@ still needs a model and an instrument when you vary them. An unknown field, such
 `GET /api/v1/sweeps/<id>` has the `progress`, each backtest's ID, status and setup, and once
 `done` the `ranking` by the metric, best first, marked as Compare marks it. Ask with
 `?metric=max_drawdown` for another order. The backtests are ordinary ones with `sweep_id`, so
-`GET /api/v1/compare` with their IDs compares them in full. In an MCP client the same is
-`validate_sweep`, `run_sweep` and `get_sweep`. `validate_sweep` needs only the scope `read`,
-while the HTTP dry run needs `backtests`. The fields:
+`GET /api/v1/compare` with their IDs compares them in full, and
+`GET /api/v1/backtests?sweep_id=<id>` lists them. `GET /api/v1/sweeps` lists your sweeps,
+newest first, each with its progress and its best backtest so far. In an MCP client the same is
+`validate_sweep`, `run_sweep`, `get_sweep` and `list_sweeps`. `validate_sweep` needs only the
+scope `read`, while the HTTP dry run needs `backtests`. The fields:
 [architecture.md](architecture.md#sweeps).
+
+## Find backtests
+
+`GET /api/v1/backtests` lists your backtests, 10 a page or up to 100 with `per_page`. Besides
+the search `q`, it filters by `status` (repeat it for several), `sweep_id`, `model_id`,
+`instrument` (`stock:AAPL`), `timeframe`, `representation`, `created_after` and
+`created_before`, `min_sharpe`, `min_total_return`, `min_max_drawdown` (the drawdown is 0 or
+below, so `-0.2` keeps falls of up to 20 %), `starred` and `public`; every filter given has to
+hold. `sort` also takes `win_rate` and `sortino`:
+
+```python
+best = api.get("/api/v1/backtests", params={
+    "status": "finished", "instrument": "stock:AAPL", "min_max_drawdown": -0.2,
+    "sort": "sharpe", "per_page": 50,
+}).json()["backtests"]
+```
+
+In an MCP client `list_backtests` takes the same filters, and answers the counts and the models
+used only on page 1 unless `include_facets` asks.
 
 ## Upload a model through a link
 

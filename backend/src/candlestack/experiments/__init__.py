@@ -58,6 +58,7 @@ from candlestack.experiments.schemas import (
     EXPERIMENTS_PAGE_SIZE,
     MODEL_NAME_MAX,
     PAGE_SIZE,
+    PER_PAGE_MAX,
     QUERY_MAX,
     Author,
     BacktestCounts,
@@ -77,10 +78,19 @@ from candlestack.experiments.schemas import (
     Representation,
     SetupTimeframe,
     SortOrder,
+    as_utc,
+    instrument_filter,
 )
 from candlestack.experiments.service import ExperimentsQuery, ListQuery
-from candlestack.experiments.store import model_usage
-from candlestack.experiments.sweeps import SweepIn, SweepMetric, SweepOut, SweepPlan, SweepVary
+from candlestack.experiments.store import BacktestFilters, model_usage
+from candlestack.experiments.sweeps import (
+    SweepIn,
+    SweepMetric,
+    SweepOut,
+    SweepPlan,
+    SweepsPage,
+    SweepVary,
+)
 
 __all__ = [
     "BACKTEST_NAME_MAX",
@@ -90,10 +100,12 @@ __all__ = [
     "MODEL_NAME_MAX",
     "PAGE_MAX",
     "PAGE_SIZE",
+    "PER_PAGE_MAX",
     "QUERY_MAX",
     "Author",
     "BacktestCheck",
     "BacktestCounts",
+    "BacktestFilters",
     "BacktestHeader",
     "BacktestIn",
     "BacktestInstrument",
@@ -131,6 +143,8 @@ __all__ = [
     "SweepOut",
     "SweepPlan",
     "SweepVary",
+    "SweepsPage",
+    "as_utc",
     "backtest_problems",
     "backtest_runs",
     "backtests_router",
@@ -138,6 +152,7 @@ __all__ = [
     "check_ids",
     "compare_backtests",
     "get_backtests_service",
+    "instrument_filter",
     "model_usage",
     "sweep_problems",
     "update_problems",

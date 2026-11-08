@@ -1432,7 +1432,7 @@
         "type": "string"
       },
       "BacktestSort": {
-        "description": "What the list is sorted by. `default` is newest first (`order` does not apply); `when`\nsorts like `number`; `name` by the name, in any case. Backtests without the value (failed\nones) come last either way, and ties go by number, newest first.",
+        "description": "What the list is sorted by. `default` is newest first (`order` does not apply); `when`\nsorts like `number`; `name` by the name, in any case; `sortino` by the Sortino ratio of\n`results.stats`. Backtests without the value (failed ones) come last either way, and ties\ngo by number, newest first.",
         "enum": [
           "default",
           "number",
@@ -1442,7 +1442,9 @@
           "sharpe",
           "max_drawdown",
           "trades",
-          "when"
+          "when",
+          "win_rate",
+          "sortino"
         ],
         "title": "BacktestSort",
         "type": "string"
@@ -1737,7 +1739,7 @@
       "BacktestsPage": {
         "properties": {
           "backtests": {
-            "description": "The page, at most 10 backtests",
+            "description": "The page, at most `per_page` backtests (10 unless asked)",
             "items": {
               "$ref": "#/components/schemas/BacktestOut"
             },
@@ -6869,6 +6871,48 @@
         "title": "SweepBacktest",
         "type": "object"
       },
+      "SweepBest": {
+        "description": "The sweep's best backtest so far by its `metric`, as its ranking would put it first.",
+        "properties": {
+          "id": {
+            "examples": [
+              "bt_t9n8v7d6a5"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "examples": [
+              "Bright Vega"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "number": {
+            "examples": [
+              13
+            ],
+            "title": "Number",
+            "type": "integer"
+          },
+          "value": {
+            "description": "The statistic, as in `results.stats`",
+            "examples": [
+              1.42
+            ],
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "name",
+          "value"
+        ],
+        "title": "SweepBest",
+        "type": "object"
+      },
       "SweepIn": {
         "additionalProperties": false,
         "description": "A new sweep: a base setup, the values to vary and the statistic to rank by.",
@@ -6896,6 +6940,66 @@
           "base"
         ],
         "title": "SweepIn",
+        "type": "object"
+      },
+      "SweepListed": {
+        "description": "A sweep in the list: how far it is and its best backtest so far.",
+        "properties": {
+          "best": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SweepBest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The finished backtest with the best `metric` so far; null until one has a value. `GET /api/v1/sweeps/{sweep_id}` ranks them all"
+          },
+          "count": {
+            "description": "Its backtests",
+            "examples": [
+              6
+            ],
+            "title": "Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "description": "When it was started (UTC)",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "done": {
+            "description": "None of its backtests is queued or running",
+            "title": "Done",
+            "type": "boolean"
+          },
+          "id": {
+            "examples": [
+              "sw_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "metric": {
+            "$ref": "#/components/schemas/SweepMetric",
+            "description": "What its ranking orders by"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/SweepProgress"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "metric",
+          "count",
+          "done",
+          "progress",
+          "best"
+        ],
+        "title": "SweepListed",
         "type": "object"
       },
       "SweepMetric": {
@@ -7331,6 +7435,50 @@
           }
         },
         "title": "SweepVary",
+        "type": "object"
+      },
+      "SweepsPage": {
+        "properties": {
+          "page": {
+            "description": "The page, from 1",
+            "examples": [
+              1
+            ],
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "description": "Pages of the sweeps, at least 1",
+            "examples": [
+              1
+            ],
+            "title": "Pages",
+            "type": "integer"
+          },
+          "sweeps": {
+            "description": "The page, newest first",
+            "items": {
+              "$ref": "#/components/schemas/SweepListed"
+            },
+            "title": "Sweeps",
+            "type": "array"
+          },
+          "total": {
+            "description": "The user's sweeps",
+            "examples": [
+              3
+            ],
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sweeps",
+          "total",
+          "page",
+          "pages"
+        ],
+        "title": "SweepsPage",
         "type": "object"
       },
       "Tensor": {
@@ -8123,7 +8271,7 @@
     },
     "/api/v1/backtests": {
       "get": {
-        "description": "A page of the user's backtests that match the search and the filters, and what the\nfilter panel shows: the counts of all, starred and failed backtests and every model the\nbacktests used. A page past the last one is empty.",
+        "description": "A page of the user's backtests that match the search and every filter, and what the\nfilter panel shows: the counts of all, starred and failed backtests and every model the\nbacktests used, whatever the filters. A page past the last one is empty.",
         "operationId": "list_backtests_api_v1_backtests_get",
         "parameters": [
           {
@@ -8176,6 +8324,258 @@
             }
           },
           {
+            "description": "Only backtests with one of these statuses (repeat the parameter)",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/BacktestStatus"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only backtests with one of these statuses (repeat the parameter)",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Only the backtests of this sweep",
+            "in": "query",
+            "name": "sweep_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the backtests of this sweep",
+              "examples": [
+                "sw_7f3k2m9qx4"
+              ],
+              "title": "Sweep Id"
+            }
+          },
+          {
+            "description": "Only the backtests of the model with this ID",
+            "in": "query",
+            "name": "model_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the backtests of the model with this ID",
+              "examples": [
+                "mdl_k2m9qx47f3"
+              ],
+              "title": "Model Id"
+            }
+          },
+          {
+            "description": "Only the backtests of this instrument, `<market>:<symbol>`",
+            "in": "query",
+            "name": "instrument",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the backtests of this instrument, `<market>:<symbol>`",
+              "examples": [
+                "stock:AAPL"
+              ],
+              "title": "Instrument"
+            }
+          },
+          {
+            "description": "Only this timeframe",
+            "in": "query",
+            "name": "timeframe",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SetupTimeframe"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this timeframe",
+              "title": "Timeframe"
+            }
+          },
+          {
+            "description": "Only models that read this",
+            "in": "query",
+            "name": "representation",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Representation"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only models that read this",
+              "title": "Representation"
+            }
+          },
+          {
+            "description": "Only those started at or after this time (UTC)",
+            "in": "query",
+            "name": "created_after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only those started at or after this time (UTC)",
+              "title": "Created After"
+            }
+          },
+          {
+            "description": "Only those started before this time (UTC)",
+            "in": "query",
+            "name": "created_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only those started before this time (UTC)",
+              "title": "Created Before"
+            }
+          },
+          {
+            "description": "Only those with at least this Sharpe ratio",
+            "in": "query",
+            "name": "min_sharpe",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only those with at least this Sharpe ratio",
+              "title": "Min Sharpe"
+            }
+          },
+          {
+            "description": "Only those with at least this return, a fraction",
+            "in": "query",
+            "name": "min_total_return",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only those with at least this return, a fraction",
+              "title": "Min Total Return"
+            }
+          },
+          {
+            "description": "Only those whose largest fall is no deeper than this, 0 or below: -0.2 keeps falls of up to 20 percent",
+            "in": "query",
+            "name": "min_max_drawdown",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only those whose largest fall is no deeper than this, 0 or below: -0.2 keeps falls of up to 20 percent",
+              "title": "Min Max Drawdown"
+            }
+          },
+          {
+            "description": "Only the starred (true) or the unstarred (false)",
+            "in": "query",
+            "name": "starred",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the starred (true) or the unstarred (false)",
+              "title": "Starred"
+            }
+          },
+          {
+            "description": "Only the published (true) or the unpublished (false)",
+            "in": "query",
+            "name": "public",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the published (true) or the unpublished (false)",
+              "title": "Public"
+            }
+          },
+          {
             "description": "What to sort by",
             "in": "query",
             "name": "sort",
@@ -8198,16 +8598,30 @@
             }
           },
           {
-            "description": "The page, from 1, of 10 backtests",
+            "description": "The page, from 1, of `per_page` backtests",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
-              "description": "The page, from 1, of 10 backtests",
+              "description": "The page, from 1, of `per_page` backtests",
               "maximum": 100000,
               "minimum": 1,
               "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Backtests per page",
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Backtests per page",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
               "type": "integer"
             }
           }
@@ -12375,6 +12789,103 @@
       }
     },
     "/api/v1/sweeps": {
+      "get": {
+        "description": "A page of the user's sweeps, newest first: each one's metric, how many of its backtests\nare queued, running, finished and failed, and its best finished backtest so far by the\nmetric. A page past the last one is empty.",
+        "operationId": "list_sweeps_api_v1_sweeps_get",
+        "parameters": [
+          {
+            "description": "The page, from 1",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "The page, from 1",
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sweeps per page",
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Sweeps per page",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SweepsPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
+        "summary": "List Sweeps",
+        "tags": [
+          "backtests"
+        ]
+      },
       "post": {
         "description": "Starts a backtest for every combination of the values in `vary` over the `base` setup\n(the body of `POST /api/v1/backtests`): models, instruments, periods and decision rules,\n2 to 20 backtests, in that order. Every setup is checked as `POST /api/v1/backtests`\nchecks one, and the user's queue must have room for all of them (up to 20 wait); then they\nall go to the end of the queue, or none does. With `validate_only` nothing starts: the\nanswer is 200 with the count and each setup. The sweep's backtests are ordinary backtests\nwith its `sweep_id`. `GET /api/v1/sweeps/{sweep_id}` follows them and ranks them once all\nended.",
         "operationId": "start_sweep_api_v1_sweeps_post",

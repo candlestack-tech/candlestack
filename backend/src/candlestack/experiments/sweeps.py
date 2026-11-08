@@ -47,7 +47,8 @@ from candlestack.experiments.errors import (
 )
 from candlestack.experiments.models import Sweep, new_sweep_id
 from candlestack.experiments.runs import BacktestRuns, Prepared
-from candlestack.experiments.schemas import BacktestStatus, Representation
+from candlestack.experiments.schemas import PAGE_SIZE, BacktestStatus, Representation
+from candlestack.experiments.service import pages
 from candlestack.experiments.spec import RunSpec
 from candlestack.experiments.store import QUEUE_MAX, BacktestStore, Listed
 
@@ -236,6 +237,37 @@ class SweepOut(BaseModel):
         description="Null until every backtest ended. For every statistic, the setups and the "
         "curves, ask `GET /api/v1/compare` with the IDs of `backtests`"
     )
+
+
+class SweepBest(BaseModel):
+    """The sweep's best backtest so far by its `metric`, as its ranking would put it first."""
+
+    id: str = Field(examples=["bt_t9n8v7d6a5"])
+    number: int = Field(examples=[13])
+    name: str = Field(examples=["Bright Vega"])
+    value: float = Field(description="The statistic, as in `results.stats`", examples=[1.42])
+
+
+class SweepListed(BaseModel):
+    """A sweep in the list: how far it is and its best backtest so far."""
+
+    id: str = Field(examples=["sw_7f3k2m9qx4"])
+    created_at: datetime = Field(description="When it was started (UTC)")
+    metric: SweepMetric = Field(description="What its ranking orders by")
+    count: int = Field(description="Its backtests", examples=[6])
+    done: bool = Field(description="None of its backtests is queued or running")
+    progress: SweepProgress
+    best: SweepBest | None = Field(
+        description="The finished backtest with the best `metric` so far; null until one has "
+        "a value. `GET /api/v1/sweeps/{sweep_id}` ranks them all"
+    )
+
+
+class SweepsPage(BaseModel):
+    sweeps: list[SweepListed] = Field(description="The page, newest first")
+    total: int = Field(description="The user's sweeps", examples=[3])
+    page: int = Field(description="The page, from 1", examples=[1])
+    pages: int = Field(description="Pages of the sweeps, at least 1", examples=[1])
 
 
 # --- The grid -------------------------------------------------------------------------------
@@ -427,8 +459,7 @@ class Sweeps:
         rows = await self._store.sweep_backtests(sweep)
         setups = {row["backtest_id"]: row for row in sweep.grid}
         backtests = [_backtest_out(row, setups[row.backtest.id]) for row in rows]
-        counts = Counter(row.backtest.status for row in rows)
-        done = not counts[BacktestStatus.queued.value] and not counts[BacktestStatus.running.value]
+        progress, done = _progress(rows)
         chosen = metric or SweepMetric(sweep.metric)
         return SweepOut(
             id=sweep.id,
@@ -436,12 +467,61 @@ class Sweeps:
             metric=chosen,
             count=len(rows),
             done=done,
-            progress=SweepProgress(
-                **{status.value: counts[status.value] for status in BacktestStatus}
-            ),
+            progress=progress,
             backtests=backtests,
             ranking=ranking(rows, chosen) if done else None,
         )
+
+    async def sweeps(self, user_id: str, page: int = 1, per_page: int = PAGE_SIZE) -> SweepsPage:
+        """A page of the user's sweeps, newest first, each with its progress and its best
+        backtest so far: three queries, whatever the page holds."""
+        total = await self._store.sweep_total(user_id)
+        found = await self._store.sweeps(user_id, limit=per_page, offset=(page - 1) * per_page)
+        rows = await self._store.backtests_of_sweeps(user_id, [sweep.id for sweep in found])
+        by_sweep: dict[str, list[Listed]] = {sweep.id: [] for sweep in found}
+        for row in rows:
+            by_sweep[str(row.backtest.sweep_id)].append(row)
+        return SweepsPage(
+            sweeps=[_listed(sweep, by_sweep[sweep.id]) for sweep in found],
+            total=total,
+            page=page,
+            pages=pages(total, per_page),
+        )
+
+
+def _progress(rows: Sequence[Listed]) -> tuple[SweepProgress, bool]:
+    """How many of the backtests have each status, and whether none is queued or running."""
+    counts = Counter(row.backtest.status for row in rows)
+    done = not counts[BacktestStatus.queued.value] and not counts[BacktestStatus.running.value]
+    return SweepProgress(**{status.value: counts[status.value] for status in BacktestStatus}), done
+
+
+def _listed(sweep: Sweep, rows: Sequence[Listed]) -> SweepListed:
+    progress, done = _progress(rows)
+    stats = [
+        row.backtest.stats if row.backtest.status == BacktestStatus.finished.value else None
+        for row in rows
+    ]
+    ranked = ranks(stats, sweep.metric)
+    best = None
+    if 1 in ranked:
+        backtest, values = rows[ranked.index(1)].backtest, stats[ranked.index(1)]
+        assert values is not None  # a ranked backtest has its statistics
+        best = SweepBest(
+            id=backtest.id,
+            number=backtest.number,
+            name=backtest.shown_name,
+            value=values[sweep.metric],
+        )
+    return SweepListed(
+        id=sweep.id,
+        created_at=sweep.created_at,
+        metric=SweepMetric(sweep.metric),
+        count=len(rows),
+        done=done,
+        progress=progress,
+        best=best,
+    )
 
 
 def _backtest_out(row: Listed, setup: dict[str, Any]) -> SweepBacktest:

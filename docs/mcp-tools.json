@@ -6925,6 +6925,7 @@
             "public": false,
             "queue_position": null,
             "status": "finished",
+            "sweep_id": null,
             "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4"
           },
           "benchmark_returns": {
@@ -7204,6 +7205,18 @@
                 "title": "Status",
                 "type": "string"
               },
+              "sweep_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The sweep it was started in (get_sweep); null for one started alone and for another account's",
+                "title": "Sweep Id"
+              },
               "url": {
                 "description": "The backtest's page in the app, to show the user",
                 "title": "Url",
@@ -7219,6 +7232,7 @@
               "public",
               "queue_position",
               "error",
+              "sweep_id",
               "created_at",
               "finished_at",
               "duration_s",
@@ -8641,7 +8655,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Lists the user's backtests as the Backtests page does: search, show the starred, failed or published ones, one model's, sort by a result, 10 a page. Use it to find a backtest's ID by its name, number, instrument or model, or the best ones by a result. Answers the page, how many match, the counts of all, starred, failed and published backtests and the models used; each backtest has its `url`, the page to show the user. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_backtests",
+      "description": "Lists the user's backtests: search, filters (status, sweep, model, instrument, timeframe, representation, start time, least Sharpe ratio or return, deepest drawdown, starred, published; all must hold), sort by a result, 10 a page or up to 100. Use it to find a backtest's ID by its name, number, instrument or model, a sweep's backtests, or the best ones by a result. Answers the page and how many match, and on page 1 the counts of all, starred, failed and published backtests and the models used; each backtest has its `url`, the page to show the user. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_backtests",
       "endpoints": [
         "GET /api/v1/backtests"
       ],
@@ -8686,6 +8700,7 @@
               "sharpe": 0.79,
               "starred": true,
               "status": "finished",
+              "sweep_id": null,
               "total_return": 0.246,
               "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
               "win_rate": 0.512
@@ -8723,7 +8738,7 @@
             "type": "string"
           },
           "BacktestSort": {
-            "description": "What the list is sorted by. `default` is newest first (`order` does not apply); `when`\nsorts like `number`; `name` by the name, in any case. Backtests without the value (failed\nones) come last either way, and ties go by number, newest first.",
+            "description": "What the list is sorted by. `default` is newest first (`order` does not apply); `when`\nsorts like `number`; `name` by the name, in any case; `sortino` by the Sortino ratio of\n`results.stats`. Backtests without the value (failed ones) come last either way, and ties\ngo by number, newest first.",
             "enum": [
               "default",
               "number",
@@ -8733,9 +8748,46 @@
               "sharpe",
               "max_drawdown",
               "trades",
-              "when"
+              "when",
+              "win_rate",
+              "sortino"
             ],
             "title": "BacktestSort",
+            "type": "string"
+          },
+          "BacktestStatus": {
+            "description": "`queued` (it waits for the user's running backtest to end), `running`, `finished` (it\nhas results) or `failed` (it has an error, also when it was cancelled before it ran).",
+            "enum": [
+              "queued",
+              "running",
+              "finished",
+              "failed"
+            ],
+            "title": "BacktestStatus",
+            "type": "string"
+          },
+          "Representation": {
+            "description": "What the model reads: Renko bricks, a Kagi line or time windows of candles.",
+            "enum": [
+              "renko",
+              "kagi",
+              "windows"
+            ],
+            "title": "Representation",
+            "type": "string"
+          },
+          "SetupTimeframe": {
+            "description": "Timeframes a backtest runs on: those of the data.",
+            "enum": [
+              "1m",
+              "5m",
+              "15m",
+              "30m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "SetupTimeframe",
             "type": "string"
           },
           "SortOrder": {
@@ -8748,6 +8800,101 @@
           }
         },
         "properties": {
+          "created_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only those started at or after this time (UTC)",
+            "title": "Created After"
+          },
+          "created_before": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only those started before this time (UTC)",
+            "title": "Created Before"
+          },
+          "include_facets": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Answer the counts and the values the filters offer: true on every page, false never; left out, only on page 1",
+            "title": "Include Facets"
+          },
+          "instrument": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only this instrument's, <market>:<symbol>",
+            "title": "Instrument"
+          },
+          "min_max_drawdown": {
+            "anyOf": [
+              {
+                "maximum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Largest fall no deeper than this, 0 or below: -0.2 keeps falls of up to 20 percent",
+            "title": "Min Max Drawdown"
+          },
+          "min_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Sharpe ratio at least this",
+            "title": "Min Sharpe"
+          },
+          "min_total_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Return at least this, a fraction",
+            "title": "Min Total Return"
+          },
           "model": {
             "anyOf": [
               {
@@ -8762,6 +8909,20 @@
             "description": "Only the backtests of the model with this name (one of `models`)",
             "title": "Model"
           },
+          "model_id": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only the backtests of this model's ID",
+            "title": "Model Id"
+          },
           "order": {
             "$ref": "#/$defs/SortOrder",
             "default": "desc",
@@ -8775,12 +8936,45 @@
             "title": "Page",
             "type": "integer"
           },
+          "per_page": {
+            "default": 10,
+            "description": "Backtests per page",
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "public": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only published (true) or not",
+            "title": "Public"
+          },
           "query": {
             "default": "",
             "description": "Search: part of the name, of the number (#12 or 12), of an instrument's symbol or of the model's name, in any case",
             "maxLength": 100,
             "title": "Query",
             "type": "string"
+          },
+          "representation": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Representation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only models that read this"
           },
           "show": {
             "$ref": "#/$defs/BacktestShow",
@@ -8791,6 +8985,61 @@
             "$ref": "#/$defs/BacktestSort",
             "default": "default",
             "description": "What to sort by; those without the value (failed ones) come last"
+          },
+          "starred": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only starred (true) or not",
+            "title": "Starred"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/BacktestStatus"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only backtests with one of these statuses",
+            "title": "Status"
+          },
+          "sweep_id": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only the backtests of this sweep",
+            "title": "Sweep Id"
+          },
+          "timeframe": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SetupTimeframe"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only this timeframe"
           }
         },
         "title": "list_backtestsArguments",
@@ -9070,6 +9319,18 @@
               "status": {
                 "$ref": "#/$defs/BacktestStatus"
               },
+              "sweep_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The sweep it was started in (get_sweep); null for one started alone",
+                "title": "Sweep Id"
+              },
               "total_return": {
                 "anyOf": [
                   {
@@ -9107,6 +9368,7 @@
               "status",
               "queue_position",
               "error",
+              "sweep_id",
               "model",
               "model_id",
               "instruments",
@@ -9216,7 +9478,7 @@
         "description": "A page of the user's backtests that match, and the filter choices.",
         "properties": {
           "backtests": {
-            "description": "At most 10 backtests",
+            "description": "At most `per_page` backtests",
             "items": {
               "$ref": "#/$defs/BacktestSummary"
             },
@@ -9224,16 +9486,30 @@
             "type": "array"
           },
           "counts": {
-            "$ref": "#/$defs/BacktestCounts",
-            "description": "All the user's backtests, whatever the filters"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BacktestCounts"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "All the user's backtests, whatever the filters; null unless `include_facets` asks (by default on page 1)"
           },
           "models": {
-            "description": "Every model the backtests used, the most used first: the values of `model`",
-            "items": {
-              "$ref": "#/$defs/ModelCount"
-            },
-            "title": "Models",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/ModelCount"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every model the backtests used, the most used first: the values of `model`; null like `counts`",
+            "title": "Models"
           },
           "page": {
             "title": "Page",
@@ -9595,7 +9871,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Lists Experiments: the backtests that accounts of the beta published, which every signed-in account can see, with search, filters (author, market, symbol, representation, timeframe), sort and 12 a page. Use it to find what others tried and how it did, then read one with its ID. Answers the page, how many match, the counts and the values each filter offers; each backtest has its `url`, the page to show the user. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_experiments",
+      "description": "Lists Experiments: the backtests that accounts of the beta published, which every signed-in account can see, with search, filters (author, market, symbol, representation, timeframe), sort and 12 a page. Use it to find what others tried and how it did, then read one with its ID. Answers the page, how many match, and on page 1 the counts and the values each filter offers; each backtest has its `url`, the page to show the user. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_experiments",
       "endpoints": [
         "GET /api/v1/experiments"
       ],
@@ -9753,6 +10029,19 @@
             "default": null,
             "description": "Only this account's (`author.id`, usr_...)",
             "title": "Author"
+          },
+          "include_facets": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Answer the counts and the values the filters offer: true on every page, false never; left out, only on page 1",
+            "title": "Include Facets"
           },
           "market": {
             "anyOf": [
@@ -10293,7 +10582,15 @@
         "description": "A page of Experiments that match, the counts and what the filters offer.",
         "properties": {
           "counts": {
-            "$ref": "#/$defs/ExperimentCounts"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ExperimentCounts"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null unless `include_facets` asks (by default on page 1)"
           },
           "experiments": {
             "description": "At most 12 published backtests",
@@ -10304,8 +10601,15 @@
             "type": "array"
           },
           "facets": {
-            "$ref": "#/$defs/ExperimentFacets",
-            "description": "The values each filter offers, with counts, over the scope and the search"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ExperimentFacets"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The values each filter offers, with counts, over the scope and the search; null like `counts`"
           },
           "page": {
             "title": "Page",
@@ -10588,6 +10892,7 @@
                 "sharpe": 0.79,
                 "starred": true,
                 "status": "finished",
+                "sweep_id": null,
                 "total_return": 0.246,
                 "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
                 "win_rate": 0.512
@@ -10628,6 +10933,7 @@
                 "sharpe": 0.79,
                 "starred": true,
                 "status": "finished",
+                "sweep_id": null,
                 "total_return": 0.246,
                 "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
                 "win_rate": 0.512
@@ -10668,6 +10974,7 @@
                 "sharpe": 0.79,
                 "starred": true,
                 "status": "finished",
+                "sweep_id": null,
                 "total_return": 0.246,
                 "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
                 "win_rate": 0.512
@@ -10708,6 +11015,7 @@
                 "sharpe": 0.79,
                 "starred": true,
                 "status": "finished",
+                "sweep_id": null,
                 "total_return": 0.246,
                 "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
                 "win_rate": 0.512
@@ -10755,6 +11063,7 @@
               "sharpe": 0.79,
               "starred": true,
               "status": "finished",
+              "sweep_id": null,
               "total_return": 0.246,
               "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
               "win_rate": 0.512
@@ -10795,6 +11104,7 @@
               "sharpe": 0.79,
               "starred": true,
               "status": "finished",
+              "sweep_id": null,
               "total_return": 0.246,
               "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
               "win_rate": 0.512
@@ -11081,6 +11391,18 @@
               "status": {
                 "$ref": "#/$defs/BacktestStatus"
               },
+              "sweep_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The sweep it was started in (get_sweep); null for one started alone",
+                "title": "Sweep Id"
+              },
               "total_return": {
                 "anyOf": [
                   {
@@ -11118,6 +11440,7 @@
               "status",
               "queue_position",
               "error",
+              "sweep_id",
               "model",
               "model_id",
               "instruments",
@@ -13806,6 +14129,267 @@
         "read"
       ],
       "title": "Get a sweep"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Lists the user's sweeps, newest first: each one's ID, metric, how many of its backtests are queued, running, finished and failed, whether it is done, and its best finished backtest so far by the metric. Use it to find a sweep again; get_sweep ranks one, and list_backtests with `sweep_id` lists its backtests. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_sweeps",
+      "endpoints": [
+        "GET /api/v1/sweeps"
+      ],
+      "example": {
+        "arguments": {},
+        "result": {
+          "page": 1,
+          "pages": 1,
+          "sweeps": [
+            {
+              "best": {
+                "id": "bt_t9n8v7d6a5",
+                "name": "Bright Vega",
+                "number": 13,
+                "value": 1.42
+              },
+              "count": 2,
+              "created_at": "2026-11-08T10:00:00Z",
+              "done": true,
+              "id": "sw_7f3k2m9qx4",
+              "metric": "sharpe",
+              "progress": {
+                "failed": 0,
+                "finished": 2,
+                "queued": 0,
+                "running": 0
+              }
+            }
+          ],
+          "total": 1
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "page": {
+            "default": 1,
+            "description": "The page, from 1",
+            "maximum": 100000,
+            "minimum": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "default": 10,
+            "description": "Sweeps per page",
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Per Page",
+            "type": "integer"
+          }
+        },
+        "title": "list_sweepsArguments",
+        "type": "object"
+      },
+      "name": "list_sweeps",
+      "outputSchema": {
+        "$defs": {
+          "SweepBest": {
+            "description": "The sweep's best backtest so far by its `metric`, as its ranking would put it first.",
+            "properties": {
+              "id": {
+                "examples": [
+                  "bt_t9n8v7d6a5"
+                ],
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "examples": [
+                  "Bright Vega"
+                ],
+                "title": "Name",
+                "type": "string"
+              },
+              "number": {
+                "examples": [
+                  13
+                ],
+                "title": "Number",
+                "type": "integer"
+              },
+              "value": {
+                "description": "The statistic, as in `results.stats`",
+                "examples": [
+                  1.42
+                ],
+                "title": "Value",
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "number",
+              "name",
+              "value"
+            ],
+            "title": "SweepBest",
+            "type": "object"
+          },
+          "SweepListed": {
+            "description": "A sweep in the list: how far it is and its best backtest so far.",
+            "properties": {
+              "best": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/SweepBest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The finished backtest with the best `metric` so far; null until one has a value. `GET /api/v1/sweeps/{sweep_id}` ranks them all"
+              },
+              "count": {
+                "description": "Its backtests",
+                "examples": [
+                  6
+                ],
+                "title": "Count",
+                "type": "integer"
+              },
+              "created_at": {
+                "description": "When it was started (UTC)",
+                "format": "date-time",
+                "title": "Created At",
+                "type": "string"
+              },
+              "done": {
+                "description": "None of its backtests is queued or running",
+                "title": "Done",
+                "type": "boolean"
+              },
+              "id": {
+                "examples": [
+                  "sw_7f3k2m9qx4"
+                ],
+                "title": "Id",
+                "type": "string"
+              },
+              "metric": {
+                "$ref": "#/$defs/SweepMetric",
+                "description": "What its ranking orders by"
+              },
+              "progress": {
+                "$ref": "#/$defs/SweepProgress"
+              }
+            },
+            "required": [
+              "id",
+              "created_at",
+              "metric",
+              "count",
+              "done",
+              "progress",
+              "best"
+            ],
+            "title": "SweepListed",
+            "type": "object"
+          },
+          "SweepMetric": {
+            "description": "A statistic of `results.stats` the ranking can use: one that is better higher or lower.",
+            "enum": [
+              "total_return",
+              "max_drawdown",
+              "sharpe",
+              "sortino",
+              "win_rate",
+              "avg_trade_return",
+              "best_trade_return",
+              "worst_trade_return",
+              "fees_paid"
+            ],
+            "title": "SweepMetric",
+            "type": "string"
+          },
+          "SweepProgress": {
+            "description": "How many of the sweep's backtests have each status.",
+            "properties": {
+              "failed": {
+                "title": "Failed",
+                "type": "integer"
+              },
+              "finished": {
+                "title": "Finished",
+                "type": "integer"
+              },
+              "queued": {
+                "title": "Queued",
+                "type": "integer"
+              },
+              "running": {
+                "title": "Running",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "queued",
+              "running",
+              "finished",
+              "failed"
+            ],
+            "title": "SweepProgress",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "page": {
+            "description": "The page, from 1",
+            "examples": [
+              1
+            ],
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "description": "Pages of the sweeps, at least 1",
+            "examples": [
+              1
+            ],
+            "title": "Pages",
+            "type": "integer"
+          },
+          "sweeps": {
+            "description": "The page, newest first",
+            "items": {
+              "$ref": "#/$defs/SweepListed"
+            },
+            "title": "Sweeps",
+            "type": "array"
+          },
+          "total": {
+            "description": "The user's sweeps",
+            "examples": [
+              3
+            ],
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sweeps",
+          "total",
+          "page",
+          "pages"
+        ],
+        "title": "SweepsPage",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "List sweeps"
     }
   ],
   "webOnly": [

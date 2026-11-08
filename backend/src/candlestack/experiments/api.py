@@ -7,9 +7,11 @@ comparison of backtests under ``/api/v1/compare``, sweeps of many backtests unde
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Path, Query, Response
+from pydantic import AfterValidator
 
 from candlestack.accounts import (
     API_KEY_SCHEME,
@@ -55,11 +57,13 @@ from candlestack.experiments.schemas import (
     EXPERIMENTS_PAGE_SIZE,
     MODEL_NAME_MAX,
     PAGE_SIZE,
+    PER_PAGE_MAX,
     QUERY_MAX,
     BacktestOut,
     BacktestShow,
     BacktestSort,
     BacktestsPage,
+    BacktestStatus,
     BacktestUpdate,
     DashboardOut,
     ExperimentSort,
@@ -68,9 +72,11 @@ from candlestack.experiments.schemas import (
     Representation,
     SetupTimeframe,
     SortOrder,
+    as_utc,
+    instrument_filter,
 )
 from candlestack.experiments.service import ExperimentsQuery, ListQuery
-from candlestack.experiments.store import QUEUE_MAX
+from candlestack.experiments.store import QUEUE_MAX, BacktestFilters
 from candlestack.experiments.sweeps import (
     SWEEP_MAX,
     SWEEP_MIN,
@@ -78,6 +84,7 @@ from candlestack.experiments.sweeps import (
     SweepMetric,
     SweepOut,
     SweepPlan,
+    SweepsPage,
 )
 
 router = APIRouter(tags=["backtests"])
@@ -93,7 +100,38 @@ BacktestId = Annotated[
 _NOT_SIGNED_IN = problem_doc(401, "Not signed in (`not-signed-in`).")
 
 
-def list_query(
+# The query parameters of the list's filters for the API and the agents (``BacktestFilters``).
+Statuses = Annotated[
+    list[BacktestStatus] | None,
+    Query(description="Only backtests with one of these statuses (repeat the parameter)"),
+]
+SweepFilter = Annotated[
+    str | None,
+    Query(
+        max_length=32, description="Only the backtests of this sweep", examples=["sw_7f3k2m9qx4"]
+    ),
+]
+ModelIdFilter = Annotated[
+    str | None,
+    Query(
+        max_length=32,
+        description="Only the backtests of the model with this ID",
+        examples=["mdl_k2m9qx47f3"],
+    ),
+]
+InstrumentFilter = Annotated[
+    str | None,
+    Query(
+        max_length=64,
+        description="Only the backtests of this instrument, `<market>:<symbol>`",
+        examples=["stock:AAPL"],
+    ),
+    AfterValidator(instrument_filter),
+]
+CreatedFilter = Annotated[datetime | None, AfterValidator(as_utc)]
+
+
+def list_query(  # noqa: PLR0913 (one argument per query parameter)
     *,
     q: Annotated[
         str,
@@ -117,13 +155,77 @@ def list_query(
             examples=["blesk-novol-8.keras"],
         ),
     ] = None,
+    status: Statuses = None,
+    sweep_id: SweepFilter = None,
+    model_id: ModelIdFilter = None,
+    instrument: InstrumentFilter = None,
+    timeframe: Annotated[SetupTimeframe | None, Query(description="Only this timeframe")] = None,
+    representation: Annotated[
+        Representation | None, Query(description="Only models that read this")
+    ] = None,
+    created_after: Annotated[
+        CreatedFilter, Query(description="Only those started at or after this time (UTC)")
+    ] = None,
+    created_before: Annotated[
+        CreatedFilter, Query(description="Only those started before this time (UTC)")
+    ] = None,
+    min_sharpe: Annotated[
+        float | None,
+        Query(allow_inf_nan=False, description="Only those with at least this Sharpe ratio"),
+    ] = None,
+    min_total_return: Annotated[
+        float | None,
+        Query(allow_inf_nan=False, description="Only those with at least this return, a fraction"),
+    ] = None,
+    min_max_drawdown: Annotated[
+        float | None,
+        Query(
+            le=0,
+            allow_inf_nan=False,
+            description="Only those whose largest fall is no deeper than this, 0 or below: "
+            "-0.2 keeps falls of up to 20 percent",
+        ),
+    ] = None,
+    starred: Annotated[
+        bool | None, Query(description="Only the starred (true) or the unstarred (false)")
+    ] = None,
+    public: Annotated[
+        bool | None, Query(description="Only the published (true) or the unpublished (false)")
+    ] = None,
     sort: Annotated[BacktestSort, Query(description="What to sort by")] = BacktestSort.default,
     order: Annotated[SortOrder, Query(description="Direction of the sort")] = SortOrder.desc,
     page: Annotated[
-        int, Query(ge=1, le=PAGE_MAX, description=f"The page, from 1, of {PAGE_SIZE} backtests")
+        int, Query(ge=1, le=PAGE_MAX, description="The page, from 1, of `per_page` backtests")
     ] = 1,
+    per_page: Annotated[
+        int, Query(ge=1, le=PER_PAGE_MAX, description="Backtests per page")
+    ] = PAGE_SIZE,
 ) -> ListQuery:
-    return ListQuery(query=q, show=show, model=model, sort=sort, order=order, page=page)
+    more = BacktestFilters(
+        statuses=tuple(status or ()),
+        sweep_id=sweep_id,
+        model_id=model_id,
+        instrument=instrument,
+        timeframe=timeframe,
+        representation=representation,
+        created_after=created_after,
+        created_before=created_before,
+        min_sharpe=min_sharpe,
+        min_total_return=min_total_return,
+        min_max_drawdown=min_max_drawdown,
+        starred=starred,
+        public=public,
+    )
+    return ListQuery(
+        query=q,
+        show=show,
+        model=model,
+        sort=sort,
+        order=order,
+        page=page,
+        more=more,
+        per_page=per_page,
+    )
 
 
 @router.get("/api/v1/backtests", responses=_NOT_SIGNED_IN)
@@ -133,9 +235,9 @@ async def list_backtests(
     service: BacktestsServiceDep,
     response: Response,
 ) -> BacktestsPage:
-    """A page of the user's backtests that match the search and the filters, and what the
+    """A page of the user's backtests that match the search and every filter, and what the
     filter panel shows: the counts of all, starred and failed backtests and every model the
-    backtests used. A page past the last one is empty."""
+    backtests used, whatever the filters. A page past the last one is empty."""
     response.headers.update(NO_STORE)
     return await service.backtests(user.id, query)
 
@@ -784,6 +886,23 @@ async def start_sweep(
         sweep = await sweeps.start(user.id, body)
     response.headers["Location"] = f"/api/v1/sweeps/{sweep.id}"
     return sweep
+
+
+@router.get("/api/v1/sweeps", responses=_NOT_SIGNED_IN)
+async def list_sweeps(
+    user: CurrentUserDep,
+    sweeps: SweepsDep,
+    response: Response,
+    page: Annotated[int, Query(ge=1, le=PAGE_MAX, description="The page, from 1")] = 1,
+    per_page: Annotated[
+        int, Query(ge=1, le=PER_PAGE_MAX, description="Sweeps per page")
+    ] = PAGE_SIZE,
+) -> SweepsPage:
+    """A page of the user's sweeps, newest first: each one's metric, how many of its backtests
+    are queued, running, finished and failed, and its best finished backtest so far by the
+    metric. A page past the last one is empty."""
+    response.headers.update(NO_STORE)
+    return await sweeps.sweeps(user.id, page, per_page)
 
 
 @router.get(

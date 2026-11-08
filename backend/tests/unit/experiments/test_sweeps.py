@@ -9,13 +9,14 @@ from pydantic import ValidationError
 
 from candlestack.experiments.compare import RANKABLE, ranks
 from candlestack.experiments.errors import InvalidBacktest, SweepTooLarge
-from candlestack.experiments.models import Backtest
+from candlestack.experiments.models import Backtest, Sweep
 from candlestack.experiments.store import Listed
 from candlestack.experiments.sweeps import (
     SWEEP_MAX,
     SweepIn,
     SweepMetric,
     SweepVary,
+    _listed,
     grid,
     grid_size,
     ranking,
@@ -255,3 +256,32 @@ def test_the_ranking_reads_only_finished_backtests() -> None:
     assert ranked.better == "lower"
     assert [(each.number, each.rank) for each in ranked.backtests] == [(1, None), (2, None)]
     assert ranking(rows, SweepMetric.sharpe).backtests[0].number == 2
+
+
+def listed_sweep(metric: str, rows: list[Listed]) -> Any:
+    sweep = Sweep(id="sw_7f3k2m9qx4", metric=metric, created_at=datetime(2026, 11, 8, tzinfo=UTC))
+    return _listed(sweep, rows)
+
+
+def test_a_listed_sweep_has_its_progress_and_its_best_so_far() -> None:
+    rows = [
+        row(1, "finished", {"max_drawdown": -0.3}),
+        row(2, "finished", {"max_drawdown": -0.1}),
+        row(3, "running", None),
+        row(4, "queued", None),
+        row(5, "failed", None),
+    ]
+
+    listed = listed_sweep("max_drawdown", rows)
+
+    assert (listed.count, listed.done) == (5, False)
+    assert listed.progress.model_dump() == {"queued": 1, "running": 1, "finished": 2, "failed": 1}
+    # The smallest fall is the best, as the ranking has it.
+    assert listed.best is not None
+    assert (listed.best.number, listed.best.value, listed.best.name) == (2, -0.1, "Backtest 2")
+
+
+def test_a_listed_sweep_without_a_value_has_no_best() -> None:
+    listed = listed_sweep("sharpe", [row(1, "failed", None), row(2, "finished", {"sharpe": None})])
+
+    assert (listed.done, listed.best) == (True, None)
