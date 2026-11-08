@@ -524,6 +524,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/connected-apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Connected Apps
+         * @description The apps (MCP clients such as Claude and ChatGPT) the user allowed to act for them, the
+         *     most recently connected first.
+         */
+        get: operations["connected_apps_api_v1_me_connected_apps_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/connected-apps/{app_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Disconnect App
+         * @description Disconnects the app: its tokens stop working at once. It can connect again with a new
+         *     consent.
+         */
+        delete: operations["disconnect_app_api_v1_me_connected_apps__app_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me/preferences": {
         parameters: {
             query?: never;
@@ -732,6 +774,127 @@ export interface paths {
          */
         put: operations["set_manifest_api_v1_models__model_id__manifest_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oauth/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Authorize
+         * @description The authorization endpoint (OAuth 2.1, authorization code with PKCE S256): an MCP
+         *     client sends the browser here. Redirects to the consent page `/oauth/consent?request=<id>`,
+         *     through `/signin?next=...` when the browser is not signed in, or back to the client's
+         *     `redirect_uri` with `error` (`unsupported_response_type`, `invalid_request` without an S256
+         *     `code_challenge`, `invalid_target` for another `resource`), `state` and `iss`. `scope` names
+         *     any of read, backtests, models and publish (all of them when it names none); the user picks
+         *     on the consent page.
+         */
+        get: operations["authorize_api_v1_oauth_authorize_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oauth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register
+         * @description Dynamic client registration (RFC 7591): an MCP client registers itself and gets its
+         *     `client_id`, and a `client_secret` when it asked for `client_secret_post` or
+         *     `client_secret_basic` (the default). Clients that publish a client ID metadata document use
+         *     its URL as their `client_id` instead and need no registration.
+         */
+        post: operations["register_api_v1_oauth_register_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oauth/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Authorization Request
+         * @description An app's request for access, for the consent page: the app as it names itself, the host
+         *     it returns to and the scopes it asks for in plain words. Needs no session, so the page can
+         *     name the app before the user signs in; the ID is the secret.
+         */
+        get: operations["authorization_request_api_v1_oauth_requests__request_id__get"];
+        put?: never;
+        /**
+         * Decide
+         * @description The user's decision on an app's request, once: `allow` with the scopes to grant (read
+         *     always), or `deny`. Answers where the browser goes back to the app: its redirect URI with a
+         *     `code` (5 minutes, used once) or `error=access_denied`, with `state` and `iss`.
+         */
+        post: operations["decide_api_v1_oauth_requests__request_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oauth/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke
+         * @description Token revocation (RFC 7009): a refresh token ends with every token of its sign-in, an
+         *     access token alone. 200 also for a token that is unknown or another client's.
+         */
+        post: operations["revoke_api_v1_oauth_revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oauth/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Token
+         * @description The token endpoint: trades a code and its PKCE verifier, or a refresh token, for an
+         *     access token (`csa_...`, an hour) and a new refresh token (`csr_...`, 30 days, works once;
+         *     bringing a used one again revokes every token of that sign-in). A public client sends its
+         *     `client_id`; a client with a secret authenticates as it registered.
+         */
+        post: operations["token_api_v1_oauth_token_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1049,6 +1212,24 @@ export interface components {
             name: string;
         };
         /**
+         * AuthorizationRequestOut
+         * @description An app's request for access to the user's account, for the consent screen.
+         */
+        AuthorizationRequestOut: {
+            client: components["schemas"]["ClientOut"];
+            /**
+             * Expires At
+             * Format: date-time
+             * @description Until when the request can be decided (UTC)
+             */
+            expires_at: string;
+            /**
+             * Scopes
+             * @description What the app asks for, in the order read, backtests, models, publish; read is always granted
+             */
+            scopes: components["schemas"]["ScopeOut"][];
+        };
+        /**
          * BacktestCounts
          * @description The user's backtests in all, starred, failed and published.
          */
@@ -1179,7 +1360,7 @@ export interface components {
             /** Benchmarks */
             benchmarks: components["schemas"]["BenchmarkOut"][];
             data: components["schemas"]["DataOut"];
-            decision: components["schemas"]["Decision"];
+            decision: components["schemas"]["Decision-Output"];
             execution: components["schemas"]["Execution"];
             metrics: components["schemas"]["MetricsArgs"];
             model: components["schemas"]["BacktestModel"];
@@ -1296,7 +1477,7 @@ export interface components {
              *       }
              *     }
              */
-            decision: components["schemas"]["Decision"];
+            decision: components["schemas"]["candlestack__experiments__document__Decision"];
             /**
              * @default {
              *       "fee_bps": 0,
@@ -2013,6 +2194,75 @@ export interface components {
          */
         CheckPart: "trial_run" | "example";
         /**
+         * ClientOut
+         * @description The app as it describes itself: anyone can register an app named Claude, so the host it
+         *     returns to is what tells apps apart.
+         */
+        ClientOut: {
+            /**
+             * Client Uri
+             * @description The app's home page, if it gave one
+             */
+            client_uri: string | null;
+            /**
+             * Logo Uri
+             * @description The app's logo, if it gave one
+             */
+            logo_uri: string | null;
+            /**
+             * Name
+             * @description The app's name; the host it returns to when it gave none
+             * @example Claude
+             */
+            name: string;
+            /**
+             * Redirect Host
+             * @description The host the browser returns to after the decision
+             * @example claude.ai
+             */
+            redirect_host: string;
+        };
+        /**
+         * ClientRegistrationOut
+         * @description A registered client (RFC 7591): its ID, its secret when it asked for one, and its
+         *     metadata as the server keeps it.
+         */
+        ClientRegistrationOut: {
+            /**
+             * Client Id
+             * @example ocl_7f3k2m4qx4abcdef
+             */
+            client_id: string;
+            /**
+             * Client Id Issued At
+             * @description When it was registered (epoch seconds)
+             */
+            client_id_issued_at: number;
+            /** Client Name */
+            client_name?: string | null;
+            /**
+             * Client Secret
+             * @description Only for `client_secret_post` and `client_secret_basic`; shown only here
+             */
+            client_secret?: string | null;
+            /**
+             * Client Secret Expires At
+             * @description 0 with a secret: it does not expire
+             */
+            client_secret_expires_at?: number | null;
+            /** Client Uri */
+            client_uri?: string | null;
+            /** Grant Types */
+            grant_types: string[];
+            /** Logo Uri */
+            logo_uri?: string | null;
+            /** Redirect Uris */
+            redirect_uris: string[];
+            /** Response Types */
+            response_types: string[];
+            token_endpoint_auth_method: components["schemas"]["TokenEndpointAuthMethod"];
+        };
+        /**
          * CompareMetric
          * @description One statistic of every backtest, in the order of `backtests`.
          */
@@ -2142,6 +2392,75 @@ export interface components {
             status: components["schemas"]["BacktestStatus"];
         };
         /**
+         * ConnectedAppOut
+         * @description An app the user allowed to act for them.
+         */
+        ConnectedAppOut: {
+            client: components["schemas"]["ClientOut"];
+            /**
+             * Connected At
+             * Format: date-time
+             * @description When the user first allowed the app (UTC)
+             */
+            connected_at: string;
+            /**
+             * Id
+             * @description Public ID of the connected app, for disconnecting it
+             * @example app_7f3k2m4qx4
+             */
+            id: string;
+            /**
+             * Last Used At
+             * @description When the app last called the MCP server (UTC); written at most once a minute; null: never
+             */
+            last_used_at: string | null;
+            /**
+             * Scopes
+             * @description What the app may do, as of the user's last consent
+             * @example [
+             *       "read",
+             *       "backtests"
+             *     ]
+             */
+            scopes: components["schemas"]["Scope"][];
+        };
+        /**
+         * ConnectedAppsOut
+         * @description The apps the user allowed, the most recently connected first.
+         */
+        ConnectedAppsOut: {
+            /** Items */
+            items: components["schemas"]["ConnectedAppOut"][];
+        };
+        /**
+         * ConsentIn
+         * @description The user's decision on an app's request.
+         */
+        ConsentIn: {
+            decision: components["schemas"]["candlestack__accounts__schemas__Decision"];
+            /**
+             * Scopes
+             * @description With `allow`: the scopes to grant, each one the app asked for; read is always granted. Ignored with `deny`
+             * @example [
+             *       "read",
+             *       "backtests"
+             *     ]
+             */
+            scopes?: components["schemas"]["Scope"][];
+        };
+        /**
+         * ConsentOut
+         * @description Where the browser goes next: back to the app, with a code or `error=access_denied`.
+         */
+        ConsentOut: {
+            /**
+             * Redirect To
+             * @description The app's redirect URI with `code` (or `error`), `state` and `iss`
+             * @example https://claude.ai/api/mcp/auth_callback?code=...&state=...&iss=...
+             */
+            redirect_to: string;
+        };
+        /**
          * DashboardOut
          * @description Everything the Dashboard shows, in one response.
          */
@@ -2210,7 +2529,7 @@ export interface components {
          * @description How the predictions become a signal: each step of docs/engine.md (Signals) in the order
          *     applied, null when off; exactly what the command's `run.json` records.
          */
-        Decision: {
+        "Decision-Output": {
             calibrate?: components["schemas"]["CalibrateStep"] | null;
             /** @description Count a value only once it held this many candles */
             confirm?: components["schemas"]["CandlesStep"] | null;
@@ -3471,6 +3790,22 @@ export interface components {
              */
             total: number;
         };
+        /**
+         * OAuthErrorOut
+         * @description An OAuth error (RFC 6749, section 5.2; RFC 7591, section 3.2.2).
+         */
+        OAuthErrorOut: {
+            /**
+             * Error
+             * @example invalid_grant
+             */
+            error: string;
+            /**
+             * Error Description
+             * @example The code is unknown, used or expired.
+             */
+            error_description: string;
+        };
         /** Output */
         Output: {
             /**
@@ -3687,6 +4022,18 @@ export interface components {
          * @enum {string}
          */
         Scope: "read" | "backtests" | "models" | "publish";
+        /**
+         * ScopeOut
+         * @description A scope an app asks for, in plain words.
+         */
+        ScopeOut: {
+            /**
+             * Description
+             * @example See your backtests, models and market data
+             */
+            description: string;
+            scope: components["schemas"]["Scope"];
+        };
         /** Series */
         Series: {
             /**
@@ -4231,6 +4578,47 @@ export interface components {
          * @enum {string}
          */
         Timeframe: "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d";
+        /**
+         * TokenEndpointAuthMethod
+         * @description How a client proves itself at the token endpoint: `none` for a public client (PKCE
+         *     alone), or with the secret it got at registration.
+         * @enum {string}
+         */
+        TokenEndpointAuthMethod: "none" | "client_secret_post" | "client_secret_basic";
+        /**
+         * TokenOut
+         * @description The tokens of an authorization or a refresh (RFC 6749, section 5.1).
+         */
+        TokenOut: {
+            /**
+             * Access Token
+             * @description `csa_...`, for `Authorization: Bearer`
+             */
+            access_token: string;
+            /**
+             * Expires In
+             * @description Seconds the access token works
+             * @example 3600
+             */
+            expires_in: number;
+            /**
+             * Refresh Token
+             * @description `csr_...`, works once: the answer to it holds a new one
+             */
+            refresh_token: string;
+            /**
+             * Scope
+             * @description The granted scopes, space-separated
+             * @example read
+             */
+            scope: string;
+            /**
+             * Token Type
+             * @default Bearer
+             * @example Bearer
+             */
+            token_type: string;
+        };
         /** TopInstrumentsOut */
         TopInstrumentsOut: {
             /**
@@ -4373,6 +4761,38 @@ export interface components {
              * @description How many rows make one sample
              */
             length: number;
+        };
+        /**
+         * Decision
+         * @enum {string}
+         */
+        candlestack__accounts__schemas__Decision: "allow" | "deny";
+        /**
+         * Decision
+         * @description How the predictions become a signal: each step of docs/engine.md (Signals) in the order
+         *     applied, null when off; exactly what the command's `run.json` records.
+         */
+        candlestack__experiments__document__Decision: {
+            calibrate?: components["schemas"]["CalibrateStep"] | null;
+            /** @description Count a value only once it held this many candles */
+            confirm?: components["schemas"]["CandlesStep"] | null;
+            ema?: components["schemas"]["EmaStep"] | null;
+            /**
+             * Long Only
+             * @description Flat instead of short
+             * @default false
+             */
+            long_only: boolean;
+            /** @description Keep each new position for at least this many candles */
+            min_hold?: components["schemas"]["CandlesStep"] | null;
+            /**
+             * Rule
+             * @default {
+             *       "limit": 0,
+             *       "name": "threshold"
+             *     }
+             */
+            rule: components["schemas"]["ThresholdRule"] | components["schemas"]["HysteresisRule"] | components["schemas"]["KmeansRule"];
         };
     };
     responses: never;
@@ -5919,6 +6339,101 @@ export interface operations {
             };
         };
     };
+    connected_apps_api_v1_me_connected_apps_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectedAppsOut"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description API keys cannot do this, only the signed-in browser (`session-required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    disconnect_app_api_v1_me_connected_apps__app_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Public ID of the connected app */
+                app_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no connected app with this ID (`not-found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     preferences_api_v1_me_preferences_get: {
         parameters: {
             query?: never;
@@ -6723,6 +7238,378 @@ export interface operations {
             };
             /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    authorize_api_v1_oauth_authorize_get: {
+        parameters: {
+            query?: {
+                response_type?: string | null;
+                client_id?: string | null;
+                redirect_uri?: string | null;
+                state?: string | null;
+                code_challenge?: string | null;
+                code_challenge_method?: string | null;
+                scope?: string | null;
+                /** @description The MCP server's URL (RFC 8707), `<PUBLIC_URL>/mcp` */
+                resource?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The client_id or the redirect_uri is unknown, so the browser cannot be sent back (`invalid-authorization-request`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many sign-in requests from this address (`rate-limited`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    register_api_v1_oauth_register_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Client Name
+                     * @description The app's name
+                     * @example Claude
+                     */
+                    client_name?: string | null;
+                    /** Client Uri */
+                    client_uri?: string | null;
+                    /**
+                     * Grant Types
+                     * @description `authorization_code` and `refresh_token` only
+                     * @default [
+                     *       "authorization_code",
+                     *       "refresh_token"
+                     *     ]
+                     */
+                    grant_types?: string[];
+                    /** Logo Uri */
+                    logo_uri?: string | null;
+                    /**
+                     * Redirect Uris
+                     * @description Where the browser returns with the code: https URLs, or http on a loopback address (127.0.0.1, [::1], localhost) for a native app, whose port may change from one sign-in to the next
+                     * @example [
+                     *       "https://claude.ai/api/mcp/auth_callback"
+                     *     ]
+                     */
+                    redirect_uris: string[];
+                    /**
+                     * Response Types
+                     * @description `code` only
+                     * @default [
+                     *       "code"
+                     *     ]
+                     */
+                    response_types?: string[];
+                    /**
+                     * @description `none`, `client_secret_post` or `client_secret_basic` (the default of RFC 7591); a metadata document may only say `none`
+                     * @default client_secret_basic
+                     */
+                    token_endpoint_auth_method?: components["schemas"]["TokenEndpointAuthMethod"];
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientRegistrationOut"];
+                };
+            };
+            /** @description `invalid_client_metadata` or `invalid_redirect_uri` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthErrorOut"];
+                };
+            };
+            /** @description Too many registrations from this address (`rate-limited`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    authorization_request_api_v1_oauth_requests__request_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The ID from the consent page's address */
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthorizationRequestOut"];
+                };
+            };
+            /** @description No authorization request has this ID: it was decided, expired (10 minutes) or never was (`authorization-request-not-found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    decide_api_v1_oauth_requests__request_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The ID from the consent page's address */
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsentIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentOut"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request does not come from the app's own pages (`cross-origin-request`), or the account is not on the beta list (`not-on-beta-list`). API keys cannot do this, only the signed-in browser (`session-required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No authorization request has this ID: it was decided, expired (10 minutes) or never was (`authorization-request-not-found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A scope the app did not ask for (`scope-not-requested`; `scope`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    revoke_api_v1_oauth_revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": {
+                    /** @description The client's ID, unless it authenticates with HTTP Basic */
+                    client_id?: string;
+                    /** @description With `client_secret_post`: the client's secret */
+                    client_secret?: string;
+                    /** @description The access or refresh token to revoke */
+                    token: string;
+                    /** @description `access_token` or `refresh_token`; not needed */
+                    token_type_hint?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description `invalid_request`: no token */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthErrorOut"];
+                };
+            };
+            /** @description `invalid_client` */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthErrorOut"];
+                };
+            };
+            /** @description API keys cannot do this, only the signed-in browser (`session-required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    token_api_v1_oauth_token_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": {
+                    /** @description The client's ID, unless it authenticates with HTTP Basic */
+                    client_id?: string;
+                    /** @description With `client_secret_post`: the client's secret */
+                    client_secret?: string;
+                    /** @description With `authorization_code`: the code from the redirect */
+                    code?: string;
+                    /** @description With `authorization_code`: the PKCE verifier */
+                    code_verifier?: string;
+                    /** @description `authorization_code` or `refresh_token` */
+                    grant_type: string;
+                    /** @description With `authorization_code`: the redirect URI of the request */
+                    redirect_uri?: string;
+                    /** @description With `refresh_token`: the refresh token, used once */
+                    refresh_token?: string;
+                    /** @description The MCP server's URL (RFC 8707) */
+                    resource?: string;
+                    /** @description With `refresh_token`: fewer scopes than granted, space-separated */
+                    scope?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenOut"];
+                };
+            };
+            /** @description `invalid_request`, `invalid_grant` (the code or refresh token is unknown, used, expired or revoked, the verifier does not match, the account left the beta list), `invalid_scope`, `invalid_target` or `unsupported_grant_type` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthErrorOut"];
+                };
+            };
+            /** @description `invalid_client` */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthErrorOut"];
+                };
+            };
+            /** @description API keys cannot do this, only the signed-in browser (`session-required`). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

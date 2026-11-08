@@ -347,18 +347,19 @@ layers = [
 ]
 
 # Inside accounts, the same: routes and what the API reference says about keys, then what other
-# modules' routes depend on (the signed-in user), the API keys, the service and the cookies, the
-# stores and the providers, the tables and bodies.
+# modules' routes depend on (the signed-in user), the API keys and the OAuth authorization
+# server, the service and the cookies, the stores, the providers and the client metadata, the
+# tables and bodies.
 [[tool.importlinter.contracts]]
 name = "Inside accounts: HTTP -> dependencies -> service -> stores and providers -> models"
 type = "layers"
 containers = ["candlestack.accounts"]
 layers = [
-    "api | reference",
+    "api | reference | oauth_api",
     "dependencies",
-    "keys",
+    "keys | authorization",
     "service | cookies",
-    "store | pending | oauth",
+    "store | pending | oauth | oauth_store | oauth_pending | client_metadata",
     "models | errors | schemas",
 ]
 

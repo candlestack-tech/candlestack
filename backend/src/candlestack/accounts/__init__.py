@@ -15,11 +15,15 @@ its rows in the deletion's transaction, and what lies outside Postgres in the ``
 it returns, once the deletion is committed.
 
 What signs requests in outside FastAPI's routes (the MCP server) uses ``key_caller`` for the
-API key and ``get_accounts_service`` for the service the routes use.
+API key, ``token_caller`` for an OAuth access token (``is_access_token``) and
+``get_accounts_service`` for the service the routes use. The OAuth authorization server
+(``oauth_router``) signs MCP clients in; its issuer is ``oauth_issuer``.
 """
 
 from candlestack.accounts.api import dev_router as dev_sign_in_router
 from candlestack.accounts.api import router as accounts_router
+from candlestack.accounts.authorization import ACCESS_PREFIX
+from candlestack.accounts.authorization import issuer as oauth_issuer
 from candlestack.accounts.dependencies import (
     API_KEY_SCHEME,
     BacktestsUserDep,
@@ -29,8 +33,10 @@ from candlestack.accounts.dependencies import (
     ModelsUserDep,
     get_accounts_service,
     key_caller,
+    token_caller,
 )
 from candlestack.accounts.models import User
+from candlestack.accounts.oauth_api import router as oauth_router
 from candlestack.accounts.reference import document_api_keys
 from candlestack.accounts.schemas import DeniedSignInOut, MeOut, Provider, Scope
 from candlestack.accounts.service import (
@@ -39,6 +45,12 @@ from candlestack.accounts.service import (
     AfterDeletion,
     dev_sign_in_allowed,
 )
+
+
+def is_access_token(token: str) -> bool:
+    """Whether `token` is an OAuth access token (``csa_...``), not an API key."""
+    return token.startswith(ACCESS_PREFIX)
+
 
 __all__ = [
     "API_KEY_SCHEME",
@@ -60,5 +72,9 @@ __all__ = [
     "dev_sign_in_router",
     "document_api_keys",
     "get_accounts_service",
+    "is_access_token",
     "key_caller",
+    "oauth_issuer",
+    "oauth_router",
+    "token_caller",
 ]

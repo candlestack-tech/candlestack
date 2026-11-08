@@ -408,6 +408,35 @@
         "title": "Author",
         "type": "object"
       },
+      "AuthorizationRequestOut": {
+        "description": "An app's request for access to the user's account, for the consent screen.",
+        "properties": {
+          "client": {
+            "$ref": "#/components/schemas/ClientOut"
+          },
+          "expires_at": {
+            "description": "Until when the request can be decided (UTC)",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "scopes": {
+            "description": "What the app asks for, in the order read, backtests, models, publish; read is always granted",
+            "items": {
+              "$ref": "#/components/schemas/ScopeOut"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "client",
+          "scopes",
+          "expires_at"
+        ],
+        "title": "AuthorizationRequestOut",
+        "type": "object"
+      },
       "BacktestCounts": {
         "description": "The user's backtests in all, starred, failed and published.",
         "properties": {
@@ -602,7 +631,7 @@
             "$ref": "#/components/schemas/DataOut"
           },
           "decision": {
-            "$ref": "#/components/schemas/Decision"
+            "$ref": "#/components/schemas/Decision-Output"
           },
           "execution": {
             "$ref": "#/components/schemas/Execution"
@@ -841,7 +870,7 @@
             "$ref": "#/components/schemas/DataIn"
           },
           "decision": {
-            "$ref": "#/components/schemas/Decision",
+            "$ref": "#/components/schemas/candlestack__experiments__document__Decision",
             "default": {
               "long_only": false,
               "rule": {
@@ -2245,6 +2274,167 @@
         "title": "CheckPart",
         "type": "string"
       },
+      "ClientOut": {
+        "description": "The app as it describes itself: anyone can register an app named Claude, so the host it\nreturns to is what tells apps apart.",
+        "properties": {
+          "client_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The app's home page, if it gave one",
+            "title": "Client Uri"
+          },
+          "logo_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The app's logo, if it gave one",
+            "title": "Logo Uri"
+          },
+          "name": {
+            "description": "The app's name; the host it returns to when it gave none",
+            "examples": [
+              "Claude"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "redirect_host": {
+            "description": "The host the browser returns to after the decision",
+            "examples": [
+              "claude.ai"
+            ],
+            "title": "Redirect Host",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "logo_uri",
+          "client_uri",
+          "redirect_host"
+        ],
+        "title": "ClientOut",
+        "type": "object"
+      },
+      "ClientRegistrationOut": {
+        "description": "A registered client (RFC 7591): its ID, its secret when it asked for one, and its\nmetadata as the server keeps it.",
+        "properties": {
+          "client_id": {
+            "examples": [
+              "ocl_7f3k2m4qx4abcdef"
+            ],
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_id_issued_at": {
+            "description": "When it was registered (epoch seconds)",
+            "title": "Client Id Issued At",
+            "type": "integer"
+          },
+          "client_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Name"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only for `client_secret_post` and `client_secret_basic`; shown only here",
+            "title": "Client Secret"
+          },
+          "client_secret_expires_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "0 with a secret: it does not expire",
+            "title": "Client Secret Expires At"
+          },
+          "client_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Uri"
+          },
+          "grant_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Grant Types",
+            "type": "array"
+          },
+          "logo_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logo Uri"
+          },
+          "redirect_uris": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Redirect Uris",
+            "type": "array"
+          },
+          "response_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Response Types",
+            "type": "array"
+          },
+          "token_endpoint_auth_method": {
+            "$ref": "#/components/schemas/TokenEndpointAuthMethod"
+          }
+        },
+        "required": [
+          "client_id",
+          "client_id_issued_at",
+          "redirect_uris",
+          "token_endpoint_auth_method",
+          "grant_types",
+          "response_types"
+        ],
+        "title": "ClientRegistrationOut",
+        "type": "object"
+      },
       "CompareMetric": {
         "description": "One statistic of every backtest, in the order of `backtests`.",
         "properties": {
@@ -2534,6 +2724,129 @@
         "title": "ComparedBacktest",
         "type": "object"
       },
+      "ConnectedAppOut": {
+        "description": "An app the user allowed to act for them.",
+        "properties": {
+          "client": {
+            "$ref": "#/components/schemas/ClientOut"
+          },
+          "connected_at": {
+            "description": "When the user first allowed the app (UTC)",
+            "format": "date-time",
+            "title": "Connected At",
+            "type": "string"
+          },
+          "id": {
+            "description": "Public ID of the connected app, for disconnecting it",
+            "examples": [
+              "app_7f3k2m4qx4"
+            ],
+            "pattern": "^app_[a-z2-7]{10}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the app last called the MCP server (UTC); written at most once a minute; null: never",
+            "title": "Last Used At"
+          },
+          "scopes": {
+            "description": "What the app may do, as of the user's last consent",
+            "examples": [
+              [
+                "read",
+                "backtests"
+              ]
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "client",
+          "scopes",
+          "connected_at",
+          "last_used_at"
+        ],
+        "title": "ConnectedAppOut",
+        "type": "object"
+      },
+      "ConnectedAppsOut": {
+        "description": "The apps the user allowed, the most recently connected first.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectedAppOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ConnectedAppsOut",
+        "type": "object"
+      },
+      "ConsentIn": {
+        "additionalProperties": false,
+        "description": "The user's decision on an app's request.",
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/candlestack__accounts__schemas__Decision"
+          },
+          "scopes": {
+            "description": "With `allow`: the scopes to grant, each one the app asked for; read is always granted. Ignored with `deny`",
+            "examples": [
+              [
+                "read",
+                "backtests"
+              ]
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "maxItems": 4,
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ConsentIn",
+        "type": "object"
+      },
+      "ConsentOut": {
+        "description": "Where the browser goes next: back to the app, with a code or `error=access_denied`.",
+        "properties": {
+          "redirect_to": {
+            "description": "The app's redirect URI with `code` (or `error`), `state` and `iss`",
+            "examples": [
+              "https://claude.ai/api/mcp/auth_callback?code=...&state=...&iss=..."
+            ],
+            "title": "Redirect To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "redirect_to"
+        ],
+        "title": "ConsentOut",
+        "type": "object"
+      },
       "DashboardOut": {
         "description": "Everything the Dashboard shows, in one response.",
         "properties": {
@@ -2697,7 +3010,7 @@
         "title": "DateFormat",
         "type": "string"
       },
-      "Decision": {
+      "Decision-Output": {
         "additionalProperties": false,
         "description": "How the predictions become a signal: each step of docs/engine.md (Signals) in the order\napplied, null when off; exactly what the command's `run.json` records.",
         "properties": {
@@ -5124,6 +5437,31 @@
         "title": "NewExperiments",
         "type": "object"
       },
+      "OAuthErrorOut": {
+        "description": "An OAuth error (RFC 6749, section 5.2; RFC 7591, section 3.2.2).",
+        "properties": {
+          "error": {
+            "examples": [
+              "invalid_grant"
+            ],
+            "title": "Error",
+            "type": "string"
+          },
+          "error_description": {
+            "examples": [
+              "The code is unknown, used or expired."
+            ],
+            "title": "Error Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "error_description"
+        ],
+        "title": "OAuthErrorOut",
+        "type": "object"
+      },
       "Output": {
         "additionalProperties": false,
         "properties": {
@@ -5569,6 +5907,27 @@
         ],
         "title": "Scope",
         "type": "string"
+      },
+      "ScopeOut": {
+        "description": "A scope an app asks for, in plain words.",
+        "properties": {
+          "description": {
+            "examples": [
+              "See your backtests, models and market data"
+            ],
+            "title": "Description",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/Scope"
+          }
+        },
+        "required": [
+          "scope",
+          "description"
+        ],
+        "title": "ScopeOut",
+        "type": "object"
       },
       "Series": {
         "properties": {
@@ -6733,6 +7092,63 @@
         "title": "Timeframe",
         "type": "string"
       },
+      "TokenEndpointAuthMethod": {
+        "description": "How a client proves itself at the token endpoint: `none` for a public client (PKCE\nalone), or with the secret it got at registration.",
+        "enum": [
+          "none",
+          "client_secret_post",
+          "client_secret_basic"
+        ],
+        "title": "TokenEndpointAuthMethod",
+        "type": "string"
+      },
+      "TokenOut": {
+        "description": "The tokens of an authorization or a refresh (RFC 6749, section 5.1).",
+        "properties": {
+          "access_token": {
+            "description": "`csa_...`, for `Authorization: Bearer`",
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_in": {
+            "description": "Seconds the access token works",
+            "examples": [
+              3600
+            ],
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "refresh_token": {
+            "description": "`csr_...`, works once: the answer to it holds a new one",
+            "title": "Refresh Token",
+            "type": "string"
+          },
+          "scope": {
+            "description": "The granted scopes, space-separated",
+            "examples": [
+              "read"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "token_type": {
+            "default": "Bearer",
+            "examples": [
+              "Bearer"
+            ],
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "expires_in",
+          "refresh_token",
+          "scope"
+        ],
+        "title": "TokenOut",
+        "type": "object"
+      },
       "TopInstrumentsOut": {
         "properties": {
           "items": {
@@ -7037,6 +7453,96 @@
           "length"
         ],
         "title": "Window",
+        "type": "object"
+      },
+      "candlestack__accounts__schemas__Decision": {
+        "enum": [
+          "allow",
+          "deny"
+        ],
+        "title": "Decision",
+        "type": "string"
+      },
+      "candlestack__experiments__document__Decision": {
+        "additionalProperties": false,
+        "description": "How the predictions become a signal: each step of docs/engine.md (Signals) in the order\napplied, null when off; exactly what the command's `run.json` records.",
+        "properties": {
+          "calibrate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CalibrateStep"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confirm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandlesStep"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Count a value only once it held this many candles"
+          },
+          "ema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmaStep"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "long_only": {
+            "default": false,
+            "description": "Flat instead of short",
+            "title": "Long Only",
+            "type": "boolean"
+          },
+          "min_hold": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandlesStep"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Keep each new position for at least this many candles"
+          },
+          "rule": {
+            "default": {
+              "limit": 0.0,
+              "name": "threshold"
+            },
+            "discriminator": {
+              "mapping": {
+                "hysteresis": "#/components/schemas/HysteresisRule",
+                "kmeans": "#/components/schemas/KmeansRule",
+                "threshold": "#/components/schemas/ThresholdRule"
+              },
+              "propertyName": "name"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ThresholdRule"
+              },
+              {
+                "$ref": "#/components/schemas/HysteresisRule"
+              },
+              {
+                "$ref": "#/components/schemas/KmeansRule"
+              }
+            ],
+            "title": "Rule"
+          }
+        },
+        "title": "Decision",
         "type": "object"
       }
     },
@@ -9390,6 +9896,119 @@
         ]
       }
     },
+    "/api/v1/me/connected-apps": {
+      "get": {
+        "description": "The apps (MCP clients such as Claude and ChatGPT) the user allowed to act for them, the\nmost recently connected first.",
+        "operationId": "connected_apps_api_v1_me_connected_apps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAppsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "API keys cannot do this, only the signed-in browser (`session-required`)."
+          }
+        },
+        "summary": "Connected Apps",
+        "tags": [
+          "oauth"
+        ]
+      }
+    },
+    "/api/v1/me/connected-apps/{app_id}": {
+      "delete": {
+        "description": "Disconnects the app: its tokens stop working at once. It can connect again with a new\nconsent.",
+        "operationId": "disconnect_app_api_v1_me_connected_apps__app_id__delete",
+        "parameters": [
+          {
+            "description": "Public ID of the connected app",
+            "in": "path",
+            "name": "app_id",
+            "required": true,
+            "schema": {
+              "description": "Public ID of the connected app",
+              "examples": [
+                "app_7f3k2m4qx4"
+              ],
+              "title": "App Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The user has no connected app with this ID (`not-found`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          }
+        },
+        "summary": "Disconnect App",
+        "tags": [
+          "oauth"
+        ]
+      }
+    },
     "/api/v1/me/preferences": {
       "get": {
         "description": "The user's settings, defaults included.",
@@ -10455,6 +11074,647 @@
         "summary": "Set Manifest",
         "tags": [
           "models"
+        ]
+      }
+    },
+    "/api/v1/oauth/authorize": {
+      "get": {
+        "description": "The authorization endpoint (OAuth 2.1, authorization code with PKCE S256): an MCP\nclient sends the browser here. Redirects to the consent page `/oauth/consent?request=<id>`,\nthrough `/signin?next=...` when the browser is not signed in, or back to the client's\n`redirect_uri` with `error` (`unsupported_response_type`, `invalid_request` without an S256\n`code_challenge`, `invalid_target` for another `resource`), `state` and `iss`. `scope` names\nany of read, backtests, models and publish (all of them when it names none); the user picks\non the consent page.",
+        "operationId": "authorize_api_v1_oauth_authorize_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "response_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Response Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Client Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "redirect_uri",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Redirect Uri"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code_challenge",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code Challenge"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code_challenge_method",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code Challenge Method"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope"
+            }
+          },
+          {
+            "description": "The MCP server's URL (RFC 8707), `<PUBLIC_URL>/mcp`",
+            "in": "query",
+            "name": "resource",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The MCP server's URL (RFC 8707), `<PUBLIC_URL>/mcp`",
+              "title": "Resource"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The client_id or the redirect_uri is unknown, so the browser cannot be sent back (`invalid-authorization-request`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many sign-in requests from this address (`rate-limited`)."
+          }
+        },
+        "summary": "Authorize",
+        "tags": [
+          "oauth"
+        ]
+      }
+    },
+    "/api/v1/oauth/register": {
+      "post": {
+        "description": "Dynamic client registration (RFC 7591): an MCP client registers itself and gets its\n`client_id`, and a `client_secret` when it asked for `client_secret_post` or\n`client_secret_basic` (the default). Clients that publish a client ID metadata document use\nits URL as their `client_id` instead and need no registration.",
+        "operationId": "register_api_v1_oauth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "What a client says about itself (RFC 7591), in a registration request or its client ID\nmetadata document. Members the server does not use are ignored.",
+                "properties": {
+                  "client_name": {
+                    "anyOf": [
+                      {
+                        "maxLength": 100,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The app's name",
+                    "examples": [
+                      "Claude"
+                    ],
+                    "title": "Client Name"
+                  },
+                  "client_uri": {
+                    "anyOf": [
+                      {
+                        "maxLength": 512,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Client Uri"
+                  },
+                  "grant_types": {
+                    "default": [
+                      "authorization_code",
+                      "refresh_token"
+                    ],
+                    "description": "`authorization_code` and `refresh_token` only",
+                    "items": {
+                      "type": "string"
+                    },
+                    "title": "Grant Types",
+                    "type": "array"
+                  },
+                  "logo_uri": {
+                    "anyOf": [
+                      {
+                        "maxLength": 512,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Logo Uri"
+                  },
+                  "redirect_uris": {
+                    "description": "Where the browser returns with the code: https URLs, or http on a loopback address (127.0.0.1, [::1], localhost) for a native app, whose port may change from one sign-in to the next",
+                    "examples": [
+                      [
+                        "https://claude.ai/api/mcp/auth_callback"
+                      ]
+                    ],
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 10,
+                    "minItems": 1,
+                    "title": "Redirect Uris",
+                    "type": "array"
+                  },
+                  "response_types": {
+                    "default": [
+                      "code"
+                    ],
+                    "description": "`code` only",
+                    "items": {
+                      "type": "string"
+                    },
+                    "title": "Response Types",
+                    "type": "array"
+                  },
+                  "token_endpoint_auth_method": {
+                    "$ref": "#/components/schemas/TokenEndpointAuthMethod",
+                    "default": "client_secret_basic",
+                    "description": "`none`, `client_secret_post` or `client_secret_basic` (the default of RFC 7591); a metadata document may only say `none`"
+                  }
+                },
+                "required": [
+                  "redirect_uris"
+                ],
+                "title": "ClientMetadataIn",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientRegistrationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorOut"
+                }
+              }
+            },
+            "description": "`invalid_client_metadata` or `invalid_redirect_uri`"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many registrations from this address (`rate-limited`)."
+          }
+        },
+        "summary": "Register",
+        "tags": [
+          "oauth"
+        ]
+      }
+    },
+    "/api/v1/oauth/requests/{request_id}": {
+      "get": {
+        "description": "An app's request for access, for the consent page: the app as it names itself, the host\nit returns to and the scopes it asks for in plain words. Needs no session, so the page can\nname the app before the user signs in; the ID is the secret.",
+        "operationId": "authorization_request_api_v1_oauth_requests__request_id__get",
+        "parameters": [
+          {
+            "description": "The ID from the consent page's address",
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "description": "The ID from the consent page's address",
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationRequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No authorization request has this ID: it was decided, expired (10 minutes) or never was (`authorization-request-not-found`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          }
+        },
+        "summary": "Authorization Request",
+        "tags": [
+          "oauth"
+        ]
+      },
+      "post": {
+        "description": "The user's decision on an app's request, once: `allow` with the scopes to grant (read\nalways), or `deny`. Answers where the browser goes back to the app: its redirect URI with a\n`code` (5 minutes, used once) or `error=access_denied`, with `state` and `iss`.",
+        "operationId": "decide_api_v1_oauth_requests__request_id__post",
+        "parameters": [
+          {
+            "description": "The ID from the consent page's address",
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "description": "The ID from the consent page's address",
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not come from the app's own pages (`cross-origin-request`), or the account is not on the beta list (`not-on-beta-list`). API keys cannot do this, only the signed-in browser (`session-required`)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No authorization request has this ID: it was decided, expired (10 minutes) or never was (`authorization-request-not-found`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A scope the app did not ask for (`scope-not-requested`; `scope`)."
+          }
+        },
+        "summary": "Decide",
+        "tags": [
+          "oauth"
+        ]
+      }
+    },
+    "/api/v1/oauth/revoke": {
+      "post": {
+        "description": "Token revocation (RFC 7009): a refresh token ends with every token of its sign-in, an\naccess token alone. 200 also for a token that is unknown or another client's.",
+        "operationId": "revoke_api_v1_oauth_revoke_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "properties": {
+                  "client_id": {
+                    "description": "The client's ID, unless it authenticates with HTTP Basic",
+                    "type": "string"
+                  },
+                  "client_secret": {
+                    "description": "With `client_secret_post`: the client's secret",
+                    "type": "string"
+                  },
+                  "token": {
+                    "description": "The access or refresh token to revoke",
+                    "type": "string"
+                  },
+                  "token_type_hint": {
+                    "description": "`access_token` or `refresh_token`; not needed",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "token"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorOut"
+                }
+              }
+            },
+            "description": "`invalid_request`: no token"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorOut"
+                }
+              }
+            },
+            "description": "`invalid_client`"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "API keys cannot do this, only the signed-in browser (`session-required`)."
+          }
+        },
+        "summary": "Revoke",
+        "tags": [
+          "oauth"
+        ]
+      }
+    },
+    "/api/v1/oauth/token": {
+      "post": {
+        "description": "The token endpoint: trades a code and its PKCE verifier, or a refresh token, for an\naccess token (`csa_...`, an hour) and a new refresh token (`csr_...`, 30 days, works once;\nbringing a used one again revokes every token of that sign-in). A public client sends its\n`client_id`; a client with a secret authenticates as it registered.",
+        "operationId": "token_api_v1_oauth_token_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "properties": {
+                  "client_id": {
+                    "description": "The client's ID, unless it authenticates with HTTP Basic",
+                    "type": "string"
+                  },
+                  "client_secret": {
+                    "description": "With `client_secret_post`: the client's secret",
+                    "type": "string"
+                  },
+                  "code": {
+                    "description": "With `authorization_code`: the code from the redirect",
+                    "type": "string"
+                  },
+                  "code_verifier": {
+                    "description": "With `authorization_code`: the PKCE verifier",
+                    "type": "string"
+                  },
+                  "grant_type": {
+                    "description": "`authorization_code` or `refresh_token`",
+                    "type": "string"
+                  },
+                  "redirect_uri": {
+                    "description": "With `authorization_code`: the redirect URI of the request",
+                    "type": "string"
+                  },
+                  "refresh_token": {
+                    "description": "With `refresh_token`: the refresh token, used once",
+                    "type": "string"
+                  },
+                  "resource": {
+                    "description": "The MCP server's URL (RFC 8707)",
+                    "type": "string"
+                  },
+                  "scope": {
+                    "description": "With `refresh_token`: fewer scopes than granted, space-separated",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "grant_type"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorOut"
+                }
+              }
+            },
+            "description": "`invalid_request`, `invalid_grant` (the code or refresh token is unknown, used, expired or revoked, the verifier does not match, the account left the beta list), `invalid_scope`, `invalid_target` or `unsupported_grant_type`"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorOut"
+                }
+              }
+            },
+            "description": "`invalid_client`"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "API keys cannot do this, only the signed-in browser (`session-required`)."
+          }
+        },
+        "summary": "Token",
+        "tags": [
+          "oauth"
         ]
       }
     },

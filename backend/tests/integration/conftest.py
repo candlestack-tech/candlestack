@@ -92,7 +92,7 @@ ORIGIN = {"Origin": "http://testserver"}
 # Every table of what users create; TRUNCATE needs the ones that refer to users with them.
 TABLES = (
     "users, identities, sessions, user_preferences, api_keys, models, model_uploads, sweeps, "
-    "backtests"
+    "backtests, oauth_clients, connected_apps, oauth_tokens"
 )
 
 
@@ -166,8 +166,13 @@ class Account:
             expires=now + timedelta(days=30),
         )
 
+    @property
+    def cookie(self) -> str:
+        """The ``Cookie`` header of the user's session."""
+        return f"session={self._token}"
+
     def request(self, method: str, url: str, **kwargs: Any) -> httpx2.Response:
-        headers = {**ORIGIN, "Cookie": f"session={self._token}", **kwargs.pop("headers", {})}
+        headers = {**ORIGIN, "Cookie": self.cookie, **kwargs.pop("headers", {})}
         self._client.cookies.clear()
         return self._client.request(method, url, headers=headers, **kwargs)
 

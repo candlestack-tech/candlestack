@@ -21,10 +21,14 @@ from fastapi import Depends, Request, Response, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, SecurityScopes
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from candlestack.accounts.authorization import AccessTokens, AuthorizationServer
+from candlestack.accounts.client_metadata import ClientDocuments
 from candlestack.accounts.cookies import SESSION, Cookies, CookiesDep
 from candlestack.accounts.keys import ApiKeys
 from candlestack.accounts.models import User
 from candlestack.accounts.oauth import OAuthClient
+from candlestack.accounts.oauth_pending import OAuthPending
+from candlestack.accounts.oauth_store import OAuthStore
 from candlestack.accounts.pending import PendingStore
 from candlestack.accounts.schemas import Scope
 from candlestack.accounts.service import SESSION_MAX_AGE, AccountDeletionHook, AccountsService
@@ -45,8 +49,11 @@ from candlestack.core import (
 # Sign-in requests (start, callback, dev sign-in) per minute and client address: a person needs
 # a few; more is someone trying states or codes.
 SIGN_IN_RATE_LIMIT = 20
-# Requests per minute and API key: a script or an agent at a steady two a second.
+# Requests per minute and API key, or connected app: a script or an agent at a steady two a
+# second.
 API_KEY_RATE_LIMIT = 120
+# Client registrations per minute and client address: an MCP client registers once.
+REGISTER_RATE_LIMIT = 10
 # The name of the API key scheme in the API reference.
 API_KEY_SCHEME = "apiKey"
 
@@ -95,6 +102,15 @@ def get_api_keys(settings: SettingsDep, db: DbSessionDep) -> ApiKeys:
 
 
 ApiKeysDep = Annotated[ApiKeys, Depends(get_api_keys)]
+
+
+def get_authorization_server(
+    settings: SettingsDep, redis: RedisDep, db: DbSessionDep, http: HttpClientDep
+) -> AuthorizationServer:
+    return AuthorizationServer(settings, OAuthStore(db), OAuthPending(redis), ClientDocuments(http))
+
+
+AuthorizationServerDep = Annotated[AuthorizationServer, Depends(get_authorization_server)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,16 +212,7 @@ async def _key_caller(token: str, keys: ApiKeys, limiter: RateLimiter) -> Caller
         )
     wait = await limiter.hit(f"accounts:key-rl:{signed_in.key.id}", API_KEY_RATE_LIMIT)
     if wait > 0:
-        seconds = max(1, math.ceil(wait))
-        raise ProblemError(
-            429,
-            "rate-limited",
-            "Too many requests",
-            f"More than {API_KEY_RATE_LIMIT} requests in one minute with this API key. Retry in "
-            f"{seconds} seconds.",
-            headers={"Retry-After": str(seconds)},
-            extensions={"limit": API_KEY_RATE_LIMIT},
-        )
+        raise _rate_limited(wait, "API key")
     await keys.mark_used(signed_in.key)
     return Caller(signed_in.user, signed_in.scopes)
 
@@ -221,6 +228,47 @@ async def key_caller(
         ProblemError: 401 ``invalid-api-key`` or 429 ``rate-limited``.
     """
     return await _key_caller(token, ApiKeys(settings, AccountStore(db)), limiter)
+
+
+def _rate_limited(wait: float, what: str) -> ProblemError:
+    seconds = max(1, math.ceil(wait))
+    return ProblemError(
+        429,
+        "rate-limited",
+        "Too many requests",
+        f"More than {API_KEY_RATE_LIMIT} requests in one minute with this {what}. Retry in "
+        f"{seconds} seconds.",
+        headers={"Retry-After": str(seconds)},
+        extensions={"limit": API_KEY_RATE_LIMIT},
+    )
+
+
+async def token_caller(
+    token: str, *, resource: str, settings: Settings, db: AsyncSession, limiter: RateLimiter
+) -> Caller:
+    """The caller of a request to `resource` (the MCP server) with the OAuth access token
+    `token`: its user and scopes, ``API_KEY_RATE_LIMIT`` requests a minute per connected app,
+    and the app's last use, on the session `db`. Scopes are not checked here.
+
+    Raises:
+        ProblemError: 401 ``invalid-access-token`` or 429 ``rate-limited``.
+    """
+    tokens = AccessTokens(settings, OAuthStore(db))
+    signed_in = await tokens.sign_in(token, resource)
+    if signed_in is None:
+        raise ProblemError(
+            401,
+            "invalid-access-token",
+            "Invalid access token",
+            "The access token is unknown, expired or revoked, or its account is no longer on "
+            "the beta list. Sign in again from the app.",
+            headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
+        )
+    wait = await limiter.hit(f"accounts:app-rl:{signed_in.app.id}", API_KEY_RATE_LIMIT)
+    if wait > 0:
+        raise _rate_limited(wait, "connected app")
+    await tokens.mark_used(signed_in.app)
+    return Caller(signed_in.user, signed_in.scopes)
 
 
 async def authenticate(  # noqa: PLR0913 (the request and what signs it in)
@@ -299,6 +347,22 @@ async def sign_in_wait(request: Request, limiter: RateLimiterDep) -> int:
     """Counts a sign-in request of the client; the seconds it must wait, 0 within the limit."""
     wait = await limiter.hit(f"accounts:rl:{client_address(request)}", SIGN_IN_RATE_LIMIT)
     return max(1, math.ceil(wait)) if wait > 0 else 0
+
+
+async def limit_registrations(request: Request, limiter: RateLimiterDep) -> None:
+    """429 ``rate-limited`` beyond ``REGISTER_RATE_LIMIT`` client registrations a minute."""
+    wait = await limiter.hit(f"accounts:reg-rl:{client_address(request)}", REGISTER_RATE_LIMIT)
+    if wait > 0:
+        seconds = max(1, math.ceil(wait))
+        raise ProblemError(
+            429,
+            "rate-limited",
+            "Too many requests",
+            f"More than {REGISTER_RATE_LIMIT} client registrations in one minute from this "
+            f"address. Retry in {seconds} seconds.",
+            headers={"Retry-After": str(seconds)},
+            extensions={"limit": REGISTER_RATE_LIMIT},
+        )
 
 
 async def limit_sign_ins(wait: Annotated[int, Depends(sign_in_wait)]) -> None:

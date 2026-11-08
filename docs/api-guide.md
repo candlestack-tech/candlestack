@@ -78,6 +78,12 @@ claude mcp add --transport http candlestack https://app.candlestack.tech/mcp \
 Its tool `get_me` answers who the key signs in as and its scopes. The other clients and every
 tool are on https://candlestack.tech/docs/mcp/.
 
+claude.ai and ChatGPT need no key: add `https://app.candlestack.tech/mcp` as a custom connector,
+and the app sends you through the CandleStack sign-in (OAuth 2.1) to a page where you choose
+what it may do, with the same scopes as keys. Settings, API and MCP lists those connected apps,
+and Disconnect ends an app's access at once. An OAuth access token works at `/mcp` only, not on
+the HTTP API.
+
 ## Find an instrument
 
 An instrument id is `<market>:<symbol>`: `crypto:BTCUSDT`, `stock:AAPL`. Search the catalog with

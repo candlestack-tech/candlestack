@@ -1,12 +1,12 @@
 """The accounts tables: users, the GitHub and Google identities they sign in with, their
-browser sessions, their settings and their API keys. Changed only through migrations
-(``backend/migrations``)."""
+browser sessions, their settings, their API keys, and the OAuth clients, connected apps and
+tokens of the MCP sign-in. Changed only through migrations (``backend/migrations``)."""
 
 import secrets
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, LargeBinary, String, text
+from sqlalchemy import DateTime, ForeignKey, LargeBinary, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,6 +18,10 @@ _ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567"
 _ID_LENGTH = 10
 # The column's room; a name is at most ``schemas.DISPLAY_NAME_MAX`` long.
 DISPLAY_NAME_LENGTH = 200
+# The room of an OAuth client's ID (an https URL for a metadata document), name and URLs.
+CLIENT_ID_LENGTH = 512
+CLIENT_NAME_LENGTH = 100
+CLIENT_URI_LENGTH = 512
 
 
 def _random_id(prefix: str) -> str:
@@ -114,3 +118,75 @@ class ApiKey(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+def new_connected_app_id() -> str:
+    """A public ID of a connected app such as ``app_7f3k2m4qx4`` (50 random bits)."""
+    return _random_id("app_")
+
+
+def new_client_id() -> str:
+    """The ``client_id`` of a client that registered itself such as
+    ``ocl_7f3k2m4qx4abcdef`` (80 random bits): public, so its length only keeps it unique."""
+    return "ocl_" + "".join(secrets.choice(_ID_ALPHABET) for _ in range(16))
+
+
+class RegisteredClient(Base):
+    """An OAuth client, an MCP client such as claude.ai or ChatGPT: one that registered itself
+    (RFC 7591, ``client_id`` ``ocl_...``), or one whose ``client_id`` is the https URL of its
+    metadata document, kept here as last fetched (``fetched_at``). Only the SHA-256 of a
+    client's secret is stored; a public client (``token_endpoint_auth_method`` ``none``) has
+    none. The client says who it is: its name is shown with the host it returns to."""
+
+    __tablename__ = "oauth_clients"
+
+    client_id: Mapped[str] = mapped_column(String(CLIENT_ID_LENGTH), primary_key=True)
+    metadata_document: Mapped[bool]
+    name: Mapped[str | None] = mapped_column(String(CLIENT_NAME_LENGTH))
+    client_uri: Mapped[str | None] = mapped_column(String(CLIENT_URI_LENGTH))
+    logo_uri: Mapped[str | None] = mapped_column(String(CLIENT_URI_LENGTH))
+    redirect_uris: Mapped[list[str]] = mapped_column(ARRAY(String(CLIENT_URI_LENGTH)))
+    token_endpoint_auth_method: Mapped[str] = mapped_column(String(32))
+    secret_hash: Mapped[bytes | None] = mapped_column(LargeBinary(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ConnectedApp(Base):
+    """A client a user allowed to act for them, with the scopes of their last consent: what
+    Settings lists under Connected apps. Deleting it (disconnect) deletes its tokens."""
+
+    __tablename__ = "connected_apps"
+    __table_args__ = (UniqueConstraint("user_id", "client_id"),)
+
+    id: Mapped[str] = mapped_column(String(14), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[str] = mapped_column(
+        ForeignKey("oauth_clients.client_id", ondelete="CASCADE"), index=True
+    )
+    # The values of ``schemas.Scope``, in their order.
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(String(16)))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AppToken(Base):
+    """An access token (``csa_...``, an hour) or a refresh token (``csr_...``, 30 days) of a
+    connected app. Only the SHA-256 is stored. The tokens one authorization started share a
+    ``family``; a refresh token is used once (``rotated_at``), and using it again ends the
+    family. A token is bound to its app's client and to ``resource``, the MCP server."""
+
+    __tablename__ = "oauth_tokens"
+
+    token_hash: Mapped[bytes] = mapped_column(LargeBinary(32), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(8))
+    app_id: Mapped[str] = mapped_column(
+        ForeignKey("connected_apps.id", ondelete="CASCADE"), index=True
+    )
+    family: Mapped[str] = mapped_column(String(32), index=True)
+    # The values of ``schemas.Scope``, in their order.
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(String(16)))
+    resource: Mapped[str] = mapped_column(String(CLIENT_URI_LENGTH))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

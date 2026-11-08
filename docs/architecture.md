@@ -8,7 +8,8 @@ instrument catalog and candles from Binance and Alpaca, see [data.md](data.md)),
 users upload: the upload and its checks, the files, the list) and `experiments` (the
 backtests: running them, their result documents, the Backtests page, the published ones of
 Experiments and the Dashboard).
-Postgres stores what users create, accounts, sessions, API keys, settings, the models and the backtests,
+Postgres stores what users create, accounts, sessions, API keys, the OAuth clients and tokens of MCP
+clients, settings, the models and the backtests,
 and a volume the files of the models; market data is not stored: the sources are the truth and
 Redis is a cache that can be lost at any time. The backtest itself is `signals`, `engine` and
 `metrics` (see [Modules](#modules) and the contract in [engine.md](engine.md)), which
@@ -83,6 +84,14 @@ flowchart LR
 | `GET /api/v1/me/api-keys` | the user's API keys that are not revoked, oldest first, without their secrets, and the `limit` of 10; session only ([Accounts](#accounts)) |
 | `POST /api/v1/me/api-keys` | creates an API key (`name`, `scopes`, optional `expires_in_days` 1 to 365); 201 with its `secret`, the only time it is shown; `409 too-many-api-keys` beyond 10 that are neither revoked nor expired; session only |
 | `DELETE /api/v1/me/api-keys/{key_id}` | revokes an API key: it stops working at once; session only |
+| `GET /api/v1/oauth/authorize` | the OAuth authorization endpoint of MCP clients (code with PKCE S256): redirects to the consent page `/oauth/consent?request=<id>` (through `/signin?next=...` without a session) or back to the client with `error`; `400 invalid-authorization-request` for an unknown client or redirect URI ([OAuth](#oauth)) |
+| `POST /api/v1/oauth/token` | trades a code and its verifier, or a refresh token, for an access token (an hour) and a new refresh token; OAuth errors as `{"error", "error_description"}` |
+| `POST /api/v1/oauth/register` | dynamic client registration (RFC 7591): 201 with `client_id` and, for a confidential client, its `client_secret` |
+| `POST /api/v1/oauth/revoke` | revokes a client's access or refresh token (RFC 7009) |
+| `GET /api/v1/oauth/requests/{request_id}` | an app's pending request for the consent page: the app as it names itself, the host it returns to, the scopes in plain words; no session needed |
+| `POST /api/v1/oauth/requests/{request_id}` | the user's decision (`allow` with the scopes, or `deny`), once: answers `redirect_to`, the client's redirect URI with a code or `error=access_denied`; session only |
+| `GET /api/v1/me/connected-apps` | the apps the user allowed (client, scopes, connected, last used), the most recent first; session only |
+| `DELETE /api/v1/me/connected-apps/{app_id}` | disconnects an app: its tokens stop working at once; session only |
 | `GET /api/v1/me/preferences` | the user's settings (backtest defaults, appearance), defaults included |
 | `PUT /api/v1/me/preferences/backtest-defaults` | replaces the backtest defaults: every field, no other (`period_start` before `period_end`), else 422 |
 | `PATCH /api/v1/me/preferences/appearance` | changes the appearance settings it is given; an unknown field is a 422 |
@@ -105,8 +114,9 @@ flowchart LR
 | `POST /api/v1/sweeps` | starts a backtest for every combination of a base setup and the lists in `vary` (models, instruments, periods, decision rules), 2 to 20, all in the user's queue or none; 201 with the sweep and `Location`, or with `validate_only` 200 with the count and each setup and nothing started ([Sweeps](#sweeps)) |
 | `GET /api/v1/sweeps/{sweep_id}` | the user's sweep: progress, each backtest's ID, status and setup, and once all ended the ranking by `metric` (the sweep's own unless the query names another) ([Sweeps](#sweeps)) |
 | `GET /api/v1/dashboard` | everything the Dashboard shows in one response: the counts, the 6 newest backtests, the 5 best finished ones by Sharpe ratio, return, drawdown and win rate, the 4 best starred ones, and the 4 newest published backtests of anyone with how many are published |
-| `POST /mcp` (and `GET`, `DELETE`) | the MCP server, Streamable HTTP, signed in with an API key only ([MCP](#mcp)); not in the API reference |
-| `GET /.well-known/oauth-protected-resource/mcp` | the MCP server's protected resource metadata (RFC 9728): its address, scopes and docs; not in the API reference |
+| `POST /mcp` (and `GET`, `DELETE`) | the MCP server, Streamable HTTP, signed in with an API key or an OAuth access token ([MCP](#mcp)); not in the API reference |
+| `GET /.well-known/oauth-protected-resource/mcp` | the MCP server's protected resource metadata (RFC 9728): its address, authorization server, scopes and docs; not in the API reference |
+| `GET /.well-known/oauth-authorization-server/api/v1/oauth` | the authorization server metadata (RFC 8414), also at `/api/v1/oauth/.well-known/oauth-authorization-server`; not in the API reference ([OAuth](#oauth)) |
 | `GET /api/v1/docs` | API reference (Scalar); public on prod |
 | `GET /api/v1/openapi.json` | OpenAPI schema; snapshot committed as [openapi.json](openapi.json) |
 
@@ -124,7 +134,13 @@ flowchart LR
   the app's own pages), `missing-scope` (403: the key lacks a scope the route needs,
   `scope` names it), `session-required` (403: keys cannot do this),
   `too-many-api-keys` (409: 10 keys that are neither revoked nor expired, with `limit`)
-  and `last-sign-in-method` (409: removing the account's only sign-in method), and uses
+  and `last-sign-in-method` (409: removing the account's only sign-in method), for the OAuth
+  sign-in of MCP clients `invalid-access-token` (401 at `/mcp`: the token is unknown, expired,
+  revoked or for another resource, or its account left the beta list),
+  `invalid-authorization-request` (400: an authorize request with an unknown client or redirect
+  URI), `authorization-request-not-found` (404: the consent page's request was decided, expired
+  or never was), `not-on-beta-list` (403: allowing an app from an account off the beta list) and
+  `scope-not-requested` (422: granting a scope the app did not ask for, with `scope`), and uses
   `not-found` (404) and `rate-limited` (429: also more than 120 requests a minute with one
   key) too. The ml module adds `model-too-large` (413: a
   file over 50 MB), `storage-full` (409: the file does not fit into the user's 100 MB, with
@@ -956,13 +972,14 @@ call, as the routes' dependencies do), never the API over HTTP.
   so it stops first. The SDK's Host check is off (the edge sets the host); a request with an
   `Origin` other than `PUBLIC_URL` is `403 cross-origin-request`, against DNS rebinding.
 - **Sign-in**: an API key in `Authorization: Bearer`, checked by `accounts.key_caller` as on a
-  route (the hash, revoked, expired, the beta list, 120 requests a minute, the last use); every
-  HTTP request counts, `initialize` and `tools/list` included. Without a key: `401
-  not-signed-in` with `WWW-Authenticate: Bearer resource_metadata="<PUBLIC_URL>/.well-known/oauth-protected-resource/mcp"`,
-  as the MCP authorization spec asks; a key that does not sign in: `401 invalid-api-key` with
-  `error="invalid_token"` and the same URL. The metadata (RFC 9728) names the resource
-  (`<PUBLIC_URL>/mcp`), the scopes and the docs and lists no authorization server until OAuth
-  comes (#408). Cookies play no part.
+  route (the hash, revoked, expired, the beta list, 120 requests a minute, the last use), or an
+  OAuth access token (`csa_...`, [OAuth](#oauth)), checked by `accounts.token_caller` the same
+  way, per connected app, and only for this resource; every HTTP request counts, `initialize`
+  and `tools/list` included. Without either: `401 not-signed-in` with `WWW-Authenticate: Bearer resource_metadata="<PUBLIC_URL>/.well-known/oauth-protected-resource/mcp"`,
+  as the MCP authorization spec asks; a key or token that does not sign in: `401
+  invalid-api-key` or `401 invalid-access-token` with `error="invalid_token"` and the same URL.
+  The metadata (RFC 9728) names the resource (`<PUBLIC_URL>/mcp`), its authorization server
+  (`<PUBLIC_URL>/api/v1/oauth`), the scopes and the docs. Cookies play no part.
 - **Scopes per tool**: each tool names the scopes a key needs (`read` for the tools that only
   read); the server checks them before the tool runs and answers `missing-scope` as the
   routes do.
@@ -1006,6 +1023,74 @@ call, as the routes' dependencies do), never the API over HTTP.
   is stale (like `openapi.json`), and the website builds `candlestack.tech/docs/mcp/tools/` from
   it (website#76).
 
+## OAuth
+
+The `accounts` module is the OAuth 2.1 authorization server through which claude.ai, ChatGPT and
+other remote MCP clients sign in as a user, as the MCP authorization spec asks
+(`accounts.authorization`, routes in `accounts.oauth_api`). Its issuer is
+`<PUBLIC_URL>/api/v1/oauth`, so every endpoint sits under `/api/v1/` and the edge routes it to the
+backend like the rest of the API; the metadata (RFC 8414) is served at
+`/.well-known/oauth-authorization-server/api/v1/oauth` and at
+`/api/v1/oauth/.well-known/oauth-authorization-server`.
+
+- **Clients**: table `oauth_clients`. A client registers itself (RFC 7591,
+  `POST /api/v1/oauth/register`, `client_id` `ocl_...`, 10 registrations a minute per address):
+  public (`token_endpoint_auth_method` `none`, PKCE alone) or confidential (`client_secret_post`
+  or `client_secret_basic`, the RFC's default; only the secret's SHA-256 is kept). Or its
+  `client_id` is the https URL of its client ID metadata document, which the server fetches on
+  the authorize step and keeps in the same table for an hour (`fetched_at`). That fetch is held
+  tight: https with a path, no user name or dot segments; every address the host resolves to must
+  be public (no loopback, private, link-local, shared or multicast address, IPv4 in IPv6
+  included) and the connection goes to the address that was checked, with the TLS name and
+  certificate check of the host (`sni_hostname`), so a second DNS answer cannot slip in; no
+  redirects; at most 16 KB in 5 seconds; the document's `client_id` must be its URL, it may hold
+  no secret and its method must be `none`. Redirect URIs are https, or http on a loopback address
+  (RFC 8252), without fragments, and must match a registered one exactly; on a loopback address
+  the port may differ.
+- **Authorize** (`GET /api/v1/oauth/authorize`): an unknown client or redirect URI is a `400
+  invalid-authorization-request` problem, as nothing proves where to send the browser. Then the
+  errors go back to the redirect URI (with `state` and `iss`, RFC 9207): `response_type` must be
+  `code`, a 43-character S256 `code_challenge` is required (no `plain`), `resource` (RFC 8707)
+  must be the MCP server `<PUBLIC_URL>/mcp` when given (`invalid_target`), and `state` at most
+  1024 characters. `scope` names any of the key scopes (unknown names such as `offline_access`
+  are ignored; none means all four). The request waits in Redis for 10 minutes
+  (`oauth:request:<sha256 of its id>`) and the browser goes to the consent page
+  `/oauth/consent?request=<id>` of the web app, through `/signin?next=<that page>` when it has no
+  session: the normal GitHub or Google sign-in with the beta list, and back. The authorize step
+  counts against the sign-in limit of the address (20 a minute).
+- **Consent**: `GET /api/v1/oauth/requests/{id}` names the app (its `client_name`, else the
+  redirect host), its logo and home page, the host it returns to (anyone can register an app
+  called Claude) and the scopes in plain words; it needs no session, so the page can name the app
+  before the sign-in, as the ID is the secret. `POST` with the session and the app's own origin
+  decides it once: `allow` grants the chosen scopes, each one the app asked for (else `422
+  scope-not-requested`), read always, and only for an account on the beta list; `deny` answers
+  `error=access_denied`. The answer's `redirect_to` is where the page sends the browser.
+- **Code**: random, 5 minutes, used once, kept in Redis with the client, redirect URI, PKCE
+  challenge, scopes, resource and user. The token endpoint checks all of them and the verifier;
+  a code brought a second time ends the tokens it gave (`oauth:used-code:<sha256>` remembers
+  their family for the code's lifetime).
+- **Tokens**: table `oauth_tokens`, kept like API keys: only the SHA-256 of the token, its kind,
+  scopes, resource (the MCP server), expiry and family. An access token (`csa_`, 256 random
+  bits) works an hour at `/mcp` only, not on the HTTP API; a refresh token (`csr_`) 30 days from
+  its issue. A refresh token works once (`rotated_at`, its row locked while it is swapped): the
+  answer holds a new one in the same family, and bringing a used one again deletes the whole
+  family, as a copy is in someone else's hands. A refresh may narrow the scopes, never widen
+  them (`invalid_scope`). Every use checks the beta list and the client the token belongs to;
+  expired tokens of an app go when it gets new ones. `POST /api/v1/oauth/revoke` (RFC 7009)
+  ends a refresh token with its family and an access token alone, and answers 200 also for a
+  token that is unknown or another client's.
+- **Connected apps**: table `connected_apps`, one per user and client (deleted with either),
+  with the scopes of the last consent and `last_used_at` (written at most once a minute in a
+  transaction of its own, like a key's). A new authorization of the same client replaces the
+  app's earlier tokens. Its requests at `/mcp` share 120 a minute. `GET` and `DELETE
+  /api/v1/me/connected-apps` list and disconnect apps with the browser session only; deleting
+  the app deletes its tokens.
+- Clients authenticate at the token and revocation endpoints the way they registered: a public
+  client sends its `client_id`, a confidential one its secret in the form or with HTTP Basic
+  (`invalid_client`, 401, otherwise). These endpoints take no cookies and speak OAuth's error
+  JSON with `Cache-Control: no-store`; the API reference lists them under `oauth`. CORS is not
+  allowed, so browser-based MCP clients cannot register or trade codes from a page.
+
 ## Modules
 
 A module is a subpackage of `candlestack` under `backend/src/candlestack/`.
@@ -1014,7 +1099,7 @@ A module is a subpackage of `candlestack` under `backend/src/candlestack/`.
 | --- | --- | --- |
 | `core` | now | settings, logging, problem errors, Redis, Postgres and HTTP clients, CSRF protection, health endpoint |
 | `data` | now | instrument catalog, candles, sessions, cache, source adapters, rate limits |
-| `accounts` | now | users, GitHub and Google sign-in, sessions, the beta list, Settings (name, sign-in methods, preferences, deleting the account); `CurrentUserDep` and the scoped dependencies for the routes of the signed-in user (session or API key), `AccountDeletionHook` for what other modules delete with an account |
+| `accounts` | now | users, GitHub and Google sign-in, sessions, the beta list, Settings (name, sign-in methods, preferences, deleting the account, connected apps), API keys, the OAuth authorization server of MCP clients; `CurrentUserDep` and the scoped dependencies for the routes of the signed-in user (session or API key), `AccountDeletionHook` for what other modules delete with an account |
 | `preprocessing` | started | the model's input from its manifest: the manifest's schema and checks, the catalog of blocks, and the input built from candles: representation (candles, Renko triples and a Kagi line), features, normalization, windows ([preprocessing.md](preprocessing.md)) |
 | `ml` | now | the models users upload: the upload and its static check, the one-time upload links, the file storage, the list, rename, star, delete, the manifest; the worker runs them and checks them with their manifests ([Worker](#worker)) |
 | `signals` | started | turn predictions into signals: align them with the candles, thresholds, long only; later smoothing, holding period, sizing, risk limits |
