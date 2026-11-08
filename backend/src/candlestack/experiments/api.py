@@ -10,7 +10,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Response
 
-from candlestack.accounts import CurrentUserDep
+from candlestack.accounts import BacktestsUserDep, CallerDep, CurrentUserDep, Scope
 from candlestack.core import NO_STORE, ProblemError, problem_doc, require_same_origin
 from candlestack.data import data_problems
 from candlestack.experiments.dependencies import BacktestRunsDep, BacktestsServiceDep
@@ -124,20 +124,29 @@ async def list_backtests(
         ),
     },
     dependencies=[Depends(require_same_origin)],
+    # An API key needs `publish` to publish or unpublish, `backtests` for the rest.
+    openapi_extra={
+        "security": [{"apiKey": [Scope.backtests.value]}, {"apiKey": [Scope.publish.value]}]
+    },
 )
 async def update_backtest(
     backtest_id: BacktestId,
     body: BacktestUpdate,
-    user: CurrentUserDep,
+    caller: CallerDep,
     service: BacktestsServiceDep,
     response: Response,
 ) -> BacktestOut:
     """Stars, unstars, renames, publishes or unpublishes the user's backtest; a field left out
     stays as it is. A name of null goes back to the generated name. Unpublishing takes it out
-    of Experiments and out of other people's Compare."""
+    of Experiments and out of other people's Compare. With an API key, publishing and unpublishing
+    need the scope `publish`, the rest `backtests`."""
+    needed = {
+        Scope.publish if field == "public" else Scope.backtests for field in body.model_fields_set
+    }
+    caller.require(*(scope for scope in Scope if scope in needed))
     response.headers.update(NO_STORE)
     try:
-        return await service.update(user.id, backtest_id, body)
+        return await service.update(caller.user.id, backtest_id, body)
     except BacktestNotFound:
         raise ProblemError(
             404, "not-found", "Not Found", "You have no backtest with this ID."
@@ -389,7 +398,7 @@ def _json(
     dependencies=[Depends(require_same_origin)],
 )
 async def start_backtest(
-    body: BacktestIn, user: CurrentUserDep, runs: BacktestRunsDep, response: Response
+    body: BacktestIn, user: BacktestsUserDep, runs: BacktestRunsDep, response: Response
 ) -> Response:
     """Starts a backtest of one of the user's models on one instrument and period and returns
     its document, `running`, with its number. Checked first: the model is the user's and has a

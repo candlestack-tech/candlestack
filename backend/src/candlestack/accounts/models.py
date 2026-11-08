@@ -1,12 +1,13 @@
 """The accounts tables: users, the GitHub and Google identities they sign in with, their
-browser sessions and their settings. Changed only through migrations (``backend/migrations``)."""
+browser sessions, their settings and their API keys. Changed only through migrations
+(``backend/migrations``)."""
 
 import secrets
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, LargeBinary, String, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from candlestack.core import Base
@@ -19,9 +20,18 @@ _ID_LENGTH = 10
 DISPLAY_NAME_LENGTH = 200
 
 
+def _random_id(prefix: str) -> str:
+    return prefix + "".join(secrets.choice(_ID_ALPHABET) for _ in range(_ID_LENGTH))
+
+
 def new_user_id() -> str:
     """A public user ID such as ``usr_7f3k2m9qx4`` (50 random bits)."""
-    return "usr_" + "".join(secrets.choice(_ID_ALPHABET) for _ in range(_ID_LENGTH))
+    return _random_id("usr_")
+
+
+def new_api_key_id() -> str:
+    """A public API key ID such as ``key_7f3k2m4qx4`` (50 random bits)."""
+    return _random_id("key_")
 
 
 class User(Base):
@@ -84,3 +94,23 @@ class UserPreferences(Base):
     )
     appearance: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ApiKey(Base):
+    """A key a script or an agent signs in with as its user (``Authorization: Bearer cs_...``).
+    Only the SHA-256 of the key is stored, so the table cannot be used to sign in; ``prefix``,
+    the key's start, finds its row and tells keys apart. A revoked key keeps its row."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(String(14), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    # The values of ``schemas.Scope``, in their order.
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(String(16)))
+    prefix: Mapped[str] = mapped_column(String(11), unique=True)
+    secret_hash: Mapped[bytes] = mapped_column(LargeBinary(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

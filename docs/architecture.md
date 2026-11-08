@@ -4,11 +4,11 @@ The CandleStack backend is one Python service: a FastAPI application that serves
 under `/api`. In this milestone it has five modules: `core` (configuration, logging, errors,
 Redis, Postgres and HTTP clients, CSRF protection, health, Sentry), `data` (market data:
 instrument catalog and candles from Binance and Alpaca, see [data.md](data.md)), `accounts`
-(users, GitHub and Google sign-in, sessions, the beta list, Settings), `ml` (the models
+(users, GitHub and Google sign-in, sessions, API keys, the beta list, Settings), `ml` (the models
 users upload: the upload and its checks, the files, the list) and `experiments` (the
 backtests: running them, their result documents, the Backtests page, the published ones of
 Experiments and the Dashboard).
-Postgres stores what users create, accounts, sessions, settings, the models and the backtests,
+Postgres stores what users create, accounts, sessions, API keys, settings, the models and the backtests,
 and a volume the files of the models; market data is not stored: the sources are the truth and
 Redis is a cache that can be lost at any time. The backtest itself is `signals`, `engine` and
 `metrics` (see [Modules](#modules) and the contract in [engine.md](engine.md)), which
@@ -80,6 +80,9 @@ flowchart LR
 | `DELETE /api/v1/me` | deletes the account with everything it owns and ends its sessions |
 | `DELETE /api/v1/me/sign-in-methods/{provider}` | removes a sign-in method; `409 last-sign-in-method` for the last one; a later sign-in with that provider and the user's email adds it again |
 | `POST /api/v1/auth/sign-out-everywhere` | ends every session of the user, this browser's included |
+| `GET /api/v1/me/api-keys` | the user's API keys that are not revoked, oldest first, without their secrets, and the `limit` of 10; session only ([Accounts](#accounts)) |
+| `POST /api/v1/me/api-keys` | creates an API key (`name`, `scopes`, optional `expires_in_days` 1 to 365); 201 with its `secret`, the only time it is shown; `409 too-many-api-keys` beyond 10 that are neither revoked nor expired; session only |
+| `DELETE /api/v1/me/api-keys/{key_id}` | revokes an API key: it stops working at once; session only |
 | `GET /api/v1/me/preferences` | the user's settings (backtest defaults, appearance), defaults included |
 | `PUT /api/v1/me/preferences/backtest-defaults` | replaces the backtest defaults: every field, no other (`period_start` before `period_end`), else 422 |
 | `PATCH /api/v1/me/preferences/appearance` | changes the appearance settings it is given; an unknown field is a 422 |
@@ -106,10 +109,15 @@ flowchart LR
   `validation` (422), the framework's own errors `not-found` (404) and `method-not-allowed`
   (405), and an unhandled exception `internal-error` (500), whose `detail` reveals nothing and
   asks to report the response's `X-Request-ID`. The slugs of the data module are listed in
-  [data.md](data.md#errors). The accounts module adds `not-signed-in` (401: no session, or it
-  ended), `cross-origin-request` (403: a change that does not come from the app's own
-  pages) and `last-sign-in-method` (409: removing the account's only sign-in method), and uses
-  `not-found` (404) and `rate-limited` (429) too. The ml module adds `model-too-large` (413: a
+  [data.md](data.md#errors). The accounts module adds `not-signed-in` (401: no session or API key, or the
+  session ended), `invalid-api-key` (401: the key is unknown, revoked or expired, or its
+  account left the beta list), `cross-origin-request` (403: a change that does not come from
+  the app's own pages), `missing-scope` (403: the key lacks a scope the route needs,
+  `scope` names it), `session-required` (403: keys cannot do this),
+  `too-many-api-keys` (409: 10 keys that are neither revoked nor expired, with `limit`)
+  and `last-sign-in-method` (409: removing the account's only sign-in method), and uses
+  `not-found` (404) and `rate-limited` (429: also more than 120 requests a minute with one
+  key) too. The ml module adds `model-too-large` (413: a
   file over 50 MB), `storage-full` (409: the file does not fit into the user's 100 MB, with
   `used_bytes` and `quota_bytes`), `unsupported-model-format` (415: not `.keras`, "coming
   soon"), `model-check-failed` (422: a check failed, `check` names it, `opens` or `weights`)
@@ -194,8 +202,37 @@ flowchart LR
   orphaned file at worst, never a user without their files. `accounts` never imports the
   modules that own the data. `ml` registers one: the user's models in the transaction, the
   directory of their files after the commit.
+- **API keys**: table `api_keys` (ID `key_...`, user, name, scopes, `prefix`, the SHA-256 of
+  the key, `created_at`, `expires_at`, `last_used_at`, `revoked_at`; deleted with the user). A
+  key is `cs_` and 40 random characters of lowercase base32 (200 bits); its first 11
+  characters are the `prefix`, unique, which the app shows and which finds the row, and the
+  SHA-256 of the whole key is compared in constant time. The key itself is in the answer of
+  `POST /api/v1/me/api-keys` only, never stored, logged or sent to Sentry (its variables are
+  named `token`, `secret` or `credentials`, which the scrubber filters, and the response
+  model keeps it out of its repr). `Authorization: Bearer cs_...` signs a request in as the
+  key's user while the key is neither revoked nor expired and the user's email is on the beta
+  list, checked on every request, so taking someone off the list stops their keys at once
+  (the dev user's keys work where the dev sign-in does). A request with a key ignores any
+  cookie; a wrong key is 401 `invalid-api-key`, whatever is wrong with it. Each key has 120
+  requests a minute (Redis, 429 `rate-limited` with `Retry-After`), and its `last_used_at`
+  is written at most once a minute. At most 10 keys of a user are neither revoked nor
+  expired; creating one locks the user's row, so two at once cannot pass the limit. A revoked
+  key keeps its row and leaves the list; an expired one stays listed until it is revoked.
+- **Scopes**: the dependency a route takes decides what a key may do there
+  (`accounts.dependencies`), and a new route is closed to keys until it says otherwise.
+  `CurrentUserDep` lets a key with `read` call a GET and nothing else (403
+  `session-required` on a change); `BacktestsUserDep` (starting a backtest) and
+  `ModelsUserDep` (upload, manifest, rename, star, delete a model) need that scope; the
+  backtest PATCH takes `CallerDep` and needs `publish` for `public`, `backtests` for the rest;
+  `SessionUserDep` refuses every key (the keys themselves, deleting the account, sign-in
+  methods, signing out everywhere; signing out refuses keys too). The API reference shows
+  the scheme `apiKey` with the scope of each route, rewritten from the dependencies by
+  `accounts.document_api_keys`.
 - Every route of the signed-in user that returns user data sends `Cache-Control: no-store`, and
-  every change requires the app's own origin.
+  every change requires the app's own origin, except a request with an API key and no cookie
+  at all (`core.require_same_origin`): nothing the browser adds by itself signs it in, and no
+  other site can make a browser send an `Authorization` header without CORS, which the API
+  does not allow.
 
 ## Models
 
@@ -731,7 +768,7 @@ A module is a subpackage of `candlestack` under `backend/src/candlestack/`.
 | --- | --- | --- |
 | `core` | now | settings, logging, problem errors, Redis, Postgres and HTTP clients, CSRF protection, health endpoint |
 | `data` | now | instrument catalog, candles, sessions, cache, source adapters, rate limits |
-| `accounts` | now | users, GitHub and Google sign-in, sessions, the beta list, Settings (name, sign-in methods, preferences, deleting the account); `CurrentUserDep` for the routes of the signed-in user, `AccountDeletionHook` for what other modules delete with an account |
+| `accounts` | now | users, GitHub and Google sign-in, sessions, the beta list, Settings (name, sign-in methods, preferences, deleting the account); `CurrentUserDep` and the scoped dependencies for the routes of the signed-in user (session or API key), `AccountDeletionHook` for what other modules delete with an account |
 | `preprocessing` | started | the model's input from its manifest: the manifest's schema and checks, the catalog of blocks, and the input built from candles: representation (candles, Renko triples and a Kagi line), features, normalization, windows ([preprocessing.md](preprocessing.md)) |
 | `ml` | now | the models users upload: the upload and its static check, the file storage, the list, rename, star, delete, the manifest; the worker runs them and checks them with their manifests ([Worker](#worker)) |
 | `signals` | started | turn predictions into signals: align them with the candles, thresholds, long only; later smoothing, holding period, sizing, risk limits |
@@ -918,6 +955,8 @@ to check that an error reaches Sentry. The Sentry settings are recorded in
 | A beta list (`BETA_ALLOWLIST`) decides who signs in, closed when empty | the app is for the team and invited testers while it is built; a turned-away account is named on the sign-in page (from Redis, for 10 minutes, never in a URL) and gets no account |
 | Server-side sessions: a random token in an HttpOnly, SameSite=Lax cookie (`__Host-` over https), only its SHA-256 in Postgres, 30 days sliding | a session can be ended at once (sign-out, later admin), a database leak does not leak sessions, and no script can read the cookie |
 | Changes on behalf of the user require the app's own origin (`core.require_same_origin`), the OAuth round trip a state bound to the browser (Redis and a cookie) and PKCE | every host under candlestack.tech is the same site to the browser, so SameSite cookies alone do not stop a page on another of them; the state stops login CSRF; PKCE stops a stolen code |
+| API keys for scripts and agents: `cs_` and 200 random bits, only the SHA-256 stored, shown once, scopes `read` / `backtests` / `models` / `publish`, optional expiry, `Authorization: Bearer` | a script or an agent (the MCP server next) must not copy the browser's session cookie, which can do everything; a key can be limited, revoked alone and recognised by its prefix, a database leak does not leak keys, and the beta list still applies on every request |
+| A route is closed to API keys unless its dependency opens it (`read` on GET routes, a named scope on changes) | a new route is safe by default, and the reference shows each route's scope from the same dependencies |
 | Preferences as one JSONB document per section of Settings, read through Pydantic models with defaults | a new setting needs no migration of the rows; the models validate both what is saved and what is read |
 | Account deletion through hooks that other modules register in `main.py` | `accounts` stays at the bottom of the import graph, yet the account's rows in other modules go with it in one transaction; data outside Postgres (model files) is the hook's to keep consistent with a rollback |
 | An upload is checked statically (the zip, its JSON and the HDF5 metadata) in a limited child process, never loaded; only what an allowlist generated from Keras names passes | loading a Keras file can run code from it (a `Lambda` layer is pickled Python, a `function` object any Keras function), and the API process must run no user's code and carry no framework; an allowlist fails closed on what a new Keras release or an attacker adds, where a list of what is known to be bad would not; the parsers of zip and HDF5 meet hostile files, so they run where a crash or a leak costs only a failed check |

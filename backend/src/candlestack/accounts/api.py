@@ -9,31 +9,43 @@ user's GitHub and Google.
 With ``intent=connect`` the same round trip, started from a link of Settings, adds a sign-in
 method to the signed-in user and returns to Settings (``/settings/sign-in``, with
 ``?error=taken`` or ``?error=failed``).
+
+The user's API keys are ``/api/v1/me/api-keys``, managed with the browser's session only: a
+key cannot create, list or revoke keys.
 """
 
 import logging
 from typing import Annotated
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from fastapi.responses import RedirectResponse
 
 from candlestack.accounts.cookies import DENIED, SESSION, STATE, Cookies, CookiesDep
 from candlestack.accounts.dependencies import (
     AccountsServiceDep,
+    ApiKeysDep,
     CurrentUserDep,
+    SessionUserDep,
     browser_session,
     limit_sign_ins,
+    reject_api_keys,
     sign_in_wait,
 )
 from candlestack.accounts.errors import (
     LastSignInMethod,
+    NoSuchApiKey,
     NoSuchSignInMethod,
     SignInDenied,
     SignInFailed,
+    TooManyApiKeys,
 )
 from candlestack.accounts.pending import TTL
 from candlestack.accounts.schemas import (
+    API_KEYS_MAX,
+    ApiKeyCreated,
+    ApiKeyIn,
+    ApiKeysOut,
     Appearance,
     AppearanceUpdate,
     BacktestDefaults,
@@ -71,8 +83,6 @@ router = APIRouter(tags=["accounts"])
 SIGN_IN_PAGE = "/signin"
 FAILED_URL = f"{SIGN_IN_PAGE}?error=failed"
 DENIED_URL = f"{SIGN_IN_PAGE}?error=denied"
-# Environments with the dev sign-in: never stage or prod, whatever their settings say.
-_DEV_SIGN_IN_ENVS = frozenset({"local", "test"})
 _PROVIDER_NAMES = {Provider.github: "GitHub", Provider.google: "Google"}
 
 IntentParam = Annotated[
@@ -94,9 +104,7 @@ _CROSS_ORIGIN = problem_doc(
     403, "The request does not come from the app's own pages (`cross-origin-request`)."
 )
 
-
-def dev_sign_in_allowed(app_env: str) -> bool:
-    return app_env in _DEV_SIGN_IN_ENVS
+ApiKeyId = Annotated[str, Path(description="Public ID of the API key", examples=["key_7f3k2m4qx4"])]
 
 
 def _redirect(url: str) -> RedirectResponse:
@@ -239,8 +247,12 @@ async def finish_sign_in(  # noqa: PLR0913 (the provider's query parameters)
 @router.post(
     "/api/v1/auth/sign-out",
     status_code=204,
-    responses=_CROSS_ORIGIN,
-    dependencies=[Depends(require_same_origin)],
+    responses=problem_doc(
+        403,
+        "The request does not come from the app's own pages (`cross-origin-request`), or it "
+        "came with an API key (`session-required`).",
+    ),
+    dependencies=[Depends(require_same_origin), Depends(reject_api_keys)],
 )
 async def sign_out(request: Request, service: AccountsServiceDep, cookies: CookiesDep) -> Response:
     """Ends this browser's session; 204 also when it had none."""
@@ -304,7 +316,7 @@ async def update_me(
     dependencies=[Depends(require_same_origin)],
 )
 async def delete_me(
-    user: CurrentUserDep, service: AccountsServiceDep, cookies: CookiesDep
+    user: SessionUserDep, service: AccountsServiceDep, cookies: CookiesDep
 ) -> Response:
     """Deletes the account with everything it owns and ends all its sessions."""
     await service.delete_account(user)
@@ -324,7 +336,7 @@ async def delete_me(
     },
     dependencies=[Depends(require_same_origin)],
 )
-async def disconnect(provider: Provider, user: CurrentUserDep, service: AccountsServiceDep) -> None:
+async def disconnect(provider: Provider, user: SessionUserDep, service: AccountsServiceDep) -> None:
     """Removes a sign-in method; the last one cannot be removed. Signing in later with an
     account of that provider whose email is the user's adds it again."""
     name = _PROVIDER_NAMES[provider]
@@ -351,7 +363,7 @@ async def disconnect(provider: Provider, user: CurrentUserDep, service: Accounts
     dependencies=[Depends(require_same_origin)],
 )
 async def sign_out_everywhere(
-    user: CurrentUserDep, service: AccountsServiceDep, cookies: CookiesDep
+    user: SessionUserDep, service: AccountsServiceDep, cookies: CookiesDep
 ) -> Response:
     """Ends every session of the user, this one included."""
     await service.sign_out_everywhere(user)
@@ -393,6 +405,70 @@ async def update_appearance(
     """Changes some appearance settings; each control saves as soon as it changes."""
     response.headers.update(NO_STORE)
     return await service.update_appearance(user, body)
+
+
+@router.get("/api/v1/me/api-keys", responses=_NOT_SIGNED_IN)
+async def list_api_keys(user: SessionUserDep, keys: ApiKeysDep, response: Response) -> ApiKeysOut:
+    """The user's API keys that are not revoked, oldest first, without their secrets; an
+    expired key stays listed until it is revoked."""
+    response.headers.update(NO_STORE)
+    return await keys.list_keys(user)
+
+
+@router.post(
+    "/api/v1/me/api-keys",
+    status_code=201,
+    responses={
+        **_NOT_SIGNED_IN,
+        **_CROSS_ORIGIN,
+        **problem_doc(
+            409,
+            f"The user has {API_KEYS_MAX} keys that are neither revoked nor expired "
+            "(`too-many-api-keys`; `limit`).",
+        ),
+    },
+    dependencies=[Depends(require_same_origin)],
+)
+async def create_api_key(
+    body: ApiKeyIn, user: SessionUserDep, keys: ApiKeysDep, response: Response
+) -> ApiKeyCreated:
+    """Creates an API key for scripts and agents: `Authorization: Bearer <secret>` signs a
+    request in as the user, for what its scopes allow. The secret is in this response only;
+    CandleStack keeps just its SHA-256."""
+    response.headers.update(NO_STORE)
+    try:
+        return await keys.create(user, body)
+    except TooManyApiKeys:
+        raise ProblemError(
+            409,
+            "too-many-api-keys",
+            "Too many API keys",
+            f"You have {API_KEYS_MAX} API keys, the most you can have. Revoke one you no longer "
+            "use, then create the new one.",
+            extensions={"limit": API_KEYS_MAX},
+        ) from None
+
+
+@router.delete(
+    "/api/v1/me/api-keys/{key_id}",
+    status_code=204,
+    responses={
+        **_NOT_SIGNED_IN,
+        **_CROSS_ORIGIN,
+        **problem_doc(
+            404, "The user has no API key with this ID that is not revoked (`not-found`)."
+        ),
+    },
+    dependencies=[Depends(require_same_origin)],
+)
+async def revoke_api_key(key_id: ApiKeyId, user: SessionUserDep, keys: ApiKeysDep) -> None:
+    """Revokes the API key: it stops working at once and leaves the list."""
+    try:
+        await keys.revoke(user, key_id)
+    except NoSuchApiKey:
+        raise ProblemError(
+            404, "not-found", "Not Found", "You have no API key with this ID that is not revoked."
+        ) from None
 
 
 # Registered only where ``dev_sign_in_allowed``; hidden from the API reference.

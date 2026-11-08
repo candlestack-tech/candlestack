@@ -6,7 +6,8 @@ cached in Redis and returned. This document is the contract for the `/api/v1/dat
 and for the code behind them. Architecture and configuration: [architecture.md](architecture.md).
 
 The market data is for signed-in accounts only: the instrument list, an instrument and its
-candles answer 401 `not-signed-in` without a session, as the routes of the signed-in user do
+candles answer 401 `not-signed-in` without a session or an API key with the scope `read`, as
+the routes of the signed-in user do
 (an account exists only for someone on the beta list). Alpaca's terms let us use its data for
 ourselves; showing it to anyone on the internet would need their notice and consent. The icons
 and `/api/health/sources` stay public: a logo is not market data. So do the few rows of the
@@ -438,7 +439,7 @@ Requests are checked in this order; the first failure is the answer.
 
 | Check | Error |
 | --- | --- |
-| a signed-in account (not for the icon or the top instruments) | 401 `not-signed-in` |
+| a signed-in account (not for the icon or the top instruments): the session, or an API key that is valid, within its rate limit and has `read` | 401 `not-signed-in` or `invalid-api-key`, 429 `rate-limited`, 403 `missing-scope` |
 | client rate limit | 429 `rate-limited` |
 | parameters present and well-formed: instrument id, timeframe from the list, `start` (or `limit`) and `end` as epoch seconds or ISO 8601, `limit` 1 to 5000 and not together with `start`, `start < end` | 422 `validation` |
 | instrument in the catalog | 404 `instrument-not-found` |
@@ -721,13 +722,15 @@ RFC 9457 `application/problem+json`, `type` `https://candlestack.tech/problems/<
 
 | Status | Slug | When | Extensions |
 | --- | --- | --- | --- |
-| 401 | `not-signed-in` | no session came with the request, or it ended (not for the icon or the top instruments) | |
+| 401 | `not-signed-in` | no session or API key came with the request, or the session ended (not for the icon or the top instruments) | |
+| 401 | `invalid-api-key` | the API key is unknown, revoked or expired, or its account left the beta list | header `WWW-Authenticate` |
+| 403 | `missing-scope` | the API key does not have the scope `read` | `scope` |
 | 404 | `instrument-not-found` | the id is not in the catalog | `instrument` |
 | 422 | `validation` | missing or malformed parameters | `errors`: one `{loc, msg, type}` per bad parameter |
 | 422 | `period-out-of-range` | `start` before `available_from`, or `end` in the future | `instrument`, `timeframe`, `available_from`, `available_to` |
 | 422 | `too-many-candles` | more than `CANDLES_MAX` expected candles | `requested`, `maximum`, `suggestion` (also in `detail`) |
 | 422 | `warm-up-out-of-range` | a backtest's period starts too early for the candles its model needs before it (`POST /api/v1/backtests`) | `instrument`, `timeframe`, `candles`, `earliest_start` (null when the first candle is not known) |
-| 429 | `rate-limited` | client over `CLIENT_RATE_LIMIT` | `limit`; header `Retry-After` |
+| 429 | `rate-limited` | client over `CLIENT_RATE_LIMIT`, or more than 120 requests a minute with one API key | `limit`; header `Retry-After` |
 | 502 | `source-data-invalid` | source data failed validation | `source` |
 | 503 | `source-unavailable` | source down or timing out, or our budget for it is spent | `source`; header `Retry-After` when waiting helps (our budget is spent, or the source limits us) |
 

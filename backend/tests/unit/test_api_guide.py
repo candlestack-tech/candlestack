@@ -30,7 +30,7 @@ def script(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     spec.loader.exec_module(module)
     monkeypatch.setattr(module, "PAGE", 3)  # pages of 3 candles instead of 5000
     monkeypatch.setattr(module.time, "sleep", lambda seconds: None)
-    monkeypatch.setenv("CANDLESTACK_SESSION", "token")
+    monkeypatch.setenv("CANDLESTACK_API_KEY", "cs_key")
     return module
 
 
@@ -66,7 +66,8 @@ def test_pages_back_by_end_and_writes_what_the_backtest_reads(
     ends = [call.request.url.params.get("end") for call in route.calls]
     assert ends == [None, str(FIRST + 4 * HOUR), str(FIRST + HOUR)]
     assert all(call.request.url.params["limit"] == "3" for call in route.calls)
-    assert route.calls[0].request.headers["Cookie"] == "__Host-session=token"
+    assert route.calls[0].request.headers["Authorization"] == "Bearer cs_key"
+    assert "Cookie" not in route.calls[0].request.headers
     frame = pl.read_parquet(out)
     assert frame.columns == ["ts", "open", "high", "low", "close", "volume"]
     assert frame.get_column("ts").to_list() == [FIRST + i * HOUR for i in range(7)]
@@ -151,8 +152,8 @@ def test_a_problem_is_reported_with_its_title_and_detail(
     assert not out.exists()
 
 
-def test_needs_the_session(script: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("CANDLESTACK_SESSION")
+def test_needs_a_key(script: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CANDLESTACK_API_KEY")
 
     with pytest.raises(SystemExit, match="2"):
         script.main(["crypto:BTCUSDT", "1h"])

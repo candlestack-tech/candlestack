@@ -6,10 +6,10 @@
 `candlestack-bt run --candles` reads: `ts` (open time, UTC epoch seconds), `open`, `high`,
 `low`, `close` and `volume`. The guide: docs/api-guide.md.
 
-The market data is for signed-in accounts, so the script sends your session cookie: copy its
-value from the browser into CANDLESTACK_SESSION and never commit it.
+The market data is for signed-in accounts, so the script sends an API key with the scope
+`read`: create one in Settings, API and MCP, put it into CANDLESTACK_API_KEY and never commit it.
 
-    CANDLESTACK_SESSION=... uv run docs/examples/download_candles.py stock:AAPL 1h --since 2024-01-01
+    CANDLESTACK_API_KEY=cs_... uv run docs/examples/download_candles.py stock:AAPL 1h --since 2024-01-01
 """
 
 import argparse
@@ -33,17 +33,19 @@ class ApiError(Exception):
     """A problem+json answer of the API: its `title` and `detail` say what to change."""
 
 
-def client(base_url: str, session: str) -> httpx.Client:
-    """A client signed in with the session cookie, named `__Host-session` over https."""
-    name = "__Host-session" if base_url.startswith("https://") else "session"
-    return httpx.Client(base_url=base_url, cookies={name: session}, timeout=60)
+def client(base_url: str, key: str) -> httpx.Client:
+    """A client signed in with the API key."""
+    return httpx.Client(
+        base_url=base_url, headers={"Authorization": f"Bearer {key}"}, timeout=60
+    )
 
 
 def get(
     api: httpx.Client, path: str, params: dict[str, str | int] | None = None
 ) -> dict:
     """The JSON of a GET; waits and asks again while the answer has `Retry-After` (429 when
-    our 60 requests a minute are spent, 503 while the source's budget is)."""
+    our 60 candle requests a minute or the key's 120 requests are spent, 503 while the
+    source's budget is)."""
     for _ in range(RETRIES):
         response = api.get(path, params=params)
         wait = response.headers.get("Retry-After")
@@ -110,12 +112,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=Path("candles.parquet"))
     parser.add_argument("--base-url", default=BASE_URL)
     args = parser.parse_args(argv)
-    session = os.environ.get("CANDLESTACK_SESSION")
-    if not session:
-        parser.error(
-            "set CANDLESTACK_SESSION to your session cookie (docs/api-guide.md)"
-        )
-    with client(args.base_url, session) as api:
+    key = os.environ.get("CANDLESTACK_API_KEY")
+    if not key:
+        parser.error("set CANDLESTACK_API_KEY to an API key (docs/api-guide.md)")
+    with client(args.base_url, key) as api:
         try:
             candles = download(api, args.instrument, args.timeframe, args.since)
         except ApiError as error:

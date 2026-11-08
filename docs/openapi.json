@@ -19,6 +19,274 @@
         "title": "AlignOut",
         "type": "object"
       },
+      "ApiKeyCreated": {
+        "description": "A new API key with its secret, which only this response shows.",
+        "properties": {
+          "created_at": {
+            "description": "When the key was created (UTC)",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the key stops working (UTC); null: it works until revoked",
+            "title": "Expires At"
+          },
+          "id": {
+            "description": "Public ID of the key, for revoking it",
+            "examples": [
+              "key_7f3k2m4qx4"
+            ],
+            "pattern": "^key_[a-z2-7]{10}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When a request last signed in with the key (UTC), to the minute; null: never used",
+            "title": "Last Used At"
+          },
+          "name": {
+            "description": "What the key is for",
+            "examples": [
+              "Claude Code on my laptop"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "prefix": {
+            "description": "The start of the key, to tell keys apart",
+            "examples": [
+              "cs_7f3k2m4q"
+            ],
+            "pattern": "^cs_[a-z2-7]{8}$",
+            "title": "Prefix",
+            "type": "string"
+          },
+          "scopes": {
+            "description": "What the key may do, in the order read, backtests, models, publish",
+            "examples": [
+              [
+                "read",
+                "backtests"
+              ]
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "secret": {
+            "description": "The key itself, for `Authorization: Bearer <secret>`. Shown only in this response: CandleStack keeps just its SHA-256, so copy it now",
+            "examples": [
+              "cs_7f3k2m4qxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            ],
+            "pattern": "^cs_[a-z2-7]{40}$",
+            "title": "Secret",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "scopes",
+          "prefix",
+          "created_at",
+          "expires_at",
+          "last_used_at",
+          "secret"
+        ],
+        "title": "ApiKeyCreated",
+        "type": "object"
+      },
+      "ApiKeyIn": {
+        "additionalProperties": false,
+        "description": "A new API key.",
+        "properties": {
+          "expires_in_days": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Days until the key stops working, 1 to 365; null or left out: it works until revoked",
+            "examples": [
+              90
+            ],
+            "title": "Expires In Days"
+          },
+          "name": {
+            "description": "What the key is for, without control characters; surrounding whitespace is dropped",
+            "examples": [
+              "Claude Code on my laptop"
+            ],
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "scopes": {
+            "description": "What the key may do, at least one; a scope given twice counts once",
+            "examples": [
+              [
+                "read",
+                "backtests"
+              ]
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "scopes"
+        ],
+        "title": "ApiKeyIn",
+        "type": "object"
+      },
+      "ApiKeyOut": {
+        "description": "An API key, without its secret: that is shown once, when the key is created.",
+        "properties": {
+          "created_at": {
+            "description": "When the key was created (UTC)",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the key stops working (UTC); null: it works until revoked",
+            "title": "Expires At"
+          },
+          "id": {
+            "description": "Public ID of the key, for revoking it",
+            "examples": [
+              "key_7f3k2m4qx4"
+            ],
+            "pattern": "^key_[a-z2-7]{10}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When a request last signed in with the key (UTC), to the minute; null: never used",
+            "title": "Last Used At"
+          },
+          "name": {
+            "description": "What the key is for",
+            "examples": [
+              "Claude Code on my laptop"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "prefix": {
+            "description": "The start of the key, to tell keys apart",
+            "examples": [
+              "cs_7f3k2m4q"
+            ],
+            "pattern": "^cs_[a-z2-7]{8}$",
+            "title": "Prefix",
+            "type": "string"
+          },
+          "scopes": {
+            "description": "What the key may do, in the order read, backtests, models, publish",
+            "examples": [
+              [
+                "read",
+                "backtests"
+              ]
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "scopes",
+          "prefix",
+          "created_at",
+          "expires_at",
+          "last_used_at"
+        ],
+        "title": "ApiKeyOut",
+        "type": "object"
+      },
+      "ApiKeysOut": {
+        "description": "The user's API keys that are not revoked, oldest first; an expired one stays listed\nuntil it is revoked.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "description": "The most keys a user can have that are neither revoked nor expired",
+            "examples": [
+              10
+            ],
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit"
+        ],
+        "title": "ApiKeysOut",
+        "type": "object"
+      },
       "Appearance": {
         "description": "How the app looks for this user (Settings, Appearance).",
         "properties": {
@@ -4633,6 +4901,17 @@
         "title": "RunnerOut",
         "type": "object"
       },
+      "Scope": {
+        "description": "What an API key may do. `read`: every GET; `backtests`: start, rename and star\nbacktests; `models`: upload models, add their manifests, rename, star and delete them;\n`publish`: publish and unpublish backtests. Managing keys, deleting the account, sign-in\nmethods and signing out need the browser session whatever the scopes.",
+        "enum": [
+          "read",
+          "backtests",
+          "models",
+          "publish"
+        ],
+        "title": "Scope",
+        "type": "string"
+      },
       "Series": {
         "properties": {
           "benchmarks": {
@@ -5559,6 +5838,14 @@
         "title": "Window",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "apiKey": {
+        "bearerFormat": "cs_...",
+        "description": "An API key from Settings, API and MCP: `Authorization: Bearer cs_...`. Its scopes decide what it may do: `read` every GET, `backtests` start, rename and star backtests, `models` upload models, add their manifests, rename, star and delete them, `publish` publish and unpublish backtests. Managing keys, deleting the account, sign-in methods and signing out need the browser session. The web app signs in with its session cookie instead.",
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -5680,7 +5967,7 @@
                 }
               }
             },
-            "description": "The request does not come from the app's own pages (`cross-origin-request`)."
+            "description": "The request does not come from the app's own pages (`cross-origin-request`), or it came with an API key (`session-required`)."
           }
         },
         "summary": "Sign Out",
@@ -5715,7 +6002,7 @@
                 }
               }
             },
-            "description": "The request does not come from the app's own pages (`cross-origin-request`)."
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`)."
           }
         },
         "summary": "Sign Out Everywhere",
@@ -5901,7 +6188,17 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "422": {
             "content": {
@@ -5912,8 +6209,25 @@
               }
             },
             "description": "Invalid request"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
         "summary": "List Backtests",
         "tags": [
           "backtests"
@@ -5951,7 +6265,7 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
           },
           "403": {
             "content": {
@@ -5961,7 +6275,7 @@
                 }
               }
             },
-            "description": "The request does not come from the app's own pages (`cross-origin-request`)."
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "404": {
             "content": {
@@ -5993,6 +6307,16 @@
             },
             "description": "An invalid setup (`validation`), a model of another market (`instrument-not-for-model`), a period outside the data (`period-out-of-range`), without the candles the model needs before it (`warm-up-out-of-range`), or with more candles than allowed (`too-many-candles`)."
           },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+          },
           "502": {
             "content": {
               "application/problem+json": {
@@ -6014,6 +6338,13 @@
             "description": "A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "backtests"
+            ]
+          }
+        ],
         "summary": "Start Backtest",
         "tags": [
           "backtests"
@@ -6059,7 +6390,17 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "404": {
             "content": {
@@ -6091,6 +6432,16 @@
             },
             "description": "Invalid request"
           },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+          },
           "502": {
             "content": {
               "application/problem+json": {
@@ -6112,13 +6463,20 @@
             "description": "A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
         "summary": "Get Backtest",
         "tags": [
           "backtests"
         ]
       },
       "patch": {
-        "description": "Stars, unstars, renames, publishes or unpublishes the user's backtest; a field left out\nstays as it is. A name of null goes back to the generated name. Unpublishing takes it out\nof Experiments and out of other people's Compare.",
+        "description": "Stars, unstars, renames, publishes or unpublishes the user's backtest; a field left out\nstays as it is. A name of null goes back to the generated name. Unpublishing takes it out\nof Experiments and out of other people's Compare. With an API key, publishing and unpublishing\nneed the scope `publish`, the rest `backtests`.",
         "operationId": "update_backtest_api_v1_backtests__backtest_id__patch",
         "parameters": [
           {
@@ -6165,7 +6523,7 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
           },
           "403": {
             "content": {
@@ -6175,7 +6533,7 @@
                 }
               }
             },
-            "description": "The request does not come from the app's own pages (`cross-origin-request`)."
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "404": {
             "content": {
@@ -6206,8 +6564,30 @@
               }
             },
             "description": "Invalid request"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "backtests"
+            ]
+          },
+          {
+            "apiKey": [
+              "publish"
+            ]
+          }
+        ],
         "summary": "Update Backtest",
         "tags": [
           "backtests"
@@ -6253,7 +6633,17 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "404": {
             "content": {
@@ -6285,6 +6675,16 @@
             },
             "description": "Invalid request"
           },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+          },
           "502": {
             "content": {
               "application/problem+json": {
@@ -6306,6 +6706,13 @@
             "description": "A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
         "summary": "Download Backtest",
         "tags": [
           "backtests"
@@ -6335,9 +6742,36 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
         "summary": "Dashboard",
         "tags": [
           "backtests"
@@ -6466,7 +6900,17 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "422": {
             "content": {
@@ -6477,6 +6921,16 @@
               }
             },
             "description": "Invalid parameters (`validation`)."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -6499,6 +6953,13 @@
             "description": "The source is down or our request budget for it is spent (`source-unavailable`); `Retry-After` when waiting helps."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
         "summary": "Search instruments",
         "tags": [
           "data"
@@ -6544,7 +7005,17 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "404": {
             "content": {
@@ -6574,7 +7045,7 @@
                 }
               }
             },
-            "description": "More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`."
+            "description": "More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -6597,6 +7068,13 @@
             "description": "The source is down or our request budget for it is spent (`source-unavailable`); `Retry-After` when waiting helps."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
         "summary": "Instrument detail",
         "tags": [
           "data"
@@ -6740,7 +7218,17 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "404": {
             "content": {
@@ -6770,7 +7258,7 @@
                 }
               }
             },
-            "description": "More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`."
+            "description": "More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -6793,6 +7281,13 @@
             "description": "The source is down or our request budget for it is spent (`source-unavailable`); `Retry-After` when waiting helps."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
         "summary": "Candles",
         "tags": [
           "data"
@@ -7102,7 +7597,17 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "422": {
             "content": {
@@ -7113,8 +7618,25 @@
               }
             },
             "description": "Invalid request"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
         "summary": "List Experiments",
         "tags": [
           "backtests"
@@ -7147,7 +7669,7 @@
                 }
               }
             },
-            "description": "The request does not come from the app's own pages (`cross-origin-request`)."
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`)."
           }
         },
         "summary": "Delete Me",
@@ -7177,9 +7699,36 @@
                 }
               }
             },
-            "description": "No session came with the request, or it ended (`not-signed-in`)."
+            "description": "No session came with the request, or it ended (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
         "summary": "Me",
         "tags": [
           "accounts"
@@ -7227,7 +7776,7 @@
                 }
               }
             },
-            "description": "The request does not come from the app's own pages (`cross-origin-request`)."
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`)."
           },
           "422": {
             "content": {
@@ -7241,6 +7790,189 @@
           }
         },
         "summary": "Update Me",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/api/v1/me/api-keys": {
+      "get": {
+        "description": "The user's API keys that are not revoked, oldest first, without their secrets; an\nexpired key stays listed until it is revoked.",
+        "operationId": "list_api_keys_api_v1_me_api_keys_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeysOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "API keys cannot do this, only the signed-in browser (`session-required`)."
+          }
+        },
+        "summary": "List Api Keys",
+        "tags": [
+          "accounts"
+        ]
+      },
+      "post": {
+        "description": "Creates an API key for scripts and agents: `Authorization: Bearer <secret>` signs a\nrequest in as the user, for what its scopes allow. The secret is in this response only;\nCandleStack keeps just its SHA-256.",
+        "operationId": "create_api_key_api_v1_me_api_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`)."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The user has 10 keys that are neither revoked nor expired (`too-many-api-keys`; `limit`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          }
+        },
+        "summary": "Create Api Key",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/api/v1/me/api-keys/{key_id}": {
+      "delete": {
+        "description": "Revokes the API key: it stops working at once and leaves the list.",
+        "operationId": "revoke_api_key_api_v1_me_api_keys__key_id__delete",
+        "parameters": [
+          {
+            "description": "Public ID of the API key",
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "description": "Public ID of the API key",
+              "examples": [
+                "key_7f3k2m4qx4"
+              ],
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The user has no API key with this ID that is not revoked (`not-found`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          }
+        },
+        "summary": "Revoke Api Key",
         "tags": [
           "accounts"
         ]
@@ -7269,9 +8001,36 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
         "summary": "Preferences",
         "tags": [
           "accounts"
@@ -7321,7 +8080,7 @@
                 }
               }
             },
-            "description": "The request does not come from the app's own pages (`cross-origin-request`)."
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`)."
           },
           "422": {
             "content": {
@@ -7383,7 +8142,7 @@
                 }
               }
             },
-            "description": "The request does not come from the app's own pages (`cross-origin-request`)."
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`)."
           },
           "422": {
             "content": {
@@ -7438,7 +8197,7 @@
                 }
               }
             },
-            "description": "The request does not come from the app's own pages (`cross-origin-request`)."
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`)."
           },
           "404": {
             "content": {
@@ -7500,9 +8259,36 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
         "summary": "List Models",
         "tags": [
           "models"
@@ -7560,7 +8346,7 @@
                 }
               }
             },
-            "description": "Not signed in, or the account was deleted while the file was uploading (`not-signed-in`)."
+            "description": "Not signed in, or the account was deleted while the file was uploading (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
           },
           "403": {
             "content": {
@@ -7570,7 +8356,7 @@
                 }
               }
             },
-            "description": "The request does not come from the app's own pages (`cross-origin-request`)."
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "408": {
             "content": {
@@ -7621,8 +8407,25 @@
               }
             },
             "description": "A check failed (`model-check-failed`): `check` names it (`opens` or `weights`) and `detail` says why; or the request is invalid (`validation`)."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "models"
+            ]
+          }
+        ],
         "summary": "Upload Model",
         "tags": [
           "models"
@@ -7661,7 +8464,7 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
           },
           "403": {
             "content": {
@@ -7671,7 +8474,7 @@
                 }
               }
             },
-            "description": "The request does not come from the app's own pages (`cross-origin-request`)."
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "404": {
             "content": {
@@ -7692,8 +8495,25 @@
               }
             },
             "description": "Invalid request"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "models"
+            ]
+          }
+        ],
         "summary": "Delete Model",
         "tags": [
           "models"
@@ -7747,7 +8567,7 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
           },
           "403": {
             "content": {
@@ -7757,7 +8577,7 @@
                 }
               }
             },
-            "description": "The request does not come from the app's own pages (`cross-origin-request`)."
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "404": {
             "content": {
@@ -7788,8 +8608,25 @@
               }
             },
             "description": "Invalid request"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "models"
+            ]
+          }
+        ],
         "summary": "Update Model",
         "tags": [
           "models"
@@ -7835,7 +8672,17 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "404": {
             "content": {
@@ -7856,8 +8703,25 @@
               }
             },
             "description": "Invalid request"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
         "summary": "Get Manifest",
         "tags": [
           "models"
@@ -7912,7 +8776,7 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
           },
           "403": {
             "content": {
@@ -7922,7 +8786,7 @@
                 }
               }
             },
-            "description": "The request does not come from the app's own pages (`cross-origin-request`)."
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "404": {
             "content": {
@@ -7953,8 +8817,25 @@
               }
             },
             "description": "A check failed (`manifest-check-failed`): `problems` lists what is wrong, at most 10, each with its `check` (`schema`, `catalog`, `params`, `names`, `signature`, `example` or `model`) and a `detail` of one sentence; `more_problems` counts the rest and `unknown_blocks` names the blocks the catalog does not have. `detail` says the same in words."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "models"
+            ]
+          }
+        ],
         "summary": "Set Manifest",
         "tags": [
           "models"

@@ -193,7 +193,8 @@ export interface paths {
          * Update Backtest
          * @description Stars, unstars, renames, publishes or unpublishes the user's backtest; a field left out
          *     stays as it is. A name of null goes back to the generated name. Unpublishing takes it out
-         *     of Experiments and out of other people's Compare.
+         *     of Experiments and out of other people's Compare. With an API key, publishing and unpublishing
+         *     need the scope `publish`, the rest `backtests`.
          */
         patch: operations["update_backtest_api_v1_backtests__backtest_id__patch"];
         trace?: never;
@@ -427,6 +428,53 @@ export interface paths {
         patch: operations["update_me_api_v1_me_patch"];
         trace?: never;
     };
+    "/api/v1/me/api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Api Keys
+         * @description The user's API keys that are not revoked, oldest first, without their secrets; an
+         *     expired key stays listed until it is revoked.
+         */
+        get: operations["list_api_keys_api_v1_me_api_keys_get"];
+        put?: never;
+        /**
+         * Create Api Key
+         * @description Creates an API key for scripts and agents: `Authorization: Bearer <secret>` signs a
+         *     request in as the user, for what its scopes allow. The secret is in this response only;
+         *     CandleStack keeps just its SHA-256.
+         */
+        post: operations["create_api_key_api_v1_me_api_keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/api-keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke Api Key
+         * @description Revokes the API key: it stops working at once and leaves the list.
+         */
+        delete: operations["revoke_api_key_api_v1_me_api_keys__key_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me/preferences": {
         parameters: {
             query?: never;
@@ -625,6 +673,152 @@ export interface components {
             candles_without_prediction: number;
             /** Predictions Without Candle */
             predictions_without_candle: number;
+        };
+        /**
+         * ApiKeyCreated
+         * @description A new API key with its secret, which only this response shows.
+         */
+        ApiKeyCreated: {
+            /**
+             * Created At
+             * Format: date-time
+             * @description When the key was created (UTC)
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * @description When the key stops working (UTC); null: it works until revoked
+             */
+            expires_at: string | null;
+            /**
+             * Id
+             * @description Public ID of the key, for revoking it
+             * @example key_7f3k2m4qx4
+             */
+            id: string;
+            /**
+             * Last Used At
+             * @description When a request last signed in with the key (UTC), to the minute; null: never used
+             */
+            last_used_at: string | null;
+            /**
+             * Name
+             * @description What the key is for
+             * @example Claude Code on my laptop
+             */
+            name: string;
+            /**
+             * Prefix
+             * @description The start of the key, to tell keys apart
+             * @example cs_7f3k2m4q
+             */
+            prefix: string;
+            /**
+             * Scopes
+             * @description What the key may do, in the order read, backtests, models, publish
+             * @example [
+             *       "read",
+             *       "backtests"
+             *     ]
+             */
+            scopes: components["schemas"]["Scope"][];
+            /**
+             * Secret
+             * @description The key itself, for `Authorization: Bearer <secret>`. Shown only in this response: CandleStack keeps just its SHA-256, so copy it now
+             * @example cs_7f3k2m4qxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+             */
+            secret: string;
+        };
+        /**
+         * ApiKeyIn
+         * @description A new API key.
+         */
+        ApiKeyIn: {
+            /**
+             * Expires In Days
+             * @description Days until the key stops working, 1 to 365; null or left out: it works until revoked
+             * @example 90
+             */
+            expires_in_days?: number | null;
+            /**
+             * Name
+             * @description What the key is for, without control characters; surrounding whitespace is dropped
+             * @example Claude Code on my laptop
+             */
+            name: string;
+            /**
+             * Scopes
+             * @description What the key may do, at least one; a scope given twice counts once
+             * @example [
+             *       "read",
+             *       "backtests"
+             *     ]
+             */
+            scopes: components["schemas"]["Scope"][];
+        };
+        /**
+         * ApiKeyOut
+         * @description An API key, without its secret: that is shown once, when the key is created.
+         */
+        ApiKeyOut: {
+            /**
+             * Created At
+             * Format: date-time
+             * @description When the key was created (UTC)
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * @description When the key stops working (UTC); null: it works until revoked
+             */
+            expires_at: string | null;
+            /**
+             * Id
+             * @description Public ID of the key, for revoking it
+             * @example key_7f3k2m4qx4
+             */
+            id: string;
+            /**
+             * Last Used At
+             * @description When a request last signed in with the key (UTC), to the minute; null: never used
+             */
+            last_used_at: string | null;
+            /**
+             * Name
+             * @description What the key is for
+             * @example Claude Code on my laptop
+             */
+            name: string;
+            /**
+             * Prefix
+             * @description The start of the key, to tell keys apart
+             * @example cs_7f3k2m4q
+             */
+            prefix: string;
+            /**
+             * Scopes
+             * @description What the key may do, in the order read, backtests, models, publish
+             * @example [
+             *       "read",
+             *       "backtests"
+             *     ]
+             */
+            scopes: components["schemas"]["Scope"][];
+        };
+        /**
+         * ApiKeysOut
+         * @description The user's API keys that are not revoked, oldest first; an expired one stays listed
+         *     until it is revoked.
+         */
+        ApiKeysOut: {
+            /** Items */
+            items: components["schemas"]["ApiKeyOut"][];
+            /**
+             * Limit
+             * @description The most keys a user can have that are neither revoked nor expired
+             * @example 10
+             */
+            limit: number;
         };
         /**
          * Appearance
@@ -3000,6 +3194,15 @@ export interface components {
              */
             keras: string | null;
         };
+        /**
+         * Scope
+         * @description What an API key may do. `read`: every GET; `backtests`: start, rename and star
+         *     backtests; `models`: upload models, add their manifests, rename, star and delete them;
+         *     `publish`: publish and unpublish backtests. Managing keys, deleting the account, sign-in
+         *     methods and signing out need the browser session whatever the scopes.
+         * @enum {string}
+         */
+        Scope: "read" | "backtests" | "models" | "publish";
         /** Series */
         Series: {
             /**
@@ -3512,7 +3715,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The request does not come from the app's own pages (`cross-origin-request`). */
+            /** @description The request does not come from the app's own pages (`cross-origin-request`), or it came with an API key (`session-required`). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3548,7 +3751,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The request does not come from the app's own pages (`cross-origin-request`). */
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3624,8 +3827,17 @@ export interface operations {
                     "application/json": components["schemas"]["BacktestsPage"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3635,6 +3847,15 @@ export interface operations {
             };
             /** @description Invalid request */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3666,7 +3887,7 @@ export interface operations {
                     "application/json": components["schemas"]["BacktestDocument"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -3675,7 +3896,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The request does not come from the app's own pages (`cross-origin-request`). */
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3704,6 +3925,15 @@ export interface operations {
             };
             /** @description An invalid setup (`validation`), a model of another market (`instrument-not-for-model`), a period outside the data (`period-out-of-range`), without the candles the model needs before it (`warm-up-out-of-range`), or with more candles than allowed (`too-many-candles`). */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3752,8 +3982,17 @@ export interface operations {
                     "application/json": components["schemas"]["BacktestDocument"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3781,6 +4020,15 @@ export interface operations {
             };
             /** @description Invalid request */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3833,7 +4081,7 @@ export interface operations {
                     "application/json": components["schemas"]["BacktestOut"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -3842,7 +4090,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The request does not come from the app's own pages (`cross-origin-request`). */
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3878,6 +4126,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     download_backtest_api_v1_backtests__backtest_id__download_get: {
@@ -3901,8 +4158,17 @@ export interface operations {
                     "application/json": components["schemas"]["BacktestDocument"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3930,6 +4196,15 @@ export interface operations {
             };
             /** @description Invalid request */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3975,8 +4250,26 @@ export interface operations {
                     "application/json": components["schemas"]["DashboardOut"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4017,8 +4310,17 @@ export interface operations {
                     "application/json": components["schemas"]["InstrumentSearchOut"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4028,6 +4330,15 @@ export interface operations {
             };
             /** @description Invalid parameters (`validation`). */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4076,8 +4387,17 @@ export interface operations {
                     "application/json": components["schemas"]["InstrumentDetailOut"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4103,7 +4423,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. */
+            /** @description More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -4161,8 +4481,17 @@ export interface operations {
                     "application/json": components["schemas"]["CandlesOut"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4188,7 +4517,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. */
+            /** @description More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -4338,8 +4667,17 @@ export interface operations {
                     "application/json": components["schemas"]["ExperimentsPage"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4349,6 +4687,15 @@ export interface operations {
             };
             /** @description Invalid request */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4376,8 +4723,26 @@ export interface operations {
                     "application/json": components["schemas"]["MeOut"];
                 };
             };
-            /** @description No session came with the request, or it ended (`not-signed-in`). */
+            /** @description No session came with the request, or it ended (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4412,7 +4777,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The request does not come from the app's own pages (`cross-origin-request`). */
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4454,8 +4819,163 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The request does not come from the app's own pages (`cross-origin-request`). */
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`). */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_api_keys_api_v1_me_api_keys_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeysOut"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description API keys cannot do this, only the signed-in browser (`session-required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_api_key_api_v1_me_api_keys_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApiKeyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyCreated"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has 10 keys that are neither revoked nor expired (`too-many-api-keys`; `limit`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    revoke_api_key_api_v1_me_api_keys__key_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Public ID of the API key */
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no API key with this ID that is not revoked (`not-found`). */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4492,8 +5012,26 @@ export interface operations {
                     "application/json": components["schemas"]["PreferencesOut"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4534,7 +5072,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The request does not come from the app's own pages (`cross-origin-request`). */
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4585,7 +5123,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The request does not come from the app's own pages (`cross-origin-request`). */
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4632,7 +5170,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The request does not come from the app's own pages (`cross-origin-request`). */
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4688,8 +5226,26 @@ export interface operations {
                     "application/json": components["schemas"]["ModelsOut"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4725,7 +5281,7 @@ export interface operations {
                     "application/json": components["schemas"]["ModelOut"];
                 };
             };
-            /** @description Not signed in, or the account was deleted while the file was uploading (`not-signed-in`). */
+            /** @description Not signed in, or the account was deleted while the file was uploading (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -4734,7 +5290,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The request does not come from the app's own pages (`cross-origin-request`). */
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4788,6 +5344,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     delete_model_api_v1_models__model_id__delete: {
@@ -4809,7 +5374,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -4818,7 +5383,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The request does not come from the app's own pages (`cross-origin-request`). */
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4838,6 +5403,15 @@ export interface operations {
             };
             /** @description Invalid request */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4872,7 +5446,7 @@ export interface operations {
                     "application/json": components["schemas"]["ModelOut"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -4881,7 +5455,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The request does not come from the app's own pages (`cross-origin-request`). */
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4917,6 +5491,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     get_manifest_api_v1_models__model_id__manifest_get: {
@@ -4940,8 +5523,17 @@ export interface operations {
                     "application/json": components["schemas"]["Manifest"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4960,6 +5552,15 @@ export interface operations {
             };
             /** @description Invalid request */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4995,7 +5596,7 @@ export interface operations {
                     "application/json": components["schemas"]["ModelOut"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -5004,7 +5605,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The request does not come from the app's own pages (`cross-origin-request`). */
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5033,6 +5634,15 @@ export interface operations {
             };
             /** @description A check failed (`manifest-check-failed`): `problems` lists what is wrong, at most 10, each with its `check` (`schema`, `catalog`, `params`, `names`, `signature`, `example` or `model`) and a `detail` of one sentence; `more_problems` counts the rest and `unknown_blocks` names the blocks the catalog does not have. `detail` says the same in words. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

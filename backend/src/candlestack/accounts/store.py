@@ -4,11 +4,11 @@ Nothing here commits; the service does, once a change is complete."""
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from candlestack.accounts.models import Identity, User, UserPreferences, UserSession
+from candlestack.accounts.models import ApiKey, Identity, User, UserPreferences, UserSession
 
 
 class AccountStore:
@@ -20,7 +20,7 @@ class AccountStore:
         """The request's session, for the account deletion hooks of other modules."""
         return self._db
 
-    def add(self, row: User | Identity | UserSession) -> None:
+    def add(self, row: User | Identity | UserSession | ApiKey) -> None:
         self._db.add(row)
 
     async def commit(self) -> None:
@@ -123,3 +123,44 @@ class AccountStore:
         )
         assert merged is not None  # an upsert returns its row
         return merged
+
+    async def api_keys(self, user_id: str) -> list[ApiKey]:
+        """The user's keys that are not revoked, oldest first."""
+        rows = await self._db.scalars(
+            select(ApiKey)
+            .where(ApiKey.user_id == user_id, ApiKey.revoked_at.is_(None))
+            .order_by(ApiKey.created_at, ApiKey.id)
+        )
+        return list(rows)
+
+    async def active_api_keys(self, user_id: str, now: datetime) -> int:
+        """How many keys of the user are neither revoked nor expired."""
+        count = await self._db.scalar(
+            select(func.count())
+            .select_from(ApiKey)
+            .where(
+                ApiKey.user_id == user_id,
+                ApiKey.revoked_at.is_(None),
+                or_(ApiKey.expires_at.is_(None), ApiKey.expires_at > now),
+            )
+        )
+        return count or 0
+
+    async def api_key(self, user_id: str, key_id: str) -> ApiKey | None:
+        """The user's key with the ID, unless it is revoked."""
+        return await self._db.scalar(
+            select(ApiKey).where(
+                ApiKey.id == key_id, ApiKey.user_id == user_id, ApiKey.revoked_at.is_(None)
+            )
+        )
+
+    async def api_key_by_prefix(self, prefix: str) -> tuple[ApiKey, User] | None:
+        """The key that starts with `prefix`, revoked or not, and its user."""
+        row = (
+            await self._db.execute(
+                select(ApiKey, User)
+                .join(User, User.id == ApiKey.user_id)
+                .where(ApiKey.prefix == prefix)
+            )
+        ).first()
+        return None if row is None else (row[0], row[1])
