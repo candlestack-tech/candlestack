@@ -19,14 +19,15 @@ down_revision: str | None = "d990b92fe1cd"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# The full name, given with op.f so the naming convention does not prefix it a second time.
 _STATUS = "ck_backtests_status"
 _INDEX = "ix_backtests_queued"
 
 
 def upgrade() -> None:
-    op.drop_constraint(_STATUS, "backtests", type_="check")
+    op.drop_constraint(op.f(_STATUS), "backtests", type_="check")
     op.create_check_constraint(
-        _STATUS, "backtests", "status IN ('queued', 'running', 'finished', 'failed')"
+        op.f(_STATUS), "backtests", "status IN ('queued', 'running', 'finished', 'failed')"
     )
     op.add_column("backtests", sa.Column("started_at", sa.DateTime(timezone=True), nullable=True))
     op.execute("UPDATE backtests SET started_at = created_at")
@@ -47,5 +48,7 @@ def downgrade() -> None:
         "error = 'The backtest was cancelled before it ran.' WHERE status = 'queued'"
     )
     op.drop_column("backtests", "started_at")
-    op.drop_constraint(_STATUS, "backtests", type_="check")
-    op.create_check_constraint(_STATUS, "backtests", "status IN ('running', 'finished', 'failed')")
+    op.drop_constraint(op.f(_STATUS), "backtests", type_="check")
+    op.create_check_constraint(
+        op.f(_STATUS), "backtests", "status IN ('running', 'finished', 'failed')"
+    )

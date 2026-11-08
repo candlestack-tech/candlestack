@@ -39,6 +39,7 @@ def test_a_backtest_as_the_list_shows_it(ada) -> None:
                 "generated_name": "Backtest A",
                 "number": 1,
                 "status": "finished",
+                "queue_position": None,
                 "seeded": False,
                 "instruments": [
                     {"market": "stock", "symbol": "MSFT"},
