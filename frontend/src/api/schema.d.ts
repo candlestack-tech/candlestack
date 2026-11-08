@@ -156,11 +156,13 @@ export interface paths {
         /**
          * Start Backtest
          * @description Starts a backtest of one of the user's models on one instrument and period and returns
-         *     its document, `running`, with its number. Checked first: the model is the user's and has a
-         *     manifest, the instrument fits the model, the period with the candles the model needs before
-         *     it fits the data and the candle limit, the user has no other backtest running, and the
-         *     worker that runs the models can be reached. The run goes on after the response; the
-         *     document (`GET /api/v1/backtests/{backtest_id}`) has the results once it finished.
+         *     its document with its number: `running`, or `queued` with its `queue_position` while
+         *     another backtest of the user runs (one runs at a time per user, up to 20 more wait, and
+         *     the oldest starts when the running one ends). Checked first: the model is the user's and
+         *     has a manifest, the instrument fits the model, the period with the candles the model needs
+         *     before it fits the data and the candle limit, the user's queue has room, and the worker
+         *     that runs the models can be reached. The run goes on after the response; the document
+         *     (`GET /api/v1/backtests/{backtest_id}`) has the results once it finished.
          */
         post: operations["start_backtest_api_v1_backtests_post"];
         delete?: never;
@@ -197,6 +199,27 @@ export interface paths {
          *     need the scope `publish`, the rest `backtests`.
          */
         patch: operations["update_backtest_api_v1_backtests__backtest_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/backtests/{backtest_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Backtest
+         * @description Cancels the user's queued backtest, so it never runs, and returns its document: `failed`,
+         *     with an `error` that says it was cancelled. A running backtest cannot be cancelled.
+         */
+        post: operations["cancel_backtest_api_v1_backtests__backtest_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/backtests/{backtest_id}/download": {
@@ -1051,12 +1074,12 @@ export interface components {
             /**
              * Created At
              * Format: date-time
-             * @description When it started (UTC)
+             * @description When it was started, queued or not (UTC)
              */
             created_at: string;
             /**
              * Duration S
-             * @description Seconds it took
+             * @description Seconds it ran, from `started_at` (the wait in the queue left out)
              * @example 162
              */
             duration_s: number | null;
@@ -1103,6 +1126,16 @@ export interface components {
              * @description When it was published (UTC); null while it is not
              */
             published_at: string | null;
+            /**
+             * Queue Position
+             * @description Where a queued backtest is in its author's queue: 1 starts next, when the running one ends; null for any other status
+             */
+            queue_position: number | null;
+            /**
+             * Started At
+             * @description When it began to run (UTC); null while it is queued, and for one cancelled before it ran
+             */
+            started_at: string | null;
             status: components["schemas"]["BacktestStatus"];
             /**
              * Steps
@@ -1206,7 +1239,7 @@ export interface components {
             /**
              * Created At
              * Format: date-time
-             * @description When the backtest started (UTC)
+             * @description When the backtest was started, queued or not (UTC)
              */
             created_at: string;
             /**
@@ -1225,7 +1258,7 @@ export interface components {
             error: string | null;
             /**
              * Finished At
-             * @description When it finished or failed (UTC); null while it runs
+             * @description When it finished or failed (UTC); null while it is queued or runs
              */
             finished_at: string | null;
             /**
@@ -1279,6 +1312,12 @@ export interface components {
              * @description When it was published (UTC); null while it is not
              */
             published_at: string | null;
+            /**
+             * Queue Position
+             * @description Where a queued backtest is in the user's queue: 1 starts next, when the running one ends; null for any other status
+             * @example null
+             */
+            queue_position: number | null;
             representation: components["schemas"]["Representation"];
             /**
              * Seeded
@@ -1368,11 +1407,11 @@ export interface components {
         BacktestSort: "default" | "number" | "name" | "model" | "return" | "sharpe" | "max_drawdown" | "trades" | "when";
         /**
          * BacktestStatus
-         * @description `finished` (it has results) or `failed` (it has an error); `running` comes with the
-         *     backtest builder.
+         * @description `queued` (it waits for the user's running backtest to end), `running`, `finished` (it
+         *     has results) or `failed` (it has an error, also when it was cancelled before it ran).
          * @enum {string}
          */
-        BacktestStatus: "running" | "finished" | "failed";
+        BacktestStatus: "queued" | "running" | "finished" | "failed";
         /**
          * BacktestStep
          * @description A step of the run. `candles` loads the candles with the warm-up, `queue` hands the job
@@ -1968,7 +2007,7 @@ export interface components {
             experiments: components["schemas"]["NewExperiments"];
             /**
              * Last
-             * @description The 6 newest backtests that ended, failed ones included (not running ones)
+             * @description The 6 newest backtests that ended, failed ones included (not queued or running ones)
              */
             last: components["schemas"]["BacktestOut"][];
             starred: components["schemas"]["StarredBacktests"];
@@ -4061,7 +4100,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The model has no manifest (`model-needs-setup`), or another backtest of the user is running (`backtest-running`). */
+            /** @description The model has no manifest (`model-needs-setup`), or the user has 20 backtests waiting already (`queue-full`, with `limit`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -4255,7 +4294,84 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Publishing a backtest that is running or failed (`backtest-not-finished`), or test data without a result document (`no-document`); a name another backtest of the account has, ignoring case, as its name or generated name (`name-taken`, the detail names that backtest and its number). */
+            /** @description Publishing a backtest that is queued, running or failed (`backtest-not-finished`), or test data without a result document (`no-document`); a name another backtest of the account has, ignoring case, as its name or generated name (`name-taken`, the detail names that backtest and its number). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    cancel_backtest_api_v1_backtests__backtest_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Public ID of the backtest */
+                backtest_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestDocument"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no backtest with this ID (`not-found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The backtest is running or has ended, so it is not queued (`backtest-not-queued`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -4332,7 +4448,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The backtest is running or failed (`backtest-not-finished`), or is test data without a result document (`no-document`). */
+            /** @description The backtest is queued, running or failed (`backtest-not-finished`), or is test data without a result document (`no-document`). */
             409: {
                 headers: {
                     [name: string]: unknown;

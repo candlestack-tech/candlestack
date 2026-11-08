@@ -50,7 +50,7 @@ class Backtest(Base):
     __table_args__ = (
         # Also the index of the user's backtests (user_id first).
         UniqueConstraint("user_id", "number"),
-        CheckConstraint("status IN ('running', 'finished', 'failed')", name="status"),
+        CheckConstraint("status IN ('queued', 'running', 'finished', 'failed')", name="status"),
     )
 
     id: Mapped[str] = mapped_column(String(14), primary_key=True)
@@ -120,7 +120,10 @@ class Backtest(Base):
     starred: Mapped[bool] = mapped_column(Boolean, server_default=false(), default=False)
     # Made by the seed command (test data on stage and local), which replaces only these.
     seeded: Mapped[bool] = mapped_column(Boolean, server_default=false(), default=False)
+    # When the user started it; it may then wait in their queue until ``started_at``, when it
+    # began to run (null while it is queued, and for one cancelled before it ran).
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # When the user last published it to Experiments, where every account of the beta sees it;
     # null while it is not published.
@@ -153,6 +156,14 @@ Index(
     Backtest.user_id,
     func.lower(Backtest.generated_name),
     unique=True,
+)
+# The queue of a user is their queued backtests, oldest (lowest number) first: a few among all
+# the rows.
+Index(
+    "ix_backtests_queued",
+    Backtest.user_id,
+    Backtest.number,
+    postgresql_where=Backtest.status == "queued",
 )
 # Experiments and the Dashboard read the published backtests of everyone, newest first: a few
 # among all the rows.

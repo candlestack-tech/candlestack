@@ -20,6 +20,7 @@ function useCompareState({ id, status, seeded = false }: Target) {
   const added = picks.some((pick) => pick.id === id);
   let why: string | undefined;
   if (seeded) why = 'Test data: no results to compare';
+  else if (status === 'queued') why = 'Queued: no results yet';
   else if (status === 'running') why = 'Still running';
   else if (status === 'failed') why = 'Failed: no results to compare';
   else if (full && !added) why = 'Up to 4 backtests. Remove one first';

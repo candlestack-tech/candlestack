@@ -3,7 +3,6 @@ import { vi } from 'vitest';
 import type {
   Backtest,
   BacktestDocument,
-  BacktestStep,
   BacktestsPage,
   Catalog,
   CatalogBlock,
@@ -14,7 +13,7 @@ import type {
   Preferences,
 } from '@/api';
 
-import { FINISHED_STEPS, step } from './steps';
+import { FINISHED_STEPS } from './steps';
 
 // A signed-in user as GET /api/v1/me sends it.
 export const ARSEN: Me = {
@@ -122,6 +121,19 @@ export const model = (fields: Partial<Model> = {}): Model => ({
   ...fields,
 });
 
+// The setup of the backtest below: 30-minute candles over four years, long only.
+const SETUP: Backtest['setup'] = {
+  timeframe: '30m',
+  period_start: '2021-01-04',
+  period_end: '2024-12-31',
+  direction: 'long',
+  threshold: 0.05,
+  stop_loss_pct: 7,
+  fees_pct: 0.1,
+  slippage_pct: 0.02,
+  benchmark: 'bh',
+};
+
 // A finished backtest as the API sends it: #12, Bright Vega, on AAPL and MSFT with
 // blesk-novol-8.keras.
 export const backtest = (fields: Partial<Backtest> = {}): Backtest => ({
@@ -136,21 +148,12 @@ export const backtest = (fields: Partial<Backtest> = {}): Backtest => ({
   ],
   representation: 'windows',
   model: { id: 'mdl_7f3k2m9qx4', name: 'blesk-novol-8.keras', framework: 'keras' },
-  setup: {
-    timeframe: '30m',
-    period_start: '2021-01-04',
-    period_end: '2024-12-31',
-    direction: 'long',
-    threshold: 0.05,
-    stop_loss_pct: 7,
-    fees_pct: 0.1,
-    slippage_pct: 0.02,
-    benchmark: 'bh',
-  },
+  setup: SETUP,
   status: 'finished',
   starred: false,
   public: false,
   published_at: null,
+  queue_position: null,
   total_return: 0.246,
   buy_and_hold_return: 0.682,
   sharpe: 0.79,
@@ -395,7 +398,9 @@ export const backtestDocument = (fields: Partial<BacktestDocument> = {}): Backte
     public: false,
     published_at: null,
     status: 'finished',
+    queue_position: null,
     created_at: '2026-10-17T14:05:00Z',
+    started_at: '2026-10-17T14:05:00Z',
     finished_at: '2026-10-17T14:07:42Z',
     duration_s: 162,
     error: null,
@@ -433,22 +438,3 @@ export const spyDocument = (): BacktestDocument =>
       series: { ...EXAMPLE_RESULTS.series, benchmarks: { spy: [1, 1.002, 1.005, 1.01, 1.013] } },
     },
   });
-
-// The same document while it runs: the setup only, the candles loading (or the steps given).
-export const runningDocument = (
-  steps: BacktestStep[] = [
-    step('candles', { state: 'running', started_at: '2026-10-17T14:05:00Z' }),
-    step('queue'),
-    step('model'),
-    step('trades'),
-  ],
-): BacktestDocument => {
-  const doc = backtestDocument();
-  return {
-    ...doc,
-    backtest: { ...doc.backtest, status: 'running', finished_at: null, duration_s: null, steps },
-    software: { ...doc.software, runner: null },
-    data: { ...doc.data, loaded: null, changed: null, rows: null, predictions: null, align: null },
-    results: null,
-  };
-};

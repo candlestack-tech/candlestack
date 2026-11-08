@@ -23,6 +23,8 @@ BACKEND = Path(__file__).parents[3]
 BEFORE_PUBLICATION = "9c2e4f7a1b36"
 # The revision before the generated names.
 BEFORE_NAMES = "e4b7a2c9d013"
+# The revision before the queue of backtests.
+BEFORE_QUEUE = "57317f52f476"
 
 
 def _migrate(database_url: str, revision: str, *, down: bool = False) -> None:
@@ -219,3 +221,57 @@ def test_the_generated_names_go_back(ada, sql, database_url: str) -> None:
     assert "generated_name" not in {row[0] for row in columns}
     assert "uq_backtests_user_id_generated_name" not in {row[0] for row in indexes}
     assert sql("SELECT name FROM backtests") == [("my run",)]
+
+
+# --- The queue ----------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def before_queue(database_url: str) -> Iterator[None]:
+    """The database at the revision before the queue; at the head again after the test."""
+    _migrate(database_url, BEFORE_QUEUE, down=True)
+    try:
+        yield
+    finally:
+        _migrate(database_url, "head")
+
+
+def _add_backtest(sql, user_id: str, number: int, status: str) -> None:
+    sql(
+        "INSERT INTO backtests (id, user_id, number, status, instruments, representation, "
+        "model_name, model_framework, setup, generated_name, created_at) VALUES (:id, :user_id, "
+        ":number, :status, '[]', 'renko', 'm.keras', 'keras', '{}', :name, "
+        "'2026-10-01T12:00:00Z')",
+        id=f"bt_{user_id[4:8]}{number:06d}",
+        user_id=user_id,
+        number=number,
+        status=status,
+        name=f"Backtest {number}",
+    )
+
+
+@pytest.mark.usefixtures("before_queue")
+def test_the_backtests_stored_before_the_queue_began_to_run_when_they_were_made(
+    ada, sql, database_url: str
+) -> None:
+    _add_backtest(sql, ada.id, 1, "finished")
+
+    _migrate(database_url, "head")
+
+    assert sql("SELECT started_at = created_at FROM backtests") == [(True,)]
+
+
+@pytest.mark.usefixtures("before_queue")
+def test_the_queue_goes_back_failing_the_queued_backtests(ada, sql, database_url: str) -> None:
+    _migrate(database_url, "head")
+    _add_backtest(sql, ada.id, 1, "queued")
+
+    _migrate(database_url, BEFORE_QUEUE, down=True)
+
+    columns = sql(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = 'backtests'"
+    )
+    assert "started_at" not in {row[0] for row in columns}
+    assert sql("SELECT status, error IS NOT NULL FROM backtests") == [("failed", True)]
+    with pytest.raises(IntegrityError, match="ck_backtests_status"):
+        _add_backtest(sql, ada.id, 2, "queued")

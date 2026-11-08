@@ -91,7 +91,8 @@ flowchart LR
 | `PATCH /api/v1/models/{model_id}` | renames a model (the extension stays; `409 model-name-taken`) or stars and unstars it |
 | `DELETE /api/v1/models/{model_id}` | deletes a model and its file |
 | `GET /api/v1/preprocessing/catalog` | the blocks a model's manifest can name, by step: id, description, the display group of a feature (`Candle`, `Bands`, `Momentum`, `Trend`, `Volume`, `Brick`, `Line`), warm-up and parameters (type, range, default, `tunable`); public, served by `ml` ([preprocessing.md](preprocessing.md#the-blocks)) |
-| `POST /api/v1/backtests` | starts a backtest of one of the user's models: the body is the setup groups of the result document (`model`, `data`, `decision`, `execution`, `benchmarks`); checked first, then stored `running` and run after the response; 201 with its result document ([Backtests](#backtests)) |
+| `POST /api/v1/backtests` | starts a backtest of one of the user's models: the body is the setup groups of the result document (`model`, `data`, `decision`, `execution`, `benchmarks`); checked first, then stored `running` and run after the response, or `queued` while another backtest of the user runs (1 runs and up to 20 wait per user, `409 queue-full` beyond); 201 with its result document ([Backtests](#backtests)) |
+| `POST /api/v1/backtests/{backtest_id}/cancel` | cancels the user's queued backtest: it fails as cancelled and never runs; 200 with its result document, `409 backtest-not-queued` for one that runs or has ended ([Backtests](#backtests)) |
 | `GET /api/v1/backtests/{backtest_id}` | the result document in the light view of the user's backtest, whatever its status, or of another account's while it is published ([engine.md](engine.md#the-result-document)) |
 | `GET /api/v1/backtests/{backtest_id}/download` | the result document of a finished backtest, the user's or a published one of another account, with every row and trade, as an attachment |
 | `GET /api/v1/backtests` | a page of 10 of the user's backtests: search `q` (name, number, symbol or model name), `show` (`all`, `starred`, `failed`, `public`), `model` (a model's name), `sort` and `order`, `page`; with the total, the pages and what the filter panel shows (the counts of all, starred, failed and published backtests, the models used) ([Backtests](#backtests)) |
@@ -131,9 +132,11 @@ flowchart LR
   website that says what the problem means and what the client should do. The experiments
   module adds `model-needs-setup` (409: the model has no manifest),
   `instrument-not-for-model` (422: a model of US trading hours on a crypto pair or the other
-  way round, with `session` and `market`), `backtest-running` (409: another backtest of the
-  user runs), `backtests-unavailable` (503: the worker's queue cannot be reached),
-  `backtest-not-finished` (409: a download of a running or failed backtest, or publishing one),
+  way round, with `session` and `market`), `queue-full` (409: 20 backtests of the user wait
+  already, with `limit`), `backtest-not-queued` (409: cancelling a backtest that runs or has
+  ended), `backtests-unavailable` (503: the worker's queue cannot be reached),
+  `backtest-not-finished` (409: a download of a queued, running or failed backtest, or
+  publishing one),
   `no-document` (409: a test backtest of the seed command has no result document and
   cannot be published) and `name-taken` (409: renaming a backtest to a name another backtest
   of the account has as its own or its generated name, in any case; the detail names that
@@ -564,13 +567,14 @@ checked at the next start.
 - **Table** `backtests`, one row per run of a user: the user's own number (`#N`: 1, 2, 3 per
   user, unique with the user, given under an advisory lock of the user), its names
   (`generated_name`, and `name`, the user's own, null until a Rename; below), the status
-  (`running`, `finished` or `failed`), the instruments in the order chosen (JSONB: market as the market data
+  (`queued`, `running`, `finished` or `failed`), the instruments in the order chosen (JSONB: market as the market data
   API names it, `stock` or `crypto`, and symbol), the representation (`renko`, `kagi`,
   `windows`), the model, the setup (JSONB, the fields of Settings > Backtest defaults), the
   results (total, buy-and-hold and benchmark return, Sharpe ratio, max drawdown, win rate,
   trades, how long the run took, the engine version), a short equity series, the model's input
   shape (`input_shape`, JSONB: rows by features, from the signature of the manifest it ran
-  with), the error of a failed one, the star, when it started and finished, and when it was
+  with), the error of a failed one, the star, when it was started (`created_at`), began to run
+  (`started_at`, null while it is queued) and finished, and when it was
   published (`published_at`, null while it is not). Results are null for a failed backtest. A
   backtest run in the app also stores (deferred columns, which the list and the Dashboard
   never read) what the result document is built from (docs/engine.md, "Stored, and built on
@@ -651,7 +655,7 @@ checked at the next start.
   (the smallest fall first) and win rate, and the 4 starred ones with the best Sharpe ratio
   (those without one last) with the total starred, and the 4 newest published backtests of
   anyone ([Experiments](#experiments)) with the total published. The newest leave out the
-  running ones, which have nothing to show yet.
+  queued and running ones, which have nothing to show yet.
 - **Starting one** (`POST /api/v1/backtests`): the body is the setup groups of the result
   document, so a document sent back runs the backtest again (the groups' other fields are
   ignored): `model` (`id`), `data` (`instrument.id` and `period`, `[start, end)` in epoch
@@ -662,8 +666,8 @@ checked at the next start.
   stock, [engine.md](engine.md#benchmarks-of-a-backtest)). Checked before anything is
   stored, each a problem ([HTTP surface](#http-surface)): the model is the user's and has a
   manifest (`ready` or `verified`), its timeframe is one the list can show (5m, 30m, 1h, 1d),
-  its session fits the instrument's market (`regular` for stocks, `24/7` for crypto), the user
-  has no backtest running (checked again under the lock that gives the number), the worker's
+  its session fits the instrument's market (`regular` for stocks, `24/7` for crypto), the user's
+  queue has room (checked again under the lock that gives the number), the worker's
   queue answers a ping (an environment without the worker: `503 backtests-unavailable` at
   once, never a wait), and the period with the manifest's warm-up before it fits the data
   (`DataService.warm_up_start`: the period as the candles endpoint checks it, the warm-up's
@@ -671,7 +675,33 @@ checked at the next start.
   a warm-up for the fund a benchmark holds. The model is held under that lock until the
   backtest is stored, so one deleted meanwhile is `404 not-found`. The
   reads end before the queue and the data module are asked, so no connection waits on them.
-  The answer is the result document of the new backtest, `running`, with `Location`.
+  The answer is the result document of the new backtest, `running` or `queued` with its
+  `queue_position`, with `Location`.
+- **The queue**: a user's backtests run one at a time. A new backtest is stored `queued`, at
+  the end of the user's queue, and in the same transaction, under the lock of the user, the
+  oldest queued one (lowest number) becomes `running` with `started_at` when none of theirs
+  runs: the new one itself when nothing else waits. At most 20 wait (`store.QUEUE_MAX`): a start
+  beyond is `409 queue-full` with `limit`, checked before the slower checks and again under
+  the lock. When a run ends, finished or failed for any reason (the worker stopped or failed
+  the job, the candles, a bug), the runner starts the oldest queued backtest of its user under
+  the same lock (`BacktestRunner._next`). Queued backtests outlive a stop of the API process:
+  the stop fails only the runs it stops, and the next start, after failing those left
+  running, starts the first of every queue (`resume`), which it also does every 30 seconds
+  for a queue that stood still (its next could not be started, Postgres out of reach); a new
+  start of the user moves such a queue on too, unless 20 wait already. With Postgres out of
+  reach at the start, failing those left running is tried again at each check; it fails only
+  backtests that began to run before the process started. A backtest the runner is handed
+  after its shutdown began goes back to the head of its queue. Fairness comes from the one run per user: each
+  user has at most one job in the worker's queue, which takes the oldest job first, so one
+  user's 20 queued backtests never hold back another user's backtest. `queue_position` (in
+  `BacktestOut` and the document's `backtest`, null for any other status) is 1 for the next to
+  start, counted on request over the partial index `ix_backtests_queued` (`user_id`, `number`
+  of the queued rows). `POST /api/v1/backtests/{id}/cancel` fails a queued backtest under the
+  same lock with the error "You cancelled the backtest before it ran.", `finished_at` set, its
+  steps left `pending`, no `started_at` or duration; a running backtest cannot be cancelled
+  (`409 backtest-not-queued`), nor one that ended. A queued backtest has no download
+  (`409 backtest-not-finished`) and cannot be published. `duration_s` is the time it ran, from
+  `started_at` (the migration set `started_at` to `created_at` for the rows stored before).
 - **The run** (`experiments/runner.py`, `BacktestRunner` on `app.state.backtest_runner`) is a
   task of the API process, so it outlives the request: the candles with the warm-up from the
   data module (and the period's candles of the fund a benchmark holds, which only the document
@@ -687,7 +717,8 @@ checked at the next start.
   it ran, no prediction in the period; a bug of ours is logged as an error (a Sentry issue) and the user reads that it was
   reported. The API runs in one process, so on its start the backtests still `running` were
   left by a process that stopped and fail ("The server restarted..."), and on shutdown the
-  runs it stops fail the same way.
+  runs it stops fail the same way; queued backtests stay queued for the next start
+  ([The queue](#backtests)).
 - **The steps of a run** (`experiments/steps.py`, `backtest.steps` of the result document,
   which the backtest's page asks for every 2 seconds while it runs) are four, in this order:
   `candles` (`DataService.candles` of the period with the warm-up, then of the fund a

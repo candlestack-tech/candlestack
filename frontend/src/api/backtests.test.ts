@@ -1,15 +1,8 @@
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  backtest,
-  backtestDocument,
-  backtestsAnswer,
-  dashboardAnswer,
-  problem,
-  runningDocument,
-  stubApi,
-} from '@/test/api';
+import { backtest, backtestDocument, backtestsAnswer, dashboardAnswer, problem, stubApi } from '@/test/api';
+import { queuedDocument, runningDocument } from '@/test/runs';
 
 import {
   backtestQueryOptions,
@@ -89,12 +82,14 @@ describe('backtestQueryOptions', () => {
     await expect(new QueryClient().fetchQuery(options)).resolves.toEqual(backtestDocument());
   });
 
-  it('asks again every 2 s while it runs and never once it ended', () => {
+  it('asks again every 2 s while it waits or runs and never once it ended', () => {
     const { refetchInterval, staleTime } = backtestQueryOptions('bt_7f3k2m9qx4');
     const query = (data: BacktestDocument | undefined) => ({ state: { data } }) as never;
     if (typeof refetchInterval !== 'function' || typeof staleTime !== 'function') throw new Error('Not functions');
+    expect(refetchInterval(query(queuedDocument()))).toBe(2000);
     expect(refetchInterval(query(runningDocument()))).toBe(2000);
     expect(refetchInterval(query(backtestDocument()))).toBe(false);
+    expect(staleTime(query(queuedDocument()))).toBe(0);
     expect(staleTime(query(runningDocument()))).toBe(0);
     expect(staleTime(query(backtestDocument()))).toBe(Infinity);
   });

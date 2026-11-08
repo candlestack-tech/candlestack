@@ -202,8 +202,8 @@ const NAMES: Record<BacktestStep['state'], string> = {
   pending: 'text-muted-foreground',
 };
 
-// The four steps of a running backtest, or of a failed one up to where it failed; the steps after
-// a failure did not run. While it runs, it may be left.
+// The four steps of a queued or running backtest (all pending while it waits), or of a failed one
+// up to where it failed; the steps after a failure did not run. Until it ends, it may be left.
 export function RunSteps({ doc }: { doc: BacktestDocument }) {
   const { status, steps } = doc.backtest;
   const running = status === 'running';
@@ -237,6 +237,9 @@ export function RunSteps({ doc }: { doc: BacktestDocument }) {
         })}
       </ol>
       {running && <p className={cn(HINT, 'mt-1')}>You can close the page. The backtest keeps going.</p>}
+      {status === 'queued' && (
+        <p className={cn(HINT, 'mt-1')}>It starts when your running backtest ends. You can close the page.</p>
+      )}
     </section>
   );
 }

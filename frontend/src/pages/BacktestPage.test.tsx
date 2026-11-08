@@ -9,11 +9,11 @@ import {
   backtestDocument,
   backtestsAnswer,
   problem,
-  runningDocument,
   sessionWithPreferences,
   spyDocument,
   stubApi,
 } from '@/test/api';
+import { queuedDocument, runningDocument } from '@/test/runs';
 import { renderApp, viewerIn } from '@/test/app';
 import { candles } from '@/test/candles';
 import { charts } from '@/test/lightweightCharts';
@@ -314,6 +314,25 @@ describe("a backtest's page before it finished", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['account', 'models'] });
   });
 
+  it('shows a queued backtest with its steps not begun, asks again until it runs, then until it ends', async () => {
+    const { all, queryClient } = await openPage({ status: 200, body: queuedDocument() });
+    const steps = await screen.findByRole('region', { name: 'Steps' });
+    expect(within(steps).getAllByText(/waiting to start$/)).toHaveLength(4);
+    expect(screen.getByText('Queued')).toBeDefined();
+    expect(screen.getByText('It starts when your running backtest ends. You can close the page.')).toBeDefined();
+    expect(box('Setup').getByText('raw-candles.keras')).toBeDefined();
+
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    all[DOCUMENT] = { status: 200, body: runningDocument() };
+    await queryClient.refetchQueries({ queryKey: ['account', 'backtest', ID] });
+    expect(await screen.findByText('You can close the page. The backtest keeps going.')).toBeDefined();
+    expect(invalidate).not.toHaveBeenCalled();
+    all[DOCUMENT] = { status: 200, body: backtestDocument() };
+    await queryClient.refetchQueries({ queryKey: ['account', 'backtest', ID] });
+    expect(await screen.findByText('Finished')).toBeDefined();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['account', 'backtests'] });
+  });
+
   it('counts how long it runs in its status each second', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
     vi.setSystemTime(new Date('2026-10-17T16:00:00Z'));
@@ -323,7 +342,9 @@ describe("a backtest's page before it finished", () => {
       step('model'),
       step('trades'),
     ]);
-    running.backtest.created_at = '2026-10-17T15:58:55Z';
+    // It waited in the queue first: the wait is not counted.
+    running.backtest.created_at = '2026-10-17T15:50:00Z';
+    running.backtest.started_at = '2026-10-17T15:58:55Z';
     await openPage({ status: 200, body: running });
     expect(await screen.findByText('Running · 1 min 5 s')).toBeDefined();
     await act(async () => {

@@ -10,9 +10,17 @@ it was at failed; a bug of ours is logged as an error (a Sentry issue) and the u
 A run cannot hold a database connection while the worker runs: it reads the backtest, lets the
 session go, and writes the result in another.
 
-The API runs in one process (granian with one worker), so a backtest still ``running`` when the
-process starts was left by one that stopped: ``recover`` marks those failed, and ``close`` on
-shutdown fails the runs it stops.
+The API runs in one process (granian with one worker), so a backtest that began to run before
+the process started was left by one that stopped: ``recover`` marks those failed (again at each
+check until Postgres answers), and ``close`` on shutdown fails the runs it stops.
+
+A user's backtests run one at a time; the others wait in the user's queue (``queued``). When a
+run ends, however it ends, the runner starts the oldest queued backtest of its user. Queued
+backtests outlive a stop of the process: ``recover`` starts the first of each queue, and every
+``QUEUE_CHECK_EVERY`` seconds ``resume`` starts those of a queue that stood still (its next
+could not be started, Postgres out of reach). As each user has at most one run, and so one job
+in the worker's queue, which takes the oldest job first, one user's queue never holds back
+another user's backtest.
 """
 
 import asyncio
@@ -66,6 +74,8 @@ UNREACHABLE = (
 )
 JOB_FAILED = "The model could not run on the candles. Try again later."
 MODEL_GONE = "The model was deleted before the backtest could run it."
+# How often the queues that stood still are moved on, in seconds.
+QUEUE_CHECK_EVERY = 30.0
 
 
 class RunFailed(Exception):
@@ -89,21 +99,42 @@ class BacktestRunner:
     """Starts the runs of the backtests and keeps their tasks until they end."""
 
     def __init__(
-        self, db: Database, data: DataService, jobs: JobClient, *, wait: float = DEFAULT_WAIT
+        self,
+        db: Database,
+        data: DataService,
+        jobs: JobClient,
+        *,
+        wait: float = DEFAULT_WAIT,
+        check_every: float = QUEUE_CHECK_EVERY,
     ) -> None:
         self._db = db
         self._data = data
         self._jobs = jobs
         self._wait = wait
+        self._check_every = check_every
         # The runs going on, by their backtest.
         self._tasks: dict[asyncio.Task[None], str] = {}
+        self._watch: asyncio.Task[None] | None = None
+        self._closed = False
+        # A backtest that began to run before this was left by a stopped process.
+        self._born = _now()
+        self._recovered = False
+        # The backtests put back in their queue after ``close``.
+        self._requeues: set[asyncio.Task[None]] = set()
 
     async def ping(self) -> None:
         """Raises ``redis.exceptions.RedisError`` when the worker's queue cannot be reached."""
         await self._jobs.ping()
 
     def start(self, backtest_id: str) -> None:
-        """Runs the backtest, which must be stored as running, in a task of its own."""
+        """Runs the backtest, which must be stored as running, in a task of its own. Once
+        ``close`` began, it goes back to the head of its queue instead, for the next start of
+        the process."""
+        if self._closed:
+            requeue = asyncio.create_task(self._requeue(backtest_id), name=f"requeue {backtest_id}")
+            self._requeues.add(requeue)
+            requeue.add_done_callback(self._requeues.discard)
+            return
         task = asyncio.create_task(self._run(backtest_id), name=f"backtest {backtest_id}")
         self._tasks[task] = backtest_id
         task.add_done_callback(self._ended)
@@ -112,27 +143,114 @@ class BacktestRunner:
         self._tasks.pop(task, None)
 
     async def recover(self) -> None:
-        """Marks failed the backtests a stopped process left running. Postgres out of reach is
-        a warning: they stay running until the next start."""
+        """Marks failed the backtests a stopped process left running, starts the first queued
+        backtest of each user, and from now on does both every ``check_every`` seconds: moves
+        on the queues that stand still, and fails those left running until Postgres answered.
+        """
+        self._watch = asyncio.create_task(self._keep_moving(), name="backtest queues")
+        await self._check()
+
+    async def _check(self) -> None:
+        """Fails the backtests left running, until that once succeeded, then ``resume``.
+        Postgres out of reach is a warning: the next check tries again, and meanwhile the
+        queues of their users stand still."""
+        if not self._recovered:
+            try:
+                async with self._db.sessions() as session:
+                    store = BacktestStore(session)
+                    # Only those that began before this process: its own runs go on.
+                    left = await store.fail(RESTARTED, _now(), before=self._born)
+                    await store.commit()
+            except DATABASE_ERRORS as error:
+                logger.warning(
+                    "The backtests left running were not checked (%s)", type(error).__name__
+                )
+                return
+            self._recovered = True
+            if left:
+                logger.warning("%d backtests left running by a stopped process failed", left)
+        await self.resume()
+
+    async def resume(self) -> None:
+        """Starts the oldest queued backtest of each user who has one and none running.
+        Postgres out of reach is a warning: the next call tries again."""
+        try:
+            async with self._db.sessions() as session:
+                users = await BacktestStore(session).waiting()
+        except DATABASE_ERRORS as error:
+            logger.warning("The backtest queues were not checked (%s)", type(error).__name__)
+            return
+        for user_id in users:
+            await self._next(user_id)
+
+    async def _keep_moving(self) -> None:
+        while True:
+            await asyncio.sleep(self._check_every)
+            try:
+                await self._check()
+            except Exception:
+                # A bug of ours (a Sentry issue); the next check still comes.
+                logger.exception("The backtest queues could not be checked")
+
+    async def _next(self, user_id: str) -> None:
+        """Starts the user's oldest queued backtest, unless one of theirs runs. Postgres out of
+        reach is a warning: ``resume`` starts it later."""
+        if self._closed:
+            return
         try:
             async with self._db.sessions() as session:
                 store = BacktestStore(session)
-                left = await store.fail(RESTARTED, _now())
+                await store.lock_user(user_id)
+                started = await store.take_next(user_id, _now())
                 await store.commit()
         except DATABASE_ERRORS as error:
-            logger.warning("The backtests left running were not checked (%s)", type(error).__name__)
+            logger.warning(
+                "The next backtest of a queue was not started (%s)", type(error).__name__
+            )
             return
-        if left:
-            logger.warning("%d backtests left running by a stopped process failed", left)
+        if started is not None:
+            self.start(started.id)
+
+    async def _advance(self, backtest_id: str) -> None:
+        """Starts the next backtest of the user of the one whose run ended."""
+        try:
+            async with self._db.sessions() as session:
+                user_id = await BacktestStore(session).user_of(backtest_id)
+        except DATABASE_ERRORS as error:
+            logger.warning(
+                "The queue of backtest %s was not moved on (%s)", backtest_id, type(error).__name__
+            )
+            return
+        if user_id is not None:
+            await self._next(user_id)
 
     async def close(self) -> None:
-        """Stops the runs and marks their backtests failed (also a run that had not begun)."""
+        """Stops the runs and marks their backtests failed (also a run that had not begun).
+        Queued backtests stay queued, for the next start of the process."""
+        self._closed = True
+        if self._watch is not None:
+            self._watch.cancel()
+            await asyncio.gather(self._watch, return_exceptions=True)
         stopped = dict(self._tasks)
         for task in stopped:
             task.cancel()
         await asyncio.gather(*stopped, return_exceptions=True)
         for backtest_id in stopped.values():
             await self._fail(backtest_id, RESTARTED)
+        await asyncio.gather(*self._requeues, return_exceptions=True)
+
+    async def _requeue(self, backtest_id: str) -> None:
+        """Puts the backtest that was to run back at the head of its queue, as it never began.
+        Postgres out of reach is a warning: the next start of the process fails it."""
+        try:
+            async with self._db.sessions() as session:
+                store = BacktestStore(session)
+                await store.requeue(backtest_id)
+                await store.commit()
+        except DATABASE_ERRORS as error:
+            logger.warning(
+                "Backtest %s was not put back in its queue (%s)", backtest_id, type(error).__name__
+            )
 
     async def _run(self, backtest_id: str) -> None:
         try:
@@ -143,6 +261,8 @@ class BacktestRunner:
         except Exception:
             logger.exception("Backtest %s failed with an error of CandleStack", backtest_id)
             await self._fail(backtest_id, INTERNAL)
+        # Not after a run that ``close`` cancelled: the process stops.
+        await self._advance(backtest_id)
 
     async def _execute(self, backtest_id: str) -> None:
         async with self._db.sessions() as session:
@@ -322,7 +442,9 @@ class BacktestRunner:
                 backtest.set_equity(*points)
             backtest.engine_version = done.result.engine_version
             backtest.finished_at = now
-            backtest.duration_s = (now - backtest.created_at).total_seconds()
+            # The time it ran: the wait in the queue left out.
+            began = backtest.started_at or backtest.created_at
+            backtest.duration_s = (now - began).total_seconds()
             backtest.steps = steps.finished()
             await session.commit()
         logger.info("Backtest %s finished in %.1f s", backtest_id, backtest.duration_s)

@@ -25,7 +25,7 @@
           "description": "Whose backtest it is. Another account's backtest is shown only while it is published, read only, and its `model.id` is null"
         },
         "created_at": {
-          "description": "When it started (UTC)",
+          "description": "When it was started, queued or not (UTC)",
           "format": "date-time",
           "title": "Created At",
           "type": "string"
@@ -39,7 +39,7 @@
               "type": "null"
             }
           ],
-          "description": "Seconds it took",
+          "description": "Seconds it ran, from `started_at` (the wait in the queue left out)",
           "examples": [
             162.0
           ],
@@ -120,6 +120,32 @@
           "description": "When it was published (UTC); null while it is not",
           "title": "Published At"
         },
+        "queue_position": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where a queued backtest is in its author's queue: 1 starts next, when the running one ends; null for any other status",
+          "title": "Queue Position"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When it began to run (UTC); null while it is queued, and for one cancelled before it ran",
+          "title": "Started At"
+        },
         "status": {
           "$ref": "#/$defs/BacktestStatus"
         },
@@ -141,7 +167,9 @@
         "public",
         "published_at",
         "status",
+        "queue_position",
         "created_at",
+        "started_at",
         "finished_at",
         "duration_s",
         "error",
@@ -216,8 +244,9 @@
       "type": "object"
     },
     "BacktestStatus": {
-      "description": "`finished` (it has results) or `failed` (it has an error); `running` comes with the\nbacktest builder.",
+      "description": "`queued` (it waits for the user's running backtest to end), `running`, `finished` (it\nhas results) or `failed` (it has an error, also when it was cancelled before it ran).",
       "enum": [
+        "queued",
         "running",
         "finished",
         "failed"

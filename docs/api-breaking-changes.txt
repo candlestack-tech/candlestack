@@ -41,3 +41,15 @@ GET /api/v1/models added the new `onnx` enum value to the `models/items/framewor
 POST /api/v1/models added the new `onnx` enum value to the `framework` response property for the response status `201`
 PATCH /api/v1/models/{model_id} added the new `onnx` enum value to the `framework` response property for the response status `200`
 PUT /api/v1/models/{model_id}/manifest added the new `onnx` enum value to the `framework` response property for the response status `200`
+GET /api/v1/backtests added the new `queued` enum value to the `backtests/items/status` response property for the response status `200`
+POST /api/v1/backtests added the new `queued` enum value to the `backtest/status` response property for the response status `201`
+GET /api/v1/backtests/{backtest_id} added the new `queued` enum value to the `backtest/status` response property for the response status `200`
+PATCH /api/v1/backtests/{backtest_id} added the new `queued` enum value to the `status` response property for the response status `200`
+GET /api/v1/backtests/{backtest_id}/download added the new `queued` enum value to the `backtest/status` response property for the response status `200`
+GET /api/v1/dashboard added the new `queued` enum value to the `best/max_drawdown/items/status` response property for the response status `200`
+GET /api/v1/dashboard added the new `queued` enum value to the `best/sharpe/items/status` response property for the response status `200`
+GET /api/v1/dashboard added the new `queued` enum value to the `best/total_return/items/status` response property for the response status `200`
+GET /api/v1/dashboard added the new `queued` enum value to the `best/win_rate/items/status` response property for the response status `200`
+GET /api/v1/dashboard added the new `queued` enum value to the `last/items/status` response property for the response status `200`
+GET /api/v1/dashboard added the new `queued` enum value to the `starred/backtests/items/status` response property for the response status `200`
+GET /api/v1/compare added the new `queued` enum value to the `backtests/items/status` response property for the response status `200`

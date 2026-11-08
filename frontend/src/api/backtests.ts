@@ -69,18 +69,21 @@ export function updateBacktest(id: string, update: components['schemas']['Backte
   return patch<Backtest>(backtestPath(id), update);
 }
 
-// While a backtest runs, its page asks again this often until it finished or failed.
+// While a backtest waits or runs, its page asks again this often until it finished or failed.
 export const POLL_MS = 2000;
 
+// Whether a backtest has not ended yet: queued or running.
+export const isUnderway = (status: BacktestStatus | undefined) => status === 'queued' || status === 'running';
+
 // GET /api/v1/backtests/{id}: the result document in the light view, whatever its status. A
-// running one is asked for again every POLL_MS; a finished or failed one never changes, so it is
-// not asked for again while it is in the cache.
+// queued or running one is asked for again every POLL_MS; a finished or failed one never changes,
+// so it is not asked for again while it is in the cache.
 export function backtestQueryOptions(id: string) {
   return queryOptions({
     queryKey: ['account', 'backtest', id],
     queryFn: ({ signal }) => get<BacktestDocument>(backtestPath(id), signal),
-    staleTime: ({ state }) => (state.data?.backtest.status === 'running' ? 0 : Infinity),
-    refetchInterval: ({ state }) => (state.data?.backtest.status === 'running' ? POLL_MS : false),
+    staleTime: ({ state }) => (isUnderway(state.data?.backtest.status) ? 0 : Infinity),
+    refetchInterval: ({ state }) => (isUnderway(state.data?.backtest.status) ? POLL_MS : false),
   });
 }
 
@@ -89,5 +92,6 @@ export function backtestQueryOptions(id: string) {
 // Content-Disposition name and save a bare id without an extension.
 export const getBacktestFile = (id: string) => getBlob(`${backtestPath(id)}/download`);
 
-// POST /api/v1/backtests: starts a backtest and answers with its document, `running`.
+// POST /api/v1/backtests: starts a backtest and answers with its document, `running`, or
+// `queued` while another backtest of the user runs.
 export const startBacktest = (body: BacktestIn) => postJson<BacktestDocument>('/v1/backtests', body);

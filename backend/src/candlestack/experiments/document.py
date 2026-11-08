@@ -316,9 +316,23 @@ class BacktestHeader(BaseModel):
         description="When it was published (UTC); null while it is not"
     )
     status: BacktestStatus
-    created_at: datetime = Field(description="When it started (UTC)")
+    queue_position: int | None = Field(
+        ge=1,
+        description=(
+            "Where a queued backtest is in its author's queue: 1 starts next, when the running "
+            "one ends; null for any other status"
+        ),
+    )
+    created_at: datetime = Field(description="When it was started, queued or not (UTC)")
+    started_at: datetime | None = Field(
+        description="When it began to run (UTC); null while it is queued, and for one "
+        "cancelled before it ran",
+    )
     finished_at: datetime | None = Field(description="When it finished or failed (UTC)")
-    duration_s: float | None = Field(description="Seconds it took", examples=[162.0])
+    duration_s: float | None = Field(
+        description="Seconds it ran, from `started_at` (the wait in the queue left out)",
+        examples=[162.0],
+    )
     error: str | None = Field(description="What went wrong and what to do, for a failed one")
     steps: list[BacktestStep] = Field(
         description="The steps of the run in their order, while it runs and after: the "

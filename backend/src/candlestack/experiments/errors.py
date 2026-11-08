@@ -36,8 +36,16 @@ class InvalidBacktest(Exception):
         self.detail = detail
 
 
-class BacktestRunning(Exception):
-    """The user has a backtest running already."""
+class QueueFull(Exception):
+    """The user has as many backtests waiting in their queue as it holds."""
+
+
+class BacktestNotQueued(Exception):
+    """The backtest runs or has ended, so it cannot be cancelled."""
+
+    def __init__(self, status: str) -> None:
+        super().__init__(status)
+        self.status = status
 
 
 class BacktestsUnavailable(Exception):
@@ -45,7 +53,7 @@ class BacktestsUnavailable(Exception):
 
 
 class BacktestNotFinished(Exception):
-    """The backtest is running or failed: it has no results."""
+    """The backtest is queued, running or failed: it has no results."""
 
     def __init__(self, status: str) -> None:
         super().__init__(status)

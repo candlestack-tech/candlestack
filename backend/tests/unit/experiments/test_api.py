@@ -39,12 +39,13 @@ def signed_in(app: FastAPI) -> FastAPI:
         ("POST", "/api/v1/backtests"),
         ("GET", "/api/v1/backtests/bt_7f3k2m9qx4"),
         ("GET", "/api/v1/backtests/bt_7f3k2m9qx4/download"),
+        ("POST", "/api/v1/backtests/bt_7f3k2m9qx4/cancel"),
         ("GET", "/api/v1/compare?ids=bt_7f3k2m9qx4,bt_t9n8v7d6a5"),
     ],
 )
 def test_the_backtests_need_a_session(client: TestClient, method: str, path: str) -> None:
     json = {"starred": True} if method == "PATCH" else None
-    if method == "POST":
+    if path == "/api/v1/backtests":
         json = {
             "model": {"id": "mdl_7f3k2m9qx4"},
             "data": {"instrument": {"id": "stock:AAPL"}, "period": {"start": 0, "end": 86400}},
@@ -57,8 +58,11 @@ def test_the_backtests_need_a_session(client: TestClient, method: str, path: str
 
 
 @pytest.mark.usefixtures("signed_in")
-def test_starting_a_backtest_needs_the_apps_own_origin(client: TestClient) -> None:
-    response = client.post("/api/v1/backtests", json={}, headers={"Origin": "https://evil.example"})
+@pytest.mark.parametrize("path", ["/api/v1/backtests", "/api/v1/backtests/bt_7f3k2m9qx4/cancel"])
+def test_starting_or_cancelling_a_backtest_needs_the_apps_own_origin(
+    client: TestClient, path: str
+) -> None:
+    response = client.post(path, json={}, headers={"Origin": "https://evil.example"})
 
     assert response.status_code == 403
     assert response.json()["type"] == PROBLEMS + "cross-origin-request"

@@ -1,6 +1,10 @@
 """Starting a backtest and building its result document: what ``POST /api/v1/backtests`` checks
-before it accepts a run, and the document ``GET /api/v1/backtests/{id}`` builds from what the
-run stored (docs/engine.md, "The result document").
+before it accepts a run, the document ``GET /api/v1/backtests/{id}`` builds from what the run
+stored (docs/engine.md, "The result document"), and cancelling a queued backtest.
+
+A user's backtests run one at a time: a new one waits in the user's queue (``queued``, at most
+``store.QUEUE_MAX``) while another of theirs runs, and the runner starts the oldest when that
+one ends (``BacktestRunner``).
 
 The document is built on request: the stored predictions, the candles from the cache and the
 engine, which is deterministic. When the candles' fingerprint differs from the run's (a source
@@ -58,13 +62,14 @@ from candlestack.experiments.document import (
 from candlestack.experiments.errors import (
     BacktestNotFinished,
     BacktestNotFound,
-    BacktestRunning,
+    BacktestNotQueued,
     BacktestsUnavailable,
     InstrumentNotForModel,
     InvalidBacktest,
     ModelNeedsSetup,
     ModelNotFound,
     NoDocument,
+    QueueFull,
 )
 from candlestack.experiments.models import Backtest, new_backtest_id
 from candlestack.experiments.runner import BacktestRunner
@@ -78,7 +83,7 @@ from candlestack.experiments.schemas import (
 )
 from candlestack.experiments.spec import RunReport, RunSpec, SpecData, SpecModel, SpecWarmUp
 from candlestack.experiments.steps import pending, shown_steps
-from candlestack.experiments.store import BacktestStore
+from candlestack.experiments.store import QUEUE_MAX, BacktestStore
 from candlestack.ml import Model
 from candlestack.preprocessing import Manifest, warm_up
 
@@ -88,6 +93,7 @@ _SESSIONS = {"stock": "regular", "crypto": "24/7"}
 # The representations the Backtests list names, by the catalog block's name; time windows of
 # candles (candles@1) for any other.
 _REPRESENTATIONS = {"renko": Representation.renko, "kagi": Representation.kagi}
+CANCELLED = "You cancelled the backtest before it ran."
 
 
 class BacktestRuns:
@@ -100,13 +106,14 @@ class BacktestRuns:
         self._app_version = app_version
 
     async def start(self, user_id: str, body: BacktestIn) -> tuple[Backtest, bytes]:
-        """Checks a new backtest of the user, stores it as running, starts its run and returns
-        it with its document.
+        """Checks a new backtest of the user, stores it, and returns it with its document: it
+        runs at once when no other backtest of the user runs or waits, else it waits at the
+        end of their queue (``queued``).
 
         Raises:
-            InvalidBacktest, ModelNotFound, ModelNeedsSetup, InstrumentNotForModel,
-            BacktestRunning, BacktestsUnavailable, and the data module's errors of the
-            instrument and the period (``data.DataError``).
+            InvalidBacktest, ModelNotFound, ModelNeedsSetup, InstrumentNotForModel, QueueFull,
+            BacktestsUnavailable, and the data module's errors of the instrument and the
+            period (``data.DataError``).
         """
         instrument_id = InstrumentId.parse(body.data.instrument.id)
         body = body.model_copy(
@@ -118,8 +125,8 @@ class BacktestRuns:
         manifest = _manifest(model, instrument_id)
         author = DocumentAuthor(id=user_id, name=await self._store.author_name(user_id), mine=True)
         # Before the slower checks; again under the lock below, where it counts.
-        if await self._store.running(user_id):
-            raise BacktestRunning
+        if await self._store.queued(user_id) >= QUEUE_MAX:
+            raise QueueFull
         # The reads so far end here, so no connection waits on the queue and the data module.
         await self._store.commit()
         try:
@@ -128,8 +135,8 @@ class BacktestRuns:
             raise BacktestsUnavailable from error
         spec = await self._spec(model, manifest, instrument_id, body)
         await self._store.lock_user(user_id)
-        if await self._store.running(user_id):
-            raise BacktestRunning
+        if await self._store.queued(user_id) >= QUEUE_MAX:
+            raise QueueFull
         # The model may have been deleted meanwhile; held now until the backtest is stored.
         if not await self._store.hold_model(user_id, model.id):
             raise ModelNotFound
@@ -137,7 +144,8 @@ class BacktestRuns:
             id=new_backtest_id(),
             user_id=user_id,
             number=await self._store.last_number(user_id) + 1,
-            status=BacktestStatus.running.value,
+            # At the end of the queue; it runs at once when it is the queue's first.
+            status=BacktestStatus.queued.value,
             instruments=[{"market": instrument_id.market, "symbol": instrument_id.symbol}],
             representation=_representation(manifest),
             model_id=model.id,
@@ -150,9 +158,34 @@ class BacktestRuns:
             created_at=datetime.now(UTC),
         )
         await self._store.add_named(backtest)
+        # Also an older one, should the queue have stood still (``BacktestRunner.resume``).
+        started = await self._store.take_next(user_id, datetime.now(UTC))
+        position = await self._store.queue_position(backtest.id)
         await self._store.commit()
-        self._runner.start(backtest.id)
-        return backtest, dumps(_document(backtest, spec, author=author))
+        if started is not None:
+            self._runner.start(started.id)
+        document = _document(backtest, spec, author=author, queue_position=position)
+        return backtest, dumps(document)
+
+    async def cancel(self, user_id: str, backtest_id: str) -> bytes:
+        """Cancels the user's queued backtest: it fails, as cancelled, and never runs. Returns
+        its document.
+
+        Raises:
+            BacktestNotFound, BacktestNotQueued (it runs or has ended).
+        """
+        # The runner cannot start it between the check and the commit.
+        await self._store.lock_user(user_id)
+        found = await self._store.backtest(user_id, backtest_id)
+        if found is None:
+            raise BacktestNotFound
+        backtest = found.backtest
+        if backtest.status != BacktestStatus.queued.value:
+            raise BacktestNotQueued(backtest.status)
+        await self._store.cancel(backtest, CANCELLED, datetime.now(UTC))
+        await self._store.commit()
+        _, content = await self.document(user_id, backtest_id, light=True)
+        return content
 
     async def _spec(
         self, model: Model, manifest: Manifest, instrument_id: InstrumentId, body: BacktestIn
@@ -222,7 +255,11 @@ class BacktestRuns:
             id=backtest.user_id, name=found.author, mine=backtest.user_id == user_id
         )
         if not finished or backtest.report is None:
-            return backtest.number, dumps(_document(backtest, spec, author=author))
+            position = None
+            if backtest.status == BacktestStatus.queued.value:
+                position = await self._store.queue_position(backtest.id)
+            document = _document(backtest, spec, author=author, queue_position=position)
+            return backtest.number, dumps(document)
         report = RunReport.model_validate(backtest.report)
         blob = await self._store.predictions(backtest.id)
         assert blob is not None  # a finished run stored them
@@ -285,6 +322,7 @@ def _document(  # noqa: PLR0913 (the document's sources)
     *,
     author: DocumentAuthor,
     changed: bool | None = None,
+    queue_position: int | None = None,
 ) -> dict[str, Any]:
     return document(
         backtest=BacktestHeader(
@@ -296,7 +334,9 @@ def _document(  # noqa: PLR0913 (the document's sources)
             public=backtest.published_at is not None,
             published_at=backtest.published_at,
             status=BacktestStatus(backtest.status),
+            queue_position=queue_position,
             created_at=backtest.created_at,
+            started_at=backtest.started_at,
             finished_at=backtest.finished_at,
             duration_s=backtest.duration_s,
             error=backtest.error,

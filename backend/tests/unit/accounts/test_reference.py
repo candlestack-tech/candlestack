@@ -20,6 +20,7 @@ def paths() -> dict[str, Any]:
         ("get", "/api/v1/me", [{"apiKey": ["read"]}]),
         ("get", "/api/v1/data/instruments", [{"apiKey": ["read"]}]),
         ("post", "/api/v1/backtests", [{"apiKey": ["backtests"]}]),
+        ("post", "/api/v1/backtests/{backtest_id}/cancel", [{"apiKey": ["backtests"]}]),
         (
             "patch",
             "/api/v1/backtests/{backtest_id}",

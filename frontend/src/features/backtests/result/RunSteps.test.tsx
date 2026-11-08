@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { BacktestDocument, BacktestStep } from '@/api';
-import { runningDocument } from '@/test/api';
+import { runningDocument } from '@/test/runs';
 import { step } from '@/test/steps';
 
 import { RunSteps } from './RunSteps';

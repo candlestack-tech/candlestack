@@ -11,11 +11,11 @@ import {
   modelsAnswer,
   problem,
   rawCandlesSummary,
-  runningDocument,
   sentBody,
   sessionWithPreferences,
   stubApi,
 } from '@/test/api';
+import { runningDocument } from '@/test/runs';
 import { renderApp } from '@/test/app';
 
 const CRYPTO = model({
@@ -348,13 +348,15 @@ describe('the backtest builder', () => {
     expect(alert()).toBeUndefined();
   });
 
-  it('stays on Run when another backtest is running', async () => {
+  it('stays on Run when the queue is full', async () => {
     const { user } = await openBuilder('/backtests/new', {
-      [RUN]: problem(409, 'backtest-running', 'Another backtest of yours is running.'),
+      [RUN]: problem(409, 'queue-full', 'You have 20 backtests waiting already.'),
     });
     await goTo(user, 'Run');
     await user.click(screen.getByRole('button', { name: 'Run backtest' }));
-    await vi.waitFor(() => expect(alert()).toBe('Another backtest is running. Run this one when it has finished.'));
+    await vi.waitFor(() =>
+      expect(alert()).toBe('Your queue is full. Run this one when a waiting backtest has started.'),
+    );
     expect(step()).toBe('Run');
   });
 

@@ -57,9 +57,9 @@ describe("the API's problems in the builder", () => {
   });
 
   it('stay on the Run step when the backtest cannot start now', () => {
-    expect(problem(409, 'backtest-running')).toEqual({
+    expect(problem(409, 'queue-full')).toEqual({
       step: 4,
-      message: 'Another backtest is running. Run this one when it has finished.',
+      message: 'Your queue is full. Run this one when a waiting backtest has started.',
     });
     expect(problem(503, 'backtests-unavailable').message).toBe('Backtests cannot run right now. Try again later.');
     expect(problem(503, 'source-unavailable').message).toBe(

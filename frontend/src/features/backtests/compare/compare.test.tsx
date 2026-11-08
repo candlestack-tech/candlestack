@@ -21,6 +21,7 @@ import { addToCompare, claimCompare, clearCompare, comparedFromOf, leaveCompare,
 vi.mock('lightweight-charts', () => import('@/test/lightweightCharts'));
 
 const NAMES: Record<number, string> = {
+  8: 'Quiet Lyra',
   9: 'Hidden Quasar',
   10: 'Radiant Altair',
   11: 'Frozen Pulsar',
@@ -35,9 +36,17 @@ const FINISHED = [12, 13, 14, 15, 16].map((number) => backtest({ id: `bt_${Strin
 const FAILED = failedBacktest({ id: 'bt_failed', ...named(11) });
 const SEEDED = backtest({ id: 'bt_seeded', ...named(9), seeded: true });
 const RUNNING = backtest({ id: 'bt_running', ...named(10), status: 'running', total_return: null, sharpe: null });
+const QUEUED = backtest({
+  id: 'bt_queued',
+  ...named(8),
+  status: 'queued',
+  queue_position: 1,
+  total_return: null,
+  sharpe: null,
+});
 const PAGE = {
-  backtests: [...FINISHED, FAILED, RUNNING, SEEDED],
-  counts: { all: 7, starred: 0, failed: 1, public: 0 },
+  backtests: [...FINISHED, FAILED, RUNNING, QUEUED, SEEDED],
+  counts: { all: 8, starred: 0, failed: 1, public: 0 },
   models: [],
 };
 // What a slot says of a backtest of the list: its name over its two instruments, what its model
@@ -92,11 +101,14 @@ describe('choosing backtests to compare', () => {
     expect(saved().slots[0]).toMatchObject({ id: 'bt_12', number: 12, name: 'Bright Vega', description: LINE });
   });
 
-  it('refuses a fifth, and a backtest that failed or still runs, and says why', async () => {
+  it('refuses a fifth, and a backtest that failed, still runs or waits, and says why', async () => {
     const user = await openList();
     expect(toggle(/: Frozen Pulsar$/)).toHaveProperty('disabled', true);
     expect(toggle(/: Frozen Pulsar$/).title).toBe('Failed: no results to compare');
     expect(toggle(/: Radiant Altair$/).title).toBe('Still running');
+    expect(toggle(/: Quiet Lyra$/).title).toBe('Queued: no results yet');
+    // Its badge says it waits.
+    expect(screen.getByText('Queued')).toBeDefined();
     expect(toggle(/: Hidden Quasar$/)).toHaveProperty('disabled', true);
     expect(toggle(/: Hidden Quasar$/).title).toBe('Test data: no results to compare');
     for (const number of [12, 13, 14, 15]) {
@@ -281,7 +293,7 @@ describe('another account’s backtest in the comparison', () => {
     await user.click(await screen.findByRole('button', { name: 'Add backtests' }));
     const dialog = within(await screen.findByRole('dialog', { name: /^Add backtests/ }));
     const tabs = () => dialog.getAllByRole('tab').map((tab) => tab.textContent);
-    await vi.waitFor(() => expect(tabs()).toEqual(['Yours7', 'Experiments4']));
+    await vi.waitFor(() => expect(tabs()).toEqual(['Yours8', 'Experiments4']));
     expect(dialog.getByRole('searchbox', { name: 'Search backtests' }).getAttribute('placeholder')).toBe(
       'Name, instrument or model',
     );
