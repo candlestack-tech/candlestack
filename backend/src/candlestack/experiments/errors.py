@@ -83,3 +83,34 @@ class NotComparable(Exception):
         super().__init__(backtest_id, found)
         self.backtest_id = backtest_id
         self.found = found
+
+
+class SweepNotFound(Exception):
+    """The user has no sweep with the ID (another user's sweep included)."""
+
+
+class SweepTooLarge(Exception):
+    """The grid of a sweep makes more backtests than a sweep runs; ``count`` is how many."""
+
+    def __init__(self, count: int) -> None:
+        super().__init__(count)
+        self.count = count
+
+
+class SweepQueueFull(Exception):
+    """The user's queue has room for fewer backtests than the sweep's ``count``: ``room``."""
+
+    def __init__(self, count: int, room: int) -> None:
+        super().__init__(count, room)
+        self.count = count
+        self.room = room
+
+
+class SetupFailed(Exception):
+    """A setup of a sweep's grid failed a check of a new backtest: ``error``, of the setup at
+    ``index`` (from 0, in the grid's order)."""
+
+    def __init__(self, index: int, error: Exception) -> None:
+        super().__init__(index, error)
+        self.index = index
+        self.error = error
