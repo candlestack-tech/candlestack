@@ -27,6 +27,12 @@ describe('apiKeysQueryOptions', () => {
     expect(options.queryKey).toEqual(['account', 'api-keys']);
     await expect(new QueryClient().fetchQuery(options)).resolves.toEqual({ items: [KEY], limit: 10 });
   });
+
+  it('asks again on coming back, since every request with a key moves its last use', () => {
+    const options = apiKeysQueryOptions();
+    expect(options.staleTime).toBeUndefined();
+    expect(options.refetchOnWindowFocus).toBe(true);
+  });
 });
 
 describe('createApiKey', () => {

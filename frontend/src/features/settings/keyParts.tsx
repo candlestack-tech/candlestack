@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 
 // The parts of a key the card and its dialogs share (design/mockups/api-mcp): the key's tile,
 // its name with the prefix, the scopes as chips, the amber note, the Copy button and the link to
-// the API guide.
+// the API docs.
 
 // .kr-ic: a 34 px tile with the key, on the surface (on the background inside .who-k).
 export function KeyTile({ className }: { className?: string }) {
@@ -25,7 +25,7 @@ export function KeyTile({ className }: { className?: string }) {
   );
 }
 
-// .kr-n: the name, cut short when long, then the start of the key in mono ("cs_7Hq2Lm9x…").
+// .kr-n: the name, cut short when long, then the start of the key in mono ("cs_7hq2lmzx…").
 export function KeyName({
   apiKey,
   muted = false,
@@ -123,14 +123,16 @@ export function CopyButton({ text, label }: { text: string; label?: string }) {
   );
 }
 
-// The public guide to the API, from the Docs row of the card and the key shown once.
-export const API_GUIDE_URL = 'https://candlestack.tech/docs/api';
+// The API docs of the same host (every endpoint, with examples), from the Docs row of the card and
+// the key shown once. The design links the website's API guide, which comes with website#75:
+// this moves there once that page is live.
+export const API_DOCS_URL = '/api/v1/docs';
 
 // .link with the arrow out: the accent, underlined under the pointer.
 export function GuideLink({ className }: { className?: string }) {
   return (
     <a
-      href={API_GUIDE_URL}
+      href={API_DOCS_URL}
       target="_blank"
       rel="noopener"
       className={cn(
@@ -138,7 +140,7 @@ export function GuideLink({ className }: { className?: string }) {
         className,
       )}
     >
-      API guide
+      API docs
       <ExternalLink aria-hidden="true" className="size-3" />
     </a>
   );

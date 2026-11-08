@@ -1,3 +1,4 @@
+import { useIsMutating } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 
 import { errorMessage, type ApiKeyCreated, type Scope } from '@/api';
@@ -19,7 +20,7 @@ import { useNow } from '@/lib/useNow';
 import { EXPIRIES, SCOPES, expiryHint, type Expiry } from './apiKeyText';
 import { ExpiryField, NameField, ScopeBoxes } from './keyFields';
 import { ShownKey } from './ShownKey';
-import { useCreateApiKey } from './useApiKeys';
+import { CREATE_API_KEY, useCreateApiKey } from './useApiKeys';
 
 type Created = { key: ApiKeyCreated; expiry: Expiry };
 
@@ -85,26 +86,44 @@ function CreateForm({ onCreated }: { onCreated: (created: Created) => void }) {
 
 // The dialog's two steps, inside its content, which unmounts once the dialog has closed: the
 // secret is forgotten then, and the dialog opens on the form again.
-function CreateSteps() {
+function CreateSteps({ onShown }: { onShown: () => void }) {
   const [created, setCreated] = useState<Created | null>(null);
+  const show = (next: Created) => {
+    setCreated(next);
+    onShown();
+  };
   return (
     <>
       <DialogHeader>
         <DialogTitle>{created ? 'Copy your new key' : 'Create API key'}</DialogTitle>
       </DialogHeader>
-      {created ? <ShownKey apiKey={created.key} expiry={created.expiry} /> : <CreateForm onCreated={setCreated} />}
+      {created ? <ShownKey apiKey={created.key} expiry={created.expiry} /> : <CreateForm onCreated={show} />}
     </>
   );
 }
 
 type Props = { open: boolean; onOpenChange: (open: boolean) => void };
 
-// Create API key, then Copy your new key in the same dialog (design/mockups/api-mcp).
+// Create API key, then Copy your new key in the same dialog (design/mockups/api-mcp). It stays
+// open while the key is on its way, so the secret is never lost to an early close. Once the key
+// shows, a click beside the dialog does not close it: Done, the cross or Escape do.
 export function CreateKeyDialog({ open, onOpenChange }: Props) {
+  const pending = useIsMutating({ mutationKey: CREATE_API_KEY }) > 0;
+  const [shown, setShown] = useState(false);
+  const change = (next: boolean) => {
+    if (pending) return;
+    if (!next) setShown(false);
+    onOpenChange(next);
+  };
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[min(600px,calc(100%-32px))]">
-        <CreateSteps />
+    <Dialog open={open} onOpenChange={change}>
+      <DialogContent
+        className="w-[min(600px,calc(100%-32px))]"
+        onInteractOutside={(event) => {
+          if (shown) event.preventDefault();
+        }}
+      >
+        <CreateSteps onShown={() => setShown(true)} />
       </DialogContent>
     </Dialog>
   );

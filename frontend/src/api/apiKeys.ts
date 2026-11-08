@@ -12,13 +12,14 @@ export type ApiKeyIn = Schemas['ApiKeyIn'];
 export type Scope = Schemas['Scope'];
 
 // GET /api/v1/me/api-keys: the user's keys that are not revoked, oldest first, and how many can
-// work at once. Under ['account', ...] with the user, so signing out forgets them. Fresh until the
-// app changes them: keys are made and revoked only here, with the session.
+// work at once. Under ['account', ...] with the user, so signing out forgets them. Every request
+// with a key moves its last use, and another tab may make or revoke one, so the list is asked
+// again on coming back to the tab, and on coming back to Settings once the app's minute is over.
 export function apiKeysQueryOptions() {
   return queryOptions({
     queryKey: ['account', 'api-keys'],
     queryFn: ({ signal }) => get<ApiKeys>('/v1/me/api-keys', signal),
-    staleTime: Infinity,
+    refetchOnWindowFocus: true,
   });
 }
 

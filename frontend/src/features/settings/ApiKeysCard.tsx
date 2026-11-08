@@ -158,11 +158,30 @@ function KeyList({ keys, now, onRevoke }: ListProps) {
   );
 }
 
+// What went wrong loading the keys, and Try again.
+function LoadError({ error, retrying, onRetry }: { error: Error; retrying: boolean; onRetry: () => void }) {
+  return (
+    <div className="mb-2 flex items-center gap-3">
+      <ErrorNote>{error.message}</ErrorNote>
+      <Button
+        type="button"
+        variant="outline"
+        className={cn(BUTTON_SIZES.sm, OUTLINE_BUTTON)}
+        disabled={retrying}
+        onClick={onRetry}
+      >
+        Try again
+      </Button>
+    </div>
+  );
+}
+
 // The API keys card (design/mockups/api-mcp, keysCard): the keys with how many of the limit work,
-// Create key, and the API guide. Keys are made and revoked only here, with the session.
+// Create key, and the API docs. The time moves every minute, so a key that expires while Settings
+// is open stops counting and its last use stays right.
 export function ApiKeysCard() {
-  const { data: keys, error } = useApiKeys();
-  const now = useNow(false);
+  const { data: keys, error, isFetching, refetch } = useApiKeys();
+  const now = useNow(true, 60_000);
   const [creating, setCreating] = useState(false);
   const [revoking, setRevoking] = useState<{ key: ApiKey | null; open: boolean }>({ key: null, open: false });
   const create = () => setCreating(true);
@@ -174,10 +193,10 @@ export function ApiKeysCard() {
       aside={any && <KeysAside keys={keys} now={now} onCreate={create} />}
     >
       <SettingsLead>Call the API from your scripts and agents. A key acts as you, so keep it secret.</SettingsLead>
-      {error && <ErrorNote className="mb-2">{error.message}</ErrorNote>}
+      {error && <LoadError error={error} retrying={isFetching} onRetry={() => void refetch()} />}
       {any && <KeyList keys={keys} now={now} onRevoke={(key) => setRevoking({ key, open: true })} />}
       {keys?.items.length === 0 && <NoKeys onCreate={create} />}
-      <SettingsRow label="Docs" hint="Examples for scripts and agents">
+      <SettingsRow label="Docs" hint="Every endpoint, with examples">
         <GuideLink />
       </SettingsRow>
       <CreateKeyDialog open={creating} onOpenChange={setCreating} />

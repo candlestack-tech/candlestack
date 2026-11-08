@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -24,7 +24,7 @@ afterEach(() => {
 const key = (fields: Partial<ApiKey>): ApiKey => ({
   id: 'key_laptop0001',
   name: 'Claude Code on my laptop',
-  prefix: 'cs_7Hq2Lm9x',
+  prefix: 'cs_7hq2lmzx',
   scopes: ['read', 'backtests', 'models'],
   created_at: '2026-11-03T10:00:00Z',
   last_used_at: '2026-11-08T11:48:00Z',
@@ -39,7 +39,7 @@ const KEYS: ApiKey[] = [
   key({
     id: 'key_nightly001',
     name: 'Nightly sweep script',
-    prefix: 'cs_K4pW8nRt',
+    prefix: 'cs_k4pw6nrt',
     scopes: ['read', 'backtests'],
     created_at: '2026-08-14T10:00:00Z',
     last_used_at: '2026-11-08T07:00:00Z',
@@ -48,7 +48,7 @@ const KEYS: ApiKey[] = [
   key({
     id: 'key_cursor0001',
     name: 'Cursor',
-    prefix: 'cs_Z2bE6yQa',
+    prefix: 'cs_z2be6yqa',
     scopes: ['read'],
     created_at: '2026-10-28T10:00:00Z',
     last_used_at: null,
@@ -57,7 +57,7 @@ const KEYS: ApiKey[] = [
   key({
     id: 'key_notebook01',
     name: 'Old notebook',
-    prefix: 'cs_M9tD3sVf',
+    prefix: 'cs_m3td3svf',
     scopes: ['read', 'backtests'],
     created_at: '2026-08-02T10:00:00Z',
     last_used_at: '2026-10-30T15:00:00Z',
@@ -89,7 +89,7 @@ describe('API keys card', () => {
     ).toBeDefined();
 
     const laptop = row('Claude Code on my laptop');
-    expect(laptop.getByText('cs_7Hq2Lm9x…')).toBeDefined();
+    expect(laptop.getByText('cs_7hq2lmzx…')).toBeDefined();
     expect(laptop.getByText('read')).toBeDefined();
     expect(laptop.getByText('models')).toBeDefined();
     expect(laptop.getByText('Last used 12 min ago')).toBeDefined();
@@ -117,10 +117,10 @@ describe('API keys card', () => {
     expect(card().getByText('3 of 10')).toBeDefined();
   });
 
-  it('links the API guide', async () => {
+  it('links the API docs', async () => {
     await open(keysAnswer(KEYS));
-    const guide = card().getByRole('link', { name: 'API guide' });
-    expect(guide.getAttribute('href')).toBe('https://candlestack.tech/docs/api');
+    const guide = card().getByRole('link', { name: 'API docs' });
+    expect(guide.getAttribute('href')).toBe('/api/v1/docs');
     expect(guide.getAttribute('target')).toBe('_blank');
   });
 
@@ -144,23 +144,40 @@ describe('API keys card', () => {
     expect(card().getByText('You have 10 keys, the most there can be. Revoke one to create another.')).toBeDefined();
   });
 
-  it('says why the keys did not load', async () => {
-    await open({ 'GET /api/v1/me/api-keys': { status: 503, body: { detail: 'Down for a minute.' } } });
+  it('says why the keys did not load, and tries again', async () => {
+    let calls = 0;
+    const { user } = await open({
+      'GET /api/v1/me/api-keys': async () =>
+        ++calls === 1
+          ? { status: 503, body: { detail: 'Down for a minute.' } }
+          : { status: 200, body: { items: KEYS, limit: 10 } },
+    });
     expect((await card().findByRole('alert')).textContent).toBe('Down for a minute.');
-    expect(card().getByRole('link', { name: 'API guide' })).toBeDefined();
+    expect(card().getByRole('link', { name: 'API docs' })).toBeDefined();
+    await user.click(card().getByRole('button', { name: 'Try again' }));
+    expect(await card().findByText('3 of 10')).toBeDefined();
+    expect(card().queryByRole('alert')).toBeNull();
   });
 });
 
 const CREATED = {
   id: 'key_new0000001',
   name: 'Model upload script',
-  prefix: 'cs_P3vN8kWq',
+  prefix: 'cs_p3vn5kwq',
   scopes: ['read', 'models'],
   created_at: '2026-11-08T12:00:00Z',
   last_used_at: null,
   expires_at: '2027-11-08T12:00:00Z',
-  secret: 'cs_P3vN8kWqexample0key0for0the0tests0only',
+  secret: 'cs_p3vn5kwqexamplekeyforthetestsonlyqqqqqqq',
 };
+
+// A click beside the open dialog. Radix listens for it a moment after the dialog opens, and acts
+// on the click that follows the press.
+async function clickBeside() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  fireEvent.pointerDown(document.body);
+  fireEvent.click(document.body);
+}
 
 describe('Create key', () => {
   it('asks for a name, the scopes and an expiry, read always on', async () => {
@@ -232,6 +249,53 @@ describe('Create key', () => {
     expect(card().getByText('4 of 10')).toBeDefined();
     const cached = queryClient.getQueryData(apiKeysQueryOptions().queryKey);
     expect(JSON.stringify(cached)).not.toContain(CREATED.secret);
+    const mutations = () => queryClient.getMutationCache().getAll();
+    await vi.waitFor(() => expect(JSON.stringify(mutations().map(({ state }) => state))).not.toContain(CREATED.secret));
+  });
+
+  it('stays open while the key is on its way, and then shows it', async () => {
+    let answer: (created: { status: number; body: unknown }) => void = () => {};
+    const { user } = await open({
+      ...keysAnswer(KEYS),
+      'POST /api/v1/me/api-keys': () => new Promise((resolve) => (answer = resolve)),
+    });
+    await user.click(await card().findByRole('button', { name: 'Create key' }));
+    const dialog = within(await screen.findByRole('dialog'));
+    await user.type(dialog.getByLabelText(/^Name/), 'Model upload script');
+    await user.click(dialog.getByRole('button', { name: 'Create key' }));
+    await vi.waitFor(() => expect(dialog.getByRole('button', { name: 'Create key' })).toHaveProperty('disabled', true));
+
+    await user.keyboard('{Escape}');
+    await user.click(dialog.getByRole('button', { name: 'Cancel' }));
+    await user.click(dialog.getByRole('button', { name: 'Close' }));
+    await clickBeside();
+    expect(screen.getByRole('dialog', { name: 'Create API key' })).toBeDefined();
+
+    answer({ status: 201, body: CREATED });
+    expect(
+      within(await screen.findByRole('dialog', { name: 'Copy your new key' })).getByText(CREATED.secret),
+    ).toBeDefined();
+  });
+
+  it('keeps the shown key on a click beside the dialog, unlike the form', async () => {
+    const { user } = await open({
+      ...keysAnswer(KEYS),
+      'POST /api/v1/me/api-keys': { status: 201, body: CREATED },
+    });
+    await user.click(await card().findByRole('button', { name: 'Create key' }));
+    await screen.findByRole('dialog', { name: 'Create API key' });
+    await clickBeside();
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    await user.click(card().getByRole('button', { name: 'Create key' }));
+    const dialog = within(await screen.findByRole('dialog'));
+    await user.type(dialog.getByLabelText(/^Name/), 'Model upload script');
+    await user.click(dialog.getByRole('button', { name: 'Create key' }));
+    await screen.findByRole('dialog', { name: 'Copy your new key' });
+    await clickBeside();
+    expect(screen.getByRole('dialog', { name: 'Copy your new key' })).toBeDefined();
+    await user.keyboard('{Escape}');
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
   it('sends no expiry for Never, and opens on an empty form again', async () => {
@@ -305,7 +369,7 @@ describe('Revoke and Delete', () => {
     let dialog = within(await screen.findByRole('dialog', { name: 'Revoke Cursor?' }));
     expect(dialog.getByText('Anything that uses this key stops working at once. It was never used.')).toBeDefined();
     expect(dialog.getByText('This cannot be undone. You can create a new key any time.')).toBeDefined();
-    expect(dialog.getByText('cs_Z2bE6yQa…')).toBeDefined();
+    expect(dialog.getByText('cs_z2be6yqa…')).toBeDefined();
     await user.click(dialog.getByRole('button', { name: 'Cancel' }));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(fetch.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
