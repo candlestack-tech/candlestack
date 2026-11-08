@@ -23,14 +23,22 @@ import { useConnectedApps } from './useConnectedApps';
 // The install guide of every client, step by step (website, docs/mcp/install).
 const MCP_INSTALL_URL = 'https://candlestack.tech/docs/mcp/install/';
 
-type Client = { name: string; how: string; Logo: ComponentType<{ className?: string }> | null };
+type Client = {
+  name: string;
+  how: string;
+  Logo: ComponentType<{ className?: string }> | null;
+  // The client's section of the guide, when the link goes straight to it.
+  anchor?: string;
+};
 
-// The clients the guide covers, each with its real mark, and any other over Streamable HTTP. Claude
-// and ChatGPT sign in with OAuth and show under Connected apps; the others use an API key.
+// The clients the guide covers, each with its real mark, and any other over Streamable HTTP. Claude,
+// ChatGPT and Codex sign in with OAuth and show under Connected apps, Claude Code with OAuth or an
+// API key; the others use an API key. Codex has no mark of its own on openai.com/brand: the Blossom.
 const CLIENTS: Client[] = [
   { name: 'Claude', how: 'Add a custom connector, sign in with CandleStack', Logo: ClaudeLogo },
   { name: 'ChatGPT', how: 'Add a connector, sign in with CandleStack', Logo: OpenAILogo },
-  { name: 'Claude Code', how: 'One command with an API key', Logo: ClaudeLogo },
+  { name: 'Codex', how: 'One command, sign in with CandleStack', Logo: OpenAILogo, anchor: 'codex' },
+  { name: 'Claude Code', how: 'One command, sign in with CandleStack or use an API key', Logo: ClaudeLogo },
   { name: 'Cursor', how: 'One entry in mcp.json with an API key', Logo: CursorLogo },
   { name: 'VS Code', how: 'One entry in mcp.json with an API key', Logo: VSCodeLogo },
   { name: 'Other clients', how: 'Any MCP client over Streamable HTTP', Logo: null },
@@ -41,7 +49,7 @@ const CLIENTS: Client[] = [
 function ClientLines() {
   return (
     <div className="flex flex-col">
-      {CLIENTS.map(({ name, how, Logo }) => (
+      {CLIENTS.map(({ name, how, Logo, anchor }) => (
         <div
           key={name}
           className="grid grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2.5 py-1.5 [&+&]:border-t [&+&]:border-dashed"
@@ -57,7 +65,7 @@ function ClientLines() {
             <span className="text-[12.5px] text-muted-foreground">{how}</span>
           </span>
           <a
-            href={MCP_INSTALL_URL}
+            href={anchor === undefined ? MCP_INSTALL_URL : `${MCP_INSTALL_URL}#${anchor}`}
             target="_blank"
             rel="noopener"
             aria-label={`Guide for ${name}`}
