@@ -23,6 +23,7 @@ type Extensions = {
   candles?: unknown;
   requested?: unknown;
   maximum?: unknown;
+  limit?: unknown;
   errors?: unknown;
 };
 
@@ -88,7 +89,12 @@ const HANDLERS: Record<string, Handler> = {
   'warm-up-out-of-range': (extensions, context) => ({ step: DATA, message: warmUpOutOfRange(extensions, context) }),
   'too-many-candles': (extensions) => ({ step: DATA, message: tooManyCandles(extensions) }),
   validation: (extensions) => ({ step: stepOfField(extensions), message: 'Check this step and try again.' }),
-  'queue-full': at(RUN, 'Your queue is full. Run this one when a waiting backtest has started.'),
+  'queue-full': ({ limit }) => ({
+    step: RUN,
+    message: isNumber(limit)
+      ? `Queue full. ${count(limit)} backtests are waiting already. Run this one when one of them has started, or cancel one.`
+      : 'Queue full. Run this one when a waiting backtest has started, or cancel one.',
+  }),
   'backtests-unavailable': at(RUN, 'Backtests cannot run right now. Try again later.'),
   'source-unavailable': at(RUN, 'The market data cannot be loaded right now. Try again later.'),
   'source-data-invalid': at(RUN, 'The market data cannot be loaded right now. Try again later.'),

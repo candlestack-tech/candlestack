@@ -202,6 +202,12 @@ const NAMES: Record<BacktestStep['state'], string> = {
   pending: 'text-muted-foreground',
 };
 
+// When a queued backtest starts: after the running one, or after all those ahead of it.
+const queuedHint = (ahead: number | null) =>
+  ahead !== null && ahead > 1
+    ? `It starts when the ${String(ahead)} backtests ahead of it end. You can close the page.`
+    : 'It starts when your running backtest ends. You can close the page.';
+
 // The four steps of a queued or running backtest (all pending while it waits), or of a failed one
 // up to where it failed; the steps after a failure did not run. Until it ends, it may be left.
 export function RunSteps({ doc }: { doc: BacktestDocument }) {
@@ -237,9 +243,7 @@ export function RunSteps({ doc }: { doc: BacktestDocument }) {
         })}
       </ol>
       {running && <p className={cn(HINT, 'mt-1')}>You can close the page. The backtest keeps going.</p>}
-      {status === 'queued' && (
-        <p className={cn(HINT, 'mt-1')}>It starts when your running backtest ends. You can close the page.</p>
-      )}
+      {status === 'queued' && <p className={cn(HINT, 'mt-1')}>{queuedHint(doc.backtest.queue_position)}</p>}
     </section>
   );
 }

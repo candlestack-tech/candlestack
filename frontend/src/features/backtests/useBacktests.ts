@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient, type QueryKey } from '@tanstack/
 import {
   backtestQueryOptions,
   backtestsQueryOptions,
+  cancelBacktest,
   dashboardQueryOptions,
   updateBacktest,
   type Backtest,
@@ -110,6 +111,22 @@ export function usePublishBacktest() {
         queryClient.invalidateQueries({ queryKey: EXPERIMENTS }),
       ]);
     },
+  });
+}
+
+// Cancels a queued backtest: its page shows the API's answer at once, failed with the cancel, and
+// that end of a run it watched asks for the lists, the dashboard and the models again
+// (useBacktestResult). A 409 means it has begun to run (or ended) meanwhile: its page is asked for
+// again, so it shows that.
+export function useCancelBacktest(id: string) {
+  const queryClient = useQueryClient();
+  const key = backtestQueryOptions(id).queryKey;
+  return useMutation({
+    mutationFn: () => cancelBacktest(id),
+    onSuccess: (doc) => {
+      queryClient.setQueryData(key, doc);
+    },
+    onError: () => queryClient.invalidateQueries({ queryKey: key }),
   });
 }
 

@@ -111,6 +111,12 @@ export async function post(path: string): Promise<void> {
   await send(path, { method: 'POST', headers: { Accept: 'application/json' } });
 }
 
+// A command without a body that the API answers with JSON, e.g. cancelling a queued backtest.
+export async function postFor<T>(path: string): Promise<T> {
+  const res = await send(path, { method: 'POST', headers: { Accept: 'application/json' } });
+  return readBody<T>(res);
+}
+
 // A file the API answers with (any type), with its errors as ApiErrors like those of get.
 export async function getBlob(path: string): Promise<Blob> {
   const res = await send(path, {});
