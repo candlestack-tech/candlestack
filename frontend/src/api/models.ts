@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 
-import { apiUrl, del, get, patch, postFile, put } from './client';
+import { apiUrl, del, get, patch, postFile, put, putFileWithProgress } from './client';
 import type { components } from './schema';
 
 export type Model = components['schemas']['ModelOut'];
@@ -12,6 +12,7 @@ export type StorageUsage = components['schemas']['StorageUsage'];
 export type ModelUpdate = components['schemas']['ModelUpdate'];
 export type Catalog = components['schemas']['CatalogOut'];
 export type CatalogBlock = components['schemas']['BlockOut'];
+export type ModelUpload = components['schemas']['ModelUploadOut'];
 
 // GET /api/v1/models: the user's models, oldest first, and the storage they take. Under
 // ['account', ...] like the user, so signing out knows to forget them. The page and the sidebar
@@ -80,4 +81,28 @@ export function catalogQueryOptions() {
     queryFn: ({ signal }) => get<Catalog>('/v1/preprocessing/catalog', signal),
     staleTime: Infinity,
   });
+}
+
+const linkPath = (token: string) => `/v1/uploads/${encodeURIComponent(token)}`;
+
+// GET /api/v1/uploads/{token}: the one-time upload link of the token, for its upload page: the
+// file it is made for and how its upload stands. Only the session of the user who made it reads
+// it (another account gets 403 upload-link-of-another-user). Under ['account', ...], so signing
+// out forgets it.
+export function uploadLinkQueryOptions(token: string) {
+  return queryOptions({
+    queryKey: ['account', 'upload-link', token],
+    queryFn: ({ signal }) => get<ModelUpload>(linkPath(token), signal),
+  });
+}
+
+// PUT /api/v1/uploads/{token}: the file through the one-time link, with its progress. The link is
+// used once the upload starts, whatever comes of it; the API checks the file as any upload and
+// answers with the new model, or a failed check as an ApiError like uploadModel's.
+export function uploadByLink(
+  token: string,
+  file: File,
+  options: { onProgress: (sent: number, total: number) => void; signal?: AbortSignal },
+): Promise<Model> {
+  return putFileWithProgress<Model>(linkPath(token), file, options);
 }

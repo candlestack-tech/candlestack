@@ -160,11 +160,13 @@ class FakeService:
             status=UploadStatus.waiting,
             created_at=CREATED,
             expires_at=datetime(2026, 11, 2, 9, 45, tzinfo=UTC),
+            finished_at=None,
             model_id=None,
             problem=None,
             check=None,
             error=None,
             url=url,
+            page_url=f"{public_url}/upload/{'t' * 40}",
             command=f"curl --fail-with-body -T {new.name} {url}",
         )
 
@@ -179,6 +181,7 @@ class FakeService:
             status=UploadStatus.failed,
             created_at=CREATED,
             expires_at=datetime(2026, 11, 2, 9, 45, tzinfo=UTC),
+            finished_at=CREATED,
             model_id=None,
             problem="model-check-failed",
             check=None,

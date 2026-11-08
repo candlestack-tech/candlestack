@@ -55,9 +55,6 @@ from candlestack.preprocessing import Manifest, parse_manifest
 
 logger = logging.getLogger(__name__)
 
-# Where the app's upload page of a link is, after the public URL; the link's token follows.
-UPLOAD_PAGE = "/upload/"
-
 ModelId = Annotated[
     str,
     Field(
@@ -451,7 +448,6 @@ async def create_model_upload(
             )
         except LINK_REFUSALS as error:
             raise upload_problem(call.user.id, error) from None
-    token = link.url.rsplit("/", 1)[1]
     return UploadLink(
         id=link.id,
         name=link.name,
@@ -459,7 +455,7 @@ async def create_model_upload(
         expires_at=link.expires_at,
         command=link.command,
         url=link.url,
-        page_url=call.settings.public_url + UPLOAD_PAGE + token,
+        page_url=link.page_url,
         next_steps=f"Ask the user to upload {link.name} before {link.expires_at:%H:%M} UTC: "
         "either run the command in the folder the file is in, or open the page and drop the "
         f"file there. Then call get_model_upload with id {link.id}.",

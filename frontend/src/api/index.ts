@@ -89,6 +89,8 @@ export {
   modelsQueryOptions,
   setManifest,
   updateModel,
+  uploadByLink,
+  uploadLinkQueryOptions,
   uploadModel,
   type Catalog,
   type CatalogBlock,
@@ -97,6 +99,7 @@ export {
   type Model,
   type ModelState,
   type Models,
+  type ModelUpload,
   type StorageUsage,
 } from './models';
 export { queryClient } from './queryClient';

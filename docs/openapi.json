@@ -5111,6 +5111,22 @@
             "title": "Expires At",
             "type": "string"
           },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the upload ended, `done` or `failed` (UTC); null before",
+            "examples": [
+              null
+            ],
+            "title": "Finished At"
+          },
           "id": {
             "description": "Public ID of the upload link",
             "examples": [
@@ -5140,6 +5156,14 @@
               "lstm-signals.keras"
             ],
             "title": "Name",
+            "type": "string"
+          },
+          "page_url": {
+            "description": "The upload page of the link in the app: a person signed in as the user drops the file there in the browser, for a client that cannot run `command`. Shown only in this response",
+            "examples": [
+              "https://app.candlestack.tech/upload/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            ],
+            "title": "Page Url",
             "type": "string"
           },
           "problem": {
@@ -5184,11 +5208,13 @@
           "status",
           "created_at",
           "expires_at",
+          "finished_at",
           "model_id",
           "problem",
           "check",
           "error",
           "url",
+          "page_url",
           "command"
         ],
         "title": "ModelUploadCreated",
@@ -5268,6 +5294,22 @@
             "title": "Expires At",
             "type": "string"
           },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the upload ended, `done` or `failed` (UTC); null before",
+            "examples": [
+              null
+            ],
+            "title": "Finished At"
+          },
           "id": {
             "description": "Public ID of the upload link",
             "examples": [
@@ -5333,6 +5375,7 @@
           "status",
           "created_at",
           "expires_at",
+          "finished_at",
           "model_id",
           "problem",
           "check",
@@ -10246,7 +10289,7 @@
     },
     "/api/v1/models/uploads": {
       "post": {
-        "description": "Makes a one-time link to upload a model file through, for a client that cannot send\nthe file itself (an agent in a chat): `PUT` the file to `url` within 15 minutes, as\n`command` does with `curl -T`. The link takes one upload of a file no larger than\n`size_bytes`, with no other sign-in, and the upload is checked as `POST /api/v1/models`\nchecks it. The URL is shown only here; `GET /api/v1/models/uploads/{upload_id}` says how\nthe upload stands. The name and the size must fit now, and are checked again when the file\ncomes.",
+        "description": "Makes a one-time link to upload a model file through, for a client that cannot send\nthe file itself (an agent in a chat): `PUT` the file to `url` within 15 minutes, as\n`command` does with `curl -T`, or have the user drop it on the upload page `page_url` in\nthe browser. The link takes one upload of a file no larger than `size_bytes`, with no other\nsign-in, and the upload is checked as `POST /api/v1/models` checks it. The URLs are shown\nonly here; `GET /api/v1/models/uploads/{upload_id}` says how the upload stands. The name\nand the size must fit now, and are checked again when the file comes.",
         "operationId": "create_model_upload_api_v1_models_uploads_post",
         "requestBody": {
           "content": {
@@ -11239,6 +11282,79 @@
       }
     },
     "/api/v1/uploads/{token}": {
+      "get": {
+        "description": "The upload link of the token for the upload page it opens in the browser: the file it\nis made for (`name`, `size_bytes`) and how its upload stands, as\n`GET /api/v1/models/uploads/{upload_id}` says it. Only the session of the user who made the\nlink reads it: an API key is refused, and another user learns nothing of the link. The file\nitself never comes back.",
+        "operationId": "get_upload_by_token_api_v1_uploads__token__get",
+        "parameters": [
+          {
+            "description": "The token of the upload link",
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "description": "The token of the upload link",
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelUploadOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Another user made this upload link (`upload-link-of-another-user`): sign in with the account that asked for it. API keys cannot do this, only the signed-in browser (`session-required`)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No upload link has this token (`upload-link-not-found`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          }
+        },
+        "summary": "Get Upload By Token",
+        "tags": [
+          "models"
+        ]
+      },
       "put": {
         "description": "Uploads the model file of a one-time link (`POST /api/v1/models/uploads`): the body is\nthe file, as `curl -T <file> <url>` sends it. The token in the path is the only sign-in: a\nsession or an API key is not needed and does not stand in for it. The link is used once\nthe upload starts, whatever comes of it; a file larger than the link's size by its\n`Content-Length`, or another upload of the user in progress, leaves it unused. The file is\nchecked as `POST /api/v1/models` checks it and becomes a model of the link's user, under\nthe link's name (numbered when the user has it).",
         "operationId": "upload_by_link_api_v1_uploads__token__put",

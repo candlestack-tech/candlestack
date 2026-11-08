@@ -88,8 +88,9 @@ flowchart LR
 | `PATCH /api/v1/me/preferences/appearance` | changes the appearance settings it is given; an unknown field is a 422 |
 | `GET /api/v1/models` | the user's uploaded models, oldest first, and the storage they take (`used_bytes`, `quota_bytes`, `file_max_bytes`) |
 | `POST /api/v1/models?name=<file name>` | uploads a model: the body is the file (`application/octet-stream`); checked before it is kept ([Models](#models)); a name the user has already gets a number (`lstm (2).keras`); one upload at a time per user, 100 models at most |
-| `POST /api/v1/models/uploads` | makes a one-time link to upload a model through (`name`, `size_bytes`): 201 with its `url` and a ready `curl --fail-with-body -T` `command`, shown only here, and its expiry in 15 minutes; the name and size must fit now (415, 413, `409 storage-full`, `409 too-many-models`) ([Models](#models)) |
+| `POST /api/v1/models/uploads` | makes a one-time link to upload a model through (`name`, `size_bytes`): 201 with its `url`, a ready `curl --fail-with-body -T` `command` and the upload page `page_url`, shown only here, and its expiry in 15 minutes; the name and size must fit now (415, 413, `409 storage-full`, `409 too-many-models`) ([Models](#models)) |
 | `GET /api/v1/models/uploads/{upload_id}` | how the upload through the user's link stands: `waiting`, `checking`, `done` (`model_id`), `failed` (`problem`, `check`, `error`) or `expired` |
+| `GET /api/v1/uploads/{token}` | the link of the token for its upload page (`/upload/<token>` in the app), as `GET /api/v1/models/uploads/{upload_id}` shows it: for the session of the user who made it only (an API key gets `403 session-required`, another user `403 upload-link-of-another-user` and nothing of the link), `404 upload-link-not-found` |
 | `PUT /api/v1/uploads/{token}` | the upload through a link: the body is the file, the token the only sign-in (no session, key or origin check); single use, then checked as `POST /api/v1/models`; 201 with the model, `404 upload-link-not-found`, `410 upload-link-gone` (used or expired) |
 | `PATCH /api/v1/models/{model_id}` | renames a model (the extension stays; `409 model-name-taken`) or stars and unstars it |
 | `DELETE /api/v1/models/{model_id}` | deletes a model and its file |
@@ -141,7 +142,8 @@ flowchart LR
   `upload-link-not-found` (404: no link has the token), `upload-link-gone` (410: the link took
   its file already or expired, `reason` says `used` or `expired`; also its account was deleted
   during the upload) and `larger-than-link` (413: the file is larger than the size the link was
-  made for, with `size_bytes`); a link's status says `upload-interrupted` in `problem` when its
+  made for, with `size_bytes`) and `upload-link-of-another-user` (403: the upload page's read
+  of a link another user made); a link's status says `upload-interrupted` in `problem` when its
   upload stopped midway (also a `400` for the client that went away), and it uses `not-found`
   (404: no model of the user with the ID, another user's included) and `not-signed-in` (401:
   also the account was deleted while its file uploaded). Each `type` URI opens a page on the
@@ -317,10 +319,18 @@ flowchart LR
   committed stays `done`). A link `checking` for longer than the upload
   lock lasts (5 minutes) reads as interrupted. `GET /api/v1/models/uploads/{upload_id}` shows
   the user's link, without its URL: `waiting`, `checking`, `done`, `failed`, or `expired` for a
-  waiting one past its expiry. The token never reaches the logs: the access line and the URLs
-  sent to Sentry, and a transaction named by its path, show `/api/v1/uploads/[Filtered]` (`redacted_path` in
-  `core/observability.py`). The upload page for the browser (#406) and the MCP tools (#403)
-  build on these routes.
+  waiting one past its expiry, with `finished_at` once the upload ended. The token never reaches
+  the logs: the access line and the URLs sent to Sentry, and a transaction named by its path,
+  show `/api/v1/uploads/[Filtered]` (`redacted_path` in `core/observability.py`). The MCP tools
+  (#403) build on these routes.
+- **Upload page** (`/upload/<token>` in the app, the link's `page_url`): for a person whose agent
+  cannot run `curl`. Signed in only: signed out, the sign-in page returns there, and the sign-in's
+  `next` is filtered from what goes to Sentry, as it holds the token. The page reads the link with
+  `GET /api/v1/uploads/{token}`, which answers only the session of the user who made it, never the
+  file: the name and size it expects, the status, the expiry. The browser refuses a file of
+  another size or format before sending, so the link stays usable, then sends the file with
+  `PUT /api/v1/uploads/{token}` and shows its progress, the checks and the new model. A used,
+  expired, unknown or another account's link is a short state of its own.
 - **The check** (`ml/inspect.py`) reads the file and never loads it: a `.keras` file is a zip of
   `config.json` (the architecture), `metadata.json` (the Keras version) and
   `model.weights.h5` (the weights), and loading it could run code from it. It runs in a child
