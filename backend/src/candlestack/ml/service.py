@@ -16,7 +16,8 @@ ended: the model it made, or the problem it answered.
 
 A manifest is added to a model that is kept, and replaces the one it had: it is checked alone,
 then against the shapes the upload's check read from the file, and kept only when every check
-passed, which makes the model ``ready``.
+passed, which makes the model ``ready``. ``check_manifest`` runs the same checks as a dry run
+and keeps nothing.
 """
 
 import hashlib
@@ -94,6 +95,7 @@ from candlestack.ml.store import ModelStore
 from candlestack.ml.uploads import UPLOAD_LOCK_TTL, UploadLocks
 from candlestack.ml.usage import UNUSED, ModelUsageStats
 from candlestack.preprocessing import (
+    Finding,
     InvalidManifest,
     Manifest,
     ManifestProblem,
@@ -351,6 +353,35 @@ async def _read_manifest(chunks: AsyncIterable[bytes]) -> bytes:
     return bytes(document)
 
 
+async def _received_manifest(
+    declared_size: int | None, chunks: AsyncIterable[bytes]
+) -> tuple[Manifest | None, list[ManifestProblem]]:
+    """The manifest the client sends, checked alone (``_checked_alone``); `declared_size` is
+    the size it announced (Content-Length), if any.
+
+    Raises:
+        ManifestTooLarge: It is larger than a manifest may be.
+    """
+    if declared_size is not None and declared_size > MANIFEST_MAX_BYTES:
+        raise ManifestTooLarge
+    return _checked_alone(await _read_manifest(chunks))
+
+
+def _passed(model: Model, manifest: Manifest | None, problems: list[ManifestProblem]) -> Manifest:
+    """`manifest` once it passed the checks against `model` too, after `problems`, those of
+    the checks alone.
+
+    Raises:
+        ManifestCheckFailed: A check failed.
+    """
+    if manifest is None:
+        raise ManifestCheckFailed(problems, [])
+    problems = problems + check_with_model(manifest, model.input_shape, model.output_shape)
+    if problems:
+        raise ManifestCheckFailed(problems, unknown_blocks(manifest))
+    return manifest
+
+
 def _checked_alone(document: bytes) -> tuple[Manifest | None, list[ManifestProblem]]:
     """The manifest in `document` and the problems of the checks that need no model: its form
     (no manifest when that fails), then the catalog, the parameters, the names, the signature
@@ -366,19 +397,20 @@ def _with_nul(manifest: Manifest) -> list[ManifestProblem]:
     """A problem of the form for the texts of the manifest that hold the character NUL: JSON
     takes it, but Postgres cannot keep it in a JSONB column. The example holds numbers only."""
     texts = _texts_with_nul(manifest.model_dump(mode="json", exclude={"example"}), "")
-    sentences = tuple(
-        f"{where} holds the character NUL, which CandleStack cannot keep. Remove it."
-        for where in texts
+    findings = tuple(
+        Finding(f"{what} holds the character NUL, which CandleStack cannot keep. Remove it.", field)
+        for field, what in texts
     )
-    return [ManifestProblem("schema", sentences)] if sentences else []
+    return [ManifestProblem("schema", findings)] if findings else []
 
 
-def _texts_with_nul(value: object, where: str) -> list[str]:
-    """Where in `value` a text, or the name of a field, holds NUL."""
+def _texts_with_nul(value: object, where: str) -> list[tuple[str, str]]:
+    """Where in `value` a text, or the name of a field, holds NUL: the field, and what holds
+    it in words."""
     if isinstance(value, str):
-        return [where] if NUL in value else []
+        return [(where, where)] if NUL in value else []
     if isinstance(value, dict):
-        found = [f"A field name in {where}" for key in value if NUL in key]
+        found = [(where, f"A field name in {where}") for key in value if NUL in key]
         return found + [
             text
             for key, item in value.items()
@@ -775,18 +807,12 @@ class ModelsService:
             ModelNotFound: The user has no model with the ID.
             ManifestCheckFailed: A check failed; nothing changes.
         """
-        if declared_size is not None and declared_size > MANIFEST_MAX_BYTES:
-            raise ManifestTooLarge
-        manifest, problems = _checked_alone(await _read_manifest(chunks))
+        manifest, problems = await _received_manifest(declared_size, chunks)
         await self._store.lock_user(user_id)
         model = await self._store.model(user_id, model_id)
         if model is None:
             raise ModelNotFound
-        if manifest is None:
-            raise ManifestCheckFailed(problems, [])
-        problems += check_with_model(manifest, model.input_shape, model.output_shape)
-        if problems:
-            raise ManifestCheckFailed(problems, unknown_blocks(manifest))
+        manifest = _passed(model, manifest, problems)
         # What the user wrote, without the defaults filled in, so it reads back as it was given.
         model.manifest = manifest.model_dump(mode="json", exclude_unset=True)
         model.verified_at = None
@@ -797,6 +823,27 @@ class ModelsService:
         await self._store.commit()
         logger.info("User %s set the manifest of model %s", user_id, model.id)
         return _out(model, usage.get(model.id, UNUSED), manifest)
+
+    async def check_manifest(
+        self,
+        user_id: str,
+        model_id: str,
+        declared_size: int | None,
+        chunks: AsyncIterable[bytes],
+    ) -> None:
+        """Runs the checks of ``set_manifest`` on the manifest the client sends, against the
+        user's model, and keeps nothing: a dry run.
+
+        Raises:
+            ManifestTooLarge: The manifest is larger than a manifest may be.
+            ModelNotFound: The user has no model with the ID.
+            ManifestCheckFailed: A check failed.
+        """
+        manifest, problems = await _received_manifest(declared_size, chunks)
+        model = await self._store.model(user_id, model_id)
+        if model is None:
+            raise ModelNotFound
+        _passed(model, manifest, problems)
 
     async def manifest(self, user_id: str, model_id: str) -> Manifest:
         """The manifest of the user's model.

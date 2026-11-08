@@ -182,6 +182,27 @@ def get(path, params=None):
 
 The example gives up after 5 waits.
 
+## Check a backtest before starting it
+
+`POST /api/v1/backtests/check` takes the body of `POST /api/v1/backtests` and runs the same
+checks without starting anything: the model is yours and has a manifest, the instrument fits
+the model, the period with the candles the model needs before it fits the data, your queue has
+room. It answers the same problem a start would, or 200 with what would run: the instrument as
+the catalog has it, the model's timeframe and session, the warm-up and where the load starts,
+and whether it would start now or wait in your queue (`starts`, `queue_position`). A key needs
+only the scope `read`:
+
+```python
+setup = {
+    "model": {"id": "mdl_k2m9qx47f3"},
+    "data": {"instrument": {"id": "stock:AAPL"},
+             "period": {"start": 1_717_372_800, "end": 1_725_148_800}},
+}
+check = api.post("/api/v1/backtests/check", json=setup)
+if check.status_code == 200:
+    started = api.post("/api/v1/backtests", json=setup).json()
+```
+
 ## Compare backtests
 
 `GET /api/v1/compare?ids=bt_7f3k2m9qx4,bt_t9n8v7d6a5` compares 1 to 20 of your backtests and
@@ -260,6 +281,35 @@ When the agent cannot run `curl` (claude.ai, ChatGPT), it gives the user the `pa
 instead: signed in to CandleStack, the user drops the file there, sees it upload and pass the
 checks, and gets a link to the new model. The page checks the file's size and format before it
 sends anything, so a wrong file leaves the link usable.
+
+## Check a manifest before setting it
+
+A model runs once it has a manifest (`PUT /api/v1/models/<id>/manifest` with the manifest as
+the body, a key of the scope `models`). To try one first, `POST` it to
+`/api/v1/models/<id>/manifest/check` with a `read` key: the same checks run and nothing is
+kept. The answer says whether every check passed (`valid`) and, if not, lists what is wrong,
+in a form a script or an agent can fix the manifest from:
+
+```json
+{
+  "valid": false,
+  "problems": [
+    {
+      "check": "schema",
+      "field": "input.session",
+      "detail": "input.session: Input should be 'regular' or '24/7'.",
+      "allowed": ["regular", "24/7"]
+    }
+  ],
+  "more_problems": 0,
+  "unknown_blocks": []
+}
+```
+
+`field` is the path the problem is about (null for the whole manifest) and `allowed` what fits
+there when the check knows it (the blocks of the step, the fields of the object, the options of
+a choice, the shape to give). A refused `PUT` answers `422 manifest-check-failed` with the same
+`problems`. The format: [preprocessing.md](preprocessing.md#the-manifest).
 
 ## Errors
 

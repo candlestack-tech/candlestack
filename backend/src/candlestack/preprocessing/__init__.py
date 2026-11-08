@@ -23,6 +23,7 @@ from candlestack.preprocessing.catalog import (
 )
 from candlestack.preprocessing.checks import (
     Check,
+    Finding,
     InvalidManifest,
     ManifestProblem,
     check_manifest,
@@ -40,6 +41,7 @@ __all__ = [
     "BlockOut",
     "CatalogOut",
     "Check",
+    "Finding",
     "Group",
     "InvalidManifest",
     "Manifest",

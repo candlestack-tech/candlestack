@@ -10,6 +10,7 @@ import pytest
 
 from candlestack.ml.inspect import inspect_keras
 from candlestack.preprocessing import (
+    Finding,
     ManifestProblem,
     check_manifest,
     check_with_model,
@@ -114,13 +115,17 @@ def test_a_feature_its_normalization_has_no_rule_for(raw: dict[str, Any]) -> Non
         ManifestProblem(
             "catalog",
             (
-                (
+                Finding(
                     "input.features[1].norm is blesk-norm@1, which has no rule for high@1, so it "
-                    "cannot scale that feature."
+                    "cannot scale that feature.",
+                    "input.features[1].norm.id",
+                    ("none@1",),
                 ),
-                (
+                Finding(
                     "input.features[4].norm is blesk-norm@1, which has no rule for volume@1, so "
-                    "it cannot scale that feature."
+                    "it cannot scale that feature.",
+                    "input.features[4].norm.id",
+                    ("none@1",),
                 ),
             ),
         )
@@ -439,8 +444,17 @@ def test_the_manifest_and_the_model_differ(
     output_shape: list[int] | None,
     sentences: tuple[str, ...],
 ) -> None:
-    assert check_with_model(parse_manifest(raw), input_shape, output_shape) == [
-        ManifestProblem("model", sentences)
+    [problem] = check_with_model(parse_manifest(raw), input_shape, output_shape)
+
+    assert (problem.check, problem.sentences) == ("model", sentences)
+
+
+def test_a_shape_the_model_file_gives_is_what_fits(raw: dict[str, Any]) -> None:
+    [problem] = check_with_model(parse_manifest(raw), [25, 23], None)
+
+    assert [(finding.field, finding.allowed) for finding in problem.findings] == [
+        ("signature.input.shape", ([25, 23],)),
+        ("signature.output.shape", None),
     ]
 
 

@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from candlestack.accounts import User
 from candlestack.accounts.dependencies import current_user, session_user
 from candlestack.core import Settings
-from candlestack.ml.api import _link_failure, _manifest_problem, _upload_problem
+from candlestack.ml.api import _link_failure
 from candlestack.ml.errors import (
     AccountGone,
     LargerThanLink,
@@ -26,9 +26,10 @@ from candlestack.ml.errors import (
     UploadInProgress,
     UploadTimeout,
 )
+from candlestack.ml.problems import manifest_check_failed, upload_problem
 from candlestack.ml.schemas import ModelCheck
 from candlestack.ml.service import UploadFailure
-from candlestack.preprocessing import ManifestProblem
+from candlestack.preprocessing import Finding, ManifestProblem
 
 PROBLEMS = "https://candlestack.tech/problems/"
 ORIGIN = {"Origin": "http://testserver"}
@@ -146,11 +147,20 @@ def test_a_manifest_announced_larger_than_1_mb_is_refused_at_once(client: TestCl
 
 def test_a_refused_manifest_shows_10_problems_and_counts_the_rest() -> None:
     problems = [
-        ManifestProblem("params", tuple(f"Problem {number}." for number in range(1, 13))),
-        ManifestProblem("model", ("The manifest gives [25, 5], the model takes [25, 23].",)),
+        ManifestProblem(
+            "params",
+            tuple(
+                Finding(f"Problem {number}.", f"input.features[{number}].params.window", ())
+                for number in range(1, 13)
+            ),
+        ),
+        ManifestProblem(
+            "model",
+            (Finding("The manifest gives [25, 5], the model takes [25, 23].", "x", ([25, 23],)),),
+        ),
     ]
 
-    problem = _manifest_problem(ManifestCheckFailed(problems, ["rsi@1"]))
+    problem = manifest_check_failed(ManifestCheckFailed(problems, ["rsi@1"]))
 
     assert (problem.status, problem.slug, problem.title) == (
         422,
@@ -163,7 +173,13 @@ def test_a_refused_manifest_shows_10_problems_and_counts_the_rest() -> None:
     )
     assert problem.extensions == {
         "problems": [
-            {"check": "params", "detail": f"Problem {number}."} for number in range(1, 11)
+            {
+                "check": "params",
+                "field": f"input.features[{number}].params.window",
+                "detail": f"Problem {number}.",
+                "allowed": [],
+            }
+            for number in range(1, 11)
         ],
         "more_problems": 3,
         "unknown_blocks": ["rsi@1"],
@@ -171,9 +187,11 @@ def test_a_refused_manifest_shows_10_problems_and_counts_the_rest() -> None:
 
 
 def test_one_problem_more_is_one_problem() -> None:
-    problems = [ManifestProblem("params", tuple(f"Problem {number}." for number in range(11)))]
+    problems = [
+        ManifestProblem("params", tuple(Finding(f"Problem {number}.") for number in range(11)))
+    ]
 
-    problem = _manifest_problem(ManifestCheckFailed(problems, []))
+    problem = manifest_check_failed(ManifestCheckFailed(problems, []))
 
     assert problem.detail.endswith("Problem 9. And 1 more problem.")
     assert problem.extensions["more_problems"] == 1
@@ -225,7 +243,7 @@ def test_each_refused_upload_has_its_problem_and_is_logged_by_ids(
     error: Exception, status: int, slug: str, caplog: pytest.LogCaptureFixture
 ) -> None:
     with caplog.at_level(logging.INFO):
-        problem = _upload_problem("usr_7f3k2m9qx4", error)
+        problem = upload_problem("usr_7f3k2m9qx4", error)
 
     assert (problem.status, problem.slug) == (status, slug)
     assert ";" not in problem.detail
@@ -233,7 +251,7 @@ def test_each_refused_upload_has_its_problem_and_is_logged_by_ids(
 
 
 def test_the_timeout_problem_names_the_minutes() -> None:
-    assert _upload_problem("usr_7f3k2m9qx4", UploadTimeout()).detail == (
+    assert upload_problem("usr_7f3k2m9qx4", UploadTimeout()).detail == (
         "The file did not arrive within 2 minutes. Check the connection and upload it again."
     )
 
