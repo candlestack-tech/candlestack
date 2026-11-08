@@ -1,7 +1,7 @@
 """Add the model uploads table: the one-time links a model is uploaded through.
 
 Revision ID: 8e4c2a7f1b59
-Revises: 5b1d7e3a9c62
+Revises: a3c8e1f04b72
 Create Date: 2026-11-08 18:00:00.000000
 """
 
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "8e4c2a7f1b59"
-down_revision: str | None = "5b1d7e3a9c62"
+down_revision: str | None = "a3c8e1f04b72"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
