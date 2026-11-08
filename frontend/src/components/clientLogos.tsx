@@ -6,8 +6,8 @@ import { cn } from '@/lib/utils';
 // name the client (design/mockups/api-mcp: the Try it tabs of a new key, the MCP card, connected
 // apps and the consent page). A neutral tile, if any, is the caller's; the class sizes the mark.
 //   Claude: the Claude Spark in Clay #D97757, https://www.anthropic.com/press-kit
-//   ChatGPT: OpenAI Blossom, black on light and white on dark, https://openai.com/brand/
-//     (OAI_OpenAI-Blossom_Black.svg), viewBox cropped to the mark
+//   ChatGPT and Codex (the brand page has no Codex mark): OpenAI Blossom, black on light and white
+//     on dark, https://openai.com/brand/ (OAI_OpenAI-Blossom_Black.svg), viewBox cropped to the mark
 //   Cursor: Cube 2D, #26251e on light and #edecec on dark, https://cursor.com/brand
 //   VS Code: the blue stable icon in both themes, https://code.visualstudio.com/brand (vscode.svg),
 //     its ids prefixed with cl-vsc- as on the website; it shows once per page

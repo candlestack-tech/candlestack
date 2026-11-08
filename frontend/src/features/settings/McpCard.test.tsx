@@ -90,14 +90,16 @@ describe('MCP server card', () => {
     const clients: [string, string][] = [
       ['Claude', 'Add a custom connector, sign in with CandleStack'],
       ['ChatGPT', 'Add a connector, sign in with CandleStack'],
-      ['Claude Code', 'One command with an API key'],
+      ['Codex', 'One command, sign in with codex mcp login'],
+      ['Claude Code', 'One command, sign in with CandleStack or use an API key'],
       ['Cursor', 'One entry in mcp.json with an API key'],
       ['VS Code', 'One entry in mcp.json with an API key'],
       ['Other clients', 'Any MCP client over Streamable HTTP'],
     ];
     for (const [name, how] of clients) {
       const guide = card().getByRole('link', { name: `Guide for ${name}` });
-      expect(guide.getAttribute('href')).toBe('https://candlestack.tech/docs/mcp/install/');
+      const section = name === 'Codex' ? '#codex' : '';
+      expect(guide.getAttribute('href')).toBe(`https://candlestack.tech/docs/mcp/install/${section}`);
       expect(guide.getAttribute('target')).toBe('_blank');
       const line = within(guide.parentElement as HTMLElement);
       expect(line.getByText(how)).toBeDefined();

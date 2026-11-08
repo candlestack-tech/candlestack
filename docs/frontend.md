@@ -297,9 +297,10 @@ The two sections with the account's preferences load them in the route's loader
   live (website#75).
 - The MCP server card (`McpCard.tsx`, #409): the server address of the same host
   (`window.location.origin` + `/mcp`, so stage shows stage's) with Copy; one line per client
-  (Claude, ChatGPT, Claude Code, Cursor, VS Code, other clients) with its real mark
-  (`src/components/clientLogos.tsx`, the official files the website's docs use), how it connects
-  and Guide to `https://candlestack.tech/docs/mcp/install/`; then Connected apps:
+  (Claude, ChatGPT, Codex, Claude Code, Cursor, VS Code, other clients) with its real mark
+  (`src/components/clientLogos.tsx`, the official files the website's docs use; Codex has the
+  OpenAI Blossom), how it connects and Guide to `https://candlestack.tech/docs/mcp/install/`
+  (Codex's to its section, `#codex`); then Connected apps:
   `GET /api/v1/me/connected-apps` under `['account', 'connected-apps']` (`src/api/oauth.ts`,
   asked again on coming back to the tab), each app with its tile, name, the host it returns to,
   its scopes, last use and when it connected, and Disconnect, which asks first
