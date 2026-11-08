@@ -27,6 +27,7 @@ import {
   type ComparePick,
 } from '@/features/backtests';
 import { usePageTitle } from '@/lib/usePageTitle';
+import { compareSearchIds } from '@/routes/compareSearch';
 
 // The chosen backtests in the order of their slots, each with its colour, as the server compares
 // them (GET /api/v1/compare). While a new choice loads, the last answer shows those still chosen. A
@@ -49,13 +50,19 @@ function useColumns() {
 
 // The URL names the backtests compared (?ids=bt_12,bt_11), so a copied address opens the same
 // comparison: every change of the choice, here or in another tab, writes it in place, keeping the
-// back link's page.
+// back link's page. An address that already names the choice, a link's, is marked as written too,
+// so Back to it keeps a choice changed since. What the URL could not name (a broken stored ID) is
+// left out, or each write would ask for the next.
 function useComparedInUrl(picks: readonly ComparePick[]) {
   const { ids } = useSearch({ from: '/_app/backtests/compare' });
+  // While a link leaves the page, the location is already the next page's: nothing to mark there.
+  const written = useRouterState({
+    select: ({ location }) => location.pathname !== '/backtests/compare' || location.state.comparedInUrl === true,
+  });
   const navigate = useNavigate();
-  const chosen = comparedIds(picks) || undefined;
+  const chosen = compareSearchIds(comparedIds(picks));
   useEffect(() => {
-    if (chosen === ids) return;
+    if (chosen === ids && written) return;
     void navigate({
       to: '/backtests/compare',
       search: { ids: chosen },
@@ -63,7 +70,7 @@ function useComparedInUrl(picks: readonly ComparePick[]) {
       replace: true,
       resetScroll: false,
     });
-  }, [chosen, ids, navigate]);
+  }, [chosen, ids, written, navigate]);
 }
 
 // "← Dashboard": back where the page was opened from, the Backtests page when it was opened

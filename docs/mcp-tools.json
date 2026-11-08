@@ -13922,6 +13922,7 @@
                 "type": "null"
               }
             ],
+            "default": null,
             "description": "The app's Compare page with its backtests side by side, to show the user: once ranked its best 4, before that all of them when they are 4 at most; else null",
             "title": "Url"
           }
@@ -13935,7 +13936,6 @@
           "progress",
           "backtests",
           "ranking",
-          "url",
           "eta_s"
         ],
         "title": "SweepStarted",
@@ -14506,6 +14506,7 @@
                 "type": "null"
               }
             ],
+            "default": null,
             "description": "The app's Compare page with its backtests side by side, to show the user: once ranked its best 4, before that all of them when they are 4 at most; else null",
             "title": "Url"
           }
@@ -14518,8 +14519,7 @@
           "done",
           "progress",
           "backtests",
-          "ranking",
-          "url"
+          "ranking"
         ],
         "title": "SweepResult",
         "type": "object"

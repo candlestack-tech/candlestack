@@ -126,9 +126,12 @@ export function nameInCompare(id: string, name: string, description?: string) {
 
 // A link to the compare page (?ids=) chooses its backtests, in its order, in place of the choice.
 // One chosen already keeps what the panel knew of it, and one unpublished since is asked again;
-// the comparison names a new one (useComparedNames) and leaves out one that is gone.
+// the comparison names a new one (useComparedNames) and leaves out one that is gone. A link that
+// names the backtests compared already, in any order, keeps their slots and colours.
 export function openInCompare(ids: readonly string[]) {
   const known = new Map(selection.slots.flatMap((slot) => (slot ? [[slot.id, slot] as const] : [])));
+  const compared = [...known.values()].every((slot) => !slot.gone);
+  if (compared && known.size === ids.length && ids.every((id) => known.has(id))) return;
   const slots = NO_SLOTS.map((_, index) => {
     const id = ids[index];
     if (id === undefined) return null;

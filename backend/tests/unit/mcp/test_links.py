@@ -80,3 +80,11 @@ def test_a_ranked_sweep_leaves_out_those_without_a_value() -> None:
     )
     # One with a value is nothing to compare.
     assert sweeps._compare_url(CALL, [], ranking(1, None)) is None
+
+
+def test_a_sweep_kept_before_its_link_still_answers_a_retry() -> None:
+    """run_sweep answers a retry with its key from the first answer as it was kept, which may
+    have no `url` yet."""
+    kept = sweeps._STARTED.model_dump(mode="json", exclude={"url"})
+
+    assert sweeps.SweepStarted.model_validate(kept).url is None

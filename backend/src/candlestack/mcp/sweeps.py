@@ -69,10 +69,13 @@ def _compare_url(
 class SweepResult(SweepOut):
     """A sweep: its backtests, how far they are, once all ended the ranking, and its page."""
 
+    # A default, as run_sweep answers a retry with its key from the first answer as it was kept,
+    # which may predate the field.
     url: str | None = Field(
+        default=None,
         description=f"The app's Compare page with its backtests side by side, to show the "
         f"user: once ranked its best {COMPARE_PAGE_MAX}, before that all of them when they "
-        f"are {COMPARE_PAGE_MAX} at most; else null"
+        f"are {COMPARE_PAGE_MAX} at most; else null",
     )
 
 

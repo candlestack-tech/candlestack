@@ -3,7 +3,7 @@ import { cleanup, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { addToCompare, clearCompare } from '@/features/backtests/compare/selection';
+import { addToCompare, claimCompare, clearCompare } from '@/features/backtests/compare/selection';
 import { ADA, backtestDocument, backtestsAnswer, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 import { compareAnswers, compareMissing } from '@/test/compare';
@@ -38,7 +38,9 @@ const choose = (...docs: ReturnType<typeof doc>[]) => {
   });
 };
 
-const kept = () => (JSON.parse(localStorage.getItem('compare-backtests') ?? '{}') as { slots: unknown[] }).slots;
+const stored = () =>
+  JSON.parse(localStorage.getItem('compare-backtests') ?? '{}') as { slots: unknown[]; owner: string | null };
+const kept = () => stored().slots;
 
 beforeEach(() => {
   clearCompare();
@@ -131,6 +133,46 @@ describe('the compare page’s address', () => {
     expect(screen.queryByRole('link', { name: 'Bright Vega' })).toBeNull();
     await vi.waitFor(() => {
       expect(router.state.location.search).toEqual({ ids: 'bt_11' });
+    });
+  });
+
+  it('back on a link’s address, keeps a choice changed since', async () => {
+    stubApi({
+      ...LISTS,
+      ...compareAnswers([BRIGHT, FROZEN]),
+      [`GET /api/v1/backtests/${BRIGHT.backtest.id}`]: { status: 200, body: BRIGHT },
+    });
+    const { router } = await renderApp('/backtests/compare?ids=bt_12,bt_11');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('link', { name: 'Bright Vega' }));
+    await user.click(await screen.findByRole('button', { name: 'Added to compare' }));
+    await user.click(screen.getByRole('button', { name: '← Compare backtests' }));
+    expect(await screen.findByText('1 of 4 backtests. Add one more to compare')).toBeDefined();
+    expect(screen.queryByRole('link', { name: 'Bright Vega' })).toBeNull();
+    await vi.waitFor(() => {
+      expect(router.state.location.search).toEqual({ ids: 'bt_11' });
+    });
+  });
+
+  it('opens a link for the signed-in account when the browser kept another account’s choice', async () => {
+    claimCompare('usr_someoneelse');
+    choose(CRIMSON);
+    stubApi({ ...LISTS, ...compareAnswers([FROZEN, BRIGHT]) });
+    const { router } = await renderApp('/backtests/compare?ids=bt_11,bt_12');
+    expect(await screen.findByRole('link', { name: 'Frozen Pulsar' })).toBeDefined();
+    expect(screen.getByText('2 of 4 backtests')).toBeDefined();
+    expect(stored()).toMatchObject({ owner: ADA.id, slots: [{ id: 'bt_11' }, { id: 'bt_12' }, null, null] });
+    expect(router.state.location.search).toEqual({ ids: 'bt_11,bt_12' });
+  });
+
+  it('keeps the slots and their colours when a link names the backtests compared already', async () => {
+    choose(BRIGHT, FROZEN);
+    stubApi({ ...LISTS, ...compareAnswers([BRIGHT, FROZEN]) });
+    const { router } = await renderApp('/backtests/compare?ids=bt_11,bt_12');
+    expect(await screen.findByRole('link', { name: 'Frozen Pulsar' })).toBeDefined();
+    expect(kept()).toMatchObject([{ id: 'bt_12' }, { id: 'bt_11' }, null, null]);
+    await vi.waitFor(() => {
+      expect(router.state.location.search).toEqual({ ids: 'bt_12,bt_11' });
     });
   });
 });

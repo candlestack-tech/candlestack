@@ -18,8 +18,13 @@ function compareIdsOf(ids: unknown): string[] {
   return [...new Set(valid)].slice(0, COMPARE_SLOTS);
 }
 
+// The value of `ids` the page's URL has for these: undefined when nothing is left.
+export function compareSearchIds(ids: unknown): string | undefined {
+  const valid = compareIdsOf(ids);
+  return valid.length > 0 ? valid.join(',') : undefined;
+}
+
 // The key stays, undefined when nothing is left: the router lays the result over the raw URL values.
 export function validateCompareSearch(search: { ids?: unknown } & SearchSchemaInput): CompareSearch {
-  const ids = compareIdsOf(search.ids);
-  return { ids: ids.length > 0 ? ids.join(',') : undefined };
+  return { ids: compareSearchIds(search.ids) };
 }

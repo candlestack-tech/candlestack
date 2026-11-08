@@ -1289,7 +1289,7 @@ call, as the routes' dependencies do), never the API over HTTP.
     `compare_backtests` (`read`) answers `GET /api/v1/compare` for a list of 1 to 20 IDs, each
     backtest with its page's `url` besides and `url`, the app's Compare page of them
     (`<PUBLIC_URL>/backtests/compare?ids=<id>,<id>`, `convention.compare_url`) for 2 to 4
-    (the page's slots; null for one or more), with `curve_points` 0 by default (no curves; up to
+    (the page's slots; null for one, or for more than 4), with `curve_points` 0 by default (no curves; up to
     200) and `setup_mode` (`full` or `diff`); its description says how to read `max_drawdown` (0 or below, a smaller fall
     is better, though `better` says `lower`). The access is that of the
     routes: the user's own backtests and other accounts' while they are published.

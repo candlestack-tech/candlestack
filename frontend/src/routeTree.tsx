@@ -174,9 +174,15 @@ const compareRoute = createRoute({
   validateSearch: validateCompareSearch,
   staticData: { sidebar: false },
   loaderDeps: ({ search }) => ({ ids: search.ids }),
-  loader: async ({ deps, cause, location }) => {
+  loader: async ({ context, deps, cause, location }) => {
     if (cause !== 'enter' || deps.ids === undefined || location.state.comparedInUrl) return;
-    const { openInCompare } = await import('@/features/backtests');
+    const [me, { claimCompare, openInCompare }] = await Promise.all([
+      context.queryClient.ensureQueryData(meQueryOptions()),
+      import('@/features/backtests'),
+    ]);
+    // The choice becomes the signed-in account's first, as the panel would make it, so another
+    // account's left in this browser does not empty the link's afterwards.
+    if (me) claimCompare(me.id);
     openInCompare(deps.ids.split(','));
   },
   component: lazyRouteComponent(() => import('@/pages/ComparePage'), 'ComparePage'),
