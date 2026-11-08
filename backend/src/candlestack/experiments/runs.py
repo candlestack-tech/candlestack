@@ -289,8 +289,7 @@ class BacktestRuns:
         """The light result document of the user's backtest, or of another account's while it
         is published, from what its run stored and never the data source: what the comparison
         reads. ``results`` has only the statistics and the series' ``CURVES`` columns (null
-        until it finished), and ``data`` and ``backtest`` none of what the rows or the queue
-        would tell.
+        until it finished), ``data`` no alignment and ``backtest`` no queue position.
 
         Raises:
             BacktestNotFound, NoDocument.
@@ -314,7 +313,10 @@ class BacktestRuns:
         else:
             columns = read_curves(backtest.curves)
         shown = {"stats": backtest.stats, "series": {"columns": columns}}
-        return _document(backtest, spec, report, shown=shown, author=author)
+        document = _document(backtest, spec, report, shown=shown, author=author)
+        # The rows the run found, as a rebuild of the document finds them again.
+        document["data"]["rows"] = report.rows.model_dump()
+        return document
 
 
 def _short_curves(backtest: Backtest, report: RunReport) -> dict[str, list[Any]]:
