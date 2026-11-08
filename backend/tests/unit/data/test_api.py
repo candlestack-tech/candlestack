@@ -1136,12 +1136,12 @@ def test_openapi_documents_the_data_api(client: TestClient) -> None:
     assert candles["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/CandlesOut"
     }
-    assert set(candles["responses"]) == {"200", "401", "404", "422", "429", "502", "503"}
-    for status in ("401", "404", "422", "429", "502", "503"):
+    assert set(candles["responses"]) == {"200", "401", "403", "404", "422", "429", "502", "503"}
+    for status in ("401", "403", "404", "422", "429", "502", "503"):
         assert list(candles["responses"][status]["content"]) == [PROBLEM]
     assert "too-many-candles" in candles["responses"]["422"]["description"]
     detail = paths["/api/v1/data/instruments/{instrument_id}"]["get"]
-    assert set(detail["responses"]) == {"200", "401", "404", "422", "429", "502", "503"}
+    assert set(detail["responses"]) == {"200", "401", "403", "404", "422", "429", "502", "503"}
     search = paths["/api/v1/data/instruments"]["get"]
     for operation in (search, detail, candles):
         assert "not-signed-in" in operation["responses"]["401"]["description"]

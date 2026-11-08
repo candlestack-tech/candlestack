@@ -19,7 +19,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 
-from candlestack.accounts import CurrentUserDep
+from candlestack.accounts import CurrentUserDep, ModelsUserDep
 from candlestack.core import NO_STORE, ProblemError, problem_doc, require_same_origin
 from candlestack.ml.dependencies import ModelChecksDep, ModelsServiceDep
 from candlestack.ml.errors import (
@@ -303,7 +303,7 @@ async def list_models(
 async def upload_model(
     name: FileName,
     request: Request,
-    user: CurrentUserDep,
+    user: ModelsUserDep,
     service: ModelsServiceDep,
     response: Response,
 ) -> ModelOut:
@@ -334,7 +334,7 @@ async def upload_model(
 async def update_model(
     model_id: ModelId,
     body: ModelUpdate,
-    user: CurrentUserDep,
+    user: ModelsUserDep,
     service: ModelsServiceDep,
     response: Response,
 ) -> ModelOut:
@@ -360,7 +360,7 @@ async def update_model(
     responses={**_NOT_SIGNED_IN, **_CROSS_ORIGIN, **_NOT_FOUND},
     dependencies=[Depends(require_same_origin)],
 )
-async def delete_model(model_id: ModelId, user: CurrentUserDep, service: ModelsServiceDep) -> None:
+async def delete_model(model_id: ModelId, user: ModelsUserDep, service: ModelsServiceDep) -> None:
     """Deletes the model and its file, which frees its storage."""
     try:
         await service.delete(user.id, model_id)
@@ -394,7 +394,7 @@ async def set_manifest(
     model_id: ModelId,
     *,
     request: Request,
-    user: CurrentUserDep,
+    user: ModelsUserDep,
     service: ModelsServiceDep,
     checks: ModelChecksDep,
     response: Response,

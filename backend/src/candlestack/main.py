@@ -17,6 +17,7 @@ from candlestack.accounts import (
     accounts_router,
     dev_sign_in_allowed,
     dev_sign_in_router,
+    document_api_keys,
 )
 from candlestack.core import (
     Database,
@@ -80,7 +81,7 @@ class CandleStackAPI(FastAPI):
     @override
     def openapi(self) -> dict[str, Any]:
         if self.openapi_schema is None:
-            self.openapi_schema = document_problems(super().openapi())
+            self.openapi_schema = document_api_keys(document_problems(super().openapi()))
         return self.openapi_schema
 
 

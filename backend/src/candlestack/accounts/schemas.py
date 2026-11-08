@@ -211,3 +211,109 @@ class PreferencesOut(BaseModel):
 
     backtest_defaults: BacktestDefaults
     appearance: Appearance
+
+
+# --- API keys ------------------------------------------------------------------------------------
+
+# The most keys a user has that are neither revoked nor expired.
+API_KEYS_MAX = 10
+API_KEY_NAME_MAX = 80
+# The longest expiry a new key can get.
+API_KEY_DAYS_MAX = 365
+
+
+class Scope(StrEnum):
+    """What an API key may do. `read`: every GET; `backtests`: start, rename and star
+    backtests; `models`: upload models, add their manifests, rename, star and delete them;
+    `publish`: publish and unpublish backtests. Managing keys, deleting the account, sign-in
+    methods and signing out need the browser session whatever the scopes."""
+
+    read = "read"
+    backtests = "backtests"
+    models = "models"
+    publish = "publish"
+
+
+# The order scopes are listed in, whatever order they were given in.
+SCOPE_ORDER = tuple(Scope)
+
+
+class ApiKeyIn(BaseModel):
+    """A new API key."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    name: str = Field(
+        min_length=1,
+        max_length=API_KEY_NAME_MAX,
+        pattern=r"^[^\x00-\x1f\x7f]+$",
+        description="What the key is for, without control characters; surrounding whitespace "
+        "is dropped",
+        examples=["Claude Code on my laptop"],
+    )
+    scopes: list[Scope] = Field(
+        min_length=1,
+        max_length=len(Scope),
+        description="What the key may do, at least one; a scope given twice counts once",
+        examples=[["read", "backtests"]],
+    )
+    expires_in_days: int | None = Field(
+        default=None,
+        ge=1,
+        le=API_KEY_DAYS_MAX,
+        description=f"Days until the key stops working, 1 to {API_KEY_DAYS_MAX}; null or left "
+        "out: it works until revoked",
+        examples=[90],
+    )
+
+
+class ApiKeyOut(BaseModel):
+    """An API key, without its secret: that is shown once, when the key is created."""
+
+    id: str = Field(
+        pattern=r"^key_[a-z2-7]{10}$",
+        description="Public ID of the key, for revoking it",
+        examples=["key_7f3k2m4qx4"],
+    )
+    name: str = Field(description="What the key is for", examples=["Claude Code on my laptop"])
+    scopes: list[Scope] = Field(
+        description="What the key may do, in the order read, backtests, models, publish",
+        examples=[["read", "backtests"]],
+    )
+    prefix: str = Field(
+        pattern=r"^cs_[a-z2-7]{8}$",
+        description="The start of the key, to tell keys apart",
+        examples=["cs_7f3k2m4q"],
+    )
+    created_at: datetime = Field(description="When the key was created (UTC)")
+    expires_at: datetime | None = Field(
+        description="When the key stops working (UTC); null: it works until revoked"
+    )
+    last_used_at: datetime | None = Field(
+        description="When a request last signed in with the key (UTC), to the minute; null: "
+        "never used"
+    )
+
+
+class ApiKeyCreated(ApiKeyOut):
+    """A new API key with its secret, which only this response shows."""
+
+    # Kept out of the repr, so an error report holding this object never shows the secret.
+    secret: str = Field(
+        repr=False,
+        pattern=r"^cs_[a-z2-7]{40}$",
+        description="The key itself, for `Authorization: Bearer <secret>`. Shown only in this "
+        "response: CandleStack keeps just its SHA-256, so copy it now",
+        examples=["cs_7f3k2m4q" + "x" * 32],
+    )
+
+
+class ApiKeysOut(BaseModel):
+    """The user's API keys that are not revoked, oldest first; an expired one stays listed
+    until it is revoked."""
+
+    items: list[ApiKeyOut]
+    limit: int = Field(
+        description="The most keys a user can have that are neither revoked nor expired",
+        examples=[API_KEYS_MAX],
+    )
