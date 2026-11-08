@@ -108,6 +108,11 @@ class Prepared(NamedTuple):
     instrument_id: InstrumentId
     body: BacktestIn
 
+    @property
+    def representation(self) -> Representation:
+        """What the model reads, as the app names it."""
+        return Representation(_representation(self.manifest))
+
 
 class BacktestRuns:
     def __init__(
@@ -448,7 +453,8 @@ def _document(  # noqa: PLR0913 (the document's sources)
             published_at=backtest.published_at,
             status=BacktestStatus(backtest.status),
             queue_position=queue_position,
-            sweep_id=backtest.sweep_id,
+            # Only the author can open the sweep: others see that there was none.
+            sweep_id=backtest.sweep_id if author.mine else None,
             created_at=backtest.created_at,
             started_at=backtest.started_at,
             finished_at=backtest.finished_at,

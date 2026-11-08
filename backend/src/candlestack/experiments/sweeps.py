@@ -45,7 +45,7 @@ from candlestack.experiments.errors import (
     SweepQueueFull,
     SweepTooLarge,
 )
-from candlestack.experiments.models import Backtest, Sweep, new_sweep_id
+from candlestack.experiments.models import Sweep, new_sweep_id
 from candlestack.experiments.runs import BacktestRuns, Prepared
 from candlestack.experiments.schemas import BacktestStatus, Representation
 from candlestack.experiments.spec import RunSpec
@@ -107,16 +107,33 @@ class SweepVary(BaseModel):
     @model_validator(mode="after")
     def _each_value_once(self) -> Self:
         for field in ("models", "instruments", "periods", "rules"):
-            values = [repr(value) for value in getattr(self, field)]
+            key = _instrument_key if field == "instruments" else repr
+            values = [key(value) for value in getattr(self, field)]
             if len(set(values)) < len(values):
                 raise ValueError(f"{field} has a value twice")
         return self
 
 
+def _instrument_key(value: str) -> str:
+    """The instrument an ID names, so two spellings of one count as the same value; an ID that
+    does not parse stays as written (its check fails later, with its setup)."""
+    try:
+        return repr(InstrumentId.parse(value))
+    except DataError:
+        return value
+
+
 class SweepIn(BaseModel):
     """A new sweep: a base setup, the values to vary and the statistic to rank by."""
 
-    base: BacktestIn = Field(description="The body of `POST /api/v1/backtests`")
+    # A mistyped field, such as a dry run flag, is an error rather than a sweep started.
+    model_config = ConfigDict(extra="forbid")
+
+    base: BacktestIn = Field(
+        description="The body of `POST /api/v1/backtests`. It still needs `model.id` and "
+        "`data.instrument` when `vary` lists models or instruments, whose values then replace "
+        "them"
+    )
     vary: SweepVary = Field(default_factory=SweepVary)
     metric: SweepMetric = Field(
         default=SweepMetric.sharpe,
@@ -289,11 +306,11 @@ def _setup(index: int) -> Iterator[None]:
         raise SetupFailed(index, error) from error
 
 
-def _setup_of(backtest: Backtest, spec: RunSpec) -> SweepSetup:
+def _setup_of(prepared: Prepared, spec: RunSpec) -> SweepSetup:
     return SweepSetup(
-        model=backtest.model_id or "",
-        model_name=backtest.model_name,
-        representation=Representation(backtest.representation),
+        model=prepared.model.id,
+        model_name=prepared.model.name,
+        representation=prepared.representation,
         timeframe=spec.data.timeframe,
         instrument=spec.data.instrument.id,
         period=spec.data.period,
@@ -317,10 +334,7 @@ class Sweeps:
             The errors of ``start`` but ``ModelNotFound`` of a model deleted meanwhile.
         """
         checked, room = await self._checked(user_id, body)
-        setups = [
-            _setup_of(self._runs.new_backtest(user_id, prepared, spec, number=index + 1), spec)
-            for index, (prepared, spec) in enumerate(checked)
-        ]
+        setups = [_setup_of(prepared, spec) for prepared, spec in checked]
         return SweepPlan(count=len(setups), limit=SWEEP_MAX, queue_room=room, setups=setups)
 
     async def start(self, user_id: str, body: SweepIn) -> SweepOut:
@@ -348,8 +362,8 @@ class Sweeps:
             for index, (prepared, spec) in enumerate(checked, start=1)
         ]
         grid_rows = [
-            {"backtest_id": backtest.id, **_setup_of(backtest, spec).model_dump(mode="json")}
-            for backtest, (_, spec) in zip(backtests, checked, strict=True)
+            {"backtest_id": backtest.id, **_setup_of(prepared, spec).model_dump(mode="json")}
+            for backtest, (prepared, spec) in zip(backtests, checked, strict=True)
         ]
         await self._store.add_sweep(
             Sweep(

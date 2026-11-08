@@ -7,7 +7,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from candlestack.accounts import User
+from candlestack.accounts import Scope, User
 from candlestack.accounts.dependencies import Caller, authenticate, current_user
 from candlestack.experiments import model_usage
 
@@ -117,6 +117,56 @@ def test_a_new_sweep_without_a_base_or_with_a_wrong_metric_is_a_422(
     client: TestClient, body: dict[str, object]
 ) -> None:
     response = client.post("/api/v1/sweeps", json=body, headers=ORIGIN)
+
+    assert response.status_code == 422
+    assert response.json()["type"] == PROBLEMS + "validation"
+
+
+@pytest.mark.usefixtures("signed_in")
+def test_a_mistyped_dry_run_flag_is_a_422_not_a_sweep(client: TestClient) -> None:
+    body = {
+        "base": {
+            "model": {"id": "mdl_x"},
+            "data": {"instrument": {"id": "stock:AAPL"}, "period": {"start": 0, "end": 9}},
+        },
+        "vary": {"rules": [{"name": "threshold", "limit": 0.2}]},
+        "validateOnly": True,
+    }
+
+    response = client.post("/api/v1/sweeps", json=body, headers=ORIGIN)
+
+    assert response.status_code == 422
+    assert response.json()["type"] == PROBLEMS + "validation"
+
+
+@pytest.fixture
+def read_key(app: FastAPI) -> FastAPI:
+    app.dependency_overrides[authenticate] = lambda: Caller(USER, frozenset({Scope.read}))
+    return app
+
+
+@pytest.mark.usefixtures("read_key")
+def test_a_read_key_cannot_start_a_sweep(client: TestClient) -> None:
+    body = {
+        "base": {
+            "model": {"id": "mdl_x"},
+            "data": {"instrument": {"id": "stock:AAPL"}, "period": {"start": 0, "end": 9}},
+        },
+        "vary": {"rules": [{"name": "threshold", "limit": 0.2}]},
+        "validate_only": True,
+    }
+
+    response = client.post("/api/v1/sweeps", json=body, headers=ORIGIN)
+
+    assert response.status_code == 403
+    assert response.json()["type"] == PROBLEMS + "missing-scope"
+    assert response.json()["scope"] == "backtests"
+
+
+@pytest.mark.usefixtures("read_key")
+def test_a_read_key_reads_a_sweep(client: TestClient) -> None:
+    # Past the scope check: the query is checked next.
+    response = client.get("/api/v1/sweeps/sw_7f3k2m9qx4", params={"metric": "exposure"})
 
     assert response.status_code == 422
     assert response.json()["type"] == PROBLEMS + "validation"

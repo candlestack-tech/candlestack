@@ -223,13 +223,16 @@ A sweep runs 2 to 20 backtests, and your queue needs room for all of them (up to
 else 422 `validation` or 409 `queue-full`, with `count`. Add `"validate_only": true` to check
 every setup without starting anything: the answer is the `count` and each setup. A setup that
 fails a check answers with that check's problem and `setup`, its place in the grid from 1.
-To vary what a model reads or its timeframe, list models whose manifests read them.
+To vary what a model reads or its timeframe, list models whose manifests read them. The base
+still needs a model and an instrument when you vary them. An unknown field, such as a mistyped
+`validate_only`, is a 422 `validation`, never a sweep started.
 
 `GET /api/v1/sweeps/<id>` has the `progress`, each backtest's ID, status and setup, and once
 `done` the `ranking` by the metric, best first, marked as Compare marks it. Ask with
 `?metric=max_drawdown` for another order. The backtests are ordinary ones with `sweep_id`, so
 `GET /api/v1/compare` with their IDs compares them in full. In an MCP client the same is
-`validate_sweep`, `run_sweep` and `get_sweep`. The fields:
+`validate_sweep`, `run_sweep` and `get_sweep`. `validate_sweep` needs only the scope `read`,
+while the HTTP dry run needs `backtests`. The fields:
 [architecture.md](architecture.md#sweeps).
 
 ## Upload a model through a link

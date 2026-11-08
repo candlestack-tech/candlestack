@@ -154,6 +154,7 @@ def test_a_sweep_varies_something(vary: dict[str, Any]) -> None:
     "vary",
     [
         {"models": ["mdl_a", "mdl_a"]},
+        {"instruments": ["stock:AAPL", " Stock:aapl "]},
         {"rules": [threshold(0.1), threshold(0.1)]},
         {"periods": [{"start": 5, "end": 1}]},
         {"models": [""]},
@@ -161,11 +162,32 @@ def test_a_sweep_varies_something(vary: dict[str, Any]) -> None:
         {"models": [f"mdl_{index}" for index in range(SWEEP_MAX + 1)]},
         {"timeframes": ["1h"]},
     ],
-    ids=["model-twice", "rule-twice", "period", "empty-id", "long-id", "long-list", "unknown"],
+    ids=[
+        "model-twice",
+        "instrument-spelt-twice",
+        "rule-twice",
+        "period",
+        "empty-id",
+        "long-id",
+        "long-list",
+        "unknown",
+    ],
 )
 def test_the_lists_are_checked(vary: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         SweepVary.model_validate(vary)
+
+
+def test_an_instrument_that_does_not_parse_waits_for_its_setups_check() -> None:
+    vary = SweepVary.model_validate({"instruments": ["AAPL", "stock:AAPL"]})
+
+    assert vary.instruments == ["AAPL", "stock:AAPL"]
+
+
+@pytest.mark.parametrize("flag", ["validateOnly", "dry_run", "validate"])
+def test_a_mistyped_field_of_a_sweep_is_refused(flag: str) -> None:
+    with pytest.raises(ValidationError):
+        SweepIn.model_validate({"base": BASE, "vary": {"rules": [threshold(0.2)]}, flag: True})
 
 
 def test_every_rankable_statistic_is_a_metric() -> None:

@@ -166,7 +166,7 @@
               "type": "null"
             }
           ],
-          "description": "The sweep it was started in (`GET /api/v1/sweeps/{sweep_id}`); null for a backtest started alone",
+          "description": "The sweep it was started in (`GET /api/v1/sweeps/{sweep_id}`); null for a backtest started alone, and for another user's",
           "examples": [
             null
           ],

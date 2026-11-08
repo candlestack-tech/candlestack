@@ -797,7 +797,7 @@
                 "type": "null"
               }
             ],
-            "description": "The sweep it was started in (`GET /api/v1/sweeps/{sweep_id}`); null for a backtest started alone",
+            "description": "The sweep it was started in (`GET /api/v1/sweeps/{sweep_id}`); null for a backtest started alone, and for another user's",
             "examples": [
               null
             ],
@@ -6175,11 +6175,12 @@
         "type": "object"
       },
       "SweepIn": {
+        "additionalProperties": false,
         "description": "A new sweep: a base setup, the values to vary and the statistic to rank by.",
         "properties": {
           "base": {
             "$ref": "#/components/schemas/BacktestIn",
-            "description": "The body of `POST /api/v1/backtests`"
+            "description": "The body of `POST /api/v1/backtests`. It still needs `model.id` and `data.instrument` when `vary` lists models or instruments, whose values then replace them"
           },
           "metric": {
             "$ref": "#/components/schemas/SweepMetric",

@@ -82,7 +82,7 @@ def test_a_dry_run_counts_and_checks_every_setup_and_stores_nothing(ada) -> None
     assert ada.sql("SELECT count(*) FROM sweeps") == [(0,)]
 
 
-def test_a_sweep_queues_ordinary_backtests_and_ranks_them_once_all_ended(ada, worker) -> None:
+def test_a_sweep_queues_ordinary_backtests_and_ranks_them_once_all_ended(ada, bob, worker) -> None:
     worker.gate.clear()  # the first run holds the worker
     model_id = ada.runnable_model()
     limits = [0.05, 0.1, 0.3]
@@ -146,6 +146,9 @@ def test_a_sweep_queues_ordinary_backtests_and_ranks_them_once_all_ended(ada, wo
     assert sweep_of(ada, sweep["id"]).json()["metric"] == "total_return"
     # A sweep's backtest is publishable as any other.
     assert ada.publish(ids[0]).json()["public"] is True
+    # Others read it without the sweep, which only its author can open.
+    assert bob.document(ids[0]).json()["backtest"]["sweep_id"] is None
+    assert ada.document(ids[0]).json()["backtest"]["sweep_id"] == sweep["id"]
 
 
 @pytest.mark.usefixtures("worker")

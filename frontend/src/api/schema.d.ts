@@ -1270,7 +1270,7 @@ export interface components {
             steps: components["schemas"]["BacktestStep"][];
             /**
              * Sweep Id
-             * @description The sweep it was started in (`GET /api/v1/sweeps/{sweep_id}`); null for a backtest started alone
+             * @description The sweep it was started in (`GET /api/v1/sweeps/{sweep_id}`); null for a backtest started alone, and for another user's
              * @example null
              */
             sweep_id: string | null;
@@ -3933,7 +3933,7 @@ export interface components {
          * @description A new sweep: a base setup, the values to vary and the statistic to rank by.
          */
         SweepIn: {
-            /** @description The body of `POST /api/v1/backtests` */
+            /** @description The body of `POST /api/v1/backtests`. It still needs `model.id` and `data.instrument` when `vary` lists models or instruments, whose values then replace them */
             base: components["schemas"]["BacktestIn"];
             /**
              * @description What the ranking orders by, unless `GET /api/v1/sweeps/{sweep_id}` names another

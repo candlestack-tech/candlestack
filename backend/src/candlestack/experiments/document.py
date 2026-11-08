@@ -325,7 +325,7 @@ class BacktestHeader(BaseModel):
     )
     sweep_id: str | None = Field(
         description="The sweep it was started in (`GET /api/v1/sweeps/{sweep_id}`); null for "
-        "a backtest started alone",
+        "a backtest started alone, and for another user's",
         examples=[None],
     )
     created_at: datetime = Field(description="When it was started, queued or not (UTC)")

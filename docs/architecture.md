@@ -902,8 +902,12 @@ backtests itself.
 
 - **The grid**: `base` is the body of `POST /api/v1/backtests`, `vary` has lists that replace
   its values: `models` (IDs), `instruments`, `periods` and `rules` (a `decision.rule` each). A
-  list left out or empty keeps the base's value; each value once per list, at most 20 per list.
-  Every combination is one backtest, in the order models, instruments, periods, rules. The
+  list left out or empty keeps the base's value; each value once per list (two spellings of one
+  instrument count as one), at most 20 per list. The base still needs its model and instrument
+  when `models` or `instruments` replace them. An unknown field of the request is `422
+  validation` (the base alone ignores them, as `POST /api/v1/backtests` does), so a mistyped
+  `validate_only` never starts a sweep. Every combination is one backtest, in the order models,
+  instruments, periods, rules. The
   representation and the timeframe are the model's manifest's, so a sweep varies them by
   listing models that read them. A buy and hold benchmark of the base's instrument holds each
   backtest's own instrument; a fund (SPY, QQQ, DIA) stays.
@@ -924,7 +928,8 @@ backtests itself.
   setup with its backtest's ID: model ID and name, representation, timeframe, instrument,
   period, rule) and `created_at`. Its backtests are ordinary rows of `backtests` with
   `sweep_id` (a partial index finds them): in the list, comparable, publishable and cancellable
-  one by one, run by the queue as any other.
+  one by one, run by the queue as any other. The result document of another user's published
+  backtest has `sweep_id` null, as its model ID: only the author can open the sweep.
 - **Progress**: how many of its backtests are queued, running, finished and failed, and each
   one's ID, number, name, status, place in the queue, error and setup; `done` once none is
   queued or running.
@@ -979,7 +984,10 @@ call, as the routes' dependencies do), never the API over HTTP.
   docs pages, the tool reference, the manifest and backtest result references with their JSON
   Schemas, the problem pages and the API reference.
 - **Tools**: `get_me` (scope `read`): the key's user (ID, name, email, created) and the key's
-  scopes. `validate_sweep` (scope `read`: it changes nothing), `run_sweep` (scope `backtests`)
+  scopes. `validate_sweep` (scope `read`, as the convention asks of a tool that changes nothing,
+  while the dry run over HTTP needs `backtests` because it is the route that starts a sweep; it
+  still runs each setup's checks against the data source, so a read key spends the same
+  requests as a dry run), `run_sweep` (scope `backtests`)
   and `get_sweep` (scope `read`): the dry run, the start and the progress and ranking of a
   sweep, on the service of `POST /api/v1/sweeps` and `GET /api/v1/sweeps/{sweep_id}`
   (`experiments.build_sweeps`, its errors as problems through `experiments.sweep_problems`),
