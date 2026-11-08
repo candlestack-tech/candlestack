@@ -57,8 +57,8 @@ TOOLS = (
             arguments={},
             result=MeResult(
                 id="usr_7f3k2m9qx4",
-                display_name="Arsen Labovich",
-                email="arsen@example.com",
+                display_name="Ada Lovelace",
+                email="ada@example.com",
                 created_at=datetime(2026, 10, 1, 9, 30, tzinfo=UTC),
                 scopes=[Scope.read, Scope.backtests],
             ),

@@ -29,10 +29,10 @@ class SignInMethodOut(BaseModel):
     provider: Provider
     email: str = Field(
         description="The account's email at the provider, as of its last sign-in or connect",
-        examples=["arsen@example.com"],
+        examples=["ada@example.com"],
     )
     login: str | None = Field(
-        description="The account's GitHub username; null for Google", examples=["arsen"]
+        description="The account's GitHub username; null for Google", examples=["ada"]
     )
 
 
@@ -44,9 +44,9 @@ class MeOut(BaseModel):
         description="Public user ID, shown in Settings and given to support",
         examples=["usr_7f3k2m9qx4"],
     )
-    display_name: str = Field(description="Name shown in the app", examples=["Arsen Labovich"])
+    display_name: str = Field(description="Name shown in the app", examples=["Ada Lovelace"])
     email: str = Field(
-        description="From the identity provider, read-only", examples=["arsen@example.com"]
+        description="From the identity provider, read-only", examples=["ada@example.com"]
     )
     providers: list[Provider] = Field(
         description="Connected sign-in methods (the providers of `sign_in_methods`)",
@@ -61,7 +61,7 @@ class MeOut(BaseModel):
 class DeniedSignInOut(BaseModel):
     """The last sign-in of this browser that the beta list turned away."""
 
-    email: str = Field(description="The account's email", examples=["arsen@example.com"])
+    email: str = Field(description="The account's email", examples=["ada@example.com"])
     provider: Provider
 
 
@@ -75,7 +75,7 @@ class MeUpdate(BaseModel):
         min_length=1,
         max_length=DISPLAY_NAME_MAX,
         description="Name shown in the app; surrounding whitespace is dropped",
-        examples=["Arsen Labovich"],
+        examples=["Ada Lovelace"],
     )
 
 
