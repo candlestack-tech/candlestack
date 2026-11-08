@@ -105,6 +105,1391 @@
         "read"
       ],
       "title": "Who am I"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Finds instruments by symbol or name: every Binance spot pair that trades (market crypto) and every tradable US stock and ETF at Alpaca (market stock). Use it to turn what the user names (bitcoin, Apple, SPY) into the instrument ID the other tools take.\n\nThe best match comes first: the most traded pair of a crypto asset equal to the query (btc finds crypto:BTCUSDT), then the exact symbol, symbol prefixes, words of the name. Each item has its last price, 24 h change and volume, and since when it has candles. Page with offset while next_offset is not null. For the most traded instruments or the top gainers without a query, use top_instruments.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#search_instruments",
+      "endpoints": [
+        "GET /api/v1/data/instruments"
+      ],
+      "example": {
+        "arguments": {
+          "limit": 1,
+          "query": "btc"
+        },
+        "result": {
+          "items": [
+            {
+              "available_from": "2017-08-17T04:00:00Z",
+              "change_24h": 1.51,
+              "exchange": "BINANCE",
+              "id": "crypto:BTCUSDT",
+              "name": "BTC/USDT",
+              "price": 83249.35,
+              "volume_24h": 1258811866.0
+            }
+          ],
+          "next_offset": 1,
+          "total": 41,
+          "unavailable": []
+        }
+      },
+      "inputSchema": {
+        "$defs": {
+          "Exchange": {
+            "description": "Where the instruments of the catalog trade: for stocks the listing exchanges Alpaca\nreports for tradable US equities without OTC (docs/data.md, \"Alpaca\"), for crypto pairs\nBinance.",
+            "enum": [
+              "AMEX",
+              "ARCA",
+              "BATS",
+              "BINANCE",
+              "NASDAQ",
+              "NYSE"
+            ],
+            "title": "Exchange",
+            "type": "string"
+          },
+          "Market": {
+            "enum": [
+              "crypto",
+              "stock"
+            ],
+            "title": "Market",
+            "type": "string"
+          }
+        },
+        "properties": {
+          "exchange": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Exchange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only instruments that trade there: BINANCE for crypto pairs"
+          },
+          "limit": {
+            "default": 10,
+            "description": "Most items to answer",
+            "maximum": 50,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Market"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only this market"
+          },
+          "offset": {
+            "default": 0,
+            "description": "Matches to skip, for the next page",
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "query": {
+            "description": "Symbol or name, any case; separators are ignored (btc/usdt finds BTCUSDT, brkb finds BRK.B)",
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "search_instrumentsArguments",
+        "type": "object"
+      },
+      "name": "search_instruments",
+      "outputSchema": {
+        "$defs": {
+          "InstrumentItem": {
+            "description": "An instrument with its last price and 24 h stats, refreshed every few minutes.",
+            "properties": {
+              "available_from": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Open time of the first candle (UTC), where backtests can start; null while not known yet (get_instrument says it)",
+                "title": "Available From"
+              },
+              "change_24h": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Change in percent: crypto against 24 hours ago, a stock against the previous session's close",
+                "title": "Change 24H"
+              },
+              "exchange": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "NASDAQ, NYSE, ARCA, ... for a stock, BINANCE",
+                "title": "Exchange"
+              },
+              "id": {
+                "description": "Instrument ID for the other tools, <market>:<symbol>",
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "description": "Crypto: <base>/<quote>. Stocks: the company or fund name",
+                "title": "Name",
+                "type": "string"
+              },
+              "price": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Last price: in the quote asset for a crypto pair, in USD for a stock (delayed by 15 minutes); null while not known",
+                "title": "Price"
+              },
+              "volume_24h": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Volume of the last 24 hours (session) in USD",
+                "title": "Volume 24H"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "exchange",
+              "price",
+              "change_24h",
+              "volume_24h",
+              "available_from"
+            ],
+            "title": "InstrumentItem",
+            "type": "object"
+          },
+          "Market": {
+            "enum": [
+              "crypto",
+              "stock"
+            ],
+            "title": "Market",
+            "type": "string"
+          }
+        },
+        "description": "The instruments that match, best first.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/$defs/InstrumentItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The offset of the next page when there are more matches, else null",
+            "title": "Next Offset"
+          },
+          "total": {
+            "description": "Number of all matches",
+            "title": "Total",
+            "type": "integer"
+          },
+          "unavailable": {
+            "description": "Markets left out because their source is down right now; ask again later. Empty normally",
+            "items": {
+              "$ref": "#/$defs/Market"
+            },
+            "title": "Unavailable",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "next_offset",
+          "unavailable"
+        ],
+        "title": "InstrumentsFound",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Search instruments"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "The most traded instruments, or the top gainers or losers of the last 24 hours, of one market or both, with their last price, 24 h change and volume. Use it when the user asks what moves or what is liquid enough to test, or wants ideas for instruments without naming one; to find a named instrument, use search_instruments.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#top_instruments",
+      "endpoints": [
+        "GET /api/v1/data/instruments",
+        "GET /api/v1/data/top-instruments"
+      ],
+      "example": {
+        "arguments": {
+          "limit": 2,
+          "market": "crypto"
+        },
+        "result": {
+          "items": [
+            {
+              "available_from": "2017-08-17T04:00:00Z",
+              "change_24h": 1.51,
+              "exchange": "BINANCE",
+              "id": "crypto:BTCUSDT",
+              "name": "BTC/USDT",
+              "price": 83249.35,
+              "volume_24h": 1258811866.0
+            },
+            {
+              "available_from": "2017-08-17T04:00:00Z",
+              "change_24h": -0.82,
+              "exchange": "BINANCE",
+              "id": "crypto:ETHUSDT",
+              "name": "ETH/USDT",
+              "price": 3121.4,
+              "volume_24h": 702114530.0
+            }
+          ],
+          "unavailable": []
+        }
+      },
+      "inputSchema": {
+        "$defs": {
+          "Market": {
+            "enum": [
+              "crypto",
+              "stock"
+            ],
+            "title": "Market",
+            "type": "string"
+          }
+        },
+        "properties": {
+          "limit": {
+            "default": 10,
+            "description": "How many",
+            "maximum": 25,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Market"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only this market; both without"
+          },
+          "sort": {
+            "default": "volume",
+            "description": "volume: the most traded (24 h volume in USD) first; change: the top gainers (24 h change) first; -change: the top losers first",
+            "enum": [
+              "volume",
+              "change",
+              "-change"
+            ],
+            "title": "Sort",
+            "type": "string"
+          }
+        },
+        "title": "top_instrumentsArguments",
+        "type": "object"
+      },
+      "name": "top_instruments",
+      "outputSchema": {
+        "$defs": {
+          "InstrumentItem": {
+            "description": "An instrument with its last price and 24 h stats, refreshed every few minutes.",
+            "properties": {
+              "available_from": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Open time of the first candle (UTC), where backtests can start; null while not known yet (get_instrument says it)",
+                "title": "Available From"
+              },
+              "change_24h": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Change in percent: crypto against 24 hours ago, a stock against the previous session's close",
+                "title": "Change 24H"
+              },
+              "exchange": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "NASDAQ, NYSE, ARCA, ... for a stock, BINANCE",
+                "title": "Exchange"
+              },
+              "id": {
+                "description": "Instrument ID for the other tools, <market>:<symbol>",
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "description": "Crypto: <base>/<quote>. Stocks: the company or fund name",
+                "title": "Name",
+                "type": "string"
+              },
+              "price": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Last price: in the quote asset for a crypto pair, in USD for a stock (delayed by 15 minutes); null while not known",
+                "title": "Price"
+              },
+              "volume_24h": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Volume of the last 24 hours (session) in USD",
+                "title": "Volume 24H"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "exchange",
+              "price",
+              "change_24h",
+              "volume_24h",
+              "available_from"
+            ],
+            "title": "InstrumentItem",
+            "type": "object"
+          },
+          "Market": {
+            "enum": [
+              "crypto",
+              "stock"
+            ],
+            "title": "Market",
+            "type": "string"
+          }
+        },
+        "description": "The instruments in the order asked for.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/$defs/InstrumentItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "unavailable": {
+            "description": "Markets left out because their source is down right now; ask again later. Empty normally",
+            "items": {
+              "$ref": "#/$defs/Market"
+            },
+            "title": "Unavailable",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "unavailable"
+        ],
+        "title": "TopInstruments",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Top instruments"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "One instrument and the period its candles cover: from the first candle to the newest closed one, in which timeframes. Use it before get_candles or a backtest to pick a period that has data; a period outside it fails with period-out-of-range.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_instrument",
+      "endpoints": [
+        "GET /api/v1/data/instruments/{instrument_id}"
+      ],
+      "example": {
+        "arguments": {
+          "instrument_id": "stock:AAPL"
+        },
+        "result": {
+          "available_from": "2016-01-04T14:30:00Z",
+          "available_to": "2026-11-06T20:59:00Z",
+          "exchange": "NASDAQ",
+          "id": "stock:AAPL",
+          "name": "Apple Inc. Common Stock",
+          "timeframes": [
+            "1m",
+            "5m",
+            "15m",
+            "30m",
+            "1h",
+            "4h",
+            "1d"
+          ]
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "instrument_id": {
+            "description": "Instrument ID, <market>:<symbol>, as search_instruments answers it: crypto:BTCUSDT, stock:AAPL",
+            "maxLength": 40,
+            "minLength": 3,
+            "title": "Instrument Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instrument_id"
+        ],
+        "title": "get_instrumentArguments",
+        "type": "object"
+      },
+      "name": "get_instrument",
+      "outputSchema": {
+        "$defs": {
+          "Timeframe": {
+            "description": "Candle durations; iteration goes from the shortest to the longest.",
+            "enum": [
+              "1m",
+              "5m",
+              "15m",
+              "30m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "Timeframe",
+            "type": "string"
+          }
+        },
+        "description": "An instrument and the period its candles can be asked for.",
+        "properties": {
+          "available_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Open time of the first candle (UTC); null when the source cannot say now",
+            "title": "Available From"
+          },
+          "available_to": {
+            "description": "Open time of the newest closed 1m candle (UTC): for a stock the last minute of the latest session, at least 15 minutes ago",
+            "format": "date-time",
+            "title": "Available To",
+            "type": "string"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "NASDAQ, NYSE, ARCA, ... for a stock, BINANCE",
+            "title": "Exchange"
+          },
+          "id": {
+            "description": "Instrument ID, <market>:<symbol>",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Crypto: <base>/<quote>. Stocks: the company or fund name",
+            "title": "Name",
+            "type": "string"
+          },
+          "timeframes": {
+            "description": "The timeframes of its candles",
+            "items": {
+              "$ref": "#/$defs/Timeframe"
+            },
+            "title": "Timeframes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "exchange",
+          "timeframes",
+          "available_from",
+          "available_to"
+        ],
+        "title": "InstrumentDetail",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Instrument"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Closed OHLCV candles of one instrument in one timeframe, in pages of at most 1000. Use it to look at the price around a trade, check a period before a backtest or compute something the backtest result does not say; a backtest loads its own candles, so do not fetch them for it.\n\nWith start: the candles from start on, oldest first; while next_start is not null, call again with start=next_start for the next page. Without start: the newest limit candles before end; call again with end=next_end for the earlier ones. Stocks have candles of the regular session only (09:30-16:00 New York); missing candles are never filled in (gaps). Counts against a per-minute limit of candle requests; ask for a longer timeframe rather than many pages.\n\nData terms: crypto comes from Binance spot, stocks from Alpaca (SIP, every US exchange, 15 minutes delayed). Alpaca allows its data for the user's personal, noncommercial use only: use it for the user's analysis here, never publish or pass on the stock candles.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_candles",
+      "endpoints": [
+        "GET /api/v1/data/instruments/{instrument_id}/candles"
+      ],
+      "example": {
+        "arguments": {
+          "instrument_id": "crypto:BTCUSDT",
+          "limit": 3,
+          "start": "2024-06-03",
+          "timeframe": "1h"
+        },
+        "result": {
+          "candles": [
+            [
+              1717372800,
+              67491.0,
+              67700.0,
+              67420.2,
+              67612.4,
+              512.31
+            ],
+            [
+              1717376400,
+              67612.5,
+              67650.0,
+              67510.0,
+              67540.3,
+              398.07
+            ],
+            [
+              1717380000,
+              67540.3,
+              67640.0,
+              67488.8,
+              67601.9,
+              421.55
+            ]
+          ],
+          "end": "2024-06-03T03:00:00Z",
+          "gaps": [],
+          "instrument": "crypto:BTCUSDT",
+          "next_end": null,
+          "next_start": "2024-06-03T03:00:00Z",
+          "start": "2024-06-03T00:00:00Z",
+          "timeframe": "1h"
+        }
+      },
+      "inputSchema": {
+        "$defs": {
+          "Timeframe": {
+            "description": "Candle durations; iteration goes from the shortest to the longest.",
+            "enum": [
+              "1m",
+              "5m",
+              "15m",
+              "30m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "Timeframe",
+            "type": "string"
+          }
+        },
+        "properties": {
+          "end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "End of the period, exclusive, in the same form; default now",
+            "title": "End"
+          },
+          "instrument_id": {
+            "description": "Instrument ID, <market>:<symbol>, as search_instruments answers it: crypto:BTCUSDT, stock:AAPL",
+            "maxLength": 40,
+            "minLength": 3,
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "limit": {
+            "default": 200,
+            "description": "Most candles in this page",
+            "maximum": 1000,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Start of the period (UTC unless it says another offset), inclusive: 2024-06-03 or 2024-06-03T13:30:00Z. Without it, the newest candles before end",
+            "title": "Start"
+          },
+          "timeframe": {
+            "$ref": "#/$defs/Timeframe",
+            "description": "Length of one candle"
+          }
+        },
+        "required": [
+          "instrument_id",
+          "timeframe"
+        ],
+        "title": "get_candlesArguments",
+        "type": "object"
+      },
+      "name": "get_candles",
+      "outputSchema": {
+        "$defs": {
+          "Timeframe": {
+            "description": "Candle durations; iteration goes from the shortest to the longest.",
+            "enum": [
+              "1m",
+              "5m",
+              "15m",
+              "30m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "Timeframe",
+            "type": "string"
+          }
+        },
+        "description": "A page of closed candles, oldest first, and where the next page starts.",
+        "properties": {
+          "candles": {
+            "description": "[open time (UTC epoch seconds), open, high, low, close, volume] each, oldest first; volume in the base asset for crypto, in shares for stocks",
+            "items": {
+              "maxItems": 6,
+              "minItems": 6,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Candles",
+            "type": "array"
+          },
+          "end": {
+            "description": "End of the page's period (UTC), exclusive",
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "gaps": {
+            "description": "Missing candles in the page as [start, end) in UTC epoch seconds: no trade then, never filled in",
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Gaps",
+            "type": "array"
+          },
+          "instrument": {
+            "description": "Instrument ID, <market>:<symbol>",
+            "title": "Instrument",
+            "type": "string"
+          },
+          "next_end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Without start: call again with end set to this for the earlier candles; null when the data begins in this page",
+            "title": "Next End"
+          },
+          "next_start": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With start: call again with start set to this (same end) for the next page; null when the period is done",
+            "title": "Next Start"
+          },
+          "start": {
+            "description": "Start of the page's period (UTC), inclusive",
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "timeframe": {
+            "$ref": "#/$defs/Timeframe"
+          }
+        },
+        "required": [
+          "instrument",
+          "timeframe",
+          "start",
+          "end",
+          "candles",
+          "gaps",
+          "next_start",
+          "next_end"
+        ],
+        "title": "CandlesPage",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Candles"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Every block a model's manifest can name, by step: the representation (which rows the model sees), the features (its columns, in order), their normalization and the window (rows to samples), each with its versioned ID, what it does, its warm-up and its parameters with types, ranges and defaults. Use it to write or check a manifest, or to explain what a model's input is made of; the manifest format is on https://candlestack.tech/docs/manifest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#preprocessing_catalog",
+      "endpoints": [
+        "GET /api/v1/preprocessing/catalog"
+      ],
+      "example": {
+        "arguments": {
+          "step": "window"
+        },
+        "result": {
+          "blocks": [
+            {
+              "description": "The last rows up to each row make one sample; with last current, the last finished rows and the row still forming",
+              "id": "window@1",
+              "params": [
+                {
+                  "default": null,
+                  "description": "How many rows make one sample",
+                  "exclusive_maximum": null,
+                  "exclusive_minimum": null,
+                  "maximum": 1000,
+                  "minimum": 1,
+                  "name": "length",
+                  "options": null,
+                  "required": true,
+                  "type": "integer"
+                },
+                {
+                  "default": "closed",
+                  "description": "The last row of a sample: the last finished one (`closed`), or the row still forming (`current`, for representations with rows that span several candles)",
+                  "exclusive_maximum": null,
+                  "exclusive_minimum": null,
+                  "maximum": null,
+                  "minimum": null,
+                  "name": "last",
+                  "options": [
+                    "closed",
+                    "current"
+                  ],
+                  "required": false,
+                  "type": "string"
+                }
+              ],
+              "step": "window",
+              "warm_up": "length - 1"
+            }
+          ]
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "step": {
+            "anyOf": [
+              {
+                "enum": [
+                  "representation",
+                  "feature",
+                  "normalization",
+                  "window"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only the blocks of this step: representation (which rows: candles, Renko bricks, a Kagi line), feature (the columns), normalization, window",
+            "title": "Step"
+          }
+        },
+        "title": "preprocessing_catalogArguments",
+        "type": "object"
+      },
+      "name": "preprocessing_catalog",
+      "outputSchema": {
+        "$defs": {
+          "CatalogBlock": {
+            "description": "A block a manifest can name for one step of the model's input.",
+            "properties": {
+              "description": {
+                "title": "Description",
+                "type": "string"
+              },
+              "id": {
+                "description": "The versioned name the manifest uses, such as rsi@2",
+                "title": "Id",
+                "type": "string"
+              },
+              "params": {
+                "items": {
+                  "$ref": "#/$defs/CatalogParam"
+                },
+                "title": "Params",
+                "type": "array"
+              },
+              "step": {
+                "enum": [
+                  "representation",
+                  "feature",
+                  "normalization",
+                  "window"
+                ],
+                "title": "Step",
+                "type": "string"
+              },
+              "warm_up": {
+                "description": "Candles the block needs before its first complete value (rows, for the window), as a formula of its parameters",
+                "title": "Warm Up",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "step",
+              "description",
+              "warm_up",
+              "params"
+            ],
+            "title": "CatalogBlock",
+            "type": "object"
+          },
+          "CatalogParam": {
+            "description": "A parameter of a block and the values it takes.",
+            "properties": {
+              "default": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Null when required",
+                "title": "Default"
+              },
+              "description": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Description"
+              },
+              "exclusive_maximum": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Values must be below it",
+                "title": "Exclusive Maximum"
+              },
+              "exclusive_minimum": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Values must be above it",
+                "title": "Exclusive Minimum"
+              },
+              "maximum": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Maximum"
+              },
+              "minimum": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Minimum"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "options": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The values allowed, for a choice",
+                "title": "Options"
+              },
+              "required": {
+                "description": "The manifest must give it; else default applies",
+                "title": "Required",
+                "type": "boolean"
+              },
+              "type": {
+                "description": "Its JSON type",
+                "enum": [
+                  "integer",
+                  "number",
+                  "string",
+                  "boolean"
+                ],
+                "title": "Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "type",
+              "description",
+              "required",
+              "default",
+              "minimum",
+              "maximum",
+              "exclusive_minimum",
+              "exclusive_maximum",
+              "options"
+            ],
+            "title": "CatalogParam",
+            "type": "object"
+          }
+        },
+        "description": "The blocks, by step in the order they apply.",
+        "properties": {
+          "blocks": {
+            "items": {
+              "$ref": "#/$defs/CatalogBlock"
+            },
+            "title": "Blocks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "blocks"
+        ],
+        "title": "Catalog",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Preprocessing catalog"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "How the user's new backtests start, as saved in Settings, Backtest defaults (or the app's defaults): timeframe, period, direction (long only or both), the signal threshold, stop loss, fees, slippage and the benchmark. Use these for every setting of a backtest the user does not name, so it runs as the app would start it.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_backtest_defaults",
+      "endpoints": [
+        "GET /api/v1/me/preferences"
+      ],
+      "example": {
+        "arguments": {},
+        "result": {
+          "benchmark": "bh",
+          "direction": "long",
+          "fees_pct": 0.1,
+          "period_end": "2024-12-31",
+          "period_start": "2021-01-04",
+          "slippage_pct": 0.02,
+          "stop_loss_pct": 7,
+          "threshold": 0.05,
+          "timeframe": "30m"
+        }
+      },
+      "inputSchema": {
+        "properties": {},
+        "title": "get_backtest_defaultsArguments",
+        "type": "object"
+      },
+      "name": "get_backtest_defaults",
+      "outputSchema": {
+        "$defs": {
+          "BacktestTimeframe": {
+            "description": "Timeframes a new backtest can start with (Settings, Backtest defaults): those of the data.",
+            "enum": [
+              "1m",
+              "5m",
+              "15m",
+              "30m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "BacktestTimeframe",
+            "type": "string"
+          },
+          "Benchmark": {
+            "description": "What each backtest is measured against: buy and hold of its own instruments, or an ETF.",
+            "enum": [
+              "bh",
+              "SPY",
+              "QQQ",
+              "DIA"
+            ],
+            "title": "Benchmark",
+            "type": "string"
+          },
+          "Direction": {
+            "enum": [
+              "long",
+              "both"
+            ],
+            "title": "Direction",
+            "type": "string"
+          }
+        },
+        "description": "How new backtests start (Settings, Backtest defaults).",
+        "properties": {
+          "benchmark": {
+            "$ref": "#/$defs/Benchmark",
+            "default": "bh"
+          },
+          "direction": {
+            "$ref": "#/$defs/Direction",
+            "default": "long"
+          },
+          "fees_pct": {
+            "default": 0.1,
+            "description": "Fees in percent per side",
+            "maximum": 5,
+            "minimum": 0,
+            "title": "Fees Pct",
+            "type": "number"
+          },
+          "period_end": {
+            "default": "2024-12-31",
+            "description": "Last day of the test",
+            "format": "date",
+            "title": "Period End",
+            "type": "string"
+          },
+          "period_start": {
+            "default": "2021-01-04",
+            "description": "First day of the test",
+            "format": "date",
+            "title": "Period Start",
+            "type": "string"
+          },
+          "slippage_pct": {
+            "default": 0.02,
+            "description": "Slippage in percent",
+            "maximum": 5,
+            "minimum": 0,
+            "title": "Slippage Pct",
+            "type": "number"
+          },
+          "stop_loss_pct": {
+            "default": 7,
+            "description": "Exit when a trade loses this many percent",
+            "maximum": 20,
+            "minimum": 1,
+            "title": "Stop Loss Pct",
+            "type": "integer"
+          },
+          "threshold": {
+            "default": 0.05,
+            "description": "Signal strength to trade",
+            "maximum": 0.5,
+            "minimum": 0,
+            "multipleOf": 0.01,
+            "title": "Threshold",
+            "type": "number"
+          },
+          "timeframe": {
+            "$ref": "#/$defs/BacktestTimeframe",
+            "default": "30m"
+          }
+        },
+        "title": "BacktestDefaults",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Backtest defaults"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "How the user reads dates and times in the app: the time zone (exchange time or their own), the date format and 12 or 24 hour time. Use it to write dates and times in your answers the way the app shows them to the user. The backtest defaults are get_backtest_defaults.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_preferences",
+      "endpoints": [
+        "GET /api/v1/me/preferences"
+      ],
+      "example": {
+        "arguments": {},
+        "result": {
+          "date_format": "dmy",
+          "time_format": "24",
+          "time_zone": "ny"
+        }
+      },
+      "inputSchema": {
+        "properties": {},
+        "title": "get_preferencesArguments",
+        "type": "object"
+      },
+      "name": "get_preferences",
+      "outputSchema": {
+        "$defs": {
+          "DateFormat": {
+            "description": "`dmy` 12 Oct 2024, `iso` 2024-10-12, `dot` 12.10.2024.",
+            "enum": [
+              "dmy",
+              "iso",
+              "dot"
+            ],
+            "title": "DateFormat",
+            "type": "string"
+          },
+          "TimeFormat": {
+            "description": "`24` 16:05, `12` 4:05 PM.",
+            "enum": [
+              "24",
+              "12"
+            ],
+            "title": "TimeFormat",
+            "type": "string"
+          },
+          "TimeZone": {
+            "description": "`ny`: exchange time (New York); `local`: the browser's time zone.",
+            "enum": [
+              "ny",
+              "local"
+            ],
+            "title": "TimeZone",
+            "type": "string"
+          }
+        },
+        "description": "How the user reads dates and times in the app.",
+        "properties": {
+          "date_format": {
+            "$ref": "#/$defs/DateFormat",
+            "description": "dmy 12 Oct 2024, iso 2024-10-12, dot 12.10.2024"
+          },
+          "time_format": {
+            "$ref": "#/$defs/TimeFormat",
+            "description": "24: 16:05, 12: 4:05 PM"
+          },
+          "time_zone": {
+            "$ref": "#/$defs/TimeZone",
+            "description": "ny: exchange time (New York); local: the user's own time zone"
+          }
+        },
+        "required": [
+          "time_zone",
+          "date_format",
+          "time_format"
+        ],
+        "title": "Preferences",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Date and time preferences"
     }
   ],
   "webOnly": [
@@ -155,6 +1540,10 @@
     {
       "endpoint": "DELETE /api/v1/me/api-keys/{key_id}",
       "reason": "API keys are managed in the signed-in browser only, so a key cannot make or revoke keys."
+    },
+    {
+      "endpoint": "PUT /api/v1/me/preferences/backtest-defaults",
+      "reason": "The backtest defaults are a setting saved in the app, which API keys cannot change; an agent passes its own settings when it starts a backtest."
     },
     {
       "endpoint": "PATCH /api/v1/me/preferences/appearance",

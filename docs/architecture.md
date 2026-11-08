@@ -926,14 +926,35 @@ call, as the routes' dependencies do), never the API over HTTP.
   `https://candlestack.tech/docs/mcp/`; the resource `candlestack://docs` (Markdown) lists the
   docs pages, the tool reference, the manifest and backtest result references with their JSON
   Schemas, the problem pages and the API reference.
-- **Tools**: `get_me` (scope `read`): the key's user (ID, name, email, created) and the key's
-  scopes. The tools of the other areas come with #399 and #402 to #405.
+- **Tools**: one module per area, each with its `TOOLS`, which `server.TOOLS` joins.
+  - `account`: `get_me` (scope `read`): the key's user (ID, name, email, created) and the
+    key's scopes.
+  - `market` (all scope `read`): `search_instruments` (a query, optional market and exchange,
+    pages with `offset` and `next_offset`), `top_instruments` (the most traded, the top
+    gainers or losers, of a market or both: the list without a query), `get_instrument` (its
+    timeframes and the period of its candles), `get_candles`, `preprocessing_catalog` (the
+    blocks of a manifest, optionally of one step, without the app's `group` and `tunable`),
+    `get_backtest_defaults` (as saved in Settings) and `get_preferences` (time zone, date and
+    time format, so an agent writes times as the app shows them; not the theme). The
+    instruments are compact: ID, name, exchange, price, 24 h change and volume, first candle;
+    no symbol, source, feed or mini chart. They call the `DataService` of the routes and answer
+    the data module's problems (`data_problems`); `get_instrument` and `get_candles` count
+    against the same per-minute limit per client address as the routes
+    (`client_rate_limit`). `get_candles` answers at most 1000 candles a call (default 200) as
+    rows `[t, o, h, l, c, v]` with the gaps inside the page: without `start` the newest before
+    `end` (default now) and `next_end` for the earlier page, with `start` the candles from
+    there and `next_start` for the next page. A page from `start` spans `limit` candles of a
+    crypto pair; for a stock it spans 5.5 times as long (1.6 for daily candles, at least four
+    days, for nights, weekends and holidays) and is cut to `limit`. Its description says the
+    data terms (Alpaca's data for the user's personal, noncommercial use only). Saving the
+    backtest defaults stays web only, as the route refuses API keys (`session-required`).
+  - The tools of the other areas come with #399 and #403 to #405.
 - **Parity table** (`mcp/parity.py`): every endpoint of the API reference, by method and path,
   maps to the tools that do the same, to `Planned` with the task that adds them, or to
   `WebOnly` with the reason (sign-in, sessions, the keys themselves, deleting the account,
-  sign-in methods, the theme, health, icons, the file download). A unit test fails when an
-  endpoint has no entry, an entry names an endpoint or tool that does not exist, or a planned
-  tool exists already.
+  sign-in methods, the theme, saving the backtest defaults, health, icons, the file
+  download). A unit test fails when an endpoint has no entry, an entry names an endpoint or
+  tool that does not exist, or a planned tool exists already.
 - **Tool reference**: `uv run python -m candlestack.mcp.reference > ../docs/mcp-tools.json`
   writes each tool as `tools/list` sends it (name, title, description, annotations, input and
   output schemas) with its scopes, example and endpoints, the instructions and resources, and

@@ -1,0 +1,668 @@
+"""The tools about market data and what a backtest is made of: finding instruments, their
+candles, the blocks a model's manifest names (the preprocessing catalog), and the user's
+backtest defaults and preferences.
+
+The market data tools call the ``DataService`` of the data routes and answer the data module's
+problems as they do (``data_problems``); an instrument and its candles count against the same
+per-minute limit of requests per client address (``client_rate_limit``). Candles come in pages
+of at most ``CANDLES_MAX`` rows, so one call never floods the model's context.
+"""
+
+import time
+from datetime import UTC, datetime
+from typing import Annotated, Literal
+
+from mcp.server.mcpserver import Context
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
+
+from candlestack.accounts import (
+    AccountsService,
+    BacktestDefaults,
+    DateFormat,
+    Scope,
+    TimeFormat,
+    TimeZone,
+    get_accounts_service,
+)
+from candlestack.data import (
+    CandleSet,
+    DataService,
+    Exchange,
+    Instrument,
+    InstrumentId,
+    InstrumentSort,
+    InstrumentStats,
+    Market,
+    SearchResult,
+    Timeframe,
+    client_rate_limit,
+    data_problems,
+)
+from candlestack.mcp.convention import Example, ToolCall, ToolSpec, reads, tool_call
+from candlestack.preprocessing import BlockOut, Step, describe_catalog
+
+# Rows of one get_candles call: a few thousand numbers, well within a model's context.
+CANDLES_DEFAULT, CANDLES_MAX = 200, 1000
+# Patched by tests to move the clock.
+_time = time.time
+# How much longer than `limit` candles of its timeframe a page of stock candles may span: a
+# session of 6.5 hours on 5 days of 7 (daily candles: on about 250 days of 365), and at least a
+# long weekend, so a page from Friday evening still reaches Tuesday's candles.
+_STOCK_INTRADAY_SPAN = 5.5
+_STOCK_DAILY_SPAN = 1.6
+_STOCK_MIN_SPAN = 4 * 86400
+# The catalog is code: it changes only with a release.
+_CATALOG = describe_catalog()
+
+
+# --- Instruments -------------------------------------------------------------------------------
+
+InstrumentIdArg = Annotated[
+    str,
+    Field(
+        min_length=3,
+        max_length=40,
+        description="Instrument ID, <market>:<symbol>, as search_instruments answers it: "
+        "crypto:BTCUSDT, stock:AAPL",
+    ),
+]
+
+
+def _moment(epoch: int | None) -> datetime | None:
+    return None if epoch is None else datetime.fromtimestamp(epoch, UTC)
+
+
+def _epoch(moment: datetime) -> int:
+    """Epoch seconds of `moment`; one without a time zone is UTC."""
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return int(moment.timestamp())
+
+
+class InstrumentItem(BaseModel):
+    """An instrument with its last price and 24 h stats, refreshed every few minutes."""
+
+    id: str = Field(description="Instrument ID for the other tools, <market>:<symbol>")
+    name: str = Field(description="Crypto: <base>/<quote>. Stocks: the company or fund name")
+    exchange: str | None = Field(description="NASDAQ, NYSE, ARCA, ... for a stock, BINANCE")
+    price: float | None = Field(
+        description="Last price: in the quote asset for a crypto pair, in USD for a stock "
+        "(delayed by 15 minutes); null while not known"
+    )
+    change_24h: float | None = Field(
+        description="Change in percent: crypto against 24 hours ago, a stock against the "
+        "previous session's close"
+    )
+    volume_24h: float | None = Field(description="Volume of the last 24 hours (session) in USD")
+    available_from: datetime | None = Field(
+        description="Open time of the first candle (UTC), where backtests can start; null "
+        "while not known yet (get_instrument says it)"
+    )
+
+    @classmethod
+    def of(
+        cls, instrument: Instrument, stats: InstrumentStats | None, first: int | None
+    ) -> "InstrumentItem":
+        return cls(
+            id=str(instrument.id),
+            name=instrument.name,
+            exchange=instrument.exchange,
+            price=stats.price if stats else None,
+            change_24h=stats.change_24h if stats else None,
+            volume_24h=stats.volume_24h if stats else None,
+            available_from=_moment(first),
+        )
+
+
+def _items(found: SearchResult) -> list[InstrumentItem]:
+    return [
+        InstrumentItem.of(item, stats, first)
+        for item, stats, first in zip(found.items, found.stats, found.firsts, strict=True)
+    ]
+
+
+_UNAVAILABLE = (
+    "Markets left out because their source is down right now; ask again later. Empty normally"
+)
+
+
+class InstrumentsFound(BaseModel):
+    """The instruments that match, best first."""
+
+    items: list[InstrumentItem]
+    total: int = Field(description="Number of all matches")
+    next_offset: int | None = Field(
+        description="The offset of the next page when there are more matches, else null"
+    )
+    unavailable: list[Market] = Field(description=_UNAVAILABLE)
+
+
+def _data(call: ToolCall) -> DataService:
+    return call.state.data_service
+
+
+async def search_instruments(
+    query: Annotated[
+        str,
+        Field(
+            min_length=1,
+            max_length=50,
+            description="Symbol or name, any case; separators are ignored (btc/usdt finds "
+            "BTCUSDT, brkb finds BRK.B)",
+        ),
+    ],
+    ctx: Context,
+    *,
+    market: Annotated[Market | None, Field(description="Only this market")] = None,
+    exchange: Annotated[
+        Exchange | None,
+        Field(description="Only instruments that trade there: BINANCE for crypto pairs"),
+    ] = None,
+    limit: Annotated[int, Field(ge=1, le=50, description="Most items to answer")] = 10,
+    offset: Annotated[int, Field(ge=0, description="Matches to skip, for the next page")] = 0,
+) -> InstrumentsFound:
+    """Finds instruments by symbol or name: every Binance spot pair that trades (market crypto)
+    and every tradable US stock and ETF at Alpaca (market stock). Use it to turn what the user
+    names (bitcoin, Apple, SPY) into the instrument ID the other tools take.
+
+    The best match comes first: the most traded pair of a crypto asset equal to the query (btc
+    finds crypto:BTCUSDT), then the exact symbol, symbol prefixes, words of the name. Each item
+    has its last price, 24 h change and volume, and since when it has candles. Page with offset
+    while next_offset is not null. For the most traded instruments or the top gainers without
+    a query, use top_instruments."""
+    call = tool_call(ctx)
+    with data_problems():
+        found = await _data(call).search(query, market, limit, offset, exchange=exchange)
+    end = offset + len(found.items)
+    return InstrumentsFound(
+        items=_items(found),
+        total=found.total,
+        next_offset=end if end < found.total else None,
+        unavailable=found.unavailable,
+    )
+
+
+class TopInstruments(BaseModel):
+    """The instruments in the order asked for."""
+
+    items: list[InstrumentItem]
+    unavailable: list[Market] = Field(description=_UNAVAILABLE)
+
+
+_TOP_SORTS = {
+    "volume": InstrumentSort.VOLUME,
+    "change": InstrumentSort.CHANGE,
+    "-change": InstrumentSort.LOSERS,
+}
+
+
+async def top_instruments(
+    ctx: Context,
+    market: Annotated[Market | None, Field(description="Only this market; both without")] = None,
+    sort: Annotated[
+        Literal["volume", "change", "-change"],
+        Field(
+            description="volume: the most traded (24 h volume in USD) first; change: the top "
+            "gainers (24 h change) first; -change: the top losers first"
+        ),
+    ] = "volume",
+    limit: Annotated[int, Field(ge=1, le=25, description="How many")] = 10,
+) -> TopInstruments:
+    """The most traded instruments, or the top gainers or losers of the last 24 hours, of one
+    market or both, with their last price, 24 h change and volume. Use it when the user asks
+    what moves or what is liquid enough to test, or wants ideas for instruments without naming
+    one; to find a named instrument, use search_instruments."""
+    call = tool_call(ctx)
+    with data_problems():
+        found = await _data(call).search(None, market, limit, sort=_TOP_SORTS[sort])
+    return TopInstruments(items=_items(found), unavailable=found.unavailable)
+
+
+async def _limit_source_requests(ctx: Context, call: ToolCall) -> None:
+    """Counts the call against the per-minute limit of instrument and candle requests of the
+    client address, as the routes do: 429 ``rate-limited`` beyond it."""
+    request = ctx.request_context.request
+    if not isinstance(request, Request):
+        raise RuntimeError("A tool ran outside a request the MCP endpoint signed in")
+    await client_rate_limit(request, call.settings, call.state.rate_limiter)
+
+
+class InstrumentDetail(BaseModel):
+    """An instrument and the period its candles can be asked for."""
+
+    id: str = Field(description="Instrument ID, <market>:<symbol>")
+    name: str = Field(description="Crypto: <base>/<quote>. Stocks: the company or fund name")
+    exchange: str | None = Field(description="NASDAQ, NYSE, ARCA, ... for a stock, BINANCE")
+    timeframes: list[Timeframe] = Field(description="The timeframes of its candles")
+    available_from: datetime | None = Field(
+        description="Open time of the first candle (UTC); null when the source cannot say now"
+    )
+    available_to: datetime = Field(
+        description="Open time of the newest closed 1m candle (UTC): for a stock the last "
+        "minute of the latest session, at least 15 minutes ago"
+    )
+
+
+async def get_instrument(instrument_id: InstrumentIdArg, ctx: Context) -> InstrumentDetail:
+    """One instrument and the period its candles cover: from the first candle to the newest
+    closed one, in which timeframes. Use it before get_candles or a backtest to pick a period
+    that has data; a period outside it fails with period-out-of-range."""
+    call = tool_call(ctx)
+    await _limit_source_requests(ctx, call)
+    with data_problems():
+        info = await _data(call).instrument(InstrumentId.parse(instrument_id))
+    instrument = info.instrument
+    return InstrumentDetail(
+        id=str(instrument.id),
+        name=instrument.name,
+        exchange=instrument.exchange,
+        timeframes=list(info.timeframes),
+        available_from=_moment(info.available_from),
+        available_to=datetime.fromtimestamp(info.available_to, UTC),
+    )
+
+
+# --- Candles -----------------------------------------------------------------------------------
+
+Candle = tuple[int, float, float, float, float, float]
+
+
+class CandlesPage(BaseModel):
+    """A page of closed candles, oldest first, and where the next page starts."""
+
+    instrument: str = Field(description="Instrument ID, <market>:<symbol>")
+    timeframe: Timeframe
+    start: datetime = Field(description="Start of the page's period (UTC), inclusive")
+    end: datetime = Field(description="End of the page's period (UTC), exclusive")
+    candles: list[Candle] = Field(
+        description="[open time (UTC epoch seconds), open, high, low, close, volume] each, "
+        "oldest first; volume in the base asset for crypto, in shares for stocks"
+    )
+    gaps: list[tuple[int, int]] = Field(
+        description="Missing candles in the page as [start, end) in UTC epoch seconds: no "
+        "trade then, never filled in"
+    )
+    next_start: datetime | None = Field(
+        description="With start: call again with start set to this (same end) for the next "
+        "page; null when the period is done"
+    )
+    next_end: datetime | None = Field(
+        description="Without start: call again with end set to this for the earlier candles; "
+        "null when the data begins in this page"
+    )
+
+
+def _span(market: Market, timeframe: Timeframe, limit: int) -> int:
+    """How far after its start a page of `limit` candles may end: exactly `limit` candles of a
+    crypto pair, which trades every minute, and more than that of a stock, whose page is then
+    cut to `limit`."""
+    span = limit * timeframe.seconds
+    if market is Market.CRYPTO:
+        return span
+    factor = _STOCK_DAILY_SPAN if timeframe is Timeframe.D1 else _STOCK_INTRADAY_SPAN
+    return max(int(span * factor), _STOCK_MIN_SPAN)
+
+
+def _page(
+    found: CandleSet,
+    *,
+    limit: int,
+    end: int,
+    next_start: int | None,
+    next_end: int | None,
+) -> CandlesPage:
+    """The first `limit` candles of `found` as a page that ends at `end`, with the gaps
+    inside it."""
+    frame = found.frame.head(limit)
+    rows = zip(
+        frame["ts"].to_list(),
+        frame["open"].to_list(),
+        frame["high"].to_list(),
+        frame["low"].to_list(),
+        frame["close"].to_list(),
+        frame["volume"].to_list(),
+        strict=True,
+    )
+    gaps = [
+        (max(start, found.start), min(stop, end))
+        for start, stop in found.gaps
+        if start < end and stop > found.start
+    ]
+    return CandlesPage(
+        instrument=str(found.instrument),
+        timeframe=found.timeframe,
+        start=datetime.fromtimestamp(found.start, UTC),
+        end=datetime.fromtimestamp(end, UTC),
+        candles=list(rows),
+        gaps=gaps,
+        next_start=_moment(next_start),
+        next_end=_moment(next_end),
+    )
+
+
+async def _newest(
+    service: DataService, instrument: InstrumentId, timeframe: Timeframe, end: int, limit: int
+) -> CandlesPage:
+    """The last `limit` candles before `end`, and where the earlier ones end."""
+    found = await service.last_candles(instrument, timeframe, end, limit)
+    frame = found.frame
+    earlier = frame["ts"][0] if frame.height == limit else None
+    return _page(found, limit=limit, end=found.end, next_start=None, next_end=earlier)
+
+
+async def _from_start(
+    service: DataService,
+    instrument: InstrumentId,
+    timeframe: Timeframe,
+    *,
+    start: int,
+    end: int,
+    limit: int,
+) -> CandlesPage:
+    """The first `limit` candles from `start` on, and where the next ones start."""
+    window_end = min(end, start + _span(instrument.market, timeframe, limit))
+    found = await service.candles(instrument, timeframe, start, window_end)
+    if found.frame.height > limit:
+        cut = int(found.frame["ts"][limit])
+        return _page(found, limit=limit, end=cut, next_start=cut, next_end=None)
+    more = window_end if window_end < end else None
+    return _page(found, limit=limit, end=window_end, next_start=more, next_end=None)
+
+
+async def get_candles(
+    instrument_id: InstrumentIdArg,
+    timeframe: Annotated[Timeframe, Field(description="Length of one candle")],
+    ctx: Context,
+    *,
+    start: Annotated[
+        datetime | None,
+        Field(
+            description="Start of the period (UTC unless it says another offset), inclusive: "
+            "2024-06-03 or 2024-06-03T13:30:00Z. Without it, the newest candles before end"
+        ),
+    ] = None,
+    end: Annotated[
+        datetime | None,
+        Field(description="End of the period, exclusive, in the same form; default now"),
+    ] = None,
+    limit: Annotated[
+        int, Field(ge=1, le=CANDLES_MAX, description="Most candles in this page")
+    ] = CANDLES_DEFAULT,
+) -> CandlesPage:
+    """Closed OHLCV candles of one instrument in one timeframe, in pages of at most 1000. Use
+    it to look at the price around a trade, check a period before a backtest or compute
+    something the backtest result does not say; a backtest loads its own candles, so do not
+    fetch them for it.
+
+    With start: the candles from start on, oldest first; while next_start is not null, call
+    again with start=next_start for the next page. Without start: the newest limit candles
+    before end; call again with end=next_end for the earlier ones. Stocks have candles of the
+    regular session only (09:30-16:00 New York); missing candles are never filled in (gaps).
+    Counts against a per-minute limit of candle requests; ask for a longer timeframe rather
+    than many pages.
+
+    Data terms: crypto comes from Binance spot, stocks from Alpaca (SIP, every US exchange,
+    15 minutes delayed). Alpaca allows its data for the user's personal, noncommercial use
+    only: use it for the user's analysis here, never publish or pass on the stock candles."""
+    call = tool_call(ctx)
+    await _limit_source_requests(ctx, call)
+    until = int(_time()) if end is None else _epoch(end)
+    with data_problems():
+        instrument = InstrumentId.parse(instrument_id)
+        if start is None:
+            return await _newest(_data(call), instrument, timeframe, until, limit)
+        return await _from_start(
+            _data(call), instrument, timeframe, start=_epoch(start), end=until, limit=limit
+        )
+
+
+# --- Preprocessing catalog ---------------------------------------------------------------------
+
+
+class CatalogParam(BaseModel):
+    """A parameter of a block and the values it takes."""
+
+    name: str
+    type: Literal["integer", "number", "string", "boolean"] = Field(description="Its JSON type")
+    description: str | None
+    required: bool = Field(description="The manifest must give it; else default applies")
+    default: int | float | str | bool | None = Field(description="Null when required")
+    minimum: int | float | None
+    maximum: int | float | None
+    exclusive_minimum: int | float | None = Field(description="Values must be above it")
+    exclusive_maximum: int | float | None = Field(description="Values must be below it")
+    options: list[str] | None = Field(description="The values allowed, for a choice")
+
+
+class CatalogBlock(BaseModel):
+    """A block a manifest can name for one step of the model's input."""
+
+    id: str = Field(description="The versioned name the manifest uses, such as rsi@2")
+    step: Step
+    description: str
+    warm_up: str = Field(
+        description="Candles the block needs before its first complete value (rows, for the "
+        "window), as a formula of its parameters"
+    )
+    params: list[CatalogParam]
+
+    @classmethod
+    def of(cls, block: BlockOut) -> "CatalogBlock":
+        return cls(
+            id=block.id,
+            step=block.step,
+            description=block.description,
+            warm_up=block.warm_up,
+            params=[
+                CatalogParam.model_validate(param.model_dump(exclude={"tunable"}))
+                for param in block.params
+            ],
+        )
+
+
+class Catalog(BaseModel):
+    """The blocks, by step in the order they apply."""
+
+    blocks: list[CatalogBlock]
+
+
+async def preprocessing_catalog(
+    ctx: Context,
+    step: Annotated[
+        Step | None,
+        Field(
+            description="Only the blocks of this step: representation (which rows: candles, "
+            "Renko bricks, a Kagi line), feature (the columns), normalization, window"
+        ),
+    ] = None,
+) -> Catalog:
+    """Every block a model's manifest can name, by step: the representation (which rows the
+    model sees), the features (its columns, in order), their normalization and the window
+    (rows to samples), each with its versioned ID, what it does, its warm-up and its parameters
+    with types, ranges and defaults. Use it to write or check a manifest, or to explain what
+    a model's input is made of; the manifest format is on https://candlestack.tech/docs/manifest."""
+    tool_call(ctx)
+    return Catalog(
+        blocks=[CatalogBlock.of(block) for block in _CATALOG.blocks if step in (None, block.step)]
+    )
+
+
+# --- The user's defaults and preferences -------------------------------------------------------
+
+
+def _accounts(call: ToolCall, db: AsyncSession) -> AccountsService:
+    """The accounts service of the routes, on the call's Postgres session."""
+    state = call.state
+    return get_accounts_service(
+        call.settings, state.redis, db, state.http, state.account_deletion_hooks
+    )
+
+
+async def get_backtest_defaults(ctx: Context) -> BacktestDefaults:
+    """How the user's new backtests start, as saved in Settings, Backtest defaults (or the
+    app's defaults): timeframe, period, direction (long only or both), the signal threshold,
+    stop loss, fees, slippage and the benchmark. Use these for every setting of a backtest
+    the user does not name, so it runs as the app would start it."""
+    call = tool_call(ctx)
+    async with call.db() as db:
+        preferences = await _accounts(call, db).preferences(call.user)
+    return preferences.backtest_defaults
+
+
+class Preferences(BaseModel):
+    """How the user reads dates and times in the app."""
+
+    time_zone: TimeZone = Field(
+        description="ny: exchange time (New York); local: the user's own time zone"
+    )
+    date_format: DateFormat = Field(description="dmy 12 Oct 2024, iso 2024-10-12, dot 12.10.2024")
+    time_format: TimeFormat = Field(description="24: 16:05, 12: 4:05 PM")
+
+
+async def get_preferences(ctx: Context) -> Preferences:
+    """How the user reads dates and times in the app: the time zone (exchange time or their
+    own), the date format and 12 or 24 hour time. Use it to write dates and times in your
+    answers the way the app shows them to the user. The backtest defaults are
+    get_backtest_defaults."""
+    call = tool_call(ctx)
+    async with call.db() as db:
+        preferences = await _accounts(call, db).preferences(call.user)
+    appearance = preferences.appearance
+    return Preferences(
+        time_zone=appearance.time_zone,
+        date_format=appearance.date_format,
+        time_format=appearance.time_format,
+    )
+
+
+# --- The tools ---------------------------------------------------------------------------------
+
+_BTC = InstrumentItem(
+    id="crypto:BTCUSDT",
+    name="BTC/USDT",
+    exchange="BINANCE",
+    price=83249.35,
+    change_24h=1.51,
+    volume_24h=1258811866.0,
+    available_from=datetime(2017, 8, 17, 4, tzinfo=UTC),
+)
+_ETH = InstrumentItem(
+    id="crypto:ETHUSDT",
+    name="ETH/USDT",
+    exchange="BINANCE",
+    price=3121.4,
+    change_24h=-0.82,
+    volume_24h=702114530.0,
+    available_from=datetime(2017, 8, 17, 4, tzinfo=UTC),
+)
+_DAY = 1717372800  # 2024-06-03T00:00:00Z
+
+TOOLS = (
+    ToolSpec(
+        search_instruments,
+        name="search_instruments",
+        title="Search instruments",
+        scopes=(Scope.read,),
+        annotations=reads(),
+        example=Example(
+            arguments={"query": "btc", "limit": 1},
+            result=InstrumentsFound(items=[_BTC], total=41, next_offset=1, unavailable=[]),
+        ),
+    ),
+    ToolSpec(
+        top_instruments,
+        name="top_instruments",
+        title="Top instruments",
+        scopes=(Scope.read,),
+        annotations=reads(),
+        example=Example(
+            arguments={"market": "crypto", "limit": 2},
+            result=TopInstruments(items=[_BTC, _ETH], unavailable=[]),
+        ),
+    ),
+    ToolSpec(
+        get_instrument,
+        name="get_instrument",
+        title="Instrument",
+        scopes=(Scope.read,),
+        annotations=reads(),
+        example=Example(
+            arguments={"instrument_id": "stock:AAPL"},
+            result=InstrumentDetail(
+                id="stock:AAPL",
+                name="Apple Inc. Common Stock",
+                exchange="NASDAQ",
+                timeframes=list(Timeframe),
+                available_from=datetime(2016, 1, 4, 14, 30, tzinfo=UTC),
+                available_to=datetime(2026, 11, 6, 20, 59, tzinfo=UTC),
+            ),
+        ),
+    ),
+    ToolSpec(
+        get_candles,
+        name="get_candles",
+        title="Candles",
+        scopes=(Scope.read,),
+        annotations=reads(),
+        example=Example(
+            arguments={
+                "instrument_id": "crypto:BTCUSDT",
+                "timeframe": "1h",
+                "start": "2024-06-03",
+                "limit": 3,
+            },
+            result=CandlesPage(
+                instrument="crypto:BTCUSDT",
+                timeframe=Timeframe.H1,
+                start=datetime(2024, 6, 3, tzinfo=UTC),
+                end=datetime(2024, 6, 3, 3, tzinfo=UTC),
+                candles=[
+                    (_DAY, 67491.0, 67700.0, 67420.2, 67612.4, 512.31),
+                    (_DAY + 3600, 67612.5, 67650.0, 67510.0, 67540.3, 398.07),
+                    (_DAY + 7200, 67540.3, 67640.0, 67488.8, 67601.9, 421.55),
+                ],
+                gaps=[],
+                next_start=datetime(2024, 6, 3, 3, tzinfo=UTC),
+                next_end=None,
+            ),
+        ),
+    ),
+    ToolSpec(
+        preprocessing_catalog,
+        name="preprocessing_catalog",
+        title="Preprocessing catalog",
+        scopes=(Scope.read,),
+        annotations=reads(),
+        example=Example(
+            arguments={"step": "window"},
+            result=Catalog(
+                blocks=[
+                    CatalogBlock.of(block) for block in _CATALOG.blocks if block.id == "window@1"
+                ]
+            ),
+        ),
+    ),
+    ToolSpec(
+        get_backtest_defaults,
+        name="get_backtest_defaults",
+        title="Backtest defaults",
+        scopes=(Scope.read,),
+        annotations=reads(),
+        example=Example(arguments={}, result=BacktestDefaults()),
+    ),
+    ToolSpec(
+        get_preferences,
+        name="get_preferences",
+        title="Date and time preferences",
+        scopes=(Scope.read,),
+        annotations=reads(),
+        example=Example(
+            arguments={},
+            result=Preferences(
+                time_zone=TimeZone.ny, date_format=DateFormat.dmy, time_format=TimeFormat.h24
+            ),
+        ),
+    ),
+)

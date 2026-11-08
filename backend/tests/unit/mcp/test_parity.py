@@ -72,4 +72,8 @@ def test_every_web_only_endpoint_says_why() -> None:
 
 def test_a_tool_knows_its_endpoints() -> None:
     assert endpoints_of("get_me") == ["GET /api/v1/me"]
-    assert endpoints_of("get_candles") == []
+    assert endpoints_of("top_instruments") == [
+        "GET /api/v1/data/instruments",
+        "GET /api/v1/data/top-instruments",
+    ]
+    assert endpoints_of("get_you") == []
