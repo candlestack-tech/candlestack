@@ -3,6 +3,7 @@ document must be the one the document prints, the light view of long runs, the t
 ``candles_held``, the decision as ``run.json`` records it, the short equity series, the stored
 predictions and the JSON Schema snapshot."""
 
+import io
 import json
 import re
 from pathlib import Path
@@ -17,11 +18,13 @@ from pydantic import ValidationError
 from candlestack.experiments.assembly import (
     NothingToTest,
     benchmark_equity,
+    curves_parquet,
     document,
     dumps,
     equity_points,
     main_benchmark,
     predictions_parquet,
+    read_curves,
     read_predictions,
     results,
     run,
@@ -606,6 +609,37 @@ def test_the_predictions_are_stored_as_parquet_and_read_back() -> None:
     assert read.schema == pl.Schema({"ts": pl.Int64, "prediction": pl.Float64})
     assert read.equals(PREDICTIONS)
     assert predictions_parquet(PREDICTIONS) == (blob, digest)
+
+
+@pytest.mark.parametrize("rows", [500, LIGHT_ROWS + 1])
+def test_the_stored_curves_are_the_light_series_columns(rows: int) -> None:
+    candles, predictions = long_run(rows)
+    done = run(
+        candles,
+        predictions,
+        period=Period(start=0, end=2**40),
+        decision=Decision(),
+        execution=Execution(),
+        periods_per_year=365,
+    )
+    light = orjson.loads(dumps(results(done, [BH], light=True)))["series"]["columns"]
+
+    blob = curves_parquet(done)
+
+    assert blob[:4] == b"PAR1"
+    assert read_curves(blob) == {
+        name: light[name] for name in ("ts", "close", "equity", "drawdown")
+    }
+
+
+def test_a_stored_value_that_is_not_a_number_reads_as_none() -> None:
+    frame = pl.DataFrame(
+        {"ts": [1, 2], "close": [1.0, float("nan")], "equity": [1.0, 1.1], "drawdown": [0.0, 0.0]}
+    )
+    buffer = io.BytesIO()
+    frame.write_parquet(buffer)
+
+    assert read_curves(buffer.getvalue())["close"] == [1.0, None]
 
 
 # --- The JSON Schema ----------------------------------------------------------------------

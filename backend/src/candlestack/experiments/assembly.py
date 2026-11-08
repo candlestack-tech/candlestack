@@ -44,6 +44,8 @@ RISK_FREE_RATE = 0.0
 # Epoch seconds have no leap seconds, so ts // _DAY is the UTC date of a candle.
 _DAY = 86_400
 _PRICES = ("ts", "open", "high", "low", "close")
+# The columns of the light series a backtest stores for the comparison (``curves_parquet``).
+CURVES = ("ts", "close", "equity", "drawdown")
 _NUMPY = orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_UTC_Z
 
 
@@ -356,3 +358,20 @@ def predictions_parquet(predictions: pl.DataFrame) -> tuple[bytes, str]:
 
 def read_predictions(blob: bytes) -> pl.DataFrame:
     return pl.read_parquet(io.BytesIO(blob))
+
+
+def curves_parquet(done: Run) -> bytes:
+    """The stored form of a run's curves: the ``CURVES`` columns of its light series, as its
+    document has them (a point per UTC day past ``LIGHT_ROWS`` rows), as zstd Parquet."""
+    columns = _series(done, {}, light=True)["columns"]
+    buffer = io.BytesIO()
+    pl.DataFrame({name: columns[name] for name in CURVES}).write_parquet(buffer, compression="zstd")
+    return buffer.getvalue()
+
+
+def read_curves(blob: bytes) -> dict[str, list[Any]]:
+    """The stored curves by column, a value that is not a number as None, as the document's
+    JSON has it."""
+    frame = pl.read_parquet(io.BytesIO(blob))
+    frame = frame.with_columns(pl.col(pl.Float32, pl.Float64).fill_nan(None))
+    return {name: frame[name].to_list() for name in CURVES}

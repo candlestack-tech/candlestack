@@ -525,7 +525,6 @@ async def download_backtest(
             f"Fewer than {COMPARE_MIN} or more than {COMPARE_MAX} IDs, an empty one or one twice "
             "(`validation`).",
         ),
-        **_SOURCE_ERRORS,
     },
 )
 async def compare_backtests(
@@ -548,7 +547,8 @@ async def compare_backtests(
     best and the worst marked, the setups and which of their fields differ, and the equity and
     the drawdown of each and the return of holding its instrument on one time axis of at most
     200 times. A backtest that is running or failed is listed with its status and without
-    values. Access is that of `GET /api/v1/backtests/{backtest_id}`."""
+    values. Access is that of `GET /api/v1/backtests/{backtest_id}`. It reads only what each
+    backtest stored when it ran, so it loads no candles from a data source."""
     response.headers.update(NO_STORE)
     with _problems():
         try:

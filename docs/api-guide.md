@@ -184,7 +184,8 @@ others' published ones as the app's Compare page does: each statistic of each wi
 the worst marked (`metrics`), the setups and which fields differ (`differs`), and the equity,
 drawdown and buy and hold curves on one time axis of at most 200 times (`times`). A running or failed
 backtest comes with its status and no values; an ID you cannot see is a 404 whose `id` names it.
-The fields: [architecture.md](architecture.md#compare).
+It reads only what each backtest stored, so comparing many loads no candles and spends none of
+the data sources' request budget. The fields: [architecture.md](architecture.md#compare).
 
 ## Errors
 

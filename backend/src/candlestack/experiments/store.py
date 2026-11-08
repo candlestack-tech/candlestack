@@ -672,18 +672,19 @@ class BacktestStore:
         """The ID of the backtest's model; None once the model is deleted."""
         return await self._db.scalar(select(Backtest.model_id).where(Backtest.id == backtest_id))
 
-    async def with_run(self, user_id: str, backtest_id: str) -> Authored | None:
+    async def with_run(
+        self, user_id: str, backtest_id: str, *, curves: bool = False
+    ) -> Authored | None:
         """The user's backtest, or another account's while it is published, with what its run
-        stored, its predictions aside, and its author's display name; None for any other."""
+        stored, its predictions aside (and its curves unless ``curves``), and its author's
+        display name; None for any other."""
+        stored = [Backtest.spec, Backtest.report, Backtest.stats, Backtest.steps]
+        if curves:
+            stored.append(Backtest.curves)
         row = (
             await self._db.execute(
                 _authored()
-                .options(
-                    undefer(Backtest.spec),
-                    undefer(Backtest.report),
-                    undefer(Backtest.stats),
-                    undefer(Backtest.steps),
-                )
+                .options(*(undefer(column) for column in stored))
                 .where(Backtest.id == backtest_id, (Backtest.user_id == user_id) | PUBLISHED)
             )
         ).first()
