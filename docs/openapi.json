@@ -6679,7 +6679,7 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
           },
           "403": {
             "content": {
@@ -6689,7 +6689,7 @@
                 }
               }
             },
-            "description": "The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`)."
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "404": {
             "content": {
@@ -6720,8 +6720,25 @@
               }
             },
             "description": "Invalid request"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "backtests"
+            ]
+          }
+        ],
         "summary": "Cancel Backtest",
         "tags": [
           "backtests"

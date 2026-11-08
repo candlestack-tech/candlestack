@@ -229,6 +229,9 @@ def test_scopes_on_the_real_routes(browser, script) -> None:
     assert body["scope"] == "backtests"
     problem(script.request("POST", "/api/v1/backtests", backtests, json={}), 422, "validation")
     problem(script.request("PATCH", backtest, backtests, json={"name": "x"}), 404, "not-found")
+    body = problem(script.request("POST", f"{backtest}/cancel", read), 403, "missing-scope")
+    assert body["scope"] == "backtests"
+    problem(script.request("POST", f"{backtest}/cancel", backtests), 404, "not-found")
     body = problem(
         script.request("PATCH", backtest, backtests, json={"public": True}), 403, "missing-scope"
     )

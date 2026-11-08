@@ -4197,7 +4197,7 @@ export interface operations {
                     "application/json": components["schemas"]["BacktestDocument"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -4206,7 +4206,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`). */
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4235,6 +4235,15 @@ export interface operations {
             };
             /** @description Invalid request */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

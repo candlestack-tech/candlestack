@@ -441,7 +441,7 @@ async def start_backtest(
     dependencies=[Depends(require_same_origin)],
 )
 async def cancel_backtest(
-    backtest_id: BacktestId, user: CurrentUserDep, runs: BacktestRunsDep, response: Response
+    backtest_id: BacktestId, user: BacktestsUserDep, runs: BacktestRunsDep, response: Response
 ) -> Response:
     """Cancels the user's queued backtest, so it never runs, and returns its document: `failed`,
     with an `error` that says it was cancelled. A running backtest cannot be cancelled."""
