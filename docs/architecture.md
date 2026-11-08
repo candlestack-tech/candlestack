@@ -112,11 +112,12 @@ flowchart LR
 | `POST /api/v1/backtests/{backtest_id}/cancel` | cancels the user's queued backtest: it fails as cancelled and never runs; 200 with its result document, `409 backtest-not-queued` for one that runs or has ended ([Backtests](#backtests)) |
 | `GET /api/v1/backtests/{backtest_id}` | the result document in the light view of the user's backtest, whatever its status, or of another account's while it is published ([engine.md](engine.md#the-result-document)) |
 | `GET /api/v1/backtests/{backtest_id}/download` | the result document of a finished backtest, the user's or a published one of another account, with every row and trade, as an attachment |
-| `GET /api/v1/backtests` | a page of 10 of the user's backtests: search `q` (name, number, symbol or model name), `show` (`all`, `starred`, `failed`, `public`), `model` (a model's name), `sort` and `order`, `page`; with the total, the pages and what the filter panel shows (the counts of all, starred, failed and published backtests, the models used) ([Backtests](#backtests)) |
+| `GET /api/v1/backtests` | a page of the user's backtests, 10 or `per_page` up to 100: search `q` (name, number, symbol or model name), `show` (`all`, `starred`, `failed`, `public`), `model` (a model's name), the filters for the API and the agents (`status`, repeated, `sweep_id`, `model_id`, `instrument`, `timeframe`, `representation`, `created_after`, `created_before`, `min_sharpe`, `min_total_return`, `min_max_drawdown`, `starred`, `public`), `sort` and `order`, `page`; with the total, the pages and what the filter panel shows (the counts of all, starred, failed and published backtests, the models used) ([Backtests](#backtests)) |
 | `PATCH /api/v1/backtests/{backtest_id}` | stars, unstars, renames (`409 name-taken`; a name of null goes back to the generated one), publishes or unpublishes the user's backtest |
 | `GET /api/v1/experiments` | a page of 12 of the backtests every account published ([Experiments](#experiments)): search `q` (the backtest's name, symbol, model name or author's name), `mine` or `author` (a user ID), `market`, `symbol`, `representation`, `timeframe`, `sort` and `order`, `page`; with the total, the pages, the counts (all published, the user's, the accounts that published) and what the filters offer |
 | `GET /api/v1/compare?ids=<id>,<id>` | 1 to 20 backtests side by side, the user's own and others' published ones, as the Compare page shows them ([Compare](#compare)) |
 | `POST /api/v1/sweeps` | starts a backtest for every combination of a base setup and the lists in `vary` (models, instruments, periods, decision rules), 2 to 20, all in the user's queue or none; 201 with the sweep and `Location`, or with `validate_only` 200 with the count and each setup and nothing started ([Sweeps](#sweeps)) |
+| `GET /api/v1/sweeps` | a page of the user's sweeps, newest first (`page`, `per_page` up to 100, 10 by default): each one's metric, progress, `done` and best finished backtest so far by the metric ([Sweeps](#sweeps)) |
 | `GET /api/v1/sweeps/{sweep_id}` | the user's sweep: progress, each backtest's ID, status and setup, and once all ended the ranking by `metric` (the sweep's own unless the query names another) ([Sweeps](#sweeps)) |
 | `GET /api/v1/dashboard` | everything the Dashboard shows in one response: the counts, the 6 newest backtests, the 5 best finished ones by Sharpe ratio, return, drawdown and win rate, the 4 best starred ones, and the 4 newest published backtests of anyone with how many are published |
 | `POST /mcp` (and `GET`, `DELETE`) | the MCP server, Streamable HTTP, signed in with an API key or an OAuth access token ([MCP](#mcp)); not in the API reference |
@@ -735,13 +736,25 @@ checked at the next start.
   the symbols and the model's shown name as substrings in any case (`%` and `_` match
   themselves), filters by show and by a model's name (exact, in any case) and sorts: `default`
   newest first, or by number, name (the shown name in any case, `asc` A to Z), model, return,
-  Sharpe ratio, drawdown, trades or `when` (as number), `asc` or
+  Sharpe ratio, drawdown, trades, win rate, Sortino ratio (from `stats`, the small statistics
+  document) or `when` (as number), `asc` or
   `desc`. Backtests without the sorted value (failed ones) are last in both directions, ties
-  newest first. 10 a page; a page past the last is empty, with the real `pages`. The counts
+  newest first. 10 a page, `per_page` up to 100; a page past the last is empty, with the real
+  `pages`. For the API and the agents it also filters (`store.BacktestFilters`, all must hold)
+  by statuses, sweep, model ID, instrument (`<market>:<symbol>`, exact, as `InstrumentId`
+  writes it), timeframe, representation, the start time (`created_after` included,
+  `created_before` not; a time without a zone is UTC), the least Sharpe ratio and return, the
+  deepest drawdown (`min_max_drawdown`, 0 or below) and starred or published. No filter has an
+  index of its own: each query also holds the user's ID, so Postgres reads only that user's
+  rows (by `ix_backtests_user_id_created_at` or the unique `(user_id, number)`), a few thousand
+  at most, and filters them in memory. The counts
   (all, starred, failed) and the models used (by count, then name) ignore the search and the
   filters: they are the filter panel's. The models used are one per name in any case, as the
   model filter compares them (spelled as and with the framework of the newest backtest of the
-  name), so each count is what its filter returns.
+  name), so each count is what its filter returns. They cost two queries of their own
+  (`BacktestsService.facets`, apart from the page's two of `find`): the route always answers
+  them, for the web app's filter panel; `list_backtests` only on page 1 unless
+  `include_facets` says otherwise.
 - A stored setup and equity series are read without the limits of a new backtest
   (`BacktestSetupIn`, `EquitySeriesIn`, which check them on the way in), so a limit made
   tighter later never fails the list. A backtest run in the app stores in `setup` a summary of
@@ -984,6 +997,11 @@ backtests itself.
 - **Progress**: how many of its backtests are queued, running, finished and failed, and each
   one's ID, number, name, status, place in the queue, error and setup; `done` once none is
   queued or running.
+- **The list** (`GET /api/v1/sweeps`): the user's sweeps newest first, `page` and `per_page`
+  (10, up to 100), each with its metric, count, progress, `done` and `best`: the finished
+  backtest that ranks first by the sweep's metric so far (`compare.ranks`), null until one has
+  a value. Three queries whatever the page holds: the total, the page of sweeps (without their
+  grids) and the backtests of all of them (by the partial index of `sweep_id`).
 - **Ranking**, once done: the backtests by the metric (`metric` of the query, else the sweep's),
   one of the 9 statistics with a direction (not the trades, the time in the market or buy and
   hold), from the `stats` each run stored, with the rules of [Compare](#compare)
@@ -1101,9 +1119,10 @@ call, as the routes' dependencies do), never the API over HTTP.
   - `sweeps`: `validate_sweep` (scope `read`, as the convention asks of a tool that changes
     nothing, while the dry run over HTTP needs `backtests` because it is the route that starts a
     sweep; it still runs each setup's checks against the data source, so a read key spends the
-    same requests as a dry run), `run_sweep` (scope `backtests`) and `get_sweep` (scope `read`):
-    the dry run, the start and the progress and ranking of a sweep, on the service of
-    `POST /api/v1/sweeps` and `GET /api/v1/sweeps/{sweep_id}` (`experiments.build_sweeps`, its
+    same requests as a dry run), `run_sweep` (scope `backtests`), `get_sweep` and `list_sweeps`
+    (scope `read`): the dry run, the start, the progress and ranking of a sweep and the list of
+    the user's sweeps, on the service of `POST /api/v1/sweeps`, `GET /api/v1/sweeps/{sweep_id}`
+    and `GET /api/v1/sweeps` (`experiments.build_sweeps`, its
     errors as problems through `experiments.sweep_problems`), answering what the routes answer
     ([Sweeps](#sweeps)).
   - `run` (#404): running and reading backtests, on `experiments.backtest_runs` and the problems
@@ -1130,15 +1149,17 @@ call, as the routes' dependencies do), never the API over HTTP.
     routes: the user's own backtests and other accounts' while they are published.
   - `manage` (#405): listing, managing and publishing backtests, on `BacktestsService` and
     `BacktestRuns` with the routes' problems (`experiments.update_problems`,
-    `backtest_problems`): `list_backtests` (`read`; search, show, model, sort, order and page as
-    `GET /backtests`), `rename_backtest` and `star_backtest` (`backtests`; idempotent),
+    `backtest_problems`): `list_backtests` (`read`; search, show, model, the filters, sort,
+    order, page and `per_page` as `GET /backtests`; the counts and the models used only on
+    page 1, or as `include_facets` asks, else null), `rename_backtest` and `star_backtest` (`backtests`; idempotent),
     `cancel_backtest` (`backtests`; queued ones only, else `backtest-not-queued`; destructive),
     `list_experiments` (`read`; search, mine, author, market, symbol, representation, timeframe,
-    sort, order and page as `GET /experiments`), `publish_backtest` and `unpublish_backtest`
+    sort, order and page as `GET /experiments`; the counts and the facets, five queries, as
+    `list_backtests` answers its own), `publish_backtest` and `unpublish_backtest`
     (`publish`; destructive, the description says the backtest becomes visible to every account
     of the beta and asks the agent to check with the user first) and `get_dashboard` (`read`;
     the counts, the 6 newest that ended, the 5 best by each result and the 4 best starred). They
-    answer a compact backtest with its page's `url`: no equity series, generated name, duration or other fields only
+    answer a compact backtest with its page's `url` and its `sweep_id`: no equity series, generated name, duration or other fields only
     the app's cards and charts use, the model by its name and ID; Experiments the same, `url`
     included, with the author, never the model file. The Dashboard's newest published backtests are left out, as
     `list_experiments` lists them.

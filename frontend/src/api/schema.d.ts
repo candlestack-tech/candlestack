@@ -147,9 +147,9 @@ export interface paths {
         };
         /**
          * List Backtests
-         * @description A page of the user's backtests that match the search and the filters, and what the
+         * @description A page of the user's backtests that match the search and every filter, and what the
          *     filter panel shows: the counts of all, starred and failed backtests and every model the
-         *     backtests used. A page past the last one is empty.
+         *     backtests used, whatever the filters. A page past the last one is empty.
          */
         get: operations["list_backtests_api_v1_backtests_get"];
         put?: never;
@@ -986,7 +986,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Sweeps
+         * @description A page of the user's sweeps, newest first: each one's metric, how many of its backtests
+         *     are queued, running, finished and failed, and its best finished backtest so far by the
+         *     metric. A page past the last one is empty.
+         */
+        get: operations["list_sweeps_api_v1_sweeps_get"];
         put?: never;
         /**
          * Start Sweep
@@ -1833,11 +1839,12 @@ export interface components {
         /**
          * BacktestSort
          * @description What the list is sorted by. `default` is newest first (`order` does not apply); `when`
-         *     sorts like `number`; `name` by the name, in any case. Backtests without the value (failed
-         *     ones) come last either way, and ties go by number, newest first.
+         *     sorts like `number`; `name` by the name, in any case; `sortino` by the Sortino ratio of
+         *     `results.stats`. Backtests without the value (failed ones) come last either way, and ties
+         *     go by number, newest first.
          * @enum {string}
          */
-        BacktestSort: "default" | "number" | "name" | "model" | "return" | "sharpe" | "max_drawdown" | "trades" | "when";
+        BacktestSort: "default" | "number" | "name" | "model" | "return" | "sharpe" | "max_drawdown" | "trades" | "when" | "win_rate" | "sortino";
         /**
          * BacktestStatus
          * @description `queued` (it waits for the user's running backtest to end), `running`, `finished` (it
@@ -1964,7 +1971,7 @@ export interface components {
         BacktestsPage: {
             /**
              * Backtests
-             * @description The page, at most 10 backtests
+             * @description The page, at most `per_page` backtests (10 unless asked)
              */
             backtests: components["schemas"]["BacktestOut"][];
             /** @description All the user's backtests, whatever the filters */
@@ -4515,6 +4522,33 @@ export interface components {
             status: components["schemas"]["BacktestStatus"];
         };
         /**
+         * SweepBest
+         * @description The sweep's best backtest so far by its `metric`, as its ranking would put it first.
+         */
+        SweepBest: {
+            /**
+             * Id
+             * @example bt_t9n8v7d6a5
+             */
+            id: string;
+            /**
+             * Name
+             * @example Bright Vega
+             */
+            name: string;
+            /**
+             * Number
+             * @example 13
+             */
+            number: number;
+            /**
+             * Value
+             * @description The statistic, as in `results.stats`
+             * @example 1.42
+             */
+            value: number;
+        };
+        /**
          * SweepIn
          * @description A new sweep: a base setup, the values to vary and the statistic to rank by.
          */
@@ -4533,6 +4567,39 @@ export interface components {
              */
             validate_only: boolean;
             vary?: components["schemas"]["SweepVary"];
+        };
+        /**
+         * SweepListed
+         * @description A sweep in the list: how far it is and its best backtest so far.
+         */
+        SweepListed: {
+            /** @description The finished backtest with the best `metric` so far; null until one has a value. `GET /api/v1/sweeps/{sweep_id}` ranks them all */
+            best: components["schemas"]["SweepBest"] | null;
+            /**
+             * Count
+             * @description Its backtests
+             * @example 6
+             */
+            count: number;
+            /**
+             * Created At
+             * Format: date-time
+             * @description When it was started (UTC)
+             */
+            created_at: string;
+            /**
+             * Done
+             * @description None of its backtests is queued or running
+             */
+            done: boolean;
+            /**
+             * Id
+             * @example sw_7f3k2m9qx4
+             */
+            id: string;
+            /** @description What its ranking orders by */
+            metric: components["schemas"]["SweepMetric"];
+            progress: components["schemas"]["SweepProgress"];
         };
         /**
          * SweepMetric
@@ -4761,6 +4828,32 @@ export interface components {
              *     ]
              */
             rules?: (components["schemas"]["ThresholdRule"] | components["schemas"]["HysteresisRule"] | components["schemas"]["KmeansRule"])[];
+        };
+        /** SweepsPage */
+        SweepsPage: {
+            /**
+             * Page
+             * @description The page, from 1
+             * @example 1
+             */
+            page: number;
+            /**
+             * Pages
+             * @description Pages of the sweeps, at least 1
+             * @example 1
+             */
+            pages: number;
+            /**
+             * Sweeps
+             * @description The page, newest first
+             */
+            sweeps: components["schemas"]["SweepListed"][];
+            /**
+             * Total
+             * @description The user's sweeps
+             * @example 3
+             */
+            total: number;
         };
         /**
          * Tensor
@@ -5235,12 +5328,40 @@ export interface operations {
                 show?: components["schemas"]["BacktestShow"];
                 /** @description Only the backtests of the model with this name, in any case */
                 model?: string | null;
+                /** @description Only backtests with one of these statuses (repeat the parameter) */
+                status?: components["schemas"]["BacktestStatus"][] | null;
+                /** @description Only the backtests of this sweep */
+                sweep_id?: string | null;
+                /** @description Only the backtests of the model with this ID */
+                model_id?: string | null;
+                /** @description Only the backtests of this instrument, `<market>:<symbol>` */
+                instrument?: string | null;
+                /** @description Only this timeframe */
+                timeframe?: components["schemas"]["SetupTimeframe"] | null;
+                /** @description Only models that read this */
+                representation?: components["schemas"]["Representation"] | null;
+                /** @description Only those started at or after this time (UTC) */
+                created_after?: string | null;
+                /** @description Only those started before this time (UTC) */
+                created_before?: string | null;
+                /** @description Only those with at least this Sharpe ratio */
+                min_sharpe?: number | null;
+                /** @description Only those with at least this return, a fraction */
+                min_total_return?: number | null;
+                /** @description Only those whose largest fall is no deeper than this, 0 or below: -0.2 keeps falls of up to 20 percent */
+                min_max_drawdown?: number | null;
+                /** @description Only the starred (true) or the unstarred (false) */
+                starred?: boolean | null;
+                /** @description Only the published (true) or the unpublished (false) */
+                public?: boolean | null;
                 /** @description What to sort by */
                 sort?: components["schemas"]["BacktestSort"];
                 /** @description Direction of the sort */
                 order?: components["schemas"]["SortOrder"];
-                /** @description The page, from 1, of 10 backtests */
+                /** @description The page, from 1, of `per_page` backtests */
                 page?: number;
+                /** @description Backtests per page */
+                per_page?: number;
             };
             header?: never;
             path?: never;
@@ -8061,6 +8182,67 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogOut"];
+                };
+            };
+        };
+    };
+    list_sweeps_api_v1_sweeps_get: {
+        parameters: {
+            query?: {
+                /** @description The page, from 1 */
+                page?: number;
+                /** @description Sweeps per page */
+                per_page?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SweepsPage"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
