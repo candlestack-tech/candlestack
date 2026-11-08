@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { preferencesQueryOptions, type BacktestDefaults } from '@/api';
-import { ARSEN, DEFAULT_PREFERENCES, problem, sentBody, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, DEFAULT_PREFERENCES, problem, sentBody, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, warmUpSettings } from '@/test/app';
 
 beforeAll(warmUpSettings);
@@ -38,7 +38,7 @@ async function retype(user: ReturnType<typeof userEvent.setup>, name: string, te
 
 describe('Backtest defaults', () => {
   it('shows the saved defaults in every control of the design', async () => {
-    stubApi(sessionWithPreferences(ARSEN));
+    stubApi(sessionWithPreferences(ADA));
     await renderApp('/settings/backtest-defaults');
     expect(card().getByText('New backtests start here')).toBeDefined();
     const timeframes = within(card().getByRole('radiogroup', { name: 'Timeframe' })).getAllByRole('radio');
@@ -68,7 +68,7 @@ describe('Backtest defaults', () => {
   });
 
   it('draws no line between the title and the first row', async () => {
-    stubApi(sessionWithPreferences(ARSEN));
+    stubApi(sessionWithPreferences(ADA));
     await renderApp('/settings/backtest-defaults');
     // The rows' top line is left out right after the card's title (rows.tsx), so the first row has
     // to follow it in the card.
@@ -77,7 +77,7 @@ describe('Backtest defaults', () => {
   });
 
   it('saves the whole set on each click: the timeframe, then the direction', async () => {
-    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: echo });
+    const fetch = stubApi({ ...sessionWithPreferences(ADA), [SAVE]: echo });
     const { queryClient } = await renderApp('/settings/backtest-defaults');
     const user = userEvent.setup();
 
@@ -93,7 +93,7 @@ describe('Backtest defaults', () => {
   });
 
   it('saves a slider once it is set: let go, or moved with a key', async () => {
-    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: echo });
+    const fetch = stubApi({ ...sessionWithPreferences(ADA), [SAVE]: echo });
     await renderApp('/settings/backtest-defaults');
     const user = userEvent.setup();
 
@@ -107,7 +107,7 @@ describe('Backtest defaults', () => {
   });
 
   it('saves a typed field on leaving it, as numbers and days, a comma working as the decimal point', async () => {
-    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: echo });
+    const fetch = stubApi({ ...sessionWithPreferences(ADA), [SAVE]: echo });
     await renderApp('/settings/backtest-defaults');
     const user = userEvent.setup();
 
@@ -126,7 +126,7 @@ describe('Backtest defaults', () => {
   });
 
   it('puts the saved value back on Esc and sends nothing', async () => {
-    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: echo });
+    const fetch = stubApi({ ...sessionWithPreferences(ADA), [SAVE]: echo });
     await renderApp('/settings/backtest-defaults');
     const user = userEvent.setup();
     await retype(user, 'Slippage', '9');
@@ -138,7 +138,7 @@ describe('Backtest defaults', () => {
   });
 
   it('picks the benchmark from its list, each with what it is, and saves it', async () => {
-    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: echo });
+    const fetch = stubApi({ ...sessionWithPreferences(ADA), [SAVE]: echo });
     await renderApp('/settings/backtest-defaults');
     const user = userEvent.setup();
     await user.click(card().getByRole('combobox', { name: 'Benchmark: Buy and hold' }));
@@ -158,7 +158,7 @@ describe('Backtest defaults', () => {
   });
 
   it('sends nothing while a typed field is not right: the field says what to fix, the card Not saved', async () => {
-    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: echo });
+    const fetch = stubApi({ ...sessionWithPreferences(ADA), [SAVE]: echo });
     await renderApp('/settings/backtest-defaults');
     const user = userEvent.setup();
     await retype(user, 'To', '2020-12-31');
@@ -190,7 +190,7 @@ describe('Backtest defaults', () => {
   it("says Couldn't save and sends the latest set again with Retry", async () => {
     const answers = [{ status: 503, body: { detail: 'Down for a minute.' } }];
     const fetch = stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       [SAVE]: async (init) => answers.shift() ?? echo(init),
     });
     await renderApp('/settings/backtest-defaults');
@@ -210,7 +210,7 @@ describe('Backtest defaults', () => {
 
   it("says in plain words when the API refuses a value, not in the API's", async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       [SAVE]: problem(422, 'validation', "body 'threshold': Input should be less than or equal to 0.5"),
     });
     await renderApp('/settings/backtest-defaults');
@@ -224,7 +224,7 @@ describe('Backtest defaults', () => {
     let answerFirst = () => undefined as void;
     const first = new Promise<void>((resolve) => (answerFirst = resolve));
     const fetch = stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       [SAVE]: async (init) => {
         if (saves(fetch).length === 1) await first;
         return echo(init);
@@ -245,7 +245,7 @@ describe('Backtest defaults', () => {
   });
 
   it('asks before leaving with a field to fix: Keep editing stays, Discard leaves', async () => {
-    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: echo });
+    const fetch = stubApi({ ...sessionWithPreferences(ADA), [SAVE]: echo });
     const { router } = await renderApp('/settings/backtest-defaults');
     const user = userEvent.setup();
     await retype(user, 'Fees', '7,5');
@@ -265,7 +265,7 @@ describe('Backtest defaults', () => {
   });
 
   it('leaves without asking once every field is right', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), [SAVE]: echo });
+    stubApi({ ...sessionWithPreferences(ADA), [SAVE]: echo });
     const { router } = await renderApp('/settings/backtest-defaults');
     const user = userEvent.setup();
     await retype(user, 'Fees', '0.2');

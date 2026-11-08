@@ -3,7 +3,7 @@ import { cleanup, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { ARSEN, dashboardAnswer, MB, model, modelsAnswer, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, dashboardAnswer, MB, model, modelsAnswer, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, warmUpSettings } from '@/test/app';
 
 beforeAll(warmUpSettings);
@@ -17,7 +17,7 @@ const tabs = () => within(screen.getByRole('navigation', { name: 'Settings secti
 
 describe('Settings', () => {
   it('opens Profile from /settings, under the title', async () => {
-    stubApi(sessionWithPreferences(ARSEN));
+    stubApi(sessionWithPreferences(ADA));
     const { router } = await renderApp('/settings');
     expect(router.state.location.pathname).toBe('/settings/profile');
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Settings');
@@ -27,13 +27,13 @@ describe('Settings', () => {
   });
 
   it('opens Profile for a section it does not know', async () => {
-    stubApi(sessionWithPreferences(ARSEN));
+    stubApi(sessionWithPreferences(ADA));
     const { router } = await renderApp('/settings/billing');
     expect(router.state.location.pathname).toBe('/settings/profile');
   });
 
   it('has the sections as tabs, each a link, the open one marked', async () => {
-    stubApi(sessionWithPreferences(ARSEN));
+    stubApi(sessionWithPreferences(ADA));
     await renderApp('/settings/appearance');
     const links = tabs().getAllByRole('link');
     expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
@@ -57,7 +57,7 @@ describe('Settings', () => {
   });
 
   it('shows one section at a time and switches with the tabs; the sidebar keeps Settings', async () => {
-    stubApi(sessionWithPreferences(ARSEN));
+    stubApi(sessionWithPreferences(ADA));
     const { router } = await renderApp('/settings/profile');
     await userEvent.setup().click(tabs().getByRole('link', { name: 'Data and storage' }));
     await vi.waitFor(() => expect(router.state.location.pathname).toBe('/settings/data-and-storage'));
@@ -69,14 +69,14 @@ describe('Settings', () => {
   });
 
   it('loads the preferences before the sections that show them', async () => {
-    const fetch = stubApi(sessionWithPreferences(ARSEN));
+    const fetch = stubApi(sessionWithPreferences(ADA));
     await renderApp('/settings/backtest-defaults');
     expect(fetch).toHaveBeenCalledWith('/api/v1/me/preferences', expect.anything());
     expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Backtest defaults');
   });
 
   it('shows where the market data comes from', async () => {
-    stubApi(sessionWithPreferences(ARSEN));
+    stubApi(sessionWithPreferences(ADA));
     await renderApp('/settings/data-and-storage');
     const card = within(screen.getByRole('region', { name: 'Data and storage' }));
     expect(card.getByText('Market data').textContent).toBe('Market dataDelayed 15 min');
@@ -85,7 +85,7 @@ describe('Settings', () => {
 
   it('shows the storage the models take and how many were uploaded', async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...modelsAnswer([model({ size_bytes: 20 * MB }), model({ id: 'mdl_a2b3c4d5e6', size_bytes: 5 * MB })]),
     });
     await renderApp('/settings/data-and-storage');
@@ -97,7 +97,7 @@ describe('Settings', () => {
   });
 
   it('leaves the models row out until the API has said', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), 'GET /api/v1/models': { status: 503, body: { detail: 'Down.' } } });
+    stubApi({ ...sessionWithPreferences(ADA), 'GET /api/v1/models': { status: 503, body: { detail: 'Down.' } } });
     await renderApp('/settings/data-and-storage');
     const card = within(screen.getByRole('region', { name: 'Data and storage' }));
     expect(card.getByText('Alpaca, SIP feed')).toBeDefined();
@@ -106,7 +106,7 @@ describe('Settings', () => {
 
   it('shows how many backtests are kept, between the market data and the models', async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...dashboardAnswer({ counts: { all: 12, starred: 3, failed: 1, public: 0 } }),
       ...modelsAnswer([model()]),
     });
@@ -123,7 +123,7 @@ describe('Settings', () => {
   });
 
   it('leaves the backtests row out until the API has said', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), 'GET /api/v1/dashboard': { status: 503, body: { detail: 'Down.' } } });
+    stubApi({ ...sessionWithPreferences(ADA), 'GET /api/v1/dashboard': { status: 503, body: { detail: 'Down.' } } });
     await renderApp('/settings/data-and-storage');
     const card = within(screen.getByRole('region', { name: 'Data and storage' }));
     expect(card.getByText('Alpaca, SIP feed')).toBeDefined();
@@ -132,7 +132,7 @@ describe('Settings', () => {
 
   it('shows the API keys, and the MCP server with the address of this host', async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       'GET /api/v1/me/api-keys': { status: 200, body: { items: [], limit: 10 } },
       'GET /api/v1/me/connected-apps': { status: 200, body: { items: [] } },
     });

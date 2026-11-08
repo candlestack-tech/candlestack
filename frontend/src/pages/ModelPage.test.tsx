@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  ARSEN,
+  ADA,
   backtest,
   backtestsAnswer,
   catalogAnswer,
@@ -50,7 +50,7 @@ type Answers = Parameters<typeof stubApi>[0];
 
 async function openPage(item = READY, answers: Answers = {}) {
   const fetch = stubApi({
-    ...session(ARSEN),
+    ...session(ADA),
     ...modelsAnswer([item, OTHER]),
     ...catalogAnswer,
     [MANIFEST]: { status: 200, body: manifest() },
@@ -216,14 +216,14 @@ describe("a model's page", () => {
   });
 
   it('says so for a model the user does not have', async () => {
-    stubApi({ ...session(ARSEN), ...modelsAnswer([OTHER]) });
+    stubApi({ ...session(ADA), ...modelsAnswer([OTHER]) });
     await renderApp(PAGE);
     expect(await screen.findByRole('heading', { level: 1, name: 'Not found' })).toBeDefined();
     expect(screen.getByText('You have no model with this ID.')).toBeDefined();
   });
 
   it('says why the models could not load', async () => {
-    stubApi({ ...session(ARSEN), 'GET /api/v1/models': { status: 503, body: { detail: 'Down for a minute.' } } });
+    stubApi({ ...session(ADA), 'GET /api/v1/models': { status: 503, body: { detail: 'Down for a minute.' } } });
     await renderApp(PAGE);
     expect(await screen.findByRole('heading', { level: 1, name: 'Model' })).toBeDefined();
     expect(screen.getByText('Down for a minute.')).toBeDefined();

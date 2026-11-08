@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { AuthorizationRequest } from '@/api';
-import { ARSEN, problem, sentBody, session, stubApi } from '@/test/api';
+import { ADA, problem, sentBody, session, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 
 afterEach(() => {
@@ -42,7 +42,7 @@ const BACK = 'https://claude.ai/api/mcp/auth_callback?code=abc&state=xyz&iss=x';
 
 // The page loads its code on demand: once before the tests, so they time only what they test.
 beforeAll(async () => {
-  stubApi({ ...session(ARSEN), ...requestAnswer() });
+  stubApi({ ...session(ADA), ...requestAnswer() });
   await renderApp(PAGE);
   await screen.findByRole('heading', { level: 1 }, { timeout: 15_000 });
   cleanup();
@@ -67,12 +67,12 @@ const box = (name: string) => screen.getByRole('checkbox', { name });
 
 describe('Consent page, signed in', () => {
   it('names the app, where it returns to and the account, with the scopes in plain words', async () => {
-    await open({ ...session(ARSEN), ...requestAnswer() });
+    await open({ ...session(ADA), ...requestAnswer() });
     expect((await heading()).textContent).toBe('Claude wants access to your CandleStack account');
     expect(document.title).toBe('Allow access · CandleStack');
     expect(screen.getByText('From claude.ai. It acts as you with what you allow here.')).toBeDefined();
     expect(screen.getByText('Named by claude.ai')).toBeDefined();
-    expect(screen.getByText('arsen@example.com')).toBeDefined();
+    expect(screen.getByText('ada@example.com')).toBeDefined();
     expect(screen.getByRole('button', { name: 'Not you?' })).toBeDefined();
 
     const read = box('See your backtests, models and market data');
@@ -91,7 +91,7 @@ describe('Consent page, signed in', () => {
 
   it('allows what is ticked and sends the browser back to the app', async () => {
     const { fetch, user } = await open({
-      ...session(ARSEN),
+      ...session(ADA),
       ...requestAnswer(),
       [`POST ${REQUEST_PATH}`]: { status: 200, body: { redirect_to: BACK } },
     });
@@ -112,7 +112,7 @@ describe('Consent page, signed in', () => {
 
   it('says the name of an app that registered itself is its own', async () => {
     const own = { ...CLAUDE.client, redirect_host: 'claude.ai.example', document_host: null };
-    await open({ ...session(ARSEN), ...requestAnswer({ ...CLAUDE, client: own }) });
+    await open({ ...session(ADA), ...requestAnswer({ ...CLAUDE, client: own }) });
     await heading();
     expect(screen.getByText('From claude.ai.example. It acts as you with what you allow here.')).toBeDefined();
     expect(screen.getByText('Named by the app itself, not checked')).toBeDefined();
@@ -123,7 +123,7 @@ describe('Consent page, signed in', () => {
     // The decision's answer, held back until the test lets it come.
     let answer: (value: { status: number; body: unknown }) => void = () => {};
     const { user } = await open({
-      ...session(ARSEN),
+      ...session(ADA),
       ...requestAnswer(),
       [`POST ${REQUEST_PATH}`]: () => new Promise((resolve) => (answer = resolve)),
     });
@@ -142,7 +142,7 @@ describe('Consent page, signed in', () => {
 
   it('offers the buttons again when Back brings the decided page out of the cache', async () => {
     const { user } = await open({
-      ...session(ARSEN),
+      ...session(ADA),
       ...requestAnswer(),
       [`POST ${REQUEST_PATH}`]: { status: 200, body: { redirect_to: BACK } },
     });
@@ -163,7 +163,7 @@ describe('Consent page, signed in', () => {
   it('denies on Cancel, and the app hears it', async () => {
     const denied = 'https://claude.ai/api/mcp/auth_callback?error=access_denied&state=xyz';
     const { fetch, user } = await open({
-      ...session(ARSEN),
+      ...session(ADA),
       ...requestAnswer(),
       [`POST ${REQUEST_PATH}`]: { status: 200, body: { redirect_to: denied } },
     });
@@ -176,7 +176,7 @@ describe('Consent page, signed in', () => {
 
   it('offers only what the app asked for, and read always', async () => {
     const { fetch, user } = await open({
-      ...session(ARSEN),
+      ...session(ADA),
       ...requestAnswer({ ...CLAUDE, scopes: [{ scope: 'publish', description: 'Publish backtests' }] }),
       [`POST ${REQUEST_PATH}`]: { status: 200, body: { redirect_to: BACK } },
     });
@@ -192,7 +192,7 @@ describe('Consent page, signed in', () => {
   });
 
   it('draws the mark of a known app, the logo a documented app gave, else its initial', async () => {
-    await open({ ...session(ARSEN), ...requestAnswer() });
+    await open({ ...session(ADA), ...requestAnswer() });
     await heading();
     const tile = () =>
       screen.getByRole('heading', { level: 1 }).closest('div.flex-col')?.querySelector('span[aria-hidden]');
@@ -207,7 +207,7 @@ describe('Consent page, signed in', () => {
       redirect_host: 'notes.example',
       document_host: 'notes.example',
     };
-    await open({ ...session(ARSEN), ...requestAnswer({ ...CLAUDE, client: notes }) });
+    await open({ ...session(ADA), ...requestAnswer({ ...CLAUDE, client: notes }) });
     await heading();
     const image = tile()?.querySelector('img');
     expect(image?.getAttribute('src')).toBe(logo);
@@ -218,7 +218,7 @@ describe('Consent page, signed in', () => {
 
   it('says why a decision failed and lets the user try again', async () => {
     const { user } = await open({
-      ...session(ARSEN),
+      ...session(ADA),
       ...requestAnswer(),
       [`POST ${REQUEST_PATH}`]: { status: 503, body: { detail: 'Down for a minute.' } },
     });
@@ -230,7 +230,7 @@ describe('Consent page, signed in', () => {
 
   it('signs out on Not you? and offers the sign-in on the same card', async () => {
     const { fetch, user } = await open({
-      ...session(ARSEN),
+      ...session(ADA),
       ...requestAnswer(),
       'POST /api/v1/auth/sign-out': { status: 204 },
     });
@@ -242,7 +242,7 @@ describe('Consent page, signed in', () => {
 
   it('shows the sign-in when the session ended meanwhile', async () => {
     const { user } = await open({
-      ...session(ARSEN),
+      ...session(ADA),
       ...requestAnswer(),
       [`POST ${REQUEST_PATH}`]: problem(401, 'not-signed-in', 'Sign in to use this.'),
     });
@@ -255,7 +255,7 @@ describe('Consent page, signed in', () => {
 describe('Consent page, off the beta list', () => {
   it('says so in the sign-in page words, and Use another account signs out', async () => {
     const { user } = await open({
-      ...session(ARSEN),
+      ...session(ADA),
       ...requestAnswer(),
       [`POST ${REQUEST_PATH}`]: problem(403, 'not-on-beta-list', 'The account is not on the beta list.'),
       'POST /api/v1/auth/sign-out': { status: 204 },
@@ -311,7 +311,7 @@ describe('Consent page, signed out', () => {
 describe('Consent page, a request that is gone', () => {
   it('says the request expired when the API no longer knows it', async () => {
     await open({
-      ...session(ARSEN),
+      ...session(ADA),
       [`GET ${REQUEST_PATH}`]: problem(404, 'authorization-request-not-found', 'No such request.'),
     });
     expect((await heading()).textContent).toBe('This request has expired');
@@ -329,7 +329,7 @@ describe('Consent page, a request that is gone', () => {
 
   it('says so when the request ended while the page was open', async () => {
     const { user } = await open({
-      ...session(ARSEN),
+      ...session(ADA),
       ...requestAnswer(),
       [`POST ${REQUEST_PATH}`]: problem(404, 'authorization-request-not-found', 'No such request.'),
     });
@@ -341,7 +341,7 @@ describe('Consent page, a request that is gone', () => {
   it('says why the request did not load, and tries again', async () => {
     let calls = 0;
     const { user } = await open({
-      ...session(ARSEN),
+      ...session(ADA),
       [`GET ${REQUEST_PATH}`]: async () =>
         ++calls === 1 ? { status: 503, body: { detail: 'Down for a minute.' } } : { status: 200, body: CLAUDE },
     });

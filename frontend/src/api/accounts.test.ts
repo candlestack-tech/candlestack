@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ARSEN, NOT_SIGNED_IN, sentBody, session, stubApi } from '@/test/api';
+import { ADA, NOT_SIGNED_IN, sentBody, session, stubApi } from '@/test/api';
 
 import {
   connectUrl,
@@ -20,8 +20,8 @@ afterEach(() => {
 
 describe('getMe', () => {
   it('returns the signed-in user', async () => {
-    stubApi(session(ARSEN));
-    await expect(getMe()).resolves.toEqual(ARSEN);
+    stubApi(session(ADA));
+    await expect(getMe()).resolves.toEqual(ADA);
   });
 
   it('reads 401 not-signed-in as signed out, not as an error', async () => {
@@ -91,10 +91,10 @@ describe('signOutEverywhere', () => {
 
 describe('the account', () => {
   it('changes the display name and returns the user', async () => {
-    const renamed = { ...ARSEN, display_name: 'Arsen L.' };
+    const renamed = { ...ADA, display_name: 'Ada L.' };
     const fetch = stubApi({ 'PATCH /api/v1/me': { status: 200, body: renamed } });
-    await expect(updateMe({ display_name: 'Arsen L.' })).resolves.toEqual(renamed);
-    expect(sentBody(fetch, 'PATCH /api/v1/me')).toEqual({ display_name: 'Arsen L.' });
+    await expect(updateMe({ display_name: 'Ada L.' })).resolves.toEqual(renamed);
+    expect(sentBody(fetch, 'PATCH /api/v1/me')).toEqual({ display_name: 'Ada L.' });
   });
 
   it('deletes the account', async () => {

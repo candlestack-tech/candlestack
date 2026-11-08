@@ -16,12 +16,12 @@ import type {
 import { FINISHED_STEPS } from './steps';
 
 // A signed-in user as GET /api/v1/me sends it.
-export const ARSEN: Me = {
+export const ADA: Me = {
   id: 'usr_7f3k2m9qx4',
-  display_name: 'Arsen Labovich',
-  email: 'arsen@example.com',
+  display_name: 'Ada Lovelace',
+  email: 'ada@example.com',
   providers: ['github'],
-  sign_in_methods: [{ provider: 'github', email: 'arsen@example.com', login: 'arsen' }],
+  sign_in_methods: [{ provider: 'github', email: 'ada@example.com', login: 'ada' }],
   created_at: '2026-10-17T08:00:00Z',
 };
 
@@ -401,7 +401,7 @@ export const backtestDocument = (fields: Partial<BacktestDocument> = {}): Backte
     name: 'Bright Vega',
     generated_name: 'Bright Vega',
     number: 12,
-    author: { id: ARSEN.id, name: ARSEN.display_name, mine: true },
+    author: { id: ADA.id, name: ADA.display_name, mine: true },
     public: false,
     published_at: null,
     status: 'finished',

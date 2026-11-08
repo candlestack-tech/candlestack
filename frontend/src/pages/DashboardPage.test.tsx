@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  ARSEN,
+  ADA,
   backtest,
   dashboardAnswer,
   failedBacktest,
@@ -85,14 +85,14 @@ const rowsOf = (name: string) =>
     );
 
 async function open(answers: object) {
-  stubApi({ ...sessionWithPreferences(ARSEN), ...answers });
+  stubApi({ ...sessionWithPreferences(ADA), ...answers });
   return renderApp('/dashboard');
 }
 
 describe('the dashboard of a new account', () => {
   it('welcomes the user with two steps to start and nothing else', async () => {
     await open({ ...dashboardAnswer(), ...modelsAnswer([]) });
-    await vi.waitFor(() => expect(heading()).toBe('Welcome, Arsen Labovich'));
+    await vi.waitFor(() => expect(heading()).toBe('Welcome, Ada Lovelace'));
     expect(screen.getByText('Your account is ready.')).toBeDefined();
     expect(widgets()).toEqual(['Get started']);
     expect(widget('Get started').getByText('2 steps')).toBeDefined();
@@ -129,7 +129,7 @@ describe('the dashboard of a new account', () => {
     cleanup();
 
     await open({ 'GET /api/v1/dashboard': { status: 503, body: { detail: 'Down.' } }, ...modelsAnswer([]) });
-    await vi.waitFor(() => expect(heading()).toBe('Welcome back, Arsen Labovich'));
+    await vi.waitFor(() => expect(heading()).toBe('Welcome back, Ada Lovelace'));
     expect(screen.getByText('Down.')).toBeDefined();
   });
 });
@@ -137,7 +137,7 @@ describe('the dashboard of a new account', () => {
 describe('the dashboard of an account with backtests', () => {
   it('welcomes the user back with the quick actions and every widget', async () => {
     await open({ ...dashboardAnswer(FULL), ...modelsAnswer([LSTM]) });
-    await vi.waitFor(() => expect(heading()).toBe('Welcome back, Arsen Labovich'));
+    await vi.waitFor(() => expect(heading()).toBe('Welcome back, Ada Lovelace'));
     expect(screen.getByRole('heading', { level: 1 }).parentElement?.querySelector('p')).toBeNull();
     expect(
       ['New backtest', 'Upload model', 'Compare backtests'].map(

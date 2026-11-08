@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { BacktestDocument } from '@/api';
 import { clearCompare } from '@/features/backtests/compare/selection';
-import { ARSEN, backtest, backtestDocument, problem, sentBody, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, backtest, backtestDocument, problem, sentBody, sessionWithPreferences, stubApi } from '@/test/api';
 import { runningDocument } from '@/test/runs';
 import { renderApp, viewerIn } from '@/test/app';
 import { candles } from '@/test/candles';
@@ -32,7 +32,7 @@ type Answers = Parameters<typeof stubApi>[0];
 
 async function open(id: string, answers: Answers) {
   const fetch = stubApi({
-    ...sessionWithPreferences(ARSEN),
+    ...sessionWithPreferences(ADA),
     [CANDLES]: { status: 200, body: candles(TIMES) },
     ...answers,
   });
@@ -88,7 +88,7 @@ describe('publishing a backtest', () => {
     expect(card.queryByRole('button')).toBeNull();
     // The card names it on two lines, without its number (#376).
     expect(
-      ['Bright Vega', 'AAPL · Candles · 30m', 'in 25 × 5', 'Buy and hold −2.0 %', 'Arsen Labovich', 'Today'].every(
+      ['Bright Vega', 'AAPL · Candles · 30m', 'in 25 × 5', 'Buy and hold −2.0 %', 'Ada Lovelace', 'Today'].every(
         (text) => card.getByText(text),
       ),
     ).toBe(true);
@@ -104,7 +104,7 @@ describe('publishing a backtest', () => {
         'Results, charts and the 1 trade',
         'The setupData, decision, fees, benchmark',
         'The model’s name and what it readsraw-candles.keras · Candles · 30m · 25 × 5',
-        'Your name and initialsALArsen Labovich',
+        'Your name and initialsALAda Lovelace',
       ],
       ['The model fileNo download, no copy, no Run again', 'Your email', 'Your other backtests and models'],
     ]);
@@ -202,26 +202,26 @@ describe("another account's published backtest", () => {
     // Its name, the number in its author's account beside it (#376).
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Velvet Deneb');
     expect(document.title).toBe('Velvet Deneb · CandleStack');
-    expect(within(header()).getByText('#9').getAttribute('title')).toBe('Backtest number 9 in Tymur’s account');
+    expect(within(header()).getByText('#9').getAttribute('title')).toBe('Backtest number 9 in Alan’s account');
     expect(buttons()).toEqual(['Download JSON', 'Add to compare']);
     expect(screen.getByRole('button', { name: 'Download JSON' }).getAttribute('title')).toBe(
       'Results, trades and setup. No model file.',
     );
     const line = header().nextElementSibling!;
-    expect(line.firstElementChild?.textContent).toBe('TTTymur Tkach');
+    expect(line.firstElementChild?.textContent).toBe('ATAlan Turing');
     expect(within(line as HTMLElement).getByText('Published today')).toBeDefined();
     // The model by name, never a link: the file stays with its author.
     expect(screen.queryByRole('link', { name: 'raw-candles.keras' })).toBeNull();
-    expect(screen.getByText('The model file stays with Tymur. You see what it reads, not the file.')).toBeDefined();
+    expect(screen.getByText('The model file stays with Alan. You see what it reads, not the file.')).toBeDefined();
     expect(screen.getByRole('link', { name: '← Experiments' }).getAttribute('href')).toBe('/experiments');
   });
 
   it('names its author on top of the right column, with the rest of theirs a click away', async () => {
     await open(OTHERS, { [`GET /api/v1/backtests/${OTHERS}`]: { status: 200, body: othersDocument() } });
     const author = within(screen.getByRole('region', { name: 'Author' }));
-    expect(author.getByText('Tymur Tkach')).toBeDefined();
+    expect(author.getByText('Alan Turing')).toBeDefined();
     expect(author.getByText('Published 17 Oct 2026 at 12:14')).toBeDefined();
-    expect(author.getByRole('link', { name: 'More by Tymur →' }).getAttribute('href')).toBe(
+    expect(author.getByRole('link', { name: 'More by Alan →' }).getAttribute('href')).toBe(
       '/experiments?author=usr_t9m8r7k6j5',
     );
     const aside = screen.getByRole('region', { name: 'Author' }).parentElement!;
@@ -233,7 +233,7 @@ describe("another account's published backtest", () => {
       [`GET /api/v1/backtests/${OTHERS}`]: { status: 200, body: othersDocument() },
     });
     await user.click(screen.getByRole('button', { name: 'Add to compare' }));
-    expect(within(screen.getByRole('complementary', { name: 'Compare' })).getByTitle('Tymur Tkach')).toBeDefined();
+    expect(within(screen.getByRole('complementary', { name: 'Compare' })).getByTitle('Alan Turing')).toBeDefined();
   });
 
   it('says it is not found once its author unpublished it', async () => {

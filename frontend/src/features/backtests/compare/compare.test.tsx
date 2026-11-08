@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  ARSEN,
+  ADA,
   backtest,
   backtestDocument,
   backtestsAnswer,
@@ -14,7 +14,7 @@ import {
   stubApi,
 } from '@/test/api';
 import { renderApp } from '@/test/app';
-import { TYMUR, experiment, experimentsAnswer, othersDocument } from '@/test/experiments';
+import { ALAN, experiment, experimentsAnswer, othersDocument } from '@/test/experiments';
 
 import { addToCompare, claimCompare, clearCompare, comparedFromOf, leaveCompare, nameInCompare } from './selection';
 
@@ -59,7 +59,7 @@ const panel = () => screen.getByRole('complementary', { name: 'Compare' });
 const saved = () => JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') as { slots: unknown[] };
 
 async function openList() {
-  stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
+  stubApi({ ...sessionWithPreferences(ADA), ...backtestsAnswer(PAGE) });
   await renderApp('/backtests');
   await screen.findByRole('link', { name: 'Bright Vega' });
   return userEvent.setup();
@@ -67,7 +67,7 @@ async function openList() {
 
 // A choice this browser kept before backtests had names, as another tab would write it.
 function keepOldChoice(slots: unknown[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ slots, hidden: false, owner: ARSEN.id }));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ slots, hidden: false, owner: ADA.id }));
   window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY }));
 }
 
@@ -180,7 +180,7 @@ describe('a choice kept before backtests had names (#376)', () => {
   it('keeps the picks, names them by number and instrument until their documents come, then by name', async () => {
     keepOldChoice([{ id: 'bt_7f3k2m9qx4', number: 12, symbol: 'AAPL' }, null, null, null]);
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...backtestsAnswer(PAGE),
       'GET /api/v1/backtests/bt_7f3k2m9qx4': { status: 200, body: backtestDocument() },
     });
@@ -199,7 +199,7 @@ describe('a choice kept before backtests had names (#376)', () => {
   it('says the number and the instrument while the document has not come', async () => {
     keepOldChoice([{ id: 'bt_slow', number: 12, symbol: 'AAPL' }, null, null, null]);
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...backtestsAnswer(PAGE),
       'GET /api/v1/backtests/bt_slow': problem(500, 'internal', 'Down.'),
     });
@@ -211,7 +211,7 @@ describe('a choice kept before backtests had names (#376)', () => {
 
 describe('another account’s backtest in the comparison', () => {
   it('leaves the choice once unpublished but keeps its slot, saying so, until dismissed', async () => {
-    claimCompare(ARSEN.id);
+    claimCompare(ADA.id);
     addToCompare({ id: 'bt_12', number: 12, name: 'Bright Vega', description: LINE, symbol: 'AAPL' });
     addToCompare({
       id: 'bt_57',
@@ -219,18 +219,18 @@ describe('another account’s backtest in the comparison', () => {
       name: 'Distant Lyra',
       description: 'BTCUSDT · Kagi · 30m',
       symbol: 'BTCUSDT',
-      author: 'Vladyslav Shudiehov',
+      author: 'Grace Hopper',
     });
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...backtestsAnswer(PAGE),
       'GET /api/v1/backtests/bt_57': problem(404, 'not-found', 'Not found.'),
     });
     await renderApp('/backtests');
     const slot = (await within(panel()).findByText('Distant Lyra was unpublished')).closest<HTMLElement>('div.h-11')!;
-    expect(slot.getAttribute('title')).toBe('Vladyslav Shudiehov unpublished it');
-    expect(slot.textContent).toBe('VSDistant Lyra was unpublishedBTCUSDT · Kagi · 30m');
-    expect(within(slot).getByTitle('Vladyslav Shudiehov').textContent).toBe('VS');
+    expect(slot.getAttribute('title')).toBe('Grace Hopper unpublished it');
+    expect(slot.textContent).toBe('GHDistant Lyra was unpublishedBTCUSDT · Kagi · 30m');
+    expect(within(slot).getByTitle('Grace Hopper').textContent).toBe('GH');
     expect(within(panel()).getByText('1 of 4')).toBeDefined();
     // It still takes its slot: the next one goes to the third.
     addToCompare({ id: 'bt_13', number: 13, symbol: 'AAPL' });
@@ -246,19 +246,19 @@ describe('another account’s backtest in the comparison', () => {
   });
 
   it('shows the name its author gave it since it was added', async () => {
-    claimCompare(ARSEN.id);
+    claimCompare(ADA.id);
     addToCompare({
       id: 'bt_t9n8v7d6a5',
       number: 9,
       name: 'Velvet Deneb',
       description: 'AAPL · Candles · 30m',
       symbol: 'AAPL',
-      author: 'Tymur Tkach',
+      author: 'Alan Turing',
     });
     const renamed = othersDocument();
     renamed.backtest.name = 'NVDA momentum';
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...backtestsAnswer(PAGE),
       'GET /api/v1/backtests/bt_t9n8v7d6a5': { status: 200, body: renamed },
     });
@@ -277,12 +277,12 @@ describe('another account’s backtest in the comparison', () => {
 
   it('is added from the Experiments tab of the picker, with its author', async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...backtestsAnswer(PAGE),
       ...experimentsAnswer({
         experiments: [
           experiment(),
-          experiment({ id: 'bt_mine', number: 12, name: 'Bright Vega', author: { ...TYMUR, mine: true } }),
+          experiment({ id: 'bt_mine', number: 12, name: 'Bright Vega', author: { ...ALAN, mine: true } }),
         ],
         counts: { all: 5, mine: 1, people: 3 },
       }),
@@ -303,12 +303,12 @@ describe('another account’s backtest in the comparison', () => {
       'Name, instrument, model or author',
     );
     // Only the other accounts’: the user's own are under Yours. One line: the name, then its number.
-    const row = (await dialog.findByText('Tymur Tkach · blesk-novol-8.keras')).closest<HTMLElement>('div.grid')!;
-    expect(row.textContent).toBe('Velvet Deneb#9NVDATTTymur Tkach · blesk-novol-8.keras+41.2 %');
+    const row = (await dialog.findByText('Alan Turing · blesk-novol-8.keras')).closest<HTMLElement>('div.grid')!;
+    expect(row.textContent).toBe('Velvet Deneb#9NVDAATAlan Turing · blesk-novol-8.keras+41.2 %');
     expect(dialog.queryByText('Bright Vega')).toBeNull();
     await user.click(within(row).getByRole('button', { name: 'Add to compare: Velvet Deneb' }));
     expect(saved()).toMatchObject({
-      slots: [{ id: 'bt_t9n8v7d6a5', name: 'Velvet Deneb', author: 'Tymur Tkach' }, null, null, null],
+      slots: [{ id: 'bt_t9n8v7d6a5', name: 'Velvet Deneb', author: 'Alan Turing' }, null, null, null],
     });
   });
 });

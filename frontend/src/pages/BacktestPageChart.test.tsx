@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, screen, within } from '@testing-library/react'
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ARSEN, backtestDocument, problem, sessionWithPreferences, spyDocument, stubApi } from '@/test/api';
+import { ADA, backtestDocument, problem, sessionWithPreferences, spyDocument, stubApi } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
 import { candles, times } from '@/test/candles';
 import { charts } from '@/test/lightweightCharts';
@@ -19,7 +19,7 @@ const TIMES = backtestDocument().results!.series.columns.ts;
 // The backtest page once, before the tests: the first page of a test file loads the app's code on
 // demand, which takes seconds while every test file starts at once (as warmUpSettings does).
 beforeAll(async () => {
-  stubApi({ ...sessionWithPreferences(ARSEN), [DOCUMENT]: { status: 200, body: backtestDocument() } });
+  stubApi({ ...sessionWithPreferences(ADA), [DOCUMENT]: { status: 200, body: backtestDocument() } });
   await renderApp(`/backtests/${ID}`);
   cleanup();
   vi.unstubAllGlobals();
@@ -44,7 +44,7 @@ type Answers = Parameters<typeof stubApi>[0];
 
 async function openPage(answer: Answers[string], answers: Answers = {}) {
   const all = {
-    ...sessionWithPreferences(ARSEN),
+    ...sessionWithPreferences(ADA),
     [DOCUMENT]: answer,
     [CANDLES]: { status: 200, body: candles(TIMES) },
     ...answers,
@@ -224,9 +224,9 @@ describe("a long backtest's chart", () => {
   });
 
   // The candles of any request, those of `held` sizes only once released.
-  async function openLong(held: string[]) {
+  async function openLong(held: string[], { settle = true } = {}) {
     const waiting: (() => void)[] = [];
-    const api = stubApi({ ...sessionWithPreferences(ARSEN), [DOCUMENT]: { status: 200, body: LONG } });
+    const api = stubApi({ ...sessionWithPreferences(ADA), [DOCUMENT]: { status: 200, body: LONG } });
     vi.stubGlobal(
       'fetch',
       vi.fn(async (path: string, init?: RequestInit) => {
@@ -247,7 +247,7 @@ describe("a long backtest's chart", () => {
     // The opening view settles (250 ms) while the month waits: settling later, after the month's
     // candles came in, it would ask for the days of the whole period again before the test looks.
     await vi.waitFor(() => expect(box('Price and trades').getByText(/1 trade in view/)).toBeDefined());
-    await act(() => new Promise((done) => setTimeout(done, 400)));
+    if (settle) await act(() => new Promise((done) => setTimeout(done, 400)));
     const release = async () => {
       act(() => waiting.splice(0).forEach((done) => done()));
       await vi.waitFor(() => expect(box('Price and trades').queryByText(/BTCUSDT · 4h/)).not.toBeNull());
@@ -284,6 +284,18 @@ describe("a long backtest's chart", () => {
     await release();
     expect(charts.shown).not.toContainEqual(MONTH);
     expect(pressed('All')).toBe(true);
+  });
+
+  // The chart tells of its new view a frame after it moved (here a slow one, 300 ms): the opening
+  // view settling in that frame must not ask for the days of the whole period again.
+  it('stays on the month when the opening view settles just after the month came in', async () => {
+    vi.stubGlobal('requestAnimationFrame', (done: FrameRequestCallback) => setTimeout(() => done(0), 300));
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => clearTimeout(id));
+    const { release } = await openLong(['4h'], { settle: false });
+    await release();
+    await act(() => new Promise((done) => setTimeout(done, 900)));
+    expect(box('Price and trades').getByText('BTCUSDT · 4h · Binance')).toBeDefined();
+    expect(charts.shown.at(-1)).toEqual(MONTH);
   });
 
   // React shows the chart's own move at once but runs the effects of it a moment later; a range

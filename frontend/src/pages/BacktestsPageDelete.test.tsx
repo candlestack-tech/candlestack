@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { addToCompare, clearCompare } from '@/features/backtests/compare/selection';
-import { ARSEN, backtest, backtestsAnswer, failedBacktest, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, backtest, backtestsAnswer, failedBacktest, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
 
 // Deleting several backtests at once from the Backtests page: a checkbox per row and one for the
@@ -36,7 +36,7 @@ type Answers = Parameters<typeof stubApi>[0];
 
 async function openList(backtests = [TWELVE, ELEVEN, TEN], answers: Answers = {}) {
   const fetch = stubApi({
-    ...sessionWithPreferences(ARSEN),
+    ...sessionWithPreferences(ADA),
     ...backtestsAnswer({ backtests, counts: COUNTS, models: [] }),
     ...answers,
   });

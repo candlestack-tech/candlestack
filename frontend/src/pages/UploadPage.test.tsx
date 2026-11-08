@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelUpload } from '@/api';
-import { ARSEN, MB, model, modelsAnswer, problem, session, stubApi } from '@/test/api';
+import { ADA, MB, model, modelsAnswer, problem, session, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 import { file } from '@/test/upload';
 import { stubXhr } from '@/test/xhr';
@@ -43,7 +43,7 @@ type Answer = Parameters<typeof stubApi>[0][string];
 
 async function openPage(answer: Answer = { status: 200, body: link() }) {
   const sent = stubXhr();
-  const fetch = stubApi({ ...session(ARSEN), ...modelsAnswer([STORED]), [LINK]: answer });
+  const fetch = stubApi({ ...session(ADA), ...modelsAnswer([STORED]), [LINK]: answer });
   const app = await renderApp(PAGE);
   await screen.findByRole('heading', { level: 1 });
   const choose = (item: File) => fireEvent.change(screen.getByLabelText('Model file'), { target: { files: [item] } });
@@ -258,7 +258,7 @@ describe('UploadPage, the link cannot take a file', () => {
       problem(403, 'upload-link-of-another-user', 'Another account asked for this upload link.'),
     );
     expect(screen.getByRole('heading', { level: 1, name: 'This link is for another account' })).toBeTruthy();
-    expect(screen.getByText('arsen@example.com')).toBeTruthy();
+    expect(screen.getByText('ada@example.com')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Go to Dashboard' }).getAttribute('href')).toBe('/dashboard');
     const signOut = stubApi({ ...session(null), 'POST /api/v1/auth/sign-out': { status: 204 } });
     await user.click(screen.getByRole('button', { name: 'Use another account' }));
@@ -276,7 +276,7 @@ describe('UploadPage, the link cannot take a file', () => {
   it('offers to try again when the link could not be read', async () => {
     const { user } = await openPage(problem(500, 'internal-error', 'Something broke on our side.'));
     expect(screen.getByRole('heading', { level: 1, name: 'Could not load this link' })).toBeTruthy();
-    stubApi({ ...session(ARSEN), ...modelsAnswer([STORED]), [LINK]: { status: 200, body: link() } });
+    stubApi({ ...session(ADA), ...modelsAnswer([STORED]), [LINK]: { status: 200, body: link() } });
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByRole('heading', { level: 1, name: 'Upload your model' })).toBeTruthy();
   });

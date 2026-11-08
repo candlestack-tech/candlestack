@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  ARSEN,
+  ADA,
   backtest,
   backtestDocument,
   backtestsAnswer,
@@ -48,7 +48,7 @@ type Answers = Parameters<typeof stubApi>[0];
 
 async function openPage(answer: Answers[string], answers: Answers = {}) {
   const all = {
-    ...sessionWithPreferences(ARSEN),
+    ...sessionWithPreferences(ADA),
     [DOCUMENT]: answer,
     [CANDLES]: { status: 200, body: candles(TIMES) },
     ...answers,
@@ -409,7 +409,7 @@ describe("a backtest's page without a document", () => {
 describe('opening a backtest', () => {
   it('goes back to where it was opened from', async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...backtestsAnswer({ backtests: [backtest()] }),
       [DOCUMENT]: { status: 200, body: backtestDocument() },
     });
