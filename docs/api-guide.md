@@ -170,7 +170,7 @@ The example gives up after 5 waits.
 
 ## Compare backtests
 
-`GET /api/v1/compare?ids=bt_7f3k2m9qx4,bt_t9n8v7d6a5` compares 2 to 20 of your backtests and
+`GET /api/v1/compare?ids=bt_7f3k2m9qx4,bt_t9n8v7d6a5` compares 1 to 20 of your backtests and
 others' published ones as the app's Compare page does: each statistic of each with the best and
 the worst marked (`metrics`), the setups and which fields differ (`differs`), and the equity,
 drawdown and buy and hold curves on one time axis of at most 200 times (`times`). A running or failed

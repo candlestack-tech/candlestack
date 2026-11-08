@@ -1,9 +1,10 @@
-import type { BacktestDocument } from '@/api';
+import type { ComparedBacktest } from '@/api';
 
-import { documentDescription } from '../names';
+import { comparedDescription } from '../names';
 
 // What the comparison's charts draw of a backtest: its return and its fall from the top, in
-// percent, on its own times, so a line starts where its period starts. Times are UTC epoch seconds.
+// percent, at the comparison's times within its period, so a line starts where its period starts.
+// Times are UTC epoch seconds.
 
 export type Point = { time: number; value: number };
 // A line is named as its backtest (backtest-names, lgLabel): the name and "AAPL · Kagi · 1h".
@@ -18,24 +19,23 @@ export type Line = {
   drawdown: Point[];
 };
 
-const percentOf = (ts: readonly number[], values: readonly (number | null)[], from: (value: number) => number) =>
-  ts.flatMap((time, index) => {
+const percentOf = (times: readonly number[], values: readonly (number | null)[]) =>
+  times.flatMap((time, index) => {
     const value = values[index];
-    return value === null || value === undefined ? [] : [{ time, value: from(value) * 100 }];
+    return value === null || value === undefined ? [] : [{ time, value: value * 100 }];
   });
 
-export function lineOf(doc: BacktestDocument, color: string): Line | null {
-  const series = doc.results?.series;
-  if (!series) return null;
-  const { ts, equity, drawdown } = series.columns;
+export function lineOf(backtest: ComparedBacktest, times: readonly number[], color: string): Line | null {
+  const { equity, drawdown } = backtest;
+  if (!equity || !drawdown) return null;
   return {
-    id: doc.backtest.id,
-    name: doc.backtest.name,
-    description: documentDescription(doc),
-    author: doc.backtest.author.mine ? null : doc.backtest.author.name,
+    id: backtest.id,
+    name: backtest.name,
+    description: comparedDescription(backtest),
+    author: backtest.author.mine ? null : backtest.author.name,
     color,
-    equity: percentOf(ts, equity, (value) => value - 1),
-    drawdown: percentOf(ts, drawdown, (value) => -Math.abs(value)),
+    equity: percentOf(times, equity),
+    drawdown: percentOf(times, drawdown),
   };
 }
 

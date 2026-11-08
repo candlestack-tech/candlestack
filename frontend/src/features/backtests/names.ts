@@ -1,4 +1,4 @@
-import type { Backtest, BacktestDocument, Manifest } from '@/api';
+import type { Backtest, BacktestDocument, ComparedBacktest, Manifest } from '@/api';
 import { manifestRepresentation } from '@/features/models';
 
 import { describedAs } from './format';
@@ -18,6 +18,13 @@ export const documentReads = (doc: BacktestDocument) => describedAs([documentRep
 // "AAPL · Kagi · 1h".
 export const documentDescription = (doc: BacktestDocument) =>
   describedAs([doc.data.instrument.symbol, documentReads(doc)]);
+
+// The same of a backtest in the comparison, from its setup ("stock:AAPL" is AAPL).
+export function comparedDescription({ setup }: ComparedBacktest): string {
+  const symbol = setup.instrument.slice(setup.instrument.indexOf(':') + 1);
+  const reads = setup.reads === null ? '' : manifestRepresentation(setup.reads);
+  return describedAs([symbol, reads, setup.timeframe]);
+}
 
 // Whether the user gave the backtest a name of their own.
 export const hasOwnName = (backtest: Pick<Backtest, 'name' | 'generated_name'>) =>

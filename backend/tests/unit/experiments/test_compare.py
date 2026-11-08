@@ -143,13 +143,13 @@ def test_a_backtest_without_results_has_no_values_and_no_marks() -> None:
 
 def test_the_ids_are_separated_by_commas() -> None:
     assert parse_ids("bt_a, bt_b") == ["bt_a", "bt_b"]
+    assert parse_ids("bt_a") == ["bt_a"]
     assert len(parse_ids(",".join(f"bt_{n}" for n in range(20)))) == 20
 
 
 @pytest.mark.parametrize(
     ("ids", "says"),
     [
-        ("bt_a", "has 1"),
         (",".join(f"bt_{n}" for n in range(21)), "has 21"),
         ("bt_a,,bt_b", "empty"),
         ("bt_a,bt_a", "twice"),
@@ -194,12 +194,16 @@ def document(
         },
         "model": {
             "name": "lstm.keras",
-            "manifest": {"input": {"representation": {"id": "candles@1"}}},
+            "manifest": {
+                "input": {"representation": {"id": "candles@1"}},
+                "signature": {"input": {"shape": [25, 5]}},
+            },
         },
         "data": {
             "instrument": {"id": "stock:AAPL"},
             "timeframe": "30m",
             "period": {"start": 0, "end": 100},
+            "rows": {"first_ts": ts[0], "last_ts": ts[-1], "count": len(ts)},
         },
         "decision": {"calibrate": calibrate, "rule": {"name": "threshold", "limit": limit}},
         "execution": {"fee_bps": 5.0},
@@ -226,6 +230,7 @@ def test_the_setup_of_a_backtest() -> None:
         "instrument": "stock:AAPL",
         "model": "lstm.keras",
         "reads": "candles@1",
+        "input": [25, 5],
         "timeframe": "30m",
         "period": {"start": 0, "end": 100},
         "decision": {"calibrate": None, "rule": {"name": "threshold", "limit": 0.1}},
@@ -310,6 +315,7 @@ def test_a_comparison_lists_each_with_its_curves_on_one_axis() -> None:
         None,
     )
     assert shown.metrics[0].values == [0.5, 0.5, None]
+    assert [backtest.candles for backtest in shown.backtests] == [3, 2, None]
     assert shown.differs == ["decision.rule.limit"]
 
 

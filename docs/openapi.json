@@ -2376,6 +2376,21 @@
             "description": "The cumulative return of holding its instrument over its period, at the same times: its last value is the `buy_and_hold_return` statistic",
             "title": "Buy And Hold"
           },
+          "candles": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The candles of its period it ran on (`data.rows.count` of its document); null without results",
+            "examples": [
+              12480
+            ],
+            "title": "Candles"
+          },
           "drawdown": {
             "anyOf": [
               {
@@ -2461,7 +2476,7 @@
           },
           "setup": {
             "additionalProperties": true,
-            "description": "What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document",
+            "description": "What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `input` (the model's input, rows by features, from its manifest's signature), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document",
             "title": "Setup",
             "type": "object"
           },
@@ -2479,6 +2494,7 @@
           "status",
           "error",
           "setup",
+          "candles",
           "equity",
           "drawdown",
           "buy_and_hold"
@@ -7448,16 +7464,16 @@
     },
     "/api/v1/compare": {
       "get": {
-        "description": "Backtests side by side, as the Compare page shows them: each statistic of each with the\nbest and the worst marked, the setups and which of their fields differ, and the equity and\nthe drawdown of each and the return of holding its instrument on one time axis of at most\n200 times. A backtest that is running or failed is listed with its status and without\nvalues. Access is that of `GET /api/v1/backtests/{backtest_id}`. It reads only what each\nbacktest stored when it ran, so it loads no candles from a data source.",
+        "description": "Backtests side by side, as the Compare page shows them: each statistic of each with the\nbest and the worst marked, the setups and which of their fields differ, and the equity and\nthe drawdown of each and the return of holding its instrument on one time axis of at most\n200 times. A backtest that is running or failed is listed with its status and without\nvalues; one alone is listed with nothing marked, as the page shows a single backtest. Access\nis that of `GET /api/v1/backtests/{backtest_id}`. It reads only what each\nbacktest stored when it ran, so it loads no candles from a data source.",
         "operationId": "compare_backtests_api_v1_compare_get",
         "parameters": [
           {
-            "description": "2 to 20 backtest IDs separated by commas: the user's own and published ones of other accounts",
+            "description": "1 to 20 backtest IDs separated by commas: the user's own and published ones of other accounts",
             "in": "query",
             "name": "ids",
             "required": true,
             "schema": {
-              "description": "2 to 20 backtest IDs separated by commas: the user's own and published ones of other accounts",
+              "description": "1 to 20 backtest IDs separated by commas: the user's own and published ones of other accounts",
               "examples": [
                 "bt_7f3k2m9qx4,bt_t9n8v7d6a5"
               ],
@@ -7526,7 +7542,7 @@
                 }
               }
             },
-            "description": "Fewer than 2 or more than 20 IDs, an empty one or one twice (`validation`)."
+            "description": "More than 20 IDs, an empty one or one twice (`validation`)."
           },
           "429": {
             "content": {

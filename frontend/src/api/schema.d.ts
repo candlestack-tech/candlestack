@@ -256,7 +256,8 @@ export interface paths {
          *     best and the worst marked, the setups and which of their fields differ, and the equity and
          *     the drawdown of each and the return of holding its instrument on one time axis of at most
          *     200 times. A backtest that is running or failed is listed with its status and without
-         *     values. Access is that of `GET /api/v1/backtests/{backtest_id}`. It reads only what each
+         *     values; one alone is listed with nothing marked, as the page shows a single backtest. Access
+         *     is that of `GET /api/v1/backtests/{backtest_id}`. It reads only what each
          *     backtest stored when it ran, so it loads no candles from a data source.
          */
         get: operations["compare_backtests_api_v1_compare_get"];
@@ -2028,6 +2029,12 @@ export interface components {
              */
             buy_and_hold: (number | null)[] | null;
             /**
+             * Candles
+             * @description The candles of its period it ran on (`data.rows.count` of its document); null without results
+             * @example 12480
+             */
+            candles: number | null;
+            /**
              * Drawdown
              * @description Its fall from its highest equity (a fraction, 0 or below), at the same times; per day, the day's lowest
              */
@@ -2065,7 +2072,7 @@ export interface components {
             public: boolean;
             /**
              * Setup
-             * @description What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document
+             * @description What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `input` (the model's input, rows by features, from its manifest's signature), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document
              */
             setup: {
                 [key: string]: unknown;
@@ -4736,7 +4743,7 @@ export interface operations {
     compare_backtests_api_v1_compare_get: {
         parameters: {
             query: {
-                /** @description 2 to 20 backtest IDs separated by commas: the user's own and published ones of other accounts */
+                /** @description 1 to 20 backtest IDs separated by commas: the user's own and published ones of other accounts */
                 ids: string;
             };
             header?: never;
@@ -4790,7 +4797,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Fewer than 2 or more than 20 IDs, an empty one or one twice (`validation`). */
+            /** @description More than 20 IDs, an empty one or one twice (`validation`). */
             422: {
                 headers: {
                     [name: string]: unknown;

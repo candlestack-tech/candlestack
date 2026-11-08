@@ -190,8 +190,21 @@ def test_an_unknown_unpublished_or_test_backtest_is_named(ada, bob, worker) -> N
     assert test_data.json()["id"] == seeded
 
 
-@pytest.mark.parametrize("ids", [["bt_a"], [f"bt_{n}" for n in range(21)], ["bt_a", "bt_a"]])
-def test_two_to_twenty_different_backtests(ada, ids: list[str]) -> None:
+def test_one_backtest_alone_is_listed_with_nothing_marked(ada, worker) -> None:
+    own = ada.start(body(ada.runnable_model())).json()["backtest"]["id"]
+    document = ada.ended(own)
+
+    response = compare(ada, own)
+
+    assert response.status_code == 200, response.text
+    (shown,) = response.json()["backtests"]
+    assert shown["candles"] == document["data"]["rows"]["count"]
+    assert shown["setup"]["input"] == [25, 5]
+    assert all(row["marks"] == [None] for row in response.json()["metrics"])
+
+
+@pytest.mark.parametrize("ids", [["bt_a", ""], [f"bt_{n}" for n in range(21)], ["bt_a", "bt_a"]])
+def test_one_to_twenty_different_backtests(ada, ids: list[str]) -> None:
     response = compare(ada, *ids)
 
     assert (response.status_code, response.json()["type"]) == (422, PROBLEMS + "validation")

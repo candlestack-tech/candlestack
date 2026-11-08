@@ -3,9 +3,10 @@ worst of every statistic marked, the setups and what differs between them, and t
 curves on one time axis, from what each backtest stored when it ran (``BacktestRuns.stored``):
 never the candles again, so comparing many spends none of a data source's request budget.
 
-The marking rules are the Compare page's (``frontend/src/features/backtests/compare/rows.ts``)
-and a line's value at a time is its chart's (``chartLines.ts``, ``valueAt``), so the app, the
-API and agents agree on which backtest did best.
+The Compare page shows this answer as it is (``frontend/src/features/backtests/compare/``:
+``rows.ts`` writes the values as the texts below, ``chartLines.ts`` draws the curves and reads a
+line's value at a time as ``value_at`` does), so the app, the API and agents agree on which
+backtest did best.
 """
 
 from bisect import bisect_right
@@ -26,7 +27,8 @@ from candlestack.experiments.errors import (
 from candlestack.experiments.runs import BacktestRuns
 from candlestack.experiments.schemas import BacktestStatus
 
-COMPARE_MIN = 2
+# One is listed as it is, nothing marked: the Compare page shows a single backtest that way.
+COMPARE_MIN = 1
 COMPARE_MAX = 20
 # The longest ``ids``: 20 IDs of ``bt_`` and 10 characters, commas and spaces, with room.
 IDS_MAX_LENGTH = COMPARE_MAX * 20
@@ -75,8 +77,14 @@ class ComparedBacktest(BaseModel):
     error: str | None = Field(description="What went wrong, for a failed one")
     setup: dict[str, Any] = Field(
         description="What it ran on and with: `instrument`, `model` (its file name), `reads` "
-        "(the representation of its manifest), `timeframe`, `period`, and the `decision`, "
+        "(the representation of its manifest), `input` (the model's input, rows by features, "
+        "from its manifest's signature), `timeframe`, `period`, and the `decision`, "
         "`execution` and `benchmarks` (the instruments held) of its result document"
+    )
+    candles: int | None = Field(
+        description="The candles of its period it ran on (`data.rows.count` of its document); "
+        "null without results",
+        examples=[12_480],
     )
     equity: list[float | None] | None = Field(
         description="Its cumulative return (a fraction of its starting capital) at each of "
@@ -119,7 +127,7 @@ def parse_ids(ids: str) -> list[str]:
     """The backtest IDs of ``ids``, separated by commas.
 
     Raises:
-        InvalidBacktest: Fewer than 2 or more than 20, an empty one, or one twice.
+        InvalidBacktest: More than 20, an empty one, or one twice.
     """
     parsed = [part.strip() for part in ids.split(",")]
     if not COMPARE_MIN <= len(parsed) <= COMPARE_MAX:
@@ -171,6 +179,7 @@ def compared(documents: Sequence[dict[str, Any]]) -> CompareOut:
                 status=BacktestStatus(header["status"]),
                 error=header["error"],
                 setup=setup,
+                candles=(doc["data"].get("rows") or {}).get("count") if finished else None,
                 equity=_curve(equity, times) if finished else None,
                 drawdown=_curve(fall, times) if finished else None,
                 buy_and_hold=_curve(held, times) if finished else None,
@@ -308,11 +317,14 @@ def metric_rows(stats: Sequence[dict[str, Any] | None]) -> list[CompareMetric]:
 def setup_of(document: dict[str, Any]) -> dict[str, Any]:
     """What a backtest ran on and with, from its result document."""
     data, model = document["data"], document["model"]
-    representation = model["manifest"].get("input", {}).get("representation", {}).get("id")
+    manifest = model["manifest"]
+    representation = manifest.get("input", {}).get("representation", {}).get("id")
+    shape = manifest.get("signature", {}).get("input", {}).get("shape")
     return {
         "instrument": data["instrument"]["id"],
         "model": model["name"],
         "reads": representation,
+        "input": shape,
         "timeframe": data["timeframe"],
         "period": data["period"],
         "decision": document["decision"],

@@ -101,7 +101,7 @@ flowchart LR
 | `GET /api/v1/backtests` | a page of 10 of the user's backtests: search `q` (name, number, symbol or model name), `show` (`all`, `starred`, `failed`, `public`), `model` (a model's name), `sort` and `order`, `page`; with the total, the pages and what the filter panel shows (the counts of all, starred, failed and published backtests, the models used) ([Backtests](#backtests)) |
 | `PATCH /api/v1/backtests/{backtest_id}` | stars, unstars, renames (`409 name-taken`; a name of null goes back to the generated one), publishes or unpublishes the user's backtest |
 | `GET /api/v1/experiments` | a page of 12 of the backtests every account published ([Experiments](#experiments)): search `q` (the backtest's name, symbol, model name or author's name), `mine` or `author` (a user ID), `market`, `symbol`, `representation`, `timeframe`, `sort` and `order`, `page`; with the total, the pages, the counts (all published, the user's, the accounts that published) and what the filters offer |
-| `GET /api/v1/compare?ids=<id>,<id>` | 2 to 20 backtests side by side, the user's own and others' published ones, as the Compare page shows them ([Compare](#compare)) |
+| `GET /api/v1/compare?ids=<id>,<id>` | 1 to 20 backtests side by side, the user's own and others' published ones, as the Compare page shows them ([Compare](#compare)) |
 | `GET /api/v1/dashboard` | everything the Dashboard shows in one response: the counts, the 6 newest backtests, the 5 best finished ones by Sharpe ratio, return, drawdown and win rate, the 4 best starred ones, and the 4 newest published backtests of anyone with how many are published |
 | `GET /api/v1/docs` | API reference (Scalar); public on prod |
 | `GET /api/v1/openapi.json` | OpenAPI schema; snapshot committed as [openapi.json](openapi.json) |
@@ -837,13 +837,15 @@ The backtests users published, which every signed-in account (the beta list's) c
 
 ## Compare
 
-`GET /api/v1/compare?ids=bt_a,bt_b,...` (`experiments/compare.py`) compares 2 to 20 backtests, so
-an agent gets the app's verdict without downloading and comparing the documents itself.
+`GET /api/v1/compare?ids=bt_a,bt_b,...` (`experiments/compare.py`) compares 1 to 20 backtests, so
+an agent gets the app's verdict without downloading and comparing the documents itself, and the
+Compare page shows the same answer (#401). One alone is listed with nothing marked: the page shows
+a single backtest that way while it asks for one more.
 
 - **Access** is that of `GET /api/v1/backtests/{backtest_id}`: the user's own, whatever their
   status, and others' while published, in the order asked for; an ID the user cannot see is
-  `404 not-found` and test data `409 no-document`, each with `id` naming that backtest. Fewer
-  than 2 or more than 20 IDs, an empty one or one twice is `422 validation`.
+  `404 not-found` and test data `409 no-document`, each with `id` naming that backtest. More
+  than 20 IDs, an empty one or one twice is `422 validation`.
 - **Only what is stored** (`BacktestRuns.stored`): the setup (`spec`), the statistics (`stats`)
   and the curves (`curves`) each backtest stored when it ran, never the candles, so it makes no
   request to a data source. Rebuilding the documents did: on stage three backtests spent
@@ -851,15 +853,17 @@ an agent gets the app's verdict without downloading and comparing the documents 
   integration test swaps the data module for one that fails on any use.
 - **Statistics** (`metrics`): the 12 of `results.stats` in the Compare table's order, each with
   `better` (`higher`, `lower` or `none`), the value of each backtest and its mark, `best`,
-  `worst` or null. The rules are the page's (`frontend/src/features/backtests/compare/rows.ts`):
+  `worst` or null, which the page shows as they are (its `rows.ts` only writes the values):
   a fall counts by its size whatever its sign, fees are better lower, the trades, the time in
   the market and buy and hold are better neither way; values that read the same on the page
   (one decimal of a percent, two of the average trade and of a ratio) count as equal; nothing is
   marked with fewer than two values or when all are equal. A running or failed backtest is
   listed with its status (and error) and null values and marks.
-- **Setups**: each backtest's `setup` (instrument, model file, what it reads, timeframe, period,
-  `decision`, `execution`, the benchmarks' instruments) and `differs`, the dotted paths of the
-  fields whose values differ (one only some have counts).
+- **Setups**: each backtest's `setup` (instrument, model file, what it reads, the model's input
+  shape from its manifest's signature, timeframe, period, `decision`, `execution`, the
+  benchmarks' instruments) and `differs`, the dotted paths of the fields whose values differ
+  (one only some have counts). `candles`, beside the setup, is how many candles of its period it
+  ran on (null without results), so it never counts as a difference of the setups.
 - **Curves**: `times`, at most 200 times shared by all (the first and the last of each series,
   the rest evenly spaced from the earliest to the latest), and for each backtest `equity` (its
   cumulative return), `drawdown` (its fall from the top, 0 or below) and `buy_and_hold` (the
@@ -874,8 +878,8 @@ an agent gets the app's verdict without downloading and comparing the documents 
   finished before `curves` was stored is drawn from its short equity series (at most 60 points
   from its first row to its last, the drawdown of those points, buy and hold only when its
   benchmark held its own instrument): its candles are not stored, so no migration can work the
-  curves out. About 20 KB for four backtests over their whole axes, against the four whole
-  documents the page loads today.
+  curves out. About 22 KB (4 KB gzipped) for four backtests over their whole axes; the four
+  light documents the page loaded before were 5 to 6 MB (1.6 to 2.1 MB gzipped).
 
 ## Modules
 

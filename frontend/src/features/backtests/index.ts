@@ -25,7 +25,7 @@ export {
   useCompareSelection,
   type ComparePick,
 } from './compare/selection';
-export { isMissing, useLeaveMissing, useNamesOf } from './compare/unpublished';
+export { isMissing, useComparedNames, useLeaveCompared } from './compare/unpublished';
 export { ModelBacktests } from './ModelBacktests';
 export { BackLink, BacktestResult, useBacktestResult } from './result';
 export { compareTarget, descriptionOf, hasResults, returnClass } from './format';
