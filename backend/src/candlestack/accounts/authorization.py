@@ -455,7 +455,7 @@ class AuthorizationServer:
 
         Raises:
             NoSuchAuthorizationRequest: It was decided, expired or never was, or it started in
-                another browser, or its app no longer registers its redirect URI.
+                another browser, or its redirect URI is not one its app registers.
         """
         pending = await self._pending.request(request_id)
         if (
