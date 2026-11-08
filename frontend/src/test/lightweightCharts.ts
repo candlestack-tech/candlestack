@@ -112,6 +112,10 @@ function timeAxis() {
     unsubscribeVisibleLogicalRangeChange: vi.fn(),
     subscribeSizeChange: vi.fn(),
     unsubscribeSizeChange: vi.fn(),
+    // No layout in jsdom: no width, and the view at the newest candle.
+    width: () => 0,
+    scrollPosition: () => 0,
+    scrollToPosition: vi.fn(),
   };
   return { api, showFirst, scroll };
 }

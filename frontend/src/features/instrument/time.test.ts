@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { marketTimeZone, viewerTimeZone, type DateStyle } from '@/lib/dates';
 
-import { Tick, crosshairFormatter, dayFormatter, tickFormatter, timeZoneNote } from './time';
+import { Tick, crosshairFormatter, dayFormatter, dayZone, tickFormatter, timeZoneNote } from './time';
 
 // 2024-06-03 13:30 UTC: the NYSE open in summer time; 2024-01-08 14:30 UTC: the open in winter.
 const SUMMER_OPEN = Date.UTC(2024, 5, 3, 13, 30) / 1000;
@@ -58,5 +58,10 @@ describe('chart time', () => {
 
   it('gives a chart of days the date alone under the crosshair', () => {
     expect(dayFormatter(inZone('America/New_York'))(SUMMER_OPEN)).toBe('3 Jun 2024');
+  });
+
+  it("writes a market's days in its own zone: New York sessions for stocks, UTC days for crypto", () => {
+    expect(dayZone('stock')).toBe('America/New_York');
+    expect(dayZone('crypto')).toBe('UTC');
   });
 });
