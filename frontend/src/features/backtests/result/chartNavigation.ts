@@ -204,19 +204,25 @@ function useLoadOnMove(
 function useRange(goTo: (target: View) => void, run: Run, visible: View | null, waiting: () => boolean) {
   const [range, setRange] = useState<RangeName | null>(null);
   const current = useRef(range);
+  // The view in place when the range was picked. React may run the effect of a move from before
+  // the pick only after it, when the pick has already let go of the target waiting for candles but
+  // `current` still holds the range before: that move must not drop the range just picked.
+  const pickedAt = useRef<View | null>(null);
   useEffect(() => {
     current.current = range;
   }, [range]);
   useEffect(() => {
     const name = current.current;
-    if (name && visible && !waiting() && !near(visible, rangeView(name, run))) setRange(null);
+    if (!name || !visible || visible === pickedAt.current || waiting()) return;
+    if (!near(visible, rangeView(name, run))) setRange(null);
   }, [visible, run, waiting]);
   const pick = useCallback(
     (name: RangeName) => {
+      pickedAt.current = visible;
       setRange(name);
       goTo(rangeView(name, run));
     },
-    [goTo, run],
+    [goTo, run, visible],
   );
   return { range, setRange, pick };
 }

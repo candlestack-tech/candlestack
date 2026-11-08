@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ARSEN, backtestDocument, problem, sessionWithPreferences, spyDocument, stubApi } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
@@ -15,6 +15,16 @@ const DOCUMENT = `GET /api/v1/backtests/${ID}`;
 // The run's 30-minute candles of AAPL, the whole test period in one request.
 const CANDLES = 'GET /api/v1/data/instruments/stock%3AAAPL/candles?timeframe=30m&start=1717372800&end=1717459200';
 const TIMES = backtestDocument().results!.series.columns.ts;
+
+// The backtest page once, before the tests: the first page of a test file loads the app's code on
+// demand, which takes seconds while every test file starts at once (as warmUpSettings does).
+beforeAll(async () => {
+  stubApi({ ...sessionWithPreferences(ARSEN), [DOCUMENT]: { status: 200, body: backtestDocument() } });
+  await renderApp(`/backtests/${ID}`);
+  cleanup();
+  vi.unstubAllGlobals();
+  charts.reset();
+});
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -234,6 +244,10 @@ describe("a long backtest's chart", () => {
     await renderApp(`/backtests/${ID}`);
     await vi.waitFor(() => expect(charts.of('Candlestick')[0]?.data.length).toBeGreaterThan(0));
     await vi.waitFor(() => expect(waiting.length).toBeGreaterThan(0));
+    // The opening view settles (250 ms) while the month waits: settling later, after the month's
+    // candles came in, it would ask for the days of the whole period again before the test looks.
+    await vi.waitFor(() => expect(box('Price and trades').getByText(/1 trade in view/)).toBeDefined());
+    await act(() => new Promise((done) => setTimeout(done, 400)));
     const release = async () => {
       act(() => waiting.splice(0).forEach((done) => done()));
       await vi.waitFor(() => expect(box('Price and trades').queryByText(/BTCUSDT · 4h/)).not.toBeNull());
@@ -269,6 +283,27 @@ describe("a long backtest's chart", () => {
     expect(all).toEqual({ from: START, to: END });
     await release();
     expect(charts.shown).not.toContainEqual(MONTH);
+    expect(pressed('All')).toBe(true);
+  });
+
+  // React shows the chart's own move at once but runs the effects of it a moment later; a range
+  // picked in between is kept.
+  it('keeps a range picked before the page caught up with a move of the chart', async () => {
+    await openLong(['4h']);
+    const section = screen.getByRole('heading', { level: 2, name: 'Price and trades' }).closest('section')!;
+    const card = within(section);
+    const picked = new Promise<void>((done) => {
+      const observer = new MutationObserver(() => {
+        if (!card.queryByText(/0 trades in view/)) return;
+        observer.disconnect();
+        fireEvent.click(card.getByRole('button', { name: 'All' }));
+        done();
+      });
+      observer.observe(section, { subtree: true, childList: true, characterData: true });
+    });
+    charts.scroll({ from: 0, to: 100 });
+    await picked;
+    await vi.waitFor(() => expect(charts.shown.at(-1)).toEqual({ from: START, to: END }));
     expect(pressed('All')).toBe(true);
   });
 });
