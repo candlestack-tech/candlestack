@@ -1011,11 +1011,11 @@ call, as the routes' dependencies do), never the API over HTTP.
   OAuth access token (`csa_...`, [OAuth](#oauth)), checked by `accounts.token_caller` the same
   way, per connected app, and only for this resource. The key or token is checked first,
   without counting the request; then the body is read, at most 2 MiB (`413 request-too-large`
-  by its `Content-Length` before anything is read, or once the bytes read pass the limit), and
-  the request is counted by its JSON-RPC method (`accounts.count_request`): `initialize`,
-  `server/discover`, `ping`, the lists (`tools/list`, `resources/list`,
-  `resources/templates/list`, `prompts/list`) and notifications count against a limit of their
-  own ten times looser (`accounts:key-rl-free:<id>`, `accounts:app-rl-free:<id>`), so a client
+  by its `Content-Length` before anything is read, or once the bytes read pass the limit, the
+  request still counted in full), and the request is counted by its JSON-RPC method
+  (`accounts.count_request`): `initialize`, `server/discover`, `ping`, the lists (`tools/list`,
+  `resources/list`, `resources/templates/list`, `prompts/list`) and notifications in a body of
+  at most 64 KiB count against a limit of their own ten times looser (`accounts:key-rl-free:<id>`, `accounts:app-rl-free:<id>`), so a client
   over the limit still connects; the rest against the 120 a minute. A `tools/call` over the
   limit is answered `200` as the tool's error (`isError`) with the problem `rate-limited` and
   its `retry_after_s`, which the model reads; any other request over it (and a `tools/call`

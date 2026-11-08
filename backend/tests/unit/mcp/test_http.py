@@ -171,14 +171,16 @@ def test_an_access_token_that_does_not_sign_in_is_an_invalid_token(
 
 class Counted:
     """Stands in for ``accounts.count_request``: records whether each request was light and
-    refuses the requests that do work, as a key over its rate limit does."""
+    refuses the requests that do work, as a key over its rate limit does, unless `refuse` is
+    false."""
 
     def __init__(self) -> None:
         self.light: list[bool] = []
+        self.refuse = True
 
     async def __call__(self, _limiter: object, _caller: Caller, *, light: bool = False) -> None:
         self.light.append(light)
-        if not light:
+        if self.refuse and not light:
             raise ProblemError(
                 429,
                 "rate-limited",
@@ -287,6 +289,8 @@ def test_the_key_is_checked_before_the_body_is_read(
 def test_a_body_declared_too_large_is_refused_unread(
     mcp_client: TestClient, keys, counted: Counted
 ) -> None:
+    counted.refuse = False
+
     response = mcp_client.post(
         "/mcp",
         content=b"{}",
@@ -295,12 +299,28 @@ def test_a_body_declared_too_large_is_refused_unread(
 
     assert response.status_code == 413
     assert response.json()["type"] == PROBLEMS + "request-too-large"
-    assert counted.light == []
+    # It still counts in full, so a key cannot send such bodies unlimited.
+    assert counted.light == [False]
+
+
+def test_a_body_too_large_over_the_rate_limit_is_rate_limited(
+    mcp_client: TestClient, keys, counted: Counted
+) -> None:
+    response = mcp_client.post(
+        "/mcp",
+        content=b"{}",
+        headers={**signed_in(keys), "Content-Length": str(http.BODY_MAX + 1)},
+    )
+
+    assert response.status_code == 429
+    assert counted.light == [False]
 
 
 def test_a_body_without_its_length_is_read_only_up_to_the_limit(
     mcp_client: TestClient, keys, counted: Counted
 ) -> None:
+    counted.refuse = False
+
     def chunks():
         for _ in range(3):
             yield b" " * (http.BODY_MAX // 2 + 1)
@@ -309,12 +329,41 @@ def test_a_body_without_its_length_is_read_only_up_to_the_limit(
 
     assert response.status_code == 413
     assert response.json()["type"] == PROBLEMS + "request-too-large"
-    assert counted.light == []
+    assert counted.light == [False]
+
+
+def test_a_light_method_in_a_large_body_counts_in_full(
+    mcp_client: TestClient, keys, counted: Counted
+) -> None:
+    listed = json.dumps({"jsonrpc": "2.0", "id": 4, "method": "tools/list"}).encode()
+    padded = listed + b" " * http.LIGHT_BODY_MAX
+
+    response = mcp_client.post(
+        "/mcp", content=padded, headers={**signed_in(keys), "Content-Type": "application/json"}
+    )
+
+    assert response.status_code == 429
+    assert counted.light == [False]
+
+
+def test_a_batch_counts_in_full_and_is_no_tool_s_error(
+    mcp_client: TestClient, keys, counted: Counted
+) -> None:
+    batch = [
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "get_me"}},
+    ]
+
+    response = mcp_client.post("/mcp", json=batch, headers=signed_in(keys))
+
+    assert response.status_code == 429
+    assert counted.light == [False]
 
 
 def test_a_body_at_the_limit_reaches_the_server_whole(
     mcp_client: TestClient, keys, counted: Counted
 ) -> None:
+    counted.refuse = False
     listed = json.dumps({"jsonrpc": "2.0", "id": 4, "method": "tools/list"}).encode()
     padded = listed + b" " * (http.BODY_MAX - len(listed))
 
@@ -330,4 +379,5 @@ def test_a_body_at_the_limit_reaches_the_server_whole(
 
     assert response.status_code == 200
     assert "get_me" in [tool["name"] for tool in response.json()["result"]["tools"]]
-    assert counted.light == [True]
+    # Too large a body for a light request: it counts in full.
+    assert counted.light == [False]

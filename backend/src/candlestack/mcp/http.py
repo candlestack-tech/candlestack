@@ -56,6 +56,8 @@ MCP_PATH = "/mcp"
 METADATA_PATH = "/.well-known/oauth-protected-resource" + MCP_PATH
 # The largest body a request may have: the largest a tool takes is a manifest of 1 MiB as JSON.
 BODY_MAX = 2 * 1024 * 1024
+# The largest body of a light request: a larger one counts as a request that does work.
+LIGHT_BODY_MAX = 64 * 1024
 # The methods that set up a session or list what the server offers, which a client sends when
 # it connects: they count against the looser limit of light requests, as notifications do.
 _LIGHT = frozenset(
@@ -168,11 +170,13 @@ def _message(body: bytes) -> dict[str, Any] | None:
     return message if isinstance(message, dict) else None
 
 
-def _light(message: dict[str, Any] | None) -> bool:
+def _light(body: bytes, message: dict[str, Any] | None) -> bool:
     """Whether the request with `message` only connects or lists: a notification or one of the
-    methods of ``_LIGHT``."""
+    methods of ``_LIGHT``, in a body of at most ``LIGHT_BODY_MAX`` bytes."""
     method = None if message is None else message.get("method")
-    return isinstance(method, str) and (method in _LIGHT or method.startswith("notifications/"))
+    if len(body) > LIGHT_BODY_MAX or not isinstance(method, str):
+        return False
+    return method in _LIGHT or method.startswith("notifications/")
 
 
 def _call_id(message: dict[str, Any] | None) -> str | int | None:
@@ -217,13 +221,18 @@ class _McpEndpoint:
         state = request.app.state
         token = _token(request, state.settings)
         caller = await _sign_in(request, state.settings, token)
-        message = None
+        body, message = b"", None
         if request.method == "POST":
-            body = await _body(request)
+            try:
+                body = await _body(request)
+            except ProblemError:
+                # A body too large still counts in full, so a key cannot send them unlimited.
+                await count_request(state.rate_limiter, caller)
+                raise
             message = _message(body)
             receive = _replayed(body, receive)
         try:
-            await count_request(state.rate_limiter, caller, light=_light(message))
+            await count_request(state.rate_limiter, caller, light=_light(body, message))
         except ProblemError as problem:
             call_id = _call_id(message)
             if call_id is None:

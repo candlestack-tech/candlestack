@@ -86,7 +86,8 @@ def test_a_tool_call_over_the_rate_limit_is_the_tool_s_error(
     key = keys("read")
 
     async def calls(session: Client):
-        # Connecting and listing the tools do not count: the two calls fit, the third not.
+        # Connecting and listing count against the light limit: the two calls fit, the third
+        # not.
         await session.list_tools()
         answers = [await get_me(session) for _ in range(3)]
         await session.list_tools()

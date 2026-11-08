@@ -168,8 +168,8 @@ the same `ts` ([engine.md](engine.md)).
 The API takes 60 candle and instrument detail requests a minute from one IP address (the
 instrument search is not counted), and 120 requests a minute with one API key, whatever they
 ask for. Past either it answers 429 `rate-limited` with a `Retry-After` header and
-`retry_after_s` in the body: the seconds until the next minute. A cold request for a long stock history can also
-answer 503 `source-unavailable` with `Retry-After` while the source's budget is spent; what it
+`retry_after_s` in the body: the seconds until the next minute. A cold request for a long stock
+history can also answer 503 `source-unavailable` with `Retry-After` while the source's budget is spent; what it
 fetched so far stays cached, so the same request continues from there. In both cases wait `Retry-After` seconds and send it again:
 
 ```python
