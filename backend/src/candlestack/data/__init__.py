@@ -4,7 +4,7 @@ Other modules import only from here (``from candlestack.data import InstrumentId
 the submodules. The contract is docs/data.md.
 """
 
-from candlestack.data.api import client_rate_limit
+from candlestack.data.api import TimeParam, client_rate_limit
 from candlestack.data.api import market as market_data_router
 from candlestack.data.api import problems as data_problems
 from candlestack.data.api import router as data_router
@@ -85,6 +85,7 @@ __all__ = [
     "Source",
     "SourceHealth",
     "SourceUnavailable",
+    "TimeParam",
     "Timeframe",
     "TooManyCandles",
     "WarmUpOutOfRange",

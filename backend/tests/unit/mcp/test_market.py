@@ -16,7 +16,13 @@ from mcp import Client
 from mcp.types import CallToolResult
 
 from candlestack.accounts import AccountsService, User
-from candlestack.accounts.schemas import Appearance, BacktestDefaults, PreferencesOut, TimeZone
+from candlestack.accounts.schemas import (
+    Appearance,
+    BacktestDefaults,
+    BacktestDefaultsIn,
+    PreferencesOut,
+    TimeZone,
+)
 from candlestack.data import (
     CANDLE_SCHEMA,
     CandleSet,
@@ -131,17 +137,20 @@ class FakeDataService:
             raise InstrumentNotFound(instrument_id)
         return InstrumentInfo(AAPL, tuple(Timeframe), 1451917800, 1790372340, 50000)
 
-    async def candles(
-        self, instrument_id: InstrumentId, timeframe: Timeframe, start: int, end: int
+    async def first_candles(
+        self, instrument_id: InstrumentId, timeframe: Timeframe, start: int, end: int, limit: int
     ) -> CandleSet:
-        self._called("candles", instrument_id, timeframe, start, end)
+        """The first `limit` hours from `start` (the data begins at ``DAY``), missing ones
+        counted."""
+        self._called("first_candles", instrument_id, timeframe, start, end, limit)
         if start >= end:
             raise InvalidRequest(f"start ({start}) must be before end ({end}).")
-        return hourly(instrument_id, start, end, self.missing)
+        return hourly(instrument_id, start, min(end, start + limit * HOUR), self.missing)
 
     async def last_candles(
         self, instrument_id: InstrumentId, timeframe: Timeframe, end: int, limit: int
     ) -> CandleSet:
+        """The last `limit` hours before `end`, missing ones counted, from ``DAY`` on."""
         self._called("last_candles", instrument_id, timeframe, end, limit)
         return hourly(instrument_id, max(end - limit * HOUR, DAY), end, self.missing)
 
@@ -355,6 +364,21 @@ def test_without_start_the_newest_candles_and_where_the_earlier_end(
     assert limiter.keys == ["data:rl:client:127.0.0.1"]
 
 
+def test_without_start_missing_candles_do_not_end_the_paging(mcp, service: FakeDataService) -> None:
+    """Hours without a trade make a page shorter than `limit`; the earlier data is still
+    there, and the next page ends where this one starts, not at its first candle."""
+    service.missing = {NOW - 4 * HOUR, NOW - 2 * HOUR}
+
+    page = answer(
+        mcp, "get_candles", {"instrument_id": "crypto:BTCUSDT", "timeframe": "1h", "limit": 4}
+    )
+
+    assert candles_of(page) == [NOW - 3 * HOUR, NOW - HOUR]
+    assert page["gaps"] == [[NOW - 4 * HOUR, NOW - 3 * HOUR], [NOW - 2 * HOUR, NOW - HOUR]]
+    assert page["start"] == "2024-07-02T20:00:00Z"
+    assert page["next_end"] == "2024-07-02T20:00:00Z"
+
+
 def test_without_start_the_data_s_beginning_ends_the_paging(mcp) -> None:
     page = answer(
         mcp,
@@ -375,7 +399,7 @@ def test_with_start_a_crypto_page_spans_limit_candles(mcp, service: FakeDataServ
         {"instrument_id": "crypto:BTCUSDT", "timeframe": "1h", "start": "2024-06-03", "limit": 3},
     )
 
-    assert service.calls == [("candles", BTCUSDT.id, Timeframe.H1, DAY, DAY + 3 * HOUR)]
+    assert service.calls == [("first_candles", BTCUSDT.id, Timeframe.H1, DAY, NOW, 3)]
     assert candles_of(page) == [DAY, DAY + 2 * HOUR]
     assert page["gaps"] == [[DAY + HOUR, DAY + 2 * HOUR]]
     assert page["start"] == "2024-06-03T00:00:00Z"
@@ -396,40 +420,45 @@ def test_with_start_the_last_page_ends_at_end(mcp, service: FakeDataService) -> 
         },
     )
 
-    assert service.calls == [("candles", BTCUSDT.id, Timeframe.H1, DAY, DAY + 2 * HOUR)]
+    assert service.calls == [("first_candles", BTCUSDT.id, Timeframe.H1, DAY, DAY + 2 * HOUR, 200)]
     assert candles_of(page) == [DAY, DAY + HOUR]
     assert page["next_start"] is None
 
 
-def test_a_stock_page_spans_more_and_is_cut_to_limit(mcp, service: FakeDataService) -> None:
-    service.missing = {DAY + 2 * HOUR, DAY + 5 * HOUR}
+def test_a_stock_page_ends_where_its_first_limit_candles_do(mcp, service: FakeDataService) -> None:
+    """The service counts the session candles of a stock; the page ends where it says."""
+    service.missing = {DAY + 2 * HOUR}
 
     page = answer(
         mcp,
         "get_candles",
-        {"instrument_id": "stock:AAPL", "timeframe": "1h", "start": "2024-06-03", "limit": 3},
+        {
+            "instrument_id": "stock:AAPL",
+            "timeframe": "1h",
+            "start": "2024-06-03T00:00:00-04:00",
+            "end": str(NOW),
+            "limit": 3,
+        },
     )
 
-    # At least four days, so a page from Friday evening reaches past a long weekend.
-    assert service.calls == [("candles", AAPL.id, Timeframe.H1, DAY, DAY + 4 * 86400)]
-    assert candles_of(page) == [DAY, DAY + HOUR, DAY + 3 * HOUR]
-    assert page["end"] == "2024-06-03T04:00:00Z"
-    assert page["next_start"] == "2024-06-03T04:00:00Z"
-    # Only the gaps inside the page.
-    assert page["gaps"] == [[DAY + 2 * HOUR, DAY + 3 * HOUR]]
+    assert service.calls == [("first_candles", AAPL.id, Timeframe.H1, DAY + 4 * HOUR, NOW, 3)]
+    assert candles_of(page) == [DAY + 4 * HOUR, DAY + 5 * HOUR, DAY + 6 * HOUR]
+    assert page["end"] == "2024-06-03T07:00:00Z"
+    assert page["next_start"] == "2024-06-03T07:00:00Z"
 
 
-@pytest.mark.parametrize(
-    ("timeframe", "limit", "span"),
-    [
-        (Timeframe.H1, 1000, int(1000 * HOUR * 5.5)),
-        (Timeframe.D1, 500, int(500 * 86400 * 1.6)),
-        (Timeframe.M1, 10, 4 * 86400),
-    ],
-)
-def test_a_stock_page_spans_its_sessions(timeframe: Timeframe, limit: int, span: int) -> None:
-    assert market._span(Market.STOCK, timeframe, limit) == span
-    assert market._span(Market.CRYPTO, timeframe, limit) == limit * timeframe.seconds
+def test_a_time_that_is_neither_a_date_nor_epoch_seconds(mcp, service: FakeDataService) -> None:
+    body = problem(
+        call(
+            mcp,
+            "get_candles",
+            {"instrument_id": "crypto:BTCUSDT", "timeframe": "1h", "start": "yesterday"},
+        )
+    )
+
+    assert body["type"] == PROBLEMS + "validation"
+    assert body["errors"][0]["loc"] == ["start"]
+    assert service.calls == []
 
 
 def test_a_start_after_the_end_is_a_validation_problem(mcp) -> None:
@@ -467,8 +496,8 @@ def test_a_period_without_data_is_the_data_problem(mcp, service: FakeDataService
     assert body["available_from"] == BTCUSDT_FIRST
 
 
-@pytest.mark.parametrize("limit", [0, 1001])
-def test_a_page_holds_1000_candles_at_most(mcp, service: FakeDataService, limit: int) -> None:
+@pytest.mark.parametrize("limit", [0, 501])
+def test_a_page_holds_500_candles_at_most(mcp, service: FakeDataService, limit: int) -> None:
     body = problem(
         call(
             mcp,
@@ -518,6 +547,10 @@ def test_the_catalog_of_one_step(mcp) -> None:
     assert length["name"] == "length"
     assert length["required"] is True
     assert (length["minimum"], length["maximum"]) == (1, 1000)
+    # What a parameter does not have is left out rather than null.
+    assert "default" not in length
+    assert "options" not in length
+    assert "exclusive_minimum" not in length
 
 
 # --- get_backtest_defaults and get_preferences ---------------------------------------------------
@@ -566,11 +599,88 @@ def test_get_preferences_answers_how_the_user_reads_dates(mcp, saved: list[str])
     assert saved == ["usr_adaaaaaaaa"]
 
 
+SAVED = {
+    "timeframe": "4h",
+    "period_start": "2022-01-03",
+    "period_end": "2023-12-29",
+    "direction": "both",
+    "threshold": 0.1,
+    "stop_loss_pct": 5,
+    "fees_pct": 0.05,
+    "slippage_pct": 0.01,
+    "benchmark": "SPY",
+}
+
+
+@pytest.fixture
+def saves(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
+    """The users and defaults saved."""
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def save(
+        _service: AccountsService, user: User, defaults: BacktestDefaultsIn
+    ) -> BacktestDefaults:
+        calls.append((user.id, defaults.model_dump(mode="json")))
+        return defaults
+
+    monkeypatch.setattr(AccountsService, "save_backtest_defaults", save)
+    return calls
+
+
+def test_update_backtest_defaults_saves_every_setting(
+    mcp, keys, saves: list[tuple[str, dict[str, Any]]]
+) -> None:
+    result = call(mcp, "update_backtest_defaults", {"defaults": SAVED}, key=keys.backtests_key)
+
+    assert not result.is_error, result.content
+    assert result.structured_content == SAVED
+    assert saves == [("usr_adaaaaaaaa", SAVED)]
+
+
+@pytest.mark.parametrize(
+    "defaults",
+    [
+        {k: v for k, v in SAVED.items() if k != "benchmark"},
+        {**SAVED, "period_start": "2024-01-02"},
+        {**SAVED, "stop": 5},
+    ],
+    ids=["a setting left out", "a period that runs back", "an unknown setting"],
+)
+def test_update_backtest_defaults_refuses_what_the_route_refuses(
+    mcp, keys, saves: list[tuple[str, dict[str, Any]]], defaults: dict[str, Any]
+) -> None:
+    body = problem(
+        call(mcp, "update_backtest_defaults", {"defaults": defaults}, key=keys.backtests_key)
+    )
+
+    assert body["type"] == PROBLEMS + "validation"
+    assert body["errors"][0]["loc"][0] == "defaults"
+    assert saves == []
+
+
+def test_update_backtest_defaults_needs_backtests(
+    mcp, saves: list[tuple[str, dict[str, Any]]]
+) -> None:
+    body = problem(call(mcp, "update_backtest_defaults", {"defaults": SAVED}))
+
+    assert body["type"] == PROBLEMS + "missing-scope"
+    assert body["scope"] == "backtests"
+    assert saves == []
+
+
 # --- scopes -------------------------------------------------------------------------------------
 
+READ_TOOLS = [spec.name for spec in market.TOOLS if spec.annotations.read_only_hint]
 
-@pytest.mark.parametrize("tool", [spec.name for spec in market.TOOLS])
-def test_every_market_tool_needs_read(mcp, keys, service: FakeDataService, tool: str) -> None:
+
+def test_only_saving_the_defaults_changes_anything() -> None:
+    assert {spec.name for spec in market.TOOLS} - set(READ_TOOLS) == {"update_backtest_defaults"}
+
+
+@pytest.mark.parametrize("tool", READ_TOOLS)
+def test_every_market_tool_that_reads_needs_read(
+    mcp, keys, service: FakeDataService, tool: str
+) -> None:
     body = problem(call(mcp, tool, key=keys.backtests_key))
 
     assert body["type"] == PROBLEMS + "missing-scope"

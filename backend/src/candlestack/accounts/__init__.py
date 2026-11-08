@@ -34,6 +34,7 @@ from candlestack.accounts.models import User
 from candlestack.accounts.reference import document_api_keys
 from candlestack.accounts.schemas import (
     BacktestDefaults,
+    BacktestDefaultsIn,
     DateFormat,
     DeniedSignInOut,
     MeOut,
@@ -55,6 +56,7 @@ __all__ = [
     "AccountsService",
     "AfterDeletion",
     "BacktestDefaults",
+    "BacktestDefaultsIn",
     "BacktestsUserDep",
     "Caller",
     "CallerDep",

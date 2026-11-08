@@ -5,7 +5,8 @@ backtest defaults and preferences.
 The market data tools call the ``DataService`` of the data routes and answer the data module's
 problems as they do (``data_problems``); an instrument and its candles count against the same
 per-minute limit of requests per client address (``client_rate_limit``). Candles come in pages
-of at most ``CANDLES_MAX`` rows, so one call never floods the model's context.
+of at most ``CANDLES_MAX`` rows, so one call never floods the model's context. Saving the
+backtest defaults needs the scope ``backtests``, as its route does.
 """
 
 import time
@@ -20,6 +21,7 @@ from starlette.requests import Request
 from candlestack.accounts import (
     AccountsService,
     BacktestDefaults,
+    BacktestDefaultsIn,
     DateFormat,
     Scope,
     TimeFormat,
@@ -37,22 +39,19 @@ from candlestack.data import (
     Market,
     SearchResult,
     Timeframe,
+    TimeParam,
     client_rate_limit,
     data_problems,
 )
-from candlestack.mcp.convention import Example, ToolCall, ToolSpec, reads, tool_call
+from candlestack.mcp.convention import Example, ToolCall, ToolSpec, changes, reads, tool_call
 from candlestack.preprocessing import BlockOut, Step, describe_catalog
 
-# Rows of one get_candles call: a few thousand numbers, well within a model's context.
-CANDLES_DEFAULT, CANDLES_MAX = 200, 1000
+# Rows of one get_candles call. Clients show a result a second time as indented text, so a full
+# page has to stay well under the 25k tokens of tool output that clients such as Claude Code
+# accept by default.
+CANDLES_DEFAULT, CANDLES_MAX = 200, 500
 # Patched by tests to move the clock.
 _time = time.time
-# How much longer than `limit` candles of its timeframe a page of stock candles may span: a
-# session of 6.5 hours on 5 days of 7 (daily candles: on about 250 days of 365), and at least a
-# long weekend, so a page from Friday evening still reaches Tuesday's candles.
-_STOCK_INTRADAY_SPAN = 5.5
-_STOCK_DAILY_SPAN = 1.6
-_STOCK_MIN_SPAN = 4 * 86400
 # The catalog is code: it changes only with a release.
 _CATALOG = describe_catalog()
 
@@ -72,13 +71,6 @@ InstrumentIdArg = Annotated[
 
 def _moment(epoch: int | None) -> datetime | None:
     return None if epoch is None else datetime.fromtimestamp(epoch, UTC)
-
-
-def _epoch(moment: datetime) -> int:
-    """Epoch seconds of `moment`; one without a time zone is UTC."""
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=UTC)
-    return int(moment.timestamp())
 
 
 class InstrumentItem(BaseModel):
@@ -290,32 +282,14 @@ class CandlesPage(BaseModel):
     )
     next_end: datetime | None = Field(
         description="Without start: call again with end set to this for the earlier candles; "
-        "null when the data begins in this page"
+        "null when the data begins in this page (when it begins exactly at next_end, that call "
+        "answers period-out-of-range: there is nothing earlier)"
     )
 
 
-def _span(market: Market, timeframe: Timeframe, limit: int) -> int:
-    """How far after its start a page of `limit` candles may end: exactly `limit` candles of a
-    crypto pair, which trades every minute, and more than that of a stock, whose page is then
-    cut to `limit`."""
-    span = limit * timeframe.seconds
-    if market is Market.CRYPTO:
-        return span
-    factor = _STOCK_DAILY_SPAN if timeframe is Timeframe.D1 else _STOCK_INTRADAY_SPAN
-    return max(int(span * factor), _STOCK_MIN_SPAN)
-
-
-def _page(
-    found: CandleSet,
-    *,
-    limit: int,
-    end: int,
-    next_start: int | None,
-    next_end: int | None,
-) -> CandlesPage:
-    """The first `limit` candles of `found` as a page that ends at `end`, with the gaps
-    inside it."""
-    frame = found.frame.head(limit)
+def _page(found: CandleSet, *, next_start: int | None, next_end: int | None) -> CandlesPage:
+    """The candles of `found` as a page, with their gaps."""
+    frame = found.frame
     rows = zip(
         frame["ts"].to_list(),
         frame["open"].to_list(),
@@ -325,18 +299,13 @@ def _page(
         frame["volume"].to_list(),
         strict=True,
     )
-    gaps = [
-        (max(start, found.start), min(stop, end))
-        for start, stop in found.gaps
-        if start < end and stop > found.start
-    ]
     return CandlesPage(
         instrument=str(found.instrument),
         timeframe=found.timeframe,
         start=datetime.fromtimestamp(found.start, UTC),
-        end=datetime.fromtimestamp(end, UTC),
+        end=datetime.fromtimestamp(found.end, UTC),
         candles=list(rows),
-        gaps=gaps,
+        gaps=found.gaps,
         next_start=_moment(next_start),
         next_end=_moment(next_end),
     )
@@ -345,11 +314,12 @@ def _page(
 async def _newest(
     service: DataService, instrument: InstrumentId, timeframe: Timeframe, end: int, limit: int
 ) -> CandlesPage:
-    """The last `limit` candles before `end`, and where the earlier ones end."""
+    """The last `limit` candles before `end`, and where the earlier ones end: where this page
+    starts, unless its candles and gaps are fewer than `limit`, which means the data begins in
+    it."""
     found = await service.last_candles(instrument, timeframe, end, limit)
-    frame = found.frame
-    earlier = frame["ts"][0] if frame.height == limit else None
-    return _page(found, limit=limit, end=found.end, next_start=None, next_end=earlier)
+    full = found.frame.height + found.gaps_total >= limit
+    return _page(found, next_start=None, next_end=found.start if full else None)
 
 
 async def _from_start(
@@ -362,13 +332,8 @@ async def _from_start(
     limit: int,
 ) -> CandlesPage:
     """The first `limit` candles from `start` on, and where the next ones start."""
-    window_end = min(end, start + _span(instrument.market, timeframe, limit))
-    found = await service.candles(instrument, timeframe, start, window_end)
-    if found.frame.height > limit:
-        cut = int(found.frame["ts"][limit])
-        return _page(found, limit=limit, end=cut, next_start=cut, next_end=None)
-    more = window_end if window_end < end else None
-    return _page(found, limit=limit, end=window_end, next_start=more, next_end=None)
+    found = await service.first_candles(instrument, timeframe, start, end, limit)
+    return _page(found, next_start=found.end if found.end < end else None, next_end=None)
 
 
 async def get_candles(
@@ -377,21 +342,22 @@ async def get_candles(
     ctx: Context,
     *,
     start: Annotated[
-        datetime | None,
+        TimeParam | None,
         Field(
-            description="Start of the period (UTC unless it says another offset), inclusive: "
-            "2024-06-03 or 2024-06-03T13:30:00Z. Without it, the newest candles before end"
+            description="Start of the period, inclusive: an ISO 8601 date or date-time (UTC "
+            "unless it says another offset), 2024-06-03 or 2024-06-03T13:30:00Z, or epoch "
+            "seconds. Without it, the newest candles before end"
         ),
     ] = None,
     end: Annotated[
-        datetime | None,
-        Field(description="End of the period, exclusive, in the same form; default now"),
+        TimeParam | None,
+        Field(description="End of the period, exclusive, in the same forms; default now"),
     ] = None,
     limit: Annotated[
         int, Field(ge=1, le=CANDLES_MAX, description="Most candles in this page")
     ] = CANDLES_DEFAULT,
 ) -> CandlesPage:
-    """Closed OHLCV candles of one instrument in one timeframe, in pages of at most 1000. Use
+    """Closed OHLCV candles of one instrument in one timeframe, in pages of at most 500. Use
     it to look at the price around a trade, check a period before a backtest or compute
     something the backtest result does not say; a backtest loads its own candles, so do not
     fetch them for it.
@@ -408,32 +374,44 @@ async def get_candles(
     only: use it for the user's analysis here, never publish or pass on the stock candles."""
     call = tool_call(ctx)
     await _limit_source_requests(ctx, call)
-    until = int(_time()) if end is None else _epoch(end)
+    until = int(_time()) if end is None else end
     with data_problems():
         instrument = InstrumentId.parse(instrument_id)
         if start is None:
             return await _newest(_data(call), instrument, timeframe, until, limit)
         return await _from_start(
-            _data(call), instrument, timeframe, start=_epoch(start), end=until, limit=limit
+            _data(call), instrument, timeframe, start=start, end=until, limit=limit
         )
 
 
 # --- Preprocessing catalog ---------------------------------------------------------------------
 
 
+def _left_out(value: object) -> bool:
+    return value is None
+
+
 class CatalogParam(BaseModel):
-    """A parameter of a block and the values it takes."""
+    """A parameter of a block and the values it takes; what it does not have is left out."""
 
     name: str
     type: Literal["integer", "number", "string", "boolean"] = Field(description="Its JSON type")
-    description: str | None
+    description: str | None = Field(default=None, exclude_if=_left_out)
     required: bool = Field(description="The manifest must give it; else default applies")
-    default: int | float | str | bool | None = Field(description="Null when required")
-    minimum: int | float | None
-    maximum: int | float | None
-    exclusive_minimum: int | float | None = Field(description="Values must be above it")
-    exclusive_maximum: int | float | None = Field(description="Values must be below it")
-    options: list[str] | None = Field(description="The values allowed, for a choice")
+    default: int | float | str | bool | None = Field(
+        default=None, exclude_if=_left_out, description="Left out when required"
+    )
+    minimum: int | float | None = Field(default=None, exclude_if=_left_out)
+    maximum: int | float | None = Field(default=None, exclude_if=_left_out)
+    exclusive_minimum: int | float | None = Field(
+        default=None, exclude_if=_left_out, description="Values must be above it"
+    )
+    exclusive_maximum: int | float | None = Field(
+        default=None, exclude_if=_left_out, description="Values must be below it"
+    )
+    options: list[str] | None = Field(
+        default=None, exclude_if=_left_out, description="The values allowed, for a choice"
+    )
 
 
 class CatalogBlock(BaseModel):
@@ -511,11 +489,29 @@ async def get_backtest_defaults(ctx: Context) -> BacktestDefaults:
     return preferences.backtest_defaults
 
 
+async def update_backtest_defaults(
+    defaults: Annotated[
+        BacktestDefaultsIn,
+        Field(description="Every setting, as get_backtest_defaults answers them"),
+    ],
+    ctx: Context,
+) -> BacktestDefaults:
+    """Saves how the user's new backtests start, as Save defaults in Settings, Backtest
+    defaults does: every setting as a whole, replacing the saved ones. Use it only when the
+    user asks to change their defaults; to run one backtest with other settings, pass them when
+    you start it instead. Call get_backtest_defaults first and change only what the user
+    named. Answers the saved defaults."""
+    call = tool_call(ctx)
+    async with call.db() as db:
+        return await _accounts(call, db).save_backtest_defaults(call.user, defaults)
+
+
 class Preferences(BaseModel):
     """How the user reads dates and times in the app."""
 
     time_zone: TimeZone = Field(
-        description="ny: exchange time (New York); local: the user's own time zone"
+        description="ny: exchange time (New York); local: the time zone of the user's browser, "
+        "which you cannot know: ask the user, or write UTC and say so"
     )
     date_format: DateFormat = Field(description="dmy 12 Oct 2024, iso 2024-10-12, dot 12.10.2024")
     time_format: TimeFormat = Field(description="24: 16:05, 12: 4:05 PM")
@@ -651,6 +647,17 @@ TOOLS = (
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(arguments={}, result=BacktestDefaults()),
+    ),
+    ToolSpec(
+        update_backtest_defaults,
+        name="update_backtest_defaults",
+        title="Save backtest defaults",
+        scopes=(Scope.backtests,),
+        annotations=changes(destructive=True, idempotent=True),
+        example=Example(
+            arguments={"defaults": BacktestDefaults(stop_loss_pct=5).model_dump(mode="json")},
+            result=BacktestDefaults(stop_loss_pct=5),
+        ),
     ),
     ToolSpec(
         get_preferences,

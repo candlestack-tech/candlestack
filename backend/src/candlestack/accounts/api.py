@@ -25,6 +25,7 @@ from candlestack.accounts.cookies import DENIED, SESSION, STATE, Cookies, Cookie
 from candlestack.accounts.dependencies import (
     AccountsServiceDep,
     ApiKeysDep,
+    BacktestsUserDep,
     CurrentUserDep,
     SessionUserDep,
     browser_session,
@@ -387,9 +388,13 @@ async def preferences(
     dependencies=[Depends(require_same_origin)],
 )
 async def save_backtest_defaults(
-    body: BacktestDefaultsIn, user: CurrentUserDep, service: AccountsServiceDep, response: Response
+    body: BacktestDefaultsIn,
+    user: BacktestsUserDep,
+    service: AccountsServiceDep,
+    response: Response,
 ) -> BacktestDefaults:
-    """Saves how new backtests start (Save defaults): every setting, as a whole."""
+    """Saves how new backtests start (Save defaults): every setting, as a whole. An API key
+    needs the scope `backtests`."""
     response.headers.update(NO_STORE)
     return await service.save_backtest_defaults(user, body)
 

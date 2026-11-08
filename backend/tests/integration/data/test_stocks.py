@@ -329,6 +329,29 @@ async def test_last_candles_skip_weekends_and_holidays(
 
 
 @pytest.mark.usefixtures("stocks")
+async def test_first_candles_skip_weekends_and_holidays(service: DataService, upstream):
+    upstream.bars_json(
+        "1Day",
+        "2024-01-01T00:00:00Z",
+        upstream.aapl_bars("bars-AAPL-1Day-2024-11-25_12-02.json"),
+    )
+
+    candles = await service.first_candles(
+        AAPL, Timeframe.D1, utc("2024-11-26"), utc("2024-12-03"), 3
+    )
+
+    # Tuesday, Wednesday, Friday (Thanksgiving, Thursday, has no session); the next starts
+    # with Monday's session.
+    assert candles.frame["ts"].to_list() == [
+        utc("2024-11-26T14:30"),
+        utc("2024-11-27T14:30"),
+        utc("2024-11-29T14:30"),
+    ]
+    assert candles.end == utc("2024-12-02T14:30")
+    assert candles.gaps_total == 0
+
+
+@pytest.mark.usefixtures("stocks")
 async def test_last_candles_over_the_available_history(service: DataService, upstream):
     upstream.bars_json(
         "1Day",

@@ -117,6 +117,32 @@ def test_keys_are_managed_with_the_session_only(browser, script) -> None:
     assert len(browser.get(KEYS).json()["items"]) == 1
 
 
+def test_a_key_with_backtests_saves_the_backtest_defaults(browser, script) -> None:
+    browser.sign_in("github")
+    reader = create(browser, scopes=["read"]).json()["secret"]
+    starter = create(browser, scopes=["backtests"]).json()["secret"]
+    defaults = {
+        "timeframe": "1h",
+        "period_start": "2022-01-03",
+        "period_end": "2023-12-29",
+        "direction": "both",
+        "threshold": 0.1,
+        "stop_loss_pct": 5,
+        "fees_pct": 0.05,
+        "slippage_pct": 0.01,
+        "benchmark": "SPY",
+    }
+    path = "/api/v1/me/preferences/backtest-defaults"
+
+    refused = problem(script.request("PUT", path, reader, json=defaults), 403, "missing-scope")
+    saved = script.request("PUT", path, starter, json=defaults)
+
+    assert refused["scope"] == "backtests"
+    assert saved.status_code == 200, saved.text
+    assert saved.json() == defaults
+    assert browser.get("/api/v1/me/preferences").json()["backtest_defaults"] == defaults
+
+
 def test_revoke(browser, script) -> None:
     browser.sign_in("github")
     secret = create(browser).json()["secret"]

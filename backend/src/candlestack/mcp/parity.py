@@ -58,10 +58,7 @@ PARITY: dict[str, Entry] = {
     "POST /api/v1/me/api-keys": WebOnly(_KEYS),
     "DELETE /api/v1/me/api-keys/{key_id}": WebOnly(_KEYS),
     "GET /api/v1/me/preferences": Tools(("get_preferences", "get_backtest_defaults")),
-    "PUT /api/v1/me/preferences/backtest-defaults": WebOnly(
-        "The backtest defaults are a setting saved in the app, which API keys cannot change; "
-        "an agent passes its own settings when it starts a backtest."
-    ),
+    "PUT /api/v1/me/preferences/backtest-defaults": Tools(("update_backtest_defaults",)),
     "PATCH /api/v1/me/preferences/appearance": WebOnly(
         "The theme of the web app, which means nothing to an agent."
     ),

@@ -72,6 +72,20 @@ def test_the_backtest_defaults_and_preferences_the_user_saved(mcp, keys, ada) ->
     }
 
 
+def test_update_backtest_defaults_saves_what_the_app_then_shows(mcp, keys, ada) -> None:
+    async def update(session: Client):
+        return await session.call_tool("update_backtest_defaults", {"defaults": DEFAULTS})
+
+    refused = mcp(update, keys("read"))
+    saved = mcp(update, keys("backtests"))
+
+    assert json.loads(refused.content[0].text)["type"] == PROBLEMS + "missing-scope"
+    assert not saved.is_error, saved.content
+    assert saved.structured_content == DEFAULTS
+    shown = ada.request("GET", "/api/v1/me/preferences")
+    assert shown.json()["backtest_defaults"] == DEFAULTS
+
+
 def test_a_user_who_saved_nothing_gets_the_app_s_defaults(mcp, keys) -> None:
     defaults = mcp(tool("get_backtest_defaults"), keys("read"))
 
