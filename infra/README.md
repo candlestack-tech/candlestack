@@ -19,9 +19,9 @@ are proxied CNAMEs to the tunnel, so moving to another server does not touch DNS
 | stage | https://stage.candlestack.tech | every push to `main` | none |
 
 Every environment is one compose project (`env/compose.yaml`). The edge Caddy sends `/api/*`,
-`/mcp` and `/.well-known/oauth-protected-resource/*` of the environment's hostname to its
-backend and everything else to its frontend, and compresses the responses (zstd or gzip) on the
-way to Cloudflare.
+`/mcp`, `/.well-known/oauth-protected-resource/*` and `/.well-known/oauth-authorization-server/*`
+of the environment's hostname to its backend and everything else to its frontend, and
+compresses the responses (zstd or gzip) on the way to Cloudflare.
 
 | Container | Image | Reached as | Memory limit |
 | --- | --- | --- | --- |
