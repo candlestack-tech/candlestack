@@ -16,20 +16,11 @@ the beta list, so ask the team to add you if signing in is refused. A script sig
 API key:
 
 1. Sign in at https://app.candlestack.tech and open Settings, API and MCP.
-2. Create a key with the scope `read` (all this guide needs) and copy it: it starts with `cs_`
-   and is shown only once. CandleStack keeps just its SHA-256, so a lost key cannot be shown
-   again; revoke it and create a new one.
+2. Click Create key, give it a name and the scope `read` (all this guide needs, always on) and
+   copy it: it starts with `cs_` and is shown only once. CandleStack keeps just its SHA-256, so
+   a lost key cannot be shown again; revoke it and create a new one.
 3. Put it into the environment variable `CANDLESTACK_API_KEY` of the shell that runs the
    script. The script sends it as `Authorization: Bearer cs_...`.
-
-Until the keys card is in Settings, create a key with `POST /api/v1/me/api-keys` from the
-browser's developer console on a page of the app, signed in:
-
-```js
-await (await fetch("/api/v1/me/api-keys", {method: "POST",
-  headers: {"Content-Type": "application/json"},
-  body: JSON.stringify({name: "my script", scopes: ["read"]})})).json()
-```
 
 The key is your account for what its scopes allow: never commit it, paste it into an issue or
 share it. Give a key only the scopes it needs:
