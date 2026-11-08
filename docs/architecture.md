@@ -1342,8 +1342,10 @@ backend like the rest of the API; the metadata (RFC 8414) is served at
   IPv4 address they carry. The fetch uses a client of its own: no keep-alive (a pooled connection
   checked for another host on the same address could carry it), no proxy from the environment.
   No redirects; at most 16 KB as sent (`Accept-Encoding: identity`, nothing is inflated) in 5
-  seconds; the document's `client_id` must be its URL, it may hold no secret and its method must
-  be `none`. Its `grant_types` must name `authorization_code` and its `response_types` `code`;
+  seconds; the document's `client_id` must be its URL, it may hold no secret and its client must
+  be able to use the method `none`: named in `token_endpoint_auth_method`, or listed in
+  `token_endpoint_auth_methods_supported` (MCP SEP-3149; ChatGPT's document prefers
+  `private_key_jwt` and lists `none` too), and then `none` is the one kept. Its `grant_types` must name `authorization_code` and its `response_types` `code`;
   other types it names are ignored (Claude's document names more) and only `authorization_code`,
   `refresh_token` and `code` are kept. Redirect URIs are https, or http on a loopback address
   (RFC 8252), without fragments, and must match a registered one exactly; on a loopback address

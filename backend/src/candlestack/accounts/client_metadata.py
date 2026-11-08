@@ -211,15 +211,19 @@ def _document(raw: bytes, url: str) -> ClientMetadataIn:
         raise ClientDocumentFailed("the document's client_id is not its URL")
     if "client_secret" in body:
         raise ClientDocumentFailed("a client ID metadata document must not hold a secret")
-    # A document's client has no secret: none is the only method it can use.
-    body.setdefault("token_endpoint_auth_method", TokenEndpointAuthMethod.none.value)
+    # A document's client has no secret: none is the only method it can use. A document may
+    # prefer another method and list the ones its client can use besides (MCP SEP-3149;
+    # ChatGPT's prefers private_key_jwt): its client uses none when none is among them.
+    none = TokenEndpointAuthMethod.none.value
+    methods = body.get("token_endpoint_auth_methods_supported")
+    if isinstance(methods, list) and none in methods:
+        body["token_endpoint_auth_method"] = none
+    if body.setdefault("token_endpoint_auth_method", none) != none:
+        raise ClientDocumentFailed("a document's client must be able to use the method none")
     try:
-        metadata = parse_metadata(body)
+        return parse_metadata(body)
     except OAuthError as error:
         raise ClientDocumentFailed(error.description) from None
-    if metadata.token_endpoint_auth_method is not TokenEndpointAuthMethod.none:
-        raise ClientDocumentFailed("a document's token_endpoint_auth_method must be none")
-    return metadata
 
 
 class ClientDocuments:

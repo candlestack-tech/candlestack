@@ -5,6 +5,7 @@ test (tests/integration/accounts/test_oauth.py)."""
 
 import asyncio
 import gzip
+import json
 
 import pytest
 import respx
@@ -16,6 +17,7 @@ from candlestack.accounts.client_metadata import (
     redirect_uri_matches,
     redirect_uri_problem,
 )
+from candlestack.accounts.schemas import TokenEndpointAuthMethod
 
 URL = "https://app.example.com/client.json"
 
@@ -181,3 +183,41 @@ async def test_a_document_that_is_no_object_is_refused() -> None:
         router.get("https://[2606:2800:220:1::1]/client.json").respond(200, json=[URL])
         with pytest.raises(ClientDocumentFailed, match="client_id is not its URL"):
             await ClientDocuments(_public).fetch(URL)
+
+
+_CHATGPT = "https://chatgpt.com/oauth/client.json"
+
+
+def _chatgpt_document(**changes: object) -> bytes:
+    body: dict[str, object] = {
+        "client_id": _CHATGPT,
+        "client_name": "ChatGPT",
+        "redirect_uris": ["https://chatgpt.com/connector_platform_oauth_redirect"],
+        "token_endpoint_auth_method": "private_key_jwt",
+        "token_endpoint_auth_methods_supported": ["none", "private_key_jwt"],
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "token_endpoint_auth_signing_alg": "RS256",
+        "jwks_uri": "https://chatgpt.com/oauth/jwks.json",
+    }
+    body.update(changes)
+    return json.dumps({key: value for key, value in body.items() if value is not None}).encode()
+
+
+def test_a_document_that_prefers_another_method_but_lists_none_gets_none() -> None:
+    metadata = client_metadata._document(_chatgpt_document(), _CHATGPT)
+
+    assert metadata.token_endpoint_auth_method is TokenEndpointAuthMethod.none
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"token_endpoint_auth_methods_supported": None},
+        {"token_endpoint_auth_methods_supported": ["private_key_jwt"]},
+        {"token_endpoint_auth_methods_supported": "none"},
+    ],
+)
+def test_a_document_whose_client_cannot_use_none_is_refused(changes: dict[str, object]) -> None:
+    with pytest.raises(ClientDocumentFailed, match="able to use the method none"):
+        client_metadata._document(_chatgpt_document(**changes), _CHATGPT)
