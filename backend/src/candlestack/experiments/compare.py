@@ -1,6 +1,7 @@
 """Comparing backtests (``GET /api/v1/compare``): the results of each with the best and the
 worst of every statistic marked, the setups and what differs between them, and the equity
-curves on one time axis, from the result documents the app shows.
+curves on one time axis, from what each backtest stored when it ran (``BacktestRuns.stored``):
+never the candles again, so comparing many spends none of a data source's request budget.
 
 The marking rules are the Compare page's (``frontend/src/features/backtests/compare/rows.ts``)
 and a line's value at a time is its chart's (``chartLines.ts``, ``valueAt``), so the app, the
@@ -13,7 +14,6 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal
 
-import orjson
 from pydantic import BaseModel, Field
 
 from candlestack.experiments.document import DocumentAuthor
@@ -82,7 +82,9 @@ class ComparedBacktest(BaseModel):
         description="Its cumulative return (a fraction of its starting capital) at each of "
         "`times`: its last value up to then, null outside its period; null without results. "
         "A long backtest's series has a point per day, so its line begins at the end of its "
-        "first day"
+        "first day. One that finished before its curves were stored is drawn from its short "
+        "series of at most 60 points, with buy and hold only when its benchmark held its own "
+        "instrument"
     )
     drawdown: list[float | None] | None = Field(
         description="Its fall from its highest equity (a fraction, 0 or below), at the same "
@@ -133,21 +135,19 @@ def parse_ids(ids: str) -> list[str]:
 
 async def compare(runs: BacktestRuns, user_id: str, ids: Sequence[str]) -> CompareOut:
     """The comparison of the backtests ``ids``, each the user's own or another account's
-    published one, from their result documents in the light view.
+    published one, from what each stored of its light result document.
 
     Raises:
         NotComparable: One the user cannot see, or test data without a document.
-        The data module's errors of loading the candles again (``data.DataError``).
     """
     documents = []
     for backtest_id in ids:
         try:
-            _, content = await runs.document(user_id, backtest_id, light=True)
+            documents.append(await runs.stored(user_id, backtest_id))
         except BacktestNotFound:
             raise NotComparable(backtest_id, found=False) from None
         except NoDocument:
             raise NotComparable(backtest_id, found=True) from None
-        documents.append(orjson.loads(content))
     return compared(documents)
 
 

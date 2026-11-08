@@ -14,8 +14,18 @@ export {
   type SignInMethod,
 } from './accounts';
 export {
+  apiKeysQueryOptions,
+  createApiKey,
+  revokeApiKey,
+  type ApiKey,
+  type ApiKeyCreated,
+  type ApiKeys,
+  type Scope,
+} from './apiKeys';
+export {
   getBacktestFile,
   backtestQueryOptions,
+  cancelBacktest,
   backtestsQueryOptions,
   dashboardQueryOptions,
   isUnderway,

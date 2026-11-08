@@ -1,4 +1,5 @@
-import type { Backtest, Representation } from '@/api';
+import type { Backtest, BacktestStatus, Representation } from '@/api';
+import { plural } from '@/lib/plural';
 import { returnTone } from '@/lib/results';
 
 // How the backtests' own parts are written (mockups/app: REP, instList, ichips); their results go
@@ -19,6 +20,19 @@ export const representationLabel = (representation: Representation) => READS[rep
 // Whether a backtest has results to show: a finished one. A failed one shows the Failed badge and
 // dashes, with no line and no Sharpe ratio.
 export const hasResults = (backtest: Backtest) => backtest.status === 'finished';
+
+// How many backtests are ahead of a queued one: the one that runs and those queued before it,
+// which is its place in the queue (1 starts next). Null for any other status.
+export const aheadOf = ({
+  status,
+  queue_position: position,
+}: {
+  status: BacktestStatus;
+  queue_position: number | null;
+}) => (status === 'queued' ? position : null);
+
+// "2 backtests ahead of it", the title of a queued backtest's badge.
+export const aheadText = (ahead: number) => `${plural(ahead, 'backtest')} ahead of it`;
 
 // The colour of a return, the only result with one: green from zero, red below.
 export const returnClass = (fraction: number) => (returnTone(fraction) === 'up' ? 'text-up' : 'text-down');

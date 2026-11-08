@@ -9,7 +9,7 @@ one ends (``BacktestRunner``).
 The document is built on request: the stored predictions, the candles from the cache and the
 engine, which is deterministic. When the candles' fingerprint differs from the run's (a source
 adjusted old prices), ``data.changed`` says so and the results come from the candles as they
-are now.
+are now. The comparison reads only what the run stored (``stored``), so it never loads candles.
 """
 
 from collections.abc import Mapping
@@ -18,6 +18,7 @@ from functools import partial
 from typing import Any
 
 import anyio
+import numpy as np
 import polars as pl
 from redis.exceptions import RedisError
 
@@ -32,6 +33,7 @@ from candlestack.data import (
 )
 from candlestack.engine import ENGINE_VERSION
 from candlestack.experiments.assembly import (
+    CURVES,
     PERIODS_PER_YEAR,
     RISK_FREE_RATE,
     NothingToTest,
@@ -39,6 +41,7 @@ from candlestack.experiments.assembly import (
     align_of,
     document,
     dumps,
+    read_curves,
     read_predictions,
     results,
     rows_of,
@@ -281,6 +284,59 @@ class BacktestRuns:
             _finished, backtest, spec, report, candles, blob, author=author, light=light, held=held
         )
         return backtest.number, await anyio.to_thread.run_sync(build)
+
+    async def stored(self, user_id: str, backtest_id: str) -> dict[str, Any]:
+        """The light result document of the user's backtest, or of another account's while it
+        is published, from what its run stored and never the data source: what the comparison
+        reads. ``results`` has only the statistics and the series' ``CURVES`` columns (null
+        until it finished), and ``data`` and ``backtest`` none of what the rows or the queue
+        would tell.
+
+        Raises:
+            BacktestNotFound, NoDocument.
+        """
+        found = await self._store.with_run(user_id, backtest_id, curves=True)
+        if found is None:
+            raise BacktestNotFound
+        backtest = found.backtest
+        if backtest.spec is None:
+            raise NoDocument
+        spec = RunSpec.model_validate(backtest.spec)
+        author = DocumentAuthor(
+            id=backtest.user_id, name=found.author, mine=backtest.user_id == user_id
+        )
+        finished = backtest.status == BacktestStatus.finished.value
+        if not finished or backtest.report is None or backtest.stats is None:
+            return _document(backtest, spec, author=author)
+        report = RunReport.model_validate(backtest.report)
+        if backtest.curves is None:
+            columns = _short_curves(backtest, report)
+        else:
+            columns = read_curves(backtest.curves)
+        shown = {"stats": backtest.stats, "series": {"columns": columns}}
+        return _document(backtest, spec, report, shown=shown, author=author)
+
+
+def _short_curves(backtest: Backtest, report: RunReport) -> dict[str, list[Any]]:
+    """The curves of a backtest that finished before they were stored, from its short equity
+    series (``Backtest.set_equity``): its points at the evenly spaced times they were taken at
+    from the first row to the last, the fall of those points, and the close as buy and hold of
+    its own instrument when that was its benchmark (else no close, so no line)."""
+    if backtest.equity is None:
+        return {name: [] for name in CURVES}
+    equity = np.asarray(backtest.equity["strategy"], dtype=np.float64) + 1.0
+    rows = report.rows
+    ts = np.linspace(rows.first_ts, rows.last_ts, equity.size).astype(np.int64)
+    fall = equity / np.maximum.accumulate(equity) - 1.0
+    close: list[float | None] = [None] * equity.size
+    if backtest.setup.get("benchmark") == SetupBenchmark.buy_and_hold.value:
+        close = [value + 1.0 for value in backtest.equity["benchmark"]]
+    return {
+        "ts": ts.tolist(),
+        "close": close,
+        "equity": equity.tolist(),
+        "drawdown": fall.tolist(),
+    }
 
 
 def _finished(  # noqa: PLR0913 (what a build of the document is made of)

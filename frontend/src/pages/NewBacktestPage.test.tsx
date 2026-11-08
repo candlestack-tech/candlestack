@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -15,7 +15,7 @@ import {
   sessionWithPreferences,
   stubApi,
 } from '@/test/api';
-import { runningDocument } from '@/test/runs';
+import { queuedDocument, runningDocument } from '@/test/runs';
 import { renderApp } from '@/test/app';
 
 const CRYPTO = model({
@@ -350,14 +350,62 @@ describe('the backtest builder', () => {
 
   it('stays on Run when the queue is full', async () => {
     const { user } = await openBuilder('/backtests/new', {
-      [RUN]: problem(409, 'queue-full', 'You have 20 backtests waiting already.'),
+      [RUN]: problem(409, 'queue-full', 'You have 20 backtests waiting already.', { limit: 20 }),
     });
     await goTo(user, 'Run');
     await user.click(screen.getByRole('button', { name: 'Run backtest' }));
     await vi.waitFor(() =>
-      expect(alert()).toBe('Your queue is full. Run this one when a waiting backtest has started.'),
+      expect(alert()).toBe(
+        'Queue full. 20 backtests are waiting already. Run this one when one of them has started, or cancel one.',
+      ),
     );
     expect(step()).toBe('Run');
+  });
+
+  it('says how many are ahead of a queued backtest and stays, with a link to its page', async () => {
+    const queued = queuedDocument(2);
+    const { user, router, queryClient } = await openBuilder('/backtests/new', {
+      [RUN]: {
+        status: 201,
+        body: { ...queued, backtest: { ...queued.backtest, id: 'bt_q2u3e4u5e6', name: 'Quiet Lyra' } },
+      },
+    });
+    await goTo(user, 'Run');
+    await user.click(screen.getByRole('button', { name: 'Run backtest' }));
+    const note = await screen.findByRole('status');
+    expect(note.textContent).toBe('Queued, 2 aheadQuiet Lyra starts on its own. You can run another one.Open it');
+    expect(router.state.location.pathname).toBe('/backtests/new');
+    expect(alert()).toBeUndefined();
+    // Its page has the answer already.
+    expect(queryClient.getQueryData(['account', 'backtest', 'bt_q2u3e4u5e6'])).toBeDefined();
+    expect(within(note).getByRole('link', { name: 'Open it' }).getAttribute('href')).toBe('/backtests/bt_q2u3e4u5e6');
+    // Going to another step keeps it; a change, for the next one, clears it.
+    await user.click(screen.getByRole('button', { name: 'Edit data' }));
+    await user.click(screen.getByRole('button', { name: 'Run' }));
+    expect(screen.getByRole('status')).toBeDefined();
+    await user.click(screen.getByRole('button', { name: 'Edit data' }));
+    await user.click(screen.getByRole('button', { name: '2025' }));
+    await goTo(user, 'Run');
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('sends one start for a quick double click, and says Queued without a place the API did not give', async () => {
+    const queued = queuedDocument();
+    let answer: ((value: { status: number; body: unknown }) => void) | undefined;
+    const { user, fetch } = await openBuilder('/backtests/new', {
+      [RUN]: () => new Promise((resolve) => (answer = resolve)),
+    });
+    const starts = () =>
+      fetch.mock.calls.filter(([path, init]) => path === '/api/v1/backtests' && init?.method === 'POST').length;
+    await goTo(user, 'Run');
+    const button = screen.getByRole('button', { name: 'Run backtest' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await vi.waitFor(() => expect(answer).toBeDefined());
+    answer?.({ status: 201, body: { ...queued, backtest: { ...queued.backtest, queue_position: null } } });
+    const note = await screen.findByRole('status');
+    expect(note.textContent).toBe('QueuedBright Vega starts on its own. You can run another one.Open it');
+    expect(starts()).toBe(1);
   });
 
   it('goes back to the page it was opened from', async () => {

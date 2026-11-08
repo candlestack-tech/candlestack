@@ -47,6 +47,7 @@ from candlestack.experiments.assembly import (
     NothingToTest,
     Run,
     align_of,
+    curves_parquet,
     equity_points,
     main_benchmark,
     predictions_parquet,
@@ -420,6 +421,7 @@ class BacktestRunner:
         there (its account may have been deleted meanwhile). ``held`` has the candles of the
         index fund of each benchmark that holds one, by its ID."""
         benchmark, benchmark_return = main_benchmark(done, held)
+        curves = curves_parquet(done)
         now = _now()
         async with self._db.sessions() as session:
             backtest = await session.get(Backtest, backtest_id, with_for_update=True)
@@ -430,6 +432,7 @@ class BacktestRunner:
             backtest.stats = shown
             backtest.report = report.model_dump(mode="json")
             backtest.predictions = blob
+            backtest.curves = curves
             backtest.total_return = shown["total_return"]
             backtest.buy_and_hold_return = shown["buy_and_hold_return"]
             backtest.benchmark_return = benchmark_return

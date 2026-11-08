@@ -801,6 +801,7 @@ backtest stores only what cannot be recomputed quickly:
 | the setup: the model (ID, name, SHA-256, a copy of its manifest), the instrument and period, the decision and the execution settings | a few KB | the run cannot be repeated without it |
 | the predictions: `ts` and `prediction` per row, Parquet | about 140 KB for 10 years of 30-minute stock candles, 700 KB for crypto | running the model is the slow part |
 | `stats`, the 12 metrics | 1 KB | the Backtests list and the Dashboard sort by them |
+| the curves: `ts`, `close`, `equity` and `drawdown` of the light series, Parquet | at most about 240 KB (10,000 rows), about 90 KB for 10 years per day | comparing backtests loads no candles |
 | the fingerprint and range of the loaded candles | under 1 KB | tells whether the candles changed since |
 
 The series, the trades and the document itself are built when they are asked for: the candles

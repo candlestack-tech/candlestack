@@ -88,6 +88,9 @@ flowchart LR
 | `PATCH /api/v1/me/preferences/appearance` | changes the appearance settings it is given; an unknown field is a 422 |
 | `GET /api/v1/models` | the user's uploaded models, oldest first, and the storage they take (`used_bytes`, `quota_bytes`, `file_max_bytes`) |
 | `POST /api/v1/models?name=<file name>` | uploads a model: the body is the file (`application/octet-stream`); checked before it is kept ([Models](#models)); a name the user has already gets a number (`lstm (2).keras`); one upload at a time per user, 100 models at most |
+| `POST /api/v1/models/uploads` | makes a one-time link to upload a model through (`name`, `size_bytes`): 201 with its `url` and a ready `curl --fail-with-body -T` `command`, shown only here, and its expiry in 15 minutes; the name and size must fit now (415, 413, `409 storage-full`, `409 too-many-models`) ([Models](#models)) |
+| `GET /api/v1/models/uploads/{upload_id}` | how the upload through the user's link stands: `waiting`, `checking`, `done` (`model_id`), `failed` (`problem`, `check`, `error`) or `expired` |
+| `PUT /api/v1/uploads/{token}` | the upload through a link: the body is the file, the token the only sign-in (no session, key or origin check); single use, then checked as `POST /api/v1/models`; 201 with the model, `404 upload-link-not-found`, `410 upload-link-gone` (used or expired) |
 | `PATCH /api/v1/models/{model_id}` | renames a model (the extension stays; `409 model-name-taken`) or stars and unstars it |
 | `DELETE /api/v1/models/{model_id}` | deletes a model and its file |
 | `GET /api/v1/preprocessing/catalog` | the blocks a model's manifest can name, by step: id, description, the display group of a feature (`Candle`, `Bands`, `Momentum`, `Trend`, `Volume`, `Brick`, `Line`), warm-up and parameters (type, range, default, `tunable`); public, served by `ml` ([preprocessing.md](preprocessing.md#the-blocks)) |
@@ -127,8 +130,13 @@ flowchart LR
   soon"), `model-check-failed` (422: a check failed, `check` names it, `opens` or `weights`)
   `model-name-taken` (409: renaming to a name the user has, rarely an upload's numbered name),
   `too-many-models` (409: the user
-  has 100 models, with `limit`), `upload-in-progress` (409: another upload of the user runs)
-  and `upload-timeout` (408: the file did not arrive within 2 minutes), and uses `not-found`
+  has 100 models, with `limit`), `upload-in-progress` (409: another upload of the user runs),
+  `upload-timeout` (408: the file did not arrive within 2 minutes), and for the upload links
+  `upload-link-not-found` (404: no link has the token), `upload-link-gone` (410: the link took
+  its file already or expired, `reason` says `used` or `expired`; also its account was deleted
+  during the upload) and `larger-than-link` (413: the file is larger than the size the link was
+  made for, with `size_bytes`); a link's status says `upload-interrupted` in `problem` when its
+  upload stopped midway (also a `400` for the client that went away), and it uses `not-found`
   (404: no model of the user with the ID, another user's included) and `not-signed-in` (401:
   also the account was deleted while its file uploaded). Each `type` URI opens a page on the
   website that says what the problem means and what the client should do. The experiments
@@ -269,6 +277,38 @@ flowchart LR
   deleted meanwhile (its deletion takes the same lock) fails the insert: `401 not-signed-in`,
   nothing is kept. The incoming files go whatever happens; the ones a crash left are removed
   when the backend starts and every 10 minutes while it runs.
+- **Upload link** (for agents, which cannot pass a file through a chat):
+  `POST /api/v1/models/uploads` (scope `models`) with the file's `name` and `size_bytes` makes a link
+  `<PUBLIC_URL>/api/v1/uploads/<token>` that takes one upload within 15 minutes, and answers it
+  with the `curl --fail-with-body -T <name> <url>` that sends the file (`name` may be a path; the
+  model gets its base name). The name must be a `.keras` or `.onnx`
+  one (415), the size at most 50 MB (413) and fit the user's storage and model count now
+  (409). The token is 40 random characters of the IDs' alphabet (200 bits); the table
+  `model_uploads` keeps only its SHA-256, with the user, the name the model gets, the size, the
+  status and the expiry, so the URL is shown once. A link is not tied to the key or session that
+  made it: revoking the key, or taking the user off the beta list, leaves the links already made
+  working until they expire. A user's links that expired more than a day
+  ago are deleted when they make a new one. `PUT /api/v1/uploads/{token}` takes the file as the
+  body with the token as its only sign-in: it depends on no session or key, so neither stands in
+  for the token, and has no same-origin check, as no cookie signs it in (another site cannot
+  send a cross-origin `PUT` without CORS anyway). A token not of its form or not found is a
+  `404 upload-link-not-found`, a link used or expired `410 upload-link-gone`. A
+  `Content-Length` over the link's size is a `413 larger-than-link` and another upload of the
+  user in progress a `409 upload-in-progress`, both before the link is used; then one
+  `UPDATE ... WHERE status = 'waiting' AND expires_at > now()` takes the link (`checking`), so two
+  requests with one link cannot both upload. From there it is the upload above under the link's
+  user, the stream stopping where it passes the link's size (`larger-than-link`), and the link
+  is used whatever comes of it: `done` with `model_id` in the transaction that keeps the model,
+  or `failed` with the problem the request answered (`problem`, `check`, `error`), also
+  `upload-interrupted` when the client went away or the stream broke (the failure is recorded in
+  a shielded scope, after a rollback, and only over `checking`, so a link whose model was
+  committed stays `done`). A link `checking` for longer than the upload
+  lock lasts (5 minutes) reads as interrupted. `GET /api/v1/models/uploads/{upload_id}` shows
+  the user's link, without its URL: `waiting`, `checking`, `done`, `failed`, or `expired` for a
+  waiting one past its expiry. The token never reaches the logs: the access line and the URLs
+  sent to Sentry, and a transaction named by its path, show `/api/v1/uploads/[Filtered]` (`redacted_path` in
+  `core/observability.py`). The upload page for the browser (#406) and the MCP tools (#403)
+  build on these routes.
 - **The check** (`ml/inspect.py`) reads the file and never loads it: a `.keras` file is a zip of
   `config.json` (the architecture), `metadata.json` (the Keras version) and
   `model.weights.h5` (the weights), and loading it could run code from it. It runs in a child
@@ -591,7 +631,10 @@ checked at the next start.
   runner's versions and the timings of the steps in milliseconds), `stats` (JSONB: the 12
   statistics, `max_drawdown` negative) and `predictions` (bytea: `ts` and `prediction` as zstd
   Parquet, about 140 KB for 10 years of 30-minute stock candles; in Postgres, so they are in its
-  backups and go with the account's cascade, and no other volume is needed), and `steps`
+  backups and go with the account's cascade, and no other volume is needed), `curves` (bytea:
+  `ts`, `close`, `equity` and `drawdown` of the light series as zstd Parquet, at most about
+  240 KB at 10,000 rows, about 90 KB for 10 years per day; what [Compare](#compare) draws
+  without the candles, null for a backtest that finished before it was stored), and `steps`
   (JSONB: the steps of the run, below). The seed command's backtests have none of them, and no
   result document.
 - **Names**: every backtest gets a generated name when it is created (`generated_name`,
@@ -802,12 +845,14 @@ The backtests users published, which every signed-in account (the beta list's) c
 an agent gets the app's verdict without downloading and comparing the documents itself.
 
 - **Access** is that of `GET /api/v1/backtests/{backtest_id}`: the user's own, whatever their
-  status, and others' while published. It builds each result document in the light view, in
-  the order asked for, and reads it; an ID the user cannot see is `404 not-found` and test data
-  `409 no-document`, each with `id` naming that backtest. Each document is a rebuild of its
-  run (the engine and the candles), one after another, so 20 backtests make a slow request: the
-  per-key rate limit (#394) should weigh it. Fewer than 2 or more than 20 IDs, an
-  empty one or one twice is `422 validation`.
+  status, and others' while published, in the order asked for; an ID the user cannot see is
+  `404 not-found` and test data `409 no-document`, each with `id` naming that backtest. Fewer
+  than 2 or more than 20 IDs, an empty one or one twice is `422 validation`.
+- **Only what is stored** (`BacktestRuns.stored`): the setup (`spec`), the statistics (`stats`)
+  and the curves (`curves`) each backtest stored when it ran, never the candles, so it makes no
+  request to a data source. Rebuilding the documents did: on stage three backtests spent
+  Alpaca's 180 requests a minute and the answer was `503 source-unavailable` (#413). An
+  integration test swaps the data module for one that fails on any use.
 - **Statistics** (`metrics`): the 12 of `results.stats` in the Compare table's order, each with
   `better` (`higher`, `lower` or `none`), the value of each backtest and its mark, `best`,
   `worst` or null. The rules are the page's (`frontend/src/features/backtests/compare/rows.ts`):
@@ -827,8 +872,14 @@ an agent gets the app's verdict without downloading and comparing the documents 
   charts read a line (`chartLines.ts`, `valueAt`). The light document of a backtest of more than
   10,000 candles has a point per UTC day (the day's last, the lowest drawdown), so its lines
   begin at the end of its first day; buy and hold is measured from the price held from, so it
-  ends at the `buy_and_hold_return` statistic either way. About 20 KB for four backtests over
-  their whole axes, against the four whole documents the page loads today.
+  ends at the `buy_and_hold_return` statistic either way. The run stores those columns of its
+  light series (`ts`, `close`, `equity`, `drawdown`) as zstd Parquet in `curves`, so the answer
+  is the one the documents give (unless a source adjusted the candles since). A backtest that
+  finished before `curves` was stored is drawn from its short equity series (at most 60 points
+  from its first row to its last, the drawdown of those points, buy and hold only when its
+  benchmark held its own instrument): its candles are not stored, so no migration can work the
+  curves out. About 20 KB for four backtests over their whole axes, against the four whole
+  documents the page loads today.
 
 ## MCP
 
@@ -896,7 +947,7 @@ A module is a subpackage of `candlestack` under `backend/src/candlestack/`.
 | `data` | now | instrument catalog, candles, sessions, cache, source adapters, rate limits |
 | `accounts` | now | users, GitHub and Google sign-in, sessions, the beta list, Settings (name, sign-in methods, preferences, deleting the account); `CurrentUserDep` and the scoped dependencies for the routes of the signed-in user (session or API key), `AccountDeletionHook` for what other modules delete with an account |
 | `preprocessing` | started | the model's input from its manifest: the manifest's schema and checks, the catalog of blocks, and the input built from candles: representation (candles, Renko triples and a Kagi line), features, normalization, windows ([preprocessing.md](preprocessing.md)) |
-| `ml` | now | the models users upload: the upload and its static check, the file storage, the list, rename, star, delete, the manifest; the worker runs them and checks them with their manifests ([Worker](#worker)) |
+| `ml` | now | the models users upload: the upload and its static check, the one-time upload links, the file storage, the list, rename, star, delete, the manifest; the worker runs them and checks them with their manifests ([Worker](#worker)) |
 | `signals` | started | turn predictions into signals: align them with the candles, thresholds, long only; later smoothing, holding period, sizing, risk limits |
 | `engine` | started | the backtest loop: candles and signals in, trades and an equity series out; `ENGINE_VERSION` names its rules ([engine.md](engine.md)) |
 | `metrics` | started | unified metrics and charts of one run |

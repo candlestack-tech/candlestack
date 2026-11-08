@@ -16,20 +16,11 @@ the beta list, so ask the team to add you if signing in is refused. A script sig
 API key:
 
 1. Sign in at https://app.candlestack.tech and open Settings, API and MCP.
-2. Create a key with the scope `read` (all this guide needs) and copy it: it starts with `cs_`
-   and is shown only once. CandleStack keeps just its SHA-256, so a lost key cannot be shown
-   again; revoke it and create a new one.
+2. Click Create key, give it a name and the scope `read` (all this guide needs, always on) and
+   copy it: it starts with `cs_` and is shown only once. CandleStack keeps just its SHA-256, so
+   a lost key cannot be shown again; revoke it and create a new one.
 3. Put it into the environment variable `CANDLESTACK_API_KEY` of the shell that runs the
    script. The script sends it as `Authorization: Bearer cs_...`.
-
-Until the keys card is in Settings, create a key with `POST /api/v1/me/api-keys` from the
-browser's developer console on a page of the app, signed in:
-
-```js
-await (await fetch("/api/v1/me/api-keys", {method: "POST",
-  headers: {"Content-Type": "application/json"},
-  body: JSON.stringify({name: "my script", scopes: ["read"]})})).json()
-```
 
 The key is your account for what its scopes allow: never commit it, paste it into an issue or
 share it. Give a key only the scopes it needs:
@@ -198,7 +189,29 @@ others' published ones as the app's Compare page does: each statistic of each wi
 the worst marked (`metrics`), the setups and which fields differ (`differs`), and the equity,
 drawdown and buy and hold curves on one time axis of at most 200 times (`times`). A running or failed
 backtest comes with its status and no values; an ID you cannot see is a 404 whose `id` names it.
-The fields: [architecture.md](architecture.md#compare).
+It reads only what each backtest stored, so comparing many loads no candles and spends none of
+the data sources' request budget. The fields: [architecture.md](architecture.md#compare).
+
+## Upload a model through a link
+
+A script can send the file itself (`POST /api/v1/models?name=lstm.keras` with the file as the
+body). An agent that cannot pass a file through a chat asks for a one-time link instead, with a
+key of the scope `models`:
+
+```sh
+curl -s -X POST -H "Authorization: Bearer $CANDLESTACK_API_KEY"     -H 'Content-Type: application/json' -d '{"name": "lstm.keras", "size_bytes": 14889779}'     https://app.candlestack.tech/api/v1/models/uploads
+```
+
+The answer holds the link's `id`, its `url`, `expires_at` (15 minutes) and the `command` that
+sends the file from the folder it is in:
+`curl --fail-with-body -T lstm.keras https://app.candlestack.tech/api/v1/uploads/<token>`
+(it exits with an error and prints the problem when the upload is refused). That request needs
+no key: the token in the link is its only sign-in, so treat the link like a
+key until it is used. A link takes one file of the name's format, no larger than `size_bytes`,
+and the file is checked as any upload. `GET /api/v1/models/uploads/<id>` says how it stands:
+`waiting`, `checking`, `done` with the `model_id`, `failed` with the `problem` and the `check`
+that failed (`upload-interrupted` when the upload stopped midway), or `expired`. A used or expired link answers 410 `upload-link-gone`: ask for a new
+one.
 
 ## Errors
 
@@ -223,6 +236,9 @@ change. Some add fields, such as `errors` of a 422 `validation`:
 | 403 | `missing-scope` | the key lacks the scope `scope` names: create a key with it |
 | 403 | `session-required` | keys cannot do this: do it in the app |
 | 404 | `instrument-not-found` | check the id with the instrument search |
+| 404 | `upload-link-not-found` | no upload link has the token: copy the whole link or ask for a new one |
+| 410 | `upload-link-gone` | the upload link was used or expired: ask for a new one |
+| 413 | `larger-than-link` | the file is larger than the upload link's `size_bytes`: ask for a new link with its size |
 | 422 | `validation` | fix the parameters `errors` names |
 | 422 | `period-out-of-range` | `start` before the first candle, `end` at or before it (paging past the start of the data) or `end` in the future: `available_from` and `available_to` say what fits |
 | 422 | `too-many-candles` | a shorter period, a longer timeframe or paging (`suggestion`) |

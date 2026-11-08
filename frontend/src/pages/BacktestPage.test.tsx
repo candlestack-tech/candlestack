@@ -318,7 +318,7 @@ describe("a backtest's page before it finished", () => {
     const { all, queryClient } = await openPage({ status: 200, body: queuedDocument() });
     const steps = await screen.findByRole('region', { name: 'Steps' });
     expect(within(steps).getAllByText(/waiting to start$/)).toHaveLength(4);
-    expect(screen.getByText('Queued')).toBeDefined();
+    expect(screen.getByText('Queued · 1 ahead')).toBeDefined();
     expect(screen.getByText('It starts when your running backtest ends. You can close the page.')).toBeDefined();
     expect(box('Setup').getByText('raw-candles.keras')).toBeDefined();
 

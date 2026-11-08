@@ -24,7 +24,10 @@ from candlestack.core.observability import (
     ErrorBudget,
     _before_send_log,
     _hide_query_secrets,
+    _redact_paths,
+    _redact_url,
     _traces_sampler,
+    redacted_path,
 )
 from candlestack.main import create_app
 
@@ -252,6 +255,68 @@ def test_a_sign_in_code_and_state_in_the_query_are_not_sent(
     sent = json.dumps([_without_source(event), transactions, logs])
     assert "oauth-code-value" not in sent
     assert "state-value" not in sent
+
+
+def test_an_upload_links_token_is_not_sent(
+    sentry: CapturingTransport, app: FastAPI, client: TestClient
+) -> None:
+    token = "q" * 40
+
+    # Named as the route names it: a variable of any other name would be sent.
+    @app.get("/api/v1/uploads/{token}")
+    async def link_crash(token: str) -> None:
+        raise RuntimeError(f"failed after {len(token)} characters")
+
+    client.get(f"/api/v1/uploads/{token}")
+
+    [event] = sentry.items("event")
+    assert event["request"]["url"] == "http://testserver/api/v1/uploads/[Filtered]"
+    [transaction] = sentry.items("transaction")
+    assert transaction["request"]["url"] == "http://testserver/api/v1/uploads/[Filtered]"
+    logs = [
+        log
+        for log in sentry.logs()
+        if log["attributes"]["logger.name"]["value"].startswith("candlestack")
+    ]
+    assert token not in json.dumps([_without_source(event), transaction, logs])
+
+
+@pytest.mark.parametrize(
+    ("path", "kept"),
+    [
+        ("/api/v1/uploads/abc", "/api/v1/uploads/[Filtered]"),
+        ("/api/v1/uploads/", "/api/v1/uploads/"),
+        ("/api/v1/models/uploads/upl_7f3k2m9qx4", "/api/v1/models/uploads/upl_7f3k2m9qx4"),
+        ("/api/health", "/api/health"),
+    ],
+)
+def test_redacted_path(path: str, kept: str) -> None:
+    assert redacted_path(path) == kept
+
+
+@pytest.mark.parametrize(
+    ("name", "kept"),
+    [
+        # No route matched (a trailing slash): the name is the path, token and all.
+        ("/api/v1/uploads/" + "q" * 40 + "/", "/api/v1/uploads/[Filtered]"),
+        ("/api/v1/uploads/{token}", "/api/v1/uploads/{token}"),
+    ],
+)
+def test_a_transaction_named_by_its_path_loses_the_token(name: str, kept: str) -> None:
+    event: Any = {"transaction": name, "request": {"url": "http://testserver" + name}}
+
+    _redact_paths(event)
+
+    assert event["transaction"] == kept
+    assert "q" * 40 not in event["request"]["url"]
+
+
+def test_redact_url_ignores_what_is_no_url() -> None:
+    for request in (None, {}, {"url": None}, {"url": "no-scheme/api/v1/uploads/x"}):
+        _redact_url(request)
+    request = {"url": "https://app.candlestack.tech"}
+    _redact_url(request)
+    assert request == {"url": "https://app.candlestack.tech"}
 
 
 @pytest.mark.parametrize(

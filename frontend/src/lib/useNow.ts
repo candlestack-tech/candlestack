@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 
-// The time now in milliseconds, taken again every second while `ticking`: the counters of a
-// running backtest go on between the page's requests.
-export function useNow(ticking: boolean): number {
+// The time now in milliseconds, taken again every `every` ms (a second) while `ticking`: the
+// counters of a running backtest go on between the page's requests.
+export function useNow(ticking: boolean, every = 1000): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!ticking) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
+    const timer = setInterval(() => setNow(Date.now()), every);
     return () => clearInterval(timer);
-  }, [ticking]);
+  }, [ticking, every]);
   return now;
 }
 
