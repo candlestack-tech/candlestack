@@ -5,15 +5,17 @@ are integration tests (tests/integration/mcp/test_models.py)."""
 import json
 from collections.abc import AsyncIterable
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from mcp import Client
-from mcp.types import CallToolResult
+from mcp.types import CallToolResult, RequestParamsMeta
 
 from candlestack.accounts import Caller, Scope, User
 from candlestack.core import ProblemError
 from candlestack.mcp import http, models
+from candlestack.mcp.apps import CHART_KEY
 from candlestack.ml import (
     Framework,
     ManifestCheckFailed,
@@ -370,6 +372,64 @@ def test_get_model_answers_one_model_in_full(mcp, service: FakeService) -> None:
     assert got["url"] == "http://testserver/models/mdl_secondxxxx"
     # It reads that one model, not the whole list.
     assert service.calls == [("model", ADA.id, "mdl_secondxxxx")]
+
+
+class FakeBacktests:
+    """Stands in for the backtests service the widget's part of get_model lists from."""
+
+    def __init__(self) -> None:
+        self.queries: list[tuple[str, Any]] = []
+
+    async def find(self, user_id: str, query: Any) -> Any:
+        self.queries.append((user_id, query))
+        setup = SimpleNamespace(threshold=0.05, direction=SimpleNamespace(value="both"))
+        best = SimpleNamespace(
+            id="bt_7f3k2m9qx4",
+            name="Silent Orion",
+            instruments=[SimpleNamespace(symbol="SPY")],
+            total_return=-0.0563,
+            sharpe=-0.44,
+            setup=setup,
+        )
+        return SimpleNamespace(backtests=[best])
+
+
+@pytest.mark.parametrize("chatgpt", [False, True])
+def test_get_model_gives_the_widget_its_best_backtests_and_the_model_the_same_answer(
+    mcp, service: FakeService, monkeypatch: pytest.MonkeyPatch, chatgpt: bool
+) -> None:
+    backtests = FakeBacktests()
+    monkeypatch.setattr(models, "get_backtests_service", lambda _db: backtests)
+
+    async def run(session: Client) -> CallToolResult:
+        meta: RequestParamsMeta | None = {"openai/subject": "v1/abc"} if chatgpt else None
+        return await session.call_tool("get_model", {"model_id": "mdl_secondxxxx"}, meta=meta)
+
+    plain = call(mcp, "get_model", {"model_id": "mdl_secondxxxx"})
+    widget = mcp(run, key=READ_KEY, apps=not chatgpt)
+
+    assert widget.content == plain.content
+    assert widget.structured_content == plain.structured_content
+    assert CHART_KEY not in (plain.meta or {})
+    assert (widget.meta or {})[CHART_KEY] == {
+        "backtests": [
+            {
+                "id": "bt_7f3k2m9qx4",
+                "name": "Silent Orion",
+                "symbols": ["SPY"],
+                "total_return": -0.0563,
+                "sharpe": -0.44,
+                "url": "http://testserver/backtests/bt_7f3k2m9qx4",
+            }
+        ],
+        "decision": {"threshold": 0.05, "direction": "both"},
+    }
+    # Only the widget's call lists them: its finished ones, the best by the Sharpe ratio.
+    [(user_id, query)] = backtests.queries
+    assert user_id == ADA.id
+    assert (query.sort, query.order, query.per_page) == ("sharpe", "desc", models.WIDGET_BACKTESTS)
+    assert query.more.model_id == "mdl_secondxxxx"
+    assert query.more.statuses == ("finished",)
 
 
 def test_get_model_says_it_counts_the_backtests() -> None:

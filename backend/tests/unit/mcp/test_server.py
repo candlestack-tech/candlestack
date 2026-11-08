@@ -19,6 +19,7 @@ from candlestack.accounts import HEAVY, Caller, Scope, User
 from candlestack.accounts.limits import USER_RATE_LIMIT, Budget
 from candlestack.core import ProblemError
 from candlestack.mcp import http
+from candlestack.mcp.apps import WIDGET_URI
 from candlestack.mcp.convention import Example, ToolSpec, changes, reads, tool_call
 from candlestack.mcp.docs import AGENTS_DOCS, DOCS_URI, MANIFEST_DOCS, MCP_DOCS, RESULT_DOCS
 from candlestack.mcp.server import TOOLS, CandleStackMCP
@@ -174,7 +175,7 @@ def test_the_docs_resource_links_the_docs(mcp) -> None:
 
     resources, read_result = mcp(read)
 
-    assert [resource.uri for resource in resources] == [DOCS_URI]
+    assert [resource.uri for resource in resources] == [WIDGET_URI, DOCS_URI]
     [contents] = read_result.contents
     assert isinstance(contents, TextResourceContents)
     assert contents.mime_type == "text/markdown"

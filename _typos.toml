@@ -1,4 +1,8 @@
 # typos (pre-commit): words it would "fix" that are right here.
+[files]
+# The MCP server's chat widget, minified by its build (npm run build:widget): short names, no words.
+extend-exclude = ["backend/src/candlestack/mcp/widget.html"]
+
 [default.extend-words]
 # "caf\xc3\xa9", café in UTF-8 bytes, in the deploy script's tests.
 caf = "caf"
