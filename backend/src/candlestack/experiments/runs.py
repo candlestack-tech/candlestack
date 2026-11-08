@@ -49,10 +49,14 @@ from candlestack.experiments.assembly import (
 )
 from candlestack.experiments.document import (
     BENCHMARK_ETFS,
+    BacktestCheck,
     BacktestHeader,
     BacktestIn,
     BacktestModel,
     BenchmarkIn,
+    BenchmarkOut,
+    CheckedModel,
+    CheckedWarmUp,
     DataOut,
     DocumentAuthor,
     HysteresisRule,
@@ -122,6 +126,41 @@ class BacktestRuns:
         self._data = data
         self._runner = runner
         self._app_version = app_version
+
+    async def check(self, user_id: str, body: BacktestIn) -> BacktestCheck:
+        """Checks a new backtest of the user as ``start`` does, stores nothing, and says what
+        would run and whether it would wait in the user's queue.
+
+        Raises:
+            The errors of ``start`` but none of the lock (the model deleted meanwhile).
+        """
+        prepared = await self.prepare(user_id, body)
+        model = prepared.model
+        # As in ``start``, before the slower checks.
+        if await self._store.queued(user_id) >= QUEUE_MAX:
+            raise QueueFull
+        await self.ready()
+        spec = await self.spec(prepared)
+        queued = await self._store.queued(user_id)
+        waits = queued > 0 or await self._store.running(user_id)
+        data = spec.data
+        return BacktestCheck(
+            model=CheckedModel(id=model.id, name=model.name, framework=model.framework),
+            instrument=data.instrument,
+            timeframe=data.timeframe,
+            session=data.session,
+            period=data.period,
+            warm_up=CheckedWarmUp(
+                candles=data.warm_up.candles,
+                kind="estimate" if data.warm_up.kind == "estimate" else "exact",
+                load_start=data.load_start,
+            ),
+            benchmarks=[
+                BenchmarkOut.model_validate(benchmark.model_dump()) for benchmark in spec.benchmarks
+            ],
+            starts="queued" if waits else "now",
+            queue_position=queued + 1 if waits else None,
+        )
 
     async def start(self, user_id: str, body: BacktestIn) -> tuple[Backtest, bytes]:
         """Checks a new backtest of the user, stores it, and returns it with its document: it
@@ -345,6 +384,29 @@ class BacktestRuns:
         )
         return backtest.number, await anyio.to_thread.run_sync(build)
 
+    async def header(self, user_id: str, backtest_id: str) -> BacktestHeader:
+        """The ``backtest`` group of the document of the user's backtest, or of another
+        account's while it is published, from its row alone: its status, its place in the queue
+        and its steps, without building the results (what an agent polls).
+
+        Raises:
+            BacktestNotFound, NoDocument.
+        """
+        found = await self._store.with_run(user_id, backtest_id)
+        if found is None:
+            raise BacktestNotFound
+        backtest = found.backtest
+        if backtest.spec is None:
+            raise NoDocument
+        author = DocumentAuthor(
+            id=backtest.user_id, name=found.author, mine=backtest.user_id == user_id
+        )
+        report = None if backtest.report is None else RunReport.model_validate(backtest.report)
+        position = None
+        if backtest.status == BacktestStatus.queued.value:
+            position = await self._store.queue_position(backtest.id)
+        return _header(backtest, report, author=author, queue_position=position)
+
     async def stored(self, user_id: str, backtest_id: str) -> dict[str, Any]:
         """The light result document of the user's backtest, or of another account's while it
         is published, from what its run stored and never the data source: what the comparison
@@ -443,25 +505,7 @@ def _document(  # noqa: PLR0913 (the document's sources)
     queue_position: int | None = None,
 ) -> dict[str, Any]:
     return document(
-        backtest=BacktestHeader(
-            id=backtest.id,
-            name=backtest.shown_name,
-            generated_name=backtest.generated_name,
-            number=backtest.number,
-            author=author,
-            public=backtest.published_at is not None,
-            published_at=backtest.published_at,
-            status=BacktestStatus(backtest.status),
-            queue_position=queue_position,
-            # Only the author can open the sweep: others see that there was none.
-            sweep_id=backtest.sweep_id if author.mine else None,
-            created_at=backtest.created_at,
-            started_at=backtest.started_at,
-            finished_at=backtest.finished_at,
-            duration_s=backtest.duration_s,
-            error=backtest.error,
-            steps=shown_steps(backtest.steps, None if report is None else report.timings),
-        ),
+        backtest=_header(backtest, report, author=author, queue_position=queue_position),
         software=Software(
             engine_version=ENGINE_VERSION,
             app_version=spec.app_version,
@@ -482,6 +526,34 @@ def _document(  # noqa: PLR0913 (the document's sources)
         benchmarks=spec.benchmarks,
         metrics=spec.metrics,
         results=shown,
+    )
+
+
+def _header(
+    backtest: Backtest,
+    report: RunReport | None,
+    *,
+    author: DocumentAuthor,
+    queue_position: int | None,
+) -> BacktestHeader:
+    return BacktestHeader(
+        id=backtest.id,
+        name=backtest.shown_name,
+        generated_name=backtest.generated_name,
+        number=backtest.number,
+        author=author,
+        public=backtest.published_at is not None,
+        published_at=backtest.published_at,
+        status=BacktestStatus(backtest.status),
+        queue_position=queue_position,
+        # Only the author can open the sweep: others see that there was none.
+        sweep_id=backtest.sweep_id if author.mine else None,
+        created_at=backtest.created_at,
+        started_at=backtest.started_at,
+        finished_at=backtest.finished_at,
+        duration_s=backtest.duration_s,
+        error=backtest.error,
+        steps=shown_steps(backtest.steps, None if report is None else report.timings),
     )
 
 

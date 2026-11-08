@@ -554,3 +554,48 @@ class BacktestDocument(BaseModel):
     benchmarks: list[BenchmarkOut]
     metrics: MetricsArgs
     results: Results | None = Field(description="Null unless it finished")
+
+
+# --- The check of a new backtest (``POST /api/v1/backtests/check``) ----------------------------
+
+
+class CheckedModel(BaseModel):
+    id: str = Field(examples=["mdl_k2m9qx47f3"])
+    name: str = Field(examples=["raw-candles.keras"])
+    framework: str = Field(examples=["keras"])
+
+
+class CheckedWarmUp(BaseModel):
+    candles: int = Field(
+        description="Candles the model needs before the period, loaded with it", examples=[24]
+    )
+    kind: Literal["exact", "estimate"] = Field(
+        description="`estimate` for a representation whose need depends on the prices (Renko, Kagi)"
+    )
+    load_start: int = Field(
+        description="Where the load with the warm-up starts, UTC epoch seconds",
+        examples=[1717329600],
+    )
+
+
+class BacktestCheck(BaseModel):
+    """What a start with this setup would run: every check of `POST /api/v1/backtests` passed
+    and nothing was stored."""
+
+    model: CheckedModel
+    instrument: InstrumentOut
+    timeframe: str = Field(description="The model's timeframe", examples=["30m"])
+    session: str = Field(description="The model's session", examples=["regular"])
+    period: Period
+    warm_up: CheckedWarmUp
+    benchmarks: list[BenchmarkOut] = Field(
+        description="As the run would store them: the instrument IDs as the catalog writes them"
+    )
+    starts: Literal["now", "queued"] = Field(
+        description="`queued` while another backtest of the user runs or waits"
+    )
+    queue_position: int | None = Field(
+        ge=1,
+        description="Where it would wait in the user's queue (1 starts next); null when it "
+        "would start now",
+    )

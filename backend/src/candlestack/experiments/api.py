@@ -16,6 +16,7 @@ from candlestack.accounts import (
     BacktestsUserDep,
     CallerDep,
     CurrentUserDep,
+    ReaderDep,
     Scope,
 )
 from candlestack.core import NO_STORE, ProblemError, problem_doc, require_same_origin
@@ -29,7 +30,7 @@ from candlestack.experiments.compare import (
     parse_ids,
 )
 from candlestack.experiments.dependencies import BacktestRunsDep, BacktestsServiceDep, SweepsDep
-from candlestack.experiments.document import BacktestDocument, BacktestIn
+from candlestack.experiments.document import BacktestCheck, BacktestDocument, BacktestIn
 from candlestack.experiments.errors import (
     BacktestNotFinished,
     BacktestNotFound,
@@ -371,6 +372,23 @@ def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911, P
                 "This backtest is test data from before backtests ran in the app, so it has no "
                 "result document.",
             )
+        case NotComparable(found=True):
+            return ProblemError(
+                409,
+                "no-document",
+                "No result document",
+                f"{error.backtest_id} is test data from before backtests ran in the app, so it "
+                "has no results to compare.",
+                extensions={"id": error.backtest_id},
+            )
+        case NotComparable():
+            return ProblemError(
+                404,
+                "not-found",
+                "Not Found",
+                f"Neither you nor a published backtest has the ID {error.backtest_id}.",
+                extensions={"id": error.backtest_id},
+            )
         case BacktestNotFinished():
             detail = {
                 "queued": "The backtest is waiting in the queue. Download it once it has finished.",
@@ -381,9 +399,9 @@ def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911, P
 
 
 @contextmanager
-def _problems() -> Iterator[None]:
-    """Raises the errors of starting a backtest, of its document and of the market data they
-    load as problem details."""
+def backtest_problems() -> Iterator[None]:
+    """Raises the errors of starting a backtest, of its document, of a comparison and of the
+    market data they load as problem details, for the routes and the MCP tools."""
     with data_problems():
         try:
             yield
@@ -449,9 +467,49 @@ async def start_backtest(
     before it fits the data and the candle limit, the user's queue has room, and the worker
     that runs the models can be reached. The run goes on after the response; the document
     (`GET /api/v1/backtests/{backtest_id}`) has the results once it finished."""
-    with _problems():
+    with backtest_problems():
         backtest, content = await runs.start(user.id, body)
     return _json(content, response, 201, {"Location": f"/api/v1/backtests/{backtest.id}"})
+
+
+@router.post(
+    "/api/v1/backtests/check",
+    responses={
+        **_NOT_SIGNED_IN,
+        **problem_doc(
+            403, "The request does not come from the app's own pages (`cross-origin-request`)."
+        ),
+        **problem_doc(
+            404,
+            "The user has no model with this ID (`not-found`), or the instrument is not in the "
+            "catalog (`instrument-not-found`).",
+        ),
+        **problem_doc(
+            409,
+            "The model has no manifest (`model-needs-setup`), or the user has "
+            f"{QUEUE_MAX} backtests waiting already (`queue-full`, with `limit`).",
+        ),
+        **problem_doc(
+            422,
+            "An invalid setup (`validation`), a model of another market "
+            "(`instrument-not-for-model`), a period outside the data (`period-out-of-range`), "
+            "without the candles the model needs before it (`warm-up-out-of-range`), or with "
+            "more candles than allowed (`too-many-candles`).",
+        ),
+        **_SOURCE_ERRORS,
+    },
+    dependencies=[Depends(require_same_origin)],
+)
+async def check_backtest(
+    body: BacktestIn, user: ReaderDep, runs: BacktestRunsDep, response: Response
+) -> BacktestCheck:
+    """Checks a new backtest as `POST /api/v1/backtests` does, with the same body and the same
+    problems, and starts nothing: what would run (the model, the instrument as the catalog has
+    it, the model's timeframe and session, the warm-up) and whether it would wait in the
+    user's queue. An API key needs only the scope `read`."""
+    response.headers.update(NO_STORE)
+    with backtest_problems():
+        return await runs.check(user.id, body)
 
 
 @router.post(
@@ -475,7 +533,7 @@ async def cancel_backtest(
 ) -> Response:
     """Cancels the user's queued backtest, so it never runs, and returns its document: `failed`,
     with an `error` that says it was cancelled. A running backtest cannot be cancelled."""
-    with _problems():
+    with backtest_problems():
         content = await runs.cancel(user.id, backtest_id)
     return _json(content, response)
 
@@ -499,7 +557,7 @@ async def get_backtest(
     it finished), or of another account's while it is published (`backtest.author`, read only,
     `model.id` null), in the light view: a series of more than 10,000 rows has one point per
     UTC day, and only the newest 10,000 trades are in it (`trades.complete` false)."""
-    with _problems():
+    with backtest_problems():
         _, content = await runs.document(user.id, backtest_id, light=True)
     return _json(content, response)
 
@@ -523,7 +581,7 @@ async def download_backtest(
 ) -> Response:
     """The result document of a finished backtest, the user's or a published one of another
     account, with every row of its series and every trade, as a file to save."""
-    with _problems():
+    with backtest_problems():
         number, content = await runs.document(user.id, backtest_id, light=False)
     disposition = f'attachment; filename="candlestack-backtest-{number}.json"'
     return _json(content, response, headers={"Content-Disposition": disposition})
@@ -572,26 +630,8 @@ async def compare_backtests(
     is that of `GET /api/v1/backtests/{backtest_id}`. It reads only what each
     backtest stored when it ran, so it loads no candles from a data source."""
     response.headers.update(NO_STORE)
-    with _problems():
-        try:
-            return await compare(runs, user.id, parse_ids(ids))
-        except NotComparable as error:
-            if error.found:
-                raise ProblemError(
-                    409,
-                    "no-document",
-                    "No result document",
-                    f"{error.backtest_id} is test data from before backtests ran in the app, so "
-                    "it has no results to compare.",
-                    extensions={"id": error.backtest_id},
-                ) from None
-            raise ProblemError(
-                404,
-                "not-found",
-                "Not Found",
-                f"Neither you nor a published backtest has the ID {error.backtest_id}.",
-                extensions={"id": error.backtest_id},
-            ) from None
+    with backtest_problems():
+        return await compare(runs, user.id, parse_ids(ids))
 
 
 # --- Sweeps -----------------------------------------------------------------------------------
@@ -628,7 +668,7 @@ def _sweep_problem(error: Exception) -> ProblemError | None:
 def _setup_problem(failed: SetupFailed) -> ProblemError:
     """The problem of a setup's error, named with the setup (`setup`, from 1)."""
     try:
-        with _problems():
+        with backtest_problems():
             raise failed.error
     except ProblemError as problem:
         problem.detail = f"Setup {failed.index + 1} of the sweep: {problem.detail}"
@@ -639,7 +679,7 @@ def _setup_problem(failed: SetupFailed) -> ProblemError:
 @contextmanager
 def sweep_problems() -> Iterator[None]:
     """Raises the errors of a sweep, of its setups and of the market data as problem details."""
-    with _problems():
+    with backtest_problems():
         try:
             yield
         except SetupFailed as failed:
