@@ -7032,7 +7032,17 @@
                 }
               }
             },
-            "description": "Not signed in (`not-signed-in`)."
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
           },
           "404": {
             "content": {
@@ -7064,6 +7074,16 @@
             },
             "description": "Fewer than 2 or more than 20 IDs, an empty one or one twice (`validation`)."
           },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+          },
           "502": {
             "content": {
               "application/problem+json": {
@@ -7085,6 +7105,13 @@
             "description": "A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`)."
           }
         },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
         "summary": "Compare Backtests",
         "tags": [
           "backtests"

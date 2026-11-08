@@ -4400,8 +4400,17 @@ export interface operations {
                     "application/json": components["schemas"]["CompareOut"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4429,6 +4438,15 @@ export interface operations {
             };
             /** @description Fewer than 2 or more than 20 IDs, an empty one or one twice (`validation`). */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
