@@ -43,6 +43,7 @@ def test_https_and_loopback_redirect_uris_are_allowed(uri: str) -> None:
         "https://claude.ai:99999/cb",
         "https:///nohost",
         "https://claude.ai/" + "x" * 600,
+        "https://cl\u0430ude.ai/callback",  # a Cyrillic a: a lookalike of claude.ai
     ],
 )
 def test_other_redirect_uris_are_refused(uri: str) -> None:

@@ -76,6 +76,9 @@ def redirect_uri_problem(uri: str) -> str | None:
         return f"{uri!r} is not a valid URL of at most {URI_MAX} characters"
     if "#" in uri or parts.username is not None or parts.password is not None:
         return f"{uri!r} must have no fragment and no user name or password"
+    # The consent page shows this host: a lookalike in other scripts must not pass as another.
+    if not parts.hostname.isascii():
+        return f"{uri!r} must name its host in ASCII (punycode for international names)"
     if parts.scheme != "https" and not _is_loopback(parts):
         return f"{uri!r} must be https, or http on a loopback address (127.0.0.1, [::1], localhost)"
     return None
@@ -167,6 +170,7 @@ def _document_parts(url: str) -> SplitResult:
         or len(url) > URI_MAX
         or parts.scheme != "https"
         or not parts.hostname
+        or not parts.hostname.isascii()
         or parts.path in ("", "/")
         or "#" in url
         or parts.username is not None
