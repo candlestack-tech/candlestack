@@ -79,6 +79,23 @@ def test_access_log_line(client: TestClient, caplog: pytest.LogCaptureFixture) -
     assert isinstance(entry["duration_ms"], float)
 
 
+def test_the_access_log_leaves_out_an_upload_links_token(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Not of a token's form, so the route answers without Postgres.
+    token = "Secret-Token"
+
+    with caplog.at_level(logging.INFO, logger="candlestack.access"):
+        client.put(f"/api/v1/uploads/{token}", content=b"x")
+
+    [record] = [r for r in caplog.records if r.name == "candlestack.access"]
+    line = JsonFormatter().format(record)
+    entry = json.loads(line)
+    assert entry["msg"] == "PUT /api/v1/uploads/[Filtered] 404"
+    assert entry["path"] == "/api/v1/uploads/[Filtered]"
+    assert token not in line
+
+
 def test_request_id_is_random_without_cf_ray(client: TestClient) -> None:
     first = client.get("/api/health").headers["x-request-id"]
     second = client.get("/api/health").headers["x-request-id"]

@@ -90,7 +90,7 @@ def database_url() -> str:
 
 ORIGIN = {"Origin": "http://testserver"}
 # Every table of what users create; TRUNCATE needs the ones that refer to users with them.
-TABLES = "users, identities, sessions, user_preferences, api_keys, models, backtests"
+TABLES = "users, identities, sessions, user_preferences, api_keys, models, model_uploads, backtests"
 
 
 async def _run_sql(url: str, statement: str, params: dict[str, Any]) -> list[Any]:

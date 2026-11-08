@@ -1,5 +1,6 @@
-"""The table of the models users upload; their files live in the model storage
-(``storage.py``). Changed only through migrations (``backend/migrations``)."""
+"""The tables of the models users upload, whose files live in the model storage
+(``storage.py``), and of the one-time links a model is uploaded through. Changed only through
+migrations (``backend/migrations``)."""
 
 import secrets
 from datetime import datetime
@@ -8,6 +9,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -26,11 +28,26 @@ from candlestack.core import Base
 # app read alike.
 _ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567"
 _ID_LENGTH = 10
+UPLOAD_TOKEN_LENGTH = 40
+
+
+def _random(length: int) -> str:
+    return "".join(secrets.choice(_ID_ALPHABET) for _ in range(length))
 
 
 def new_model_id() -> str:
     """A public model ID such as ``mdl_7f3k2m9qx4`` (50 random bits)."""
-    return "mdl_" + "".join(secrets.choice(_ID_ALPHABET) for _ in range(_ID_LENGTH))
+    return "mdl_" + _random(_ID_LENGTH)
+
+
+def new_upload_id() -> str:
+    """A public upload link ID such as ``upl_7f3k2m9qx4`` (50 random bits)."""
+    return "upl_" + _random(_ID_LENGTH)
+
+
+def new_upload_token() -> str:
+    """The secret of a new upload link: 40 characters of the IDs' alphabet (200 bits)."""
+    return _random(UPLOAD_TOKEN_LENGTH)
 
 
 class Model(Base):
@@ -78,3 +95,35 @@ class Model(Base):
 
 # A user's names are unique in any case, as the numbering of uploads compares them so.
 Index("uq_models_user_id_name", Model.user_id, func.lower(Model.name), unique=True)
+
+
+class ModelUpload(Base):
+    """A one-time link to upload a model with: made for one file of `name` and at most
+    `size_bytes`, it takes one upload until `expires_at`. Only the SHA-256 of its token is
+    kept, so the table cannot be used to upload. `status` is ``waiting`` until the upload
+    starts, ``checking`` while the file comes in and is checked, then ``done`` with the model it
+    made or ``failed`` with the problem the upload answered (`problem`, the check that failed,
+    `error`). An expired link stays ``waiting``: the API tells it by `expires_at`."""
+
+    __tablename__ = "model_uploads"
+    __table_args__ = (
+        CheckConstraint("status IN ('waiting', 'checking', 'done', 'failed')", name="status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(14), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # The name the model gets (upload_name), extension included.
+    name: Mapped[str] = mapped_column(String(255))
+    framework: Mapped[str] = mapped_column(String(16))
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    token_hash: Mapped[bytes] = mapped_column(LargeBinary(32), unique=True)
+    status: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The model the upload made; not a foreign key, so deleting the model leaves the record.
+    model_id: Mapped[str | None] = mapped_column(String(14))
+    problem: Mapped[str | None] = mapped_column(String(64))
+    failed_check: Mapped[str | None] = mapped_column(String(16))
+    error: Mapped[str | None] = mapped_column(Text)

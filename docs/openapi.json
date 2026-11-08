@@ -4445,6 +4445,15 @@
         "title": "MetricsArgs",
         "type": "object"
       },
+      "ModelCheck": {
+        "description": "The checks of an upload, in the order they run: `opens` (a real model of its format with\nno custom code inside), then `weights` (it holds trained weights).",
+        "enum": [
+          "opens",
+          "weights"
+        ],
+        "title": "ModelCheck",
+        "type": "string"
+      },
       "ModelCount": {
         "description": "A model the user's backtests used, by the name they show for it.",
         "properties": {
@@ -4736,6 +4745,288 @@
           }
         },
         "title": "ModelUpdate",
+        "type": "object"
+      },
+      "ModelUploadCreated": {
+        "description": "A new upload link with its URL, which only this response shows.",
+        "properties": {
+          "check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCheck"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The check that failed, for `model-check-failed`; null otherwise",
+            "examples": [
+              null
+            ]
+          },
+          "command": {
+            "description": "The `curl` command that uploads the file from the folder it is in; it exits with an error and prints the problem when the upload is refused",
+            "examples": [
+              "curl --fail-with-body -T lstm-signals.keras https://app.candlestack.tech/api/v1/uploads/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            ],
+            "title": "Command",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "When the link was made (UTC)",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the upload failed and what to do, in plain words; null otherwise",
+            "examples": [
+              null
+            ],
+            "title": "Error"
+          },
+          "expires_at": {
+            "description": "Until when the link takes its file (UTC)",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "description": "Public ID of the upload link",
+            "examples": [
+              "upl_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The model the upload made, once `done`; null before",
+            "examples": [
+              null
+            ],
+            "title": "Model Id"
+          },
+          "name": {
+            "description": "The name the model gets; a name the user has already gets a number then",
+            "examples": [
+              "lstm-signals.keras"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The problem the upload answered once `failed` (`model-check-failed`, `storage-full`, ...); null otherwise",
+            "examples": [
+              null
+            ],
+            "title": "Problem"
+          },
+          "size_bytes": {
+            "description": "The largest file the link takes",
+            "examples": [
+              14889779
+            ],
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/UploadStatus"
+          },
+          "url": {
+            "description": "Where the file goes: `PUT` it there as the body, with no other sign-in. Shown only in this response: CandleStack keeps just the SHA-256 of its token",
+            "examples": [
+              "https://app.candlestack.tech/api/v1/uploads/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            ],
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "size_bytes",
+          "status",
+          "created_at",
+          "expires_at",
+          "model_id",
+          "problem",
+          "check",
+          "error",
+          "url",
+          "command"
+        ],
+        "title": "ModelUploadCreated",
+        "type": "object"
+      },
+      "ModelUploadIn": {
+        "additionalProperties": false,
+        "description": "The file an upload link is made for.",
+        "properties": {
+          "name": {
+            "description": "Name of the file, extension included (`.keras` or `.onnx`), or its path; the model gets the base name, as an upload's name",
+            "examples": [
+              "lstm-signals.keras"
+            ],
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "size_bytes": {
+            "description": "Size of the file in bytes: the link takes no larger file",
+            "examples": [
+              14889779
+            ],
+            "exclusiveMinimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "size_bytes"
+        ],
+        "title": "ModelUploadIn",
+        "type": "object"
+      },
+      "ModelUploadOut": {
+        "properties": {
+          "check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCheck"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The check that failed, for `model-check-failed`; null otherwise",
+            "examples": [
+              null
+            ]
+          },
+          "created_at": {
+            "description": "When the link was made (UTC)",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the upload failed and what to do, in plain words; null otherwise",
+            "examples": [
+              null
+            ],
+            "title": "Error"
+          },
+          "expires_at": {
+            "description": "Until when the link takes its file (UTC)",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "description": "Public ID of the upload link",
+            "examples": [
+              "upl_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The model the upload made, once `done`; null before",
+            "examples": [
+              null
+            ],
+            "title": "Model Id"
+          },
+          "name": {
+            "description": "The name the model gets; a name the user has already gets a number then",
+            "examples": [
+              "lstm-signals.keras"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The problem the upload answered once `failed` (`model-check-failed`, `storage-full`, ...); null otherwise",
+            "examples": [
+              null
+            ],
+            "title": "Problem"
+          },
+          "size_bytes": {
+            "description": "The largest file the link takes",
+            "examples": [
+              14889779
+            ],
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/UploadStatus"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "size_bytes",
+          "status",
+          "created_at",
+          "expires_at",
+          "model_id",
+          "problem",
+          "check",
+          "error"
+        ],
+        "title": "ModelUploadOut",
         "type": "object"
       },
       "ModelsOut": {
@@ -6022,6 +6313,18 @@
         ],
         "title": "Trades",
         "type": "object"
+      },
+      "UploadStatus": {
+        "description": "Where an upload through a link stands: `waiting` for the file, `checking` while it comes\nin and is checked, `done` (the model is made), `failed` (`problem` says why) or `expired`\n(the link was not used in time).",
+        "enum": [
+          "waiting",
+          "checking",
+          "done",
+          "failed",
+          "expired"
+        ],
+        "title": "UploadStatus",
+        "type": "string"
       },
       "UsedModel": {
         "description": "The model a backtest used.",
@@ -8962,6 +9265,210 @@
         ]
       }
     },
+    "/api/v1/models/uploads": {
+      "post": {
+        "description": "Makes a one-time link to upload a model file through, for a client that cannot send\nthe file itself (an agent in a chat): `PUT` the file to `url` within 15 minutes, as\n`command` does with `curl -T`. The link takes one upload of a file no larger than\n`size_bytes`, with no other sign-in, and the upload is checked as `POST /api/v1/models`\nchecks it. The URL is shown only here; `GET /api/v1/models/uploads/{upload_id}` says how\nthe upload stands. The name and the size must fit now, and are checked again when the file\ncomes.",
+        "operationId": "create_model_upload_api_v1_models_uploads_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelUploadIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelUploadCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The file does not fit into the user's storage now (`storage-full`; `used_bytes` and `quota_bytes`), or the user has 100 models already (`too-many-models`; `limit`)."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The size is larger than 50 MB (`model-too-large`)."
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The name is not that of a Keras (`.keras`) or ONNX (`.onnx`) file (`unsupported-model-format`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "models"
+            ]
+          }
+        ],
+        "summary": "Create Model Upload",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/uploads/{upload_id}": {
+      "get": {
+        "description": "How the upload through the link stands: `waiting` for the file, `checking` while it\ncomes in and is checked, `done` with the model it made (`model_id`), `failed` with the\nproblem it answered (`problem`, `check`, `error`), or `expired` unused. A link stays\nreadable for at least a day after it expired.",
+        "operationId": "get_model_upload_api_v1_models_uploads__upload_id__get",
+        "parameters": [
+          {
+            "description": "Public ID of the upload link",
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "description": "Public ID of the upload link",
+              "examples": [
+                "upl_7f3k2m9qx4"
+              ],
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelUploadOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The user has no upload link with this ID (`not-found`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
+        "summary": "Get Model Upload",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/api/v1/models/{model_id}": {
       "delete": {
         "description": "Deletes the model and its file, which frees its storage.",
@@ -9391,6 +9898,123 @@
         "summary": "Preprocessing Catalog",
         "tags": [
           "preprocessing"
+        ]
+      }
+    },
+    "/api/v1/uploads/{token}": {
+      "put": {
+        "description": "Uploads the model file of a one-time link (`POST /api/v1/models/uploads`): the body is\nthe file, as `curl -T <file> <url>` sends it. The token in the path is the only sign-in: a\nsession or an API key is not needed and does not stand in for it. The link is used once\nthe upload starts, whatever comes of it; a file larger than the link's size by its\n`Content-Length`, or another upload of the user in progress, leaves it unused. The file is\nchecked as `POST /api/v1/models` checks it and becomes a model of the link's user, under\nthe link's name (numbered when the user has it).",
+        "operationId": "upload_by_link_api_v1_uploads__token__put",
+        "parameters": [
+          {
+            "description": "The token of the upload link",
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "description": "The token of the upload link",
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "The model file",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The client went away before the whole file came (`upload-interrupted`); the link is used and reads `failed`."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No upload link has this token (`upload-link-not-found`)."
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The file did not arrive within 2 minutes (`upload-timeout`)."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Another upload of the user is in progress (`upload-in-progress`; the link stays unused), the file does not fit into the user's storage (`storage-full`), the user has 100 models already (`too-many-models`), or, rarely, the numbered name is one the user has in another case (`model-name-taken`)."
+          },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The link took its file already or expired (`upload-link-gone`; `reason` says `used` or `expired`), or its account was deleted while the file was uploading."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The file is larger than the link's size (`larger-than-link`; `size_bytes`) or than 50 MB (`model-too-large`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A check failed (`model-check-failed`): `check` names it (`opens` or `weights`) and `detail` says why."
+          }
+        },
+        "summary": "Upload By Link",
+        "tags": [
+          "models"
         ]
       }
     }
