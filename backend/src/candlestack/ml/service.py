@@ -259,6 +259,22 @@ def _out(
     )
 
 
+# A path from the user's home, kept outside the quotes so the shell expands it.
+_HOME_PREFIXES = {"~/": "~/", "$HOME/": '"$HOME"/'}
+
+
+def upload_curl(path: str) -> str:
+    """The upload command up to the link's URL, which follows it after a space: curl sending
+    the file at `path`, for a POSIX shell or PowerShell. The path is quoted, but a leading `~/`
+    or `$HOME/` is left for the shell to expand. `--fail-with-body` prints the problem when the
+    upload is refused. The URL is not an argument: no local variable holds it (Sentry filters
+    only the token's by its name)."""
+    for prefix, kept in _HOME_PREFIXES.items():
+        if path.startswith(prefix) and len(path) > len(prefix):
+            return f"curl --fail-with-body -T {kept}{shlex.quote(path.removeprefix(prefix))}"
+    return f"curl --fail-with-body -T {shlex.quote(path)}"
+
+
 def upload_token_hash(token: str) -> bytes:
     return hashlib.sha256(token.encode()).digest()
 
@@ -611,8 +627,7 @@ class ModelsService:
             **_upload_out(upload, now).model_dump(),
             url=public_url + UPLOAD_PATH + token,
             page_url=public_url + UPLOAD_PAGE_PATH + token,
-            command=f"curl --fail-with-body -T {shlex.quote(new.name)} "
-            f"{public_url}{UPLOAD_PATH}{token}",
+            command=f"{upload_curl(new.name)} {public_url}{UPLOAD_PATH}{token}",
         )
 
     async def upload_status(self, user_id: str, upload_id: str) -> ModelUploadOut:

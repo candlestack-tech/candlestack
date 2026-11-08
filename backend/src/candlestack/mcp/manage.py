@@ -166,6 +166,7 @@ class ExperimentSummary(BaseModel):
     win_rate: float | None
     num_trades: int | None
     published_at: datetime
+    url: str = Field(description="The backtest's page in the app, to show the user")
 
 
 class ExperimentList(BaseModel):
@@ -216,9 +217,11 @@ def summary(call: ToolCall, backtest: BacktestOut) -> BacktestSummary:
     )
 
 
-def experiment_summary(experiment: ExperimentOut) -> ExperimentSummary:
-    fields = experiment.model_dump(include=set(ExperimentSummary.model_fields) - {"model"})
-    return ExperimentSummary(**fields, model=experiment.model.name)
+def experiment_summary(call: ToolCall, experiment: ExperimentOut) -> ExperimentSummary:
+    fields = experiment.model_dump(include=set(ExperimentSummary.model_fields) - {"model", "url"})
+    return ExperimentSummary(
+        **fields, model=experiment.model.name, url=backtest_url(call, experiment.id)
+    )
 
 
 def _state(backtest: BacktestOut) -> BacktestState:
@@ -361,7 +364,8 @@ async def list_experiments(  # noqa: PLR0913 (one argument per filter, as GET /e
     signed-in account can see, with search, filters (author, market, symbol, representation,
     timeframe), sort and 12 a page. Use it to find what others tried and how it did, then
     read one with its ID. Answers the page, how many match, the counts and the values each
-    filter offers. A page past the last one is empty."""
+    filter offers; each backtest has its `url`, the page to show the user. A page past the
+    last one is empty."""
     call = tool_call(ctx)
     experiments_query = ExperimentsQuery(
         query=query,
@@ -378,7 +382,7 @@ async def list_experiments(  # noqa: PLR0913 (one argument per filter, as GET /e
     async with call.db() as db:
         found = await get_backtests_service(db).experiments(call.user.id, experiments_query)
     return ExperimentList(
-        experiments=[experiment_summary(experiment) for experiment in found.experiments],
+        experiments=[experiment_summary(call, experiment) for experiment in found.experiments],
         total=found.total,
         page=found.page,
         pages=found.pages,
@@ -556,6 +560,7 @@ TOOLS = (
                         win_rate=0.512,
                         num_trades=1712,
                         published_at=datetime(2026, 10, 25, 18, 5, tzinfo=UTC),
+                        url="https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
                     )
                 ],
                 total=1,

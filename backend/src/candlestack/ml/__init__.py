@@ -55,7 +55,7 @@ from candlestack.ml.schemas import (
     ModelUploadIn,
     UploadStatus,
 )
-from candlestack.ml.service import ModelsAccountDeletion, ModelsService
+from candlestack.ml.service import ModelsAccountDeletion, ModelsService, upload_curl
 from candlestack.ml.storage import (
     LocalModelStorage,
     ModelStorage,
@@ -105,6 +105,7 @@ __all__ = [
     "no_usage",
     "preprocessing_router",
     "rename_taken",
+    "upload_curl",
     "upload_not_found",
     "upload_problem",
 ]

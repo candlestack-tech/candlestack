@@ -9,20 +9,22 @@ from typing import Any
 
 import pytest
 
-from candlestack.mcp.docs import DOCS_TEXT, INSTRUCTIONS, MCP_DOCS
+from candlestack.mcp import market
+from candlestack.mcp.docs import DOCS_TEXT, INSTRUCTIONS, MANIFEST_DOCS, MCP_DOCS, RESULT_DOCS
 from candlestack.mcp.server import build_server
 
 TOOLS_PAGE = "https://candlestack.tech/docs/mcp/tools/"
-# The pages that exist. The manifest and the result document point to the repository until
-# the website has their pages (candlestack-tech/website#63, #64).
+# The pages that exist. The manifest and the result document are the docs module's links, so
+# a description that names another page for them fails here when those links move to the
+# website's pages (candlestack-tech/website#63, #64).
 KNOWN = {
     "https://candlestack.tech/docs/agents/",
     "https://candlestack.tech/docs/mcp/",
     TOOLS_PAGE,
     "https://candlestack.tech/problems/",
     "https://app.candlestack.tech/api/v1/docs",
-    "https://github.com/candlestack-tech/candlestack/blob/main/docs/preprocessing.md#the-manifest",
-    "https://github.com/candlestack-tech/candlestack/blob/main/docs/engine.md#the-result-document",
+    MANIFEST_DOCS,
+    RESULT_DOCS,
     "https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/manifest.schema.json",
     "https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/backtest.schema.json",
 }
@@ -74,9 +76,13 @@ def test_every_docs_link_is_a_known_page(named: tuple[set[str], set[str]]) -> No
 def test_the_manifest_and_result_links_are_named(named: tuple[set[str], set[str]]) -> None:
     urls, _ = named
 
-    assert {
-        "https://github.com/candlestack-tech/candlestack/blob/main/docs/preprocessing.md#the-manifest",
-        "https://github.com/candlestack-tech/candlestack/blob/main/docs/engine.md#the-result-document",
-    } <= urls
+    assert {MANIFEST_DOCS, RESULT_DOCS} <= urls
     assert not [url for url in urls if url.startswith("https://candlestack.tech/docs/manifest")]
     assert not [url for url in urls if "backtest-json" in url]
+
+
+def test_the_catalog_links_the_manifest_docs() -> None:
+    [catalog] = [spec for spec in market.TOOLS if spec.name == "preprocessing_catalog"]
+
+    assert f"The manifest format: {MANIFEST_DOCS}." in catalog.description
+    assert "{manifest_docs}" not in catalog.description

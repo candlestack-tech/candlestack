@@ -557,6 +557,10 @@ def test_create_model_upload_answers_the_link_the_command_and_the_page(
         ("models/lstm.keras", "models/lstm.keras"),
         ("/home/ada/my models/lstm.keras", "'/home/ada/my models/lstm.keras'"),
         (r"C:\Users\Ada\lstm.onnx", r"'C:\Users\Ada\lstm.onnx'"),
+        # The home is left for the shell to expand: quoted, ~ stays a plain character.
+        ("~/models/lstm.keras", "~/models/lstm.keras"),
+        ("~/my models/lstm.keras", "~/'my models/lstm.keras'"),
+        ("$HOME/models/lstm.keras", '"$HOME"/models/lstm.keras'),
     ],
 )
 def test_the_command_sends_the_file_at_the_path_given(

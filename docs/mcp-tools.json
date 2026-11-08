@@ -1749,7 +1749,7 @@
           },
           "period": {
             "$ref": "#/$defs/Period",
-            "description": "`period_start` to `period_end` as start_backtest's `data.period`: UTC epoch seconds from the first day's midnight to the midnight after the last day (excluded); end it now at the latest, as there are no candles after"
+            "description": "`period_start` to `period_end` as start_backtest's `data.period`: UTC epoch seconds from the first day's midnight to the midnight after the last day (excluded), or to now while that day has not ended, as the app's builder sends it"
           },
           "period_end": {
             "default": "2024-12-31",
@@ -1849,17 +1849,32 @@
       },
       "inputSchema": {
         "$defs": {
-          "BacktestDefaultsIn": {
+          "BacktestDefaultsArg": {
             "additionalProperties": false,
-            "description": "The backtest defaults to save (Save defaults): every field, and no other. The same\nchecks as `BacktestDefaults`, but no defaults, so a body that leaves a field out is\nrefused instead of filled in.",
+            "description": "The backtest defaults to save, in Settings' units. The settings in start_backtest's\nunits that get_backtest_defaults adds are taken and ignored, so its answer can come back\nwith one setting changed.",
             "properties": {
               "benchmark": {
                 "$ref": "#/$defs/Benchmark",
                 "description": "What the result is measured against: bh buy and hold of the backtest's own instrument, or the ETF SPY, QQQ or DIA"
               },
+              "benchmark_instrument": {
+                "default": null,
+                "description": "Ignored: get_backtest_defaults derives it from the settings above",
+                "title": "Benchmark Instrument"
+              },
+              "decision": {
+                "default": null,
+                "description": "Ignored: get_backtest_defaults derives it from the settings above",
+                "title": "Decision"
+              },
               "direction": {
                 "$ref": "#/$defs/Direction",
                 "description": "long: long trades only, flat on a sell signal; both: long and short"
+              },
+              "execution": {
+                "default": null,
+                "description": "Ignored: get_backtest_defaults derives it from the settings above",
+                "title": "Execution"
               },
               "fees_pct": {
                 "description": "Fees in percent per side",
@@ -1867,6 +1882,11 @@
                 "minimum": 0,
                 "title": "Fees Pct",
                 "type": "number"
+              },
+              "period": {
+                "default": null,
+                "description": "Ignored: get_backtest_defaults derives it from the settings above",
+                "title": "Period"
               },
               "period_end": {
                 "description": "Last day of the test",
@@ -1918,7 +1938,7 @@
               "slippage_pct",
               "benchmark"
             ],
-            "title": "BacktestDefaultsIn",
+            "title": "BacktestDefaultsArg",
             "type": "object"
           },
           "BacktestTimeframe": {
@@ -1957,8 +1977,8 @@
         },
         "properties": {
           "defaults": {
-            "$ref": "#/$defs/BacktestDefaultsIn",
-            "description": "Every setting in Settings' units, as get_backtest_defaults answers them in percent and days: timeframe, period_start, period_end, direction, threshold, stop_loss_pct, fees_pct, slippage_pct and benchmark, nothing else"
+            "$ref": "#/$defs/BacktestDefaultsArg",
+            "description": "Every setting in Settings' units, as get_backtest_defaults answers them in percent and days: timeframe, period_start, period_end, direction, threshold, stop_loss_pct, fees_pct, slippage_pct and benchmark. Its answer can be sent back as it is: `period`, `decision`, `execution` and `benchmark_instrument` are ignored"
           }
         },
         "required": [
@@ -4424,7 +4444,7 @@
           "expires_at": "2026-11-02T09:45:00Z",
           "id": "upl_7f3k2m9qx4",
           "name": "lstm.keras",
-          "next_steps": "Ask the user to upload lstm.keras before 09:45 UTC: either run the command in the folder the file is in, or open the page and drop the file there. Then call get_model_upload with id upl_7f3k2m9qx4.",
+          "next_steps": "Ask the user to upload lstm.keras before 09:45 UTC: either run the command with the file's path on their computer after -T, or open the page and drop the file there. Then call get_model_upload with id upl_7f3k2m9qx4.",
           "page_url": "https://app.candlestack.tech/upload/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
           "size_bytes": 1489779,
           "url": "https://app.candlestack.tech/api/v1/uploads/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
@@ -4461,7 +4481,7 @@
         "description": "A one-time link to upload a model file through.",
         "properties": {
           "command": {
-            "description": "The curl command that uploads the file from the user's computer; it prints the problem when the upload is refused. The file's local path follows `-T`: the path given as `file_name`, or `./path/to/<name>` for a bare name, to replace with where the file is",
+            "description": "The curl command that uploads the file from the user's computer; it prints the problem when the upload is refused. It is for a POSIX shell (bash, zsh) or PowerShell, not cmd.exe. The file's local path follows `-T`: the path given as `file_name`, or `./path/to/<name>` for a bare name, to replace with where the file is",
             "title": "Command",
             "type": "string"
           },
@@ -9529,7 +9549,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Lists Experiments: the backtests that accounts of the beta published, which every signed-in account can see, with search, filters (author, market, symbol, representation, timeframe), sort and 12 a page. Use it to find what others tried and how it did, then read one with its ID. Answers the page, how many match, the counts and the values each filter offers. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_experiments",
+      "description": "Lists Experiments: the backtests that accounts of the beta published, which every signed-in account can see, with search, filters (author, market, symbol, representation, timeframe), sort and 12 a page. Use it to find what others tried and how it did, then read one with its ID. Answers the page, how many match, the counts and the values each filter offers; each backtest has its `url`, the page to show the user. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_experiments",
       "endpoints": [
         "GET /api/v1/experiments"
       ],
@@ -9580,6 +9600,7 @@
               },
               "sharpe": 0.79,
               "total_return": 0.246,
+              "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
               "win_rate": 0.512
             }
           ],
@@ -10078,6 +10099,11 @@
                 ],
                 "title": "Total Return"
               },
+              "url": {
+                "description": "The backtest's page in the app, to show the user",
+                "title": "Url",
+                "type": "string"
+              },
               "win_rate": {
                 "anyOf": [
                   {
@@ -10106,7 +10132,8 @@
               "max_drawdown",
               "win_rate",
               "num_trades",
-              "published_at"
+              "published_at",
+              "url"
             ],
             "title": "ExperimentSummary",
             "type": "object"

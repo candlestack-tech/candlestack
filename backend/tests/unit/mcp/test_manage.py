@@ -467,6 +467,8 @@ def test_list_experiments_passes_the_search_scope_filters_sort_and_page(mcp, ser
     assert listed["model"] == "kagi.onnx"
     assert listed["benchmark_return"] == 0.2
     assert "equity" not in listed
+    # The page of a published backtest, which every signed-in account can open.
+    assert listed["url"] == f"http://testserver/backtests/{EXPERIMENT.id}"
 
 
 def test_list_experiments_defaults_to_everyones_newest(mcp, service) -> None:

@@ -1047,10 +1047,11 @@ call, as the routes' dependencies do), never the API over HTTP.
     blocks of a manifest, optionally of one step, without the app's `group` and `tunable`
     and without the bounds and options a parameter does not have), `get_backtest_defaults` (as
     saved in Settings, in percent and days, and the same settings in the units of
-    `start_backtest` to pass through: `period` in epoch seconds, `decision`, `execution` with
-    the stop loss a fraction and the fees and slippage in basis points, and
-    `benchmark_instrument`), `update_backtest_defaults` (scope `backtests`, as its route; replaces
-    every setting, so destructive and idempotent) and `get_preferences` (time zone, date and
+    `start_backtest` to pass through: `period` in epoch seconds, ending now at the latest as
+    the builder's, `decision`, `execution` with the stop loss a fraction and the fees and
+    slippage in basis points, and `benchmark_instrument`), `update_backtest_defaults` (scope
+    `backtests`, as its route; replaces every setting, so destructive and idempotent; it takes
+    `get_backtest_defaults`' answer back as it is and ignores the four derived fields) and `get_preferences` (time zone, date and
     time format, so an agent writes times as the app shows them; not the theme). The
     instruments are compact: ID, name, exchange, price, 24 h change and volume, first candle;
     no symbol, source, feed or mini chart. They call the `DataService` of the routes and answer
@@ -1082,8 +1083,9 @@ call, as the routes' dependencies do), never the API over HTTP.
     answers `manifest-check-failed` with the `field`, `detail` and `allowed` of each problem.
     The upload: `create_model_upload` (`models`) makes the one-time link of
     `POST /api/v1/models/uploads` and answers its `id`, `expires_at`, the `curl` `command`
-    (with the path given as `file_name`, or `./path/to/<name>` for a bare name, which the
-    description asks to replace with the file's folder), the `url`, the app's upload page of the link (`page_url`,
+    (with the path given as `file_name`, quoted but with a leading `~/` or `$HOME/` left for
+    the shell, or `./path/to/<name>` for a bare name, which the description asks to replace
+    with the file's folder; `ml.upload_curl` builds it for the route too), the `url`, the app's upload page of the link (`page_url`,
     `<PUBLIC_URL>/upload/<token>`, #406) and `next_steps` to tell the user: the file goes
     from the user's disk with curl or through that page, never through a tool.
     `get_model_upload` (`read`) says how it stands (`waiting`, `checking`, `done` with the
@@ -1129,8 +1131,8 @@ call, as the routes' dependencies do), never the API over HTTP.
     of the beta and asks the agent to check with the user first) and `get_dashboard` (`read`;
     the counts, the 6 newest that ended, the 5 best by each result and the 4 best starred). They
     answer a compact backtest with its page's `url`: no equity series, generated name, duration or other fields only
-    the app's cards and charts use, the model by its name and ID; Experiments the same with the
-    author, never the model file. The Dashboard's newest published backtests are left out, as
+    the app's cards and charts use, the model by its name and ID; Experiments the same, `url`
+    included, with the author, never the model file. The Dashboard's newest published backtests are left out, as
     `list_experiments` lists them.
   - The tools of the other areas come with #399.
 - **Parity table** (`mcp/parity.py`): every endpoint of the API reference, by method and path,

@@ -8,7 +8,6 @@ from the user's disk to it with ``curl`` or through the upload page of the app.
 
 import json
 import logging
-import shlex
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Annotated, Any
@@ -49,6 +48,7 @@ from candlestack.ml import (
     model_not_found,
     no_manifest,
     rename_taken,
+    upload_curl,
     upload_not_found,
     upload_problem,
 )
@@ -410,9 +410,10 @@ class UploadLink(BaseModel):
     expires_at: datetime = Field(description="Until when the link takes its file (UTC)")
     command: str = Field(
         description="The curl command that uploads the file from the user's computer; it "
-        "prints the problem when the upload is refused. The file's local path follows `-T`: "
-        f"the path given as `file_name`, or `{_PLACEHOLDER}<name>` for a bare name, to replace "
-        "with where the file is"
+        "prints the problem when the upload is refused. It is for a POSIX shell (bash, zsh) "
+        "or PowerShell, not cmd.exe. The file's local path follows `-T`: the path given as "
+        f"`file_name`, or `{_PLACEHOLDER}<name>` for a bare name, to replace with where the "
+        "file is"
     )
     url: str = Field(
         description="Where the file goes with PUT, with no other sign-in; the token in it is "
@@ -474,7 +475,7 @@ async def create_model_upload(
         expires_at=link.expires_at,
         # The path given, or a placeholder of its folder: a bare name is often not where the
         # file is, and curl would fail on it.
-        command=f"curl --fail-with-body -T {shlex.quote(_local_path(file_name))} {link.url}",
+        command=f"{upload_curl(_local_path(file_name))} {link.url}",
         url=link.url,
         page_url=link.page_url,
         next_steps=f"Ask the user to upload {link.name} before {link.expires_at:%H:%M} UTC: "
@@ -719,8 +720,8 @@ TOOLS = (
                 url=_UPLOAD_URL,
                 page_url="https://app.candlestack.tech/upload/" + "x" * 40,
                 next_steps="Ask the user to upload lstm.keras before 09:45 UTC: either run the "
-                "command in the folder the file is in, or open the page and drop the file "
-                "there. Then call get_model_upload with id upl_7f3k2m9qx4.",
+                "command with the file's path on their computer after -T, or open the page and "
+                "drop the file there. Then call get_model_upload with id upl_7f3k2m9qx4.",
             ),
         ),
     ),

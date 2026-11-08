@@ -11,7 +11,7 @@ backtest defaults needs the scope ``backtests``, as its route does.
 
 import time
 from datetime import UTC, date, datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import Context
 from pydantic import BaseModel, Field
@@ -45,6 +45,7 @@ from candlestack.data import (
 )
 from candlestack.experiments import Decision, Execution, Period
 from candlestack.mcp.convention import Example, ToolCall, ToolSpec, changes, reads, tool_call
+from candlestack.mcp.docs import MANIFEST_DOCS
 from candlestack.preprocessing import BlockOut, Step, describe_catalog
 
 # Rows of one get_candles call. Clients show a result a second time as indented text, so a full
@@ -461,12 +462,17 @@ async def preprocessing_catalog(
     model sees), the features (its columns, in order), their normalization and the window
     (rows to samples), each with its versioned ID, what it does, its warm-up and its parameters
     with types, ranges and defaults. Use it to write or check a manifest, or to explain what
-    a model's input is made of. The manifest format:
-    https://github.com/candlestack-tech/candlestack/blob/main/docs/preprocessing.md#the-manifest."""
+    a model's input is made of. The manifest format: {manifest_docs}."""
     tool_call(ctx)
     return Catalog(
         blocks=[CatalogBlock.of(block) for block in _CATALOG.blocks if step in (None, block.step)]
     )
+
+
+# The link of the docs module, so the page moves in one place.
+preprocessing_catalog.__doc__ = (preprocessing_catalog.__doc__ or "").replace(
+    "{manifest_docs}", MANIFEST_DOCS
+)
 
 
 # --- The user's defaults and preferences -------------------------------------------------------
@@ -487,8 +493,8 @@ class BacktestDefaultsOut(BacktestDefaults):
 
     period: Period = Field(
         description="`period_start` to `period_end` as start_backtest's `data.period`: UTC epoch "
-        "seconds from the first day's midnight to the midnight after the last day (excluded); "
-        "end it now at the latest, as there are no candles after"
+        "seconds from the first day's midnight to the midnight after the last day (excluded), "
+        "or to now while that day has not ended, as the app's builder sends it"
     )
     decision: Decision = Field(
         description="`threshold` and `direction` as start_backtest's `decision`: the threshold "
@@ -516,15 +522,22 @@ def _bps(pct: float) -> float:
     return round(pct * 100, 4)
 
 
+def _period(defaults: BacktestDefaults) -> Period:
+    """The defaults' days as epoch seconds, ending now at the latest as the builder's period
+    does: there are no candles after, and a backtest refuses an end in the future. A period
+    that starts in the future keeps its end, so it stays a period (the backtest refuses it)."""
+    start = _midnight(defaults.period_start)
+    end = _midnight(defaults.period_end + timedelta(days=1))
+    now = int(_time())
+    return Period(start=start, end=min(end, now) if now > start else end)
+
+
 def defaults_out(defaults: BacktestDefaults) -> BacktestDefaultsOut:
     """The defaults with the same settings in start_backtest's units, as the app's builder
     starts a backtest from them (the next candle's open, the whole capital, no drawdown stop)."""
     return BacktestDefaultsOut(
         **defaults.model_dump(),
-        period=Period(
-            start=_midnight(defaults.period_start),
-            end=_midnight(defaults.period_end + timedelta(days=1)),
-        ),
+        period=_period(defaults),
         decision=Decision.model_validate(
             {
                 "rule": {"name": "threshold", "limit": defaults.threshold},
@@ -560,13 +573,29 @@ async def get_backtest_defaults(ctx: Context) -> BacktestDefaultsOut:
     return defaults_out(preferences.backtest_defaults)
 
 
+_DERIVED = "Ignored: get_backtest_defaults derives it from the settings above"
+
+
+class BacktestDefaultsArg(BacktestDefaultsIn):
+    """The backtest defaults to save, in Settings' units. The settings in start_backtest's
+    units that get_backtest_defaults adds are taken and ignored, so its answer can come back
+    with one setting changed."""
+
+    period: Any = Field(default=None, exclude=True, description=_DERIVED)
+    decision: Any = Field(default=None, exclude=True, description=_DERIVED)
+    execution: Any = Field(default=None, exclude=True, description=_DERIVED)
+    benchmark_instrument: Any = Field(default=None, exclude=True, description=_DERIVED)
+
+
 async def update_backtest_defaults(
     defaults: Annotated[
-        BacktestDefaultsIn,
+        BacktestDefaultsArg,
         Field(
             description="Every setting in Settings' units, as get_backtest_defaults answers "
             "them in percent and days: timeframe, period_start, period_end, direction, "
-            "threshold, stop_loss_pct, fees_pct, slippage_pct and benchmark, nothing else"
+            "threshold, stop_loss_pct, fees_pct, slippage_pct and benchmark. Its answer can "
+            "be sent back as it is: `period`, `decision`, `execution` and "
+            "`benchmark_instrument` are ignored"
         ),
     ],
     ctx: Context,
@@ -578,7 +607,9 @@ async def update_backtest_defaults(
     named. Answers the saved defaults."""
     call = tool_call(ctx)
     async with call.db() as db:
-        return await _accounts(call, db).save_backtest_defaults(call.user, defaults)
+        return await _accounts(call, db).save_backtest_defaults(
+            call.user, BacktestDefaultsIn.model_validate(defaults.model_dump())
+        )
 
 
 class Preferences(BaseModel):

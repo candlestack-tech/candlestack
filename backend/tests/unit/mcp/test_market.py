@@ -613,7 +613,8 @@ def test_get_backtest_defaults_answers_the_saved_defaults(mcp, saved: list[str])
     assert saved == ["usr_adaaaaaaaa"]
 
 
-def test_the_defaults_go_to_start_backtest_unchanged() -> None:
+def test_the_defaults_go_to_start_backtest_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(market, "_time", lambda: TODAY_0930)
     defaults = BacktestDefaults(
         direction="both", stop_loss_pct=5, fees_pct=0.07, slippage_pct=0.01, benchmark="SPY"
     )
@@ -640,6 +641,30 @@ def test_the_defaults_go_to_start_backtest_unchanged() -> None:
     days = (date(2025, 1, 1) - date(2021, 1, 4)).days
     assert body.data.period.end - body.data.period.start == days * 86_400
     assert body.decision.rule.name == "threshold"
+
+
+# 2026-11-08 09:30 UTC.
+TODAY_0930 = 1_794_096_000 + 9 * HOUR + 1800
+
+
+def test_a_default_period_that_ends_today_ends_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(market, "_time", lambda: TODAY_0930 + 0.5)
+    defaults = BacktestDefaults(period_start=date(2026, 1, 5), period_end=date(2026, 11, 8))
+
+    period = market.defaults_out(defaults).period
+
+    # As the builder sends it: a backtest refuses an end after now (period-out-of-range).
+    assert (period.start, period.end) == (1_767_571_200, TODAY_0930)
+
+
+def test_a_default_period_that_starts_later_keeps_its_end(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(market, "_time", lambda: TODAY_0930)
+    defaults = BacktestDefaults(period_start=date(2026, 12, 1), period_end=date(2026, 12, 31))
+
+    period = market.defaults_out(defaults).period
+
+    # Ending it now would end it before it starts: the defaults still answer.
+    assert (period.start, period.end) == (1_796_083_200, 1_798_761_600)
 
 
 def test_the_descriptions_say_the_units() -> None:
@@ -698,6 +723,26 @@ def test_update_backtest_defaults_saves_every_setting(
     assert not result.is_error, result.content
     assert result.structured_content == SAVED
     assert saves == [("usr_adaaaaaaaa", SAVED)]
+
+
+def test_update_backtest_defaults_takes_back_what_get_backtest_defaults_answers(
+    mcp, keys, saved: list[str], saves: list[tuple[str, dict[str, Any]]]
+) -> None:
+    defaults = answer(mcp, "get_backtest_defaults")
+
+    result = call(
+        mcp,
+        "update_backtest_defaults",
+        {"defaults": {**defaults, "stop_loss_pct": 5}},
+        key=keys.backtests_key,
+    )
+
+    # The settings in start_backtest's units are derived: taken, and left out of what is saved.
+    derived = {"period", "decision", "execution", "benchmark_instrument"}
+    settings = {k: v for k, v in defaults.items() if k not in derived} | {"stop_loss_pct": 5}
+    assert not result.is_error, result.content
+    assert result.structured_content == settings
+    assert saves == [("usr_adaaaaaaaa", settings)]
 
 
 @pytest.mark.parametrize(
