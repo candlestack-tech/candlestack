@@ -20,8 +20,10 @@ are proxied CNAMEs to the tunnel, so moving to another server does not touch DNS
 
 Every environment is one compose project (`env/compose.yaml`). The edge Caddy sends `/api/*`,
 `/mcp`, `/.well-known/oauth-protected-resource/*` and `/.well-known/oauth-authorization-server/*`
-of the environment's hostname to its backend and everything else to its frontend, and
-compresses the responses (zstd or gzip) on the way to Cloudflare.
+of the environment's hostname to its backend, answers any other `/.well-known/` path with 404
+(so OAuth clients probing for metadata fall back instead of reading the app's page) and
+everything else to its frontend, and compresses the responses (zstd or gzip) on the way to
+Cloudflare.
 
 | Container | Image | Reached as | Memory limit |
 | --- | --- | --- | --- |
