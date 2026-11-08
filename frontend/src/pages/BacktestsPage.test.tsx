@@ -65,6 +65,7 @@ describe('the Backtests page', () => {
     expect(subtitle()).toBe('3 backtests');
     expect(document.title).toBe('Backtests · CandleStack');
     expect(screen.getAllByRole('columnheader').map((head) => head.textContent)).toEqual([
+      '',
       'Backtest',
       'Instruments',
       'Model',
@@ -74,11 +75,12 @@ describe('the Backtests page', () => {
       'When',
       'Compare',
     ]);
-    // The name, then the number (#376); a backtest without results has its badge as its return.
+    // A checkbox, the name, then the number (#376); a backtest without results has its badge as its
+    // return.
     expect(rows().map(cells)).toEqual([
-      ['☆Bright Vega#12', 'AAPL+1', 'blesk-novol-8.keras', '+24.6 %', '0.79', '−19.7 %', 'Today 10:05', ''],
-      ['☆Frozen Pulsar#11', 'AAPL+1', 'blesk-novol-8.keras', 'Failed', '–', '–', 'Yesterday 18:10', ''],
-      ['★Crimson Nova#10', 'BTCUSDT+2', 'blesk-novol-8.keras', '−24.1 %', '−0.18', '−19.7 %', '12 Oct 19:44', ''],
+      ['', '☆Bright Vega#12', 'AAPL+1', 'blesk-novol-8.keras', '+24.6 %', '0.79', '−19.7 %', 'Today 10:05', ''],
+      ['', '☆Frozen Pulsar#11', 'AAPL+1', 'blesk-novol-8.keras', 'Failed', '–', '–', 'Yesterday 18:10', ''],
+      ['', '★Crimson Nova#10', 'BTCUSDT+2', 'blesk-novol-8.keras', '−24.1 %', '−0.18', '−19.7 %', '12 Oct 19:44', ''],
     ]);
     expect(within(rows()[0]!).getByRole('img', { name: 'Keras' })).toBeDefined();
   });
@@ -95,7 +97,7 @@ describe('the Backtests page', () => {
     await screen.findByText('#12');
     expect(subtitle()).toBe('3 backtests · 1 public');
     const globe = { name: 'Public, in Experiments' };
-    expect(within(within(rows()[0]!).getAllByRole('cell')[0]!).getByRole('img', globe)).toBeDefined();
+    expect(within(within(rows()[0]!).getAllByRole('cell')[1]!).getByRole('img', globe)).toBeDefined();
     expect(within(rows()[1]!).queryByRole('img', globe)).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: 'Filters: All backtests' }));
     const panel = screen.getByRole('dialog', { name: 'Filters' });
@@ -111,13 +113,13 @@ describe('the Backtests page', () => {
     stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
     await renderApp('/backtests');
     await screen.findByText('#12');
-    const icons = rows().map((row) => row.querySelector('td:nth-child(2) img')?.getAttribute('src'));
+    const icons = rows().map((row) => row.querySelector('td:nth-child(3) img')?.getAttribute('src'));
     expect(icons).toEqual([
       '/api/v1/data/instruments/stock%3AAAPL/icon',
       '/api/v1/data/instruments/stock%3AAAPL/icon',
       '/api/v1/data/instruments/crypto%3ABTCUSDT/icon',
     ]);
-    expect(rows()[2]!.querySelector('td:nth-child(2) [title]')?.getAttribute('title')).toBe(
+    expect(rows()[2]!.querySelector('td:nth-child(3) [title]')?.getAttribute('title')).toBe(
       'BTCUSDT, ETHUSDT and SOLUSDT',
     );
   });
@@ -159,7 +161,7 @@ describe('the Backtests page', () => {
     ]);
     expect(screen.queryByRole('columnheader', { name: 'Status' })).toBeNull();
 
-    const [backtestCell, , , result] = within(rows()[0]!).getAllByRole('cell');
+    const [, backtestCell, , , result] = within(rows()[0]!).getAllByRole('cell');
     expect(backtestCell!.textContent).toBe('☆Bright Vega#12');
     expect(result!.textContent).toBe('Failed');
   });
@@ -288,7 +290,7 @@ describe('the Backtests page', () => {
     await renderApp('/backtests');
     const name = await screen.findByText(long);
     expect(screen.queryByText('Bright Vega')).toBeNull();
-    expect(within(rows()[0]!).getAllByRole('cell')[0]!.textContent).toBe(`☆${long}#12`);
+    expect(within(rows()[0]!).getAllByRole('cell')[1]!.textContent).toBe(`☆${long}#12`);
     expect(screen.getByRole('link', { name: long })).toBeDefined();
     expect(name.className.split(' ')).toEqual(expect.arrayContaining(['truncate', 'max-w-[150px]']));
 

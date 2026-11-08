@@ -137,8 +137,9 @@ describe('deleting a backtest', () => {
       [DELETE]: () => new Promise((resolve) => (answer = resolve)),
     });
     await user.click(dialog.getByRole('button', { name: 'Delete' }));
-    await vi.waitFor(() => expect(dialog.getByRole('button', { name: 'Cancel' }).hasAttribute('disabled')).toBe(true));
+    await vi.waitFor(() => expect(dialog.getByRole('button', { name: 'Delete' }).hasAttribute('disabled')).toBe(true));
     await user.keyboard('{Escape}');
+    await user.click(dialog.getByRole('button', { name: 'Cancel' }));
     expect(screen.getByRole('dialog')).toBeDefined();
     answer?.({ status: 204 });
     await vi.waitFor(() => expect(router.state.location.pathname).toBe('/backtests'));

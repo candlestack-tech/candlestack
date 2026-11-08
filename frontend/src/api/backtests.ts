@@ -19,6 +19,8 @@ export type BacktestStatus = components['schemas']['BacktestStatus'];
 export type BacktestStep = components['schemas']['BacktestStep'];
 // What a new backtest is made of: the setup groups of the result document.
 export type BacktestIn = components['schemas']['BacktestIn'];
+// What a bulk delete did: the IDs deleted and those the user does not have.
+export type BacktestsDeleted = components['schemas']['BacktestsDeleted'];
 // The results Best backtests ranks by.
 export type BestMetric = keyof Dashboard['best'];
 
@@ -105,6 +107,10 @@ export function updateBacktest(id: string, update: components['schemas']['Backte
 export function deleteBacktest(id: string): Promise<void> {
   return del(backtestPath(id));
 }
+
+// POST /api/v1/backtests/delete: deletes 1 to 100 of the user's backtests at once, as
+// deleteBacktest does one. IDs the user does not have come back in `not_found`, not as an error.
+export const deleteBacktests = (ids: readonly string[]) => postJson<BacktestsDeleted>('/v1/backtests/delete', { ids });
 
 // While a backtest waits or runs, its page asks again this often until it finished or failed.
 export const POLL_MS = 2000;

@@ -284,6 +284,22 @@ def tool_problem(result: Any, slug: str) -> dict[str, Any]:
     return found
 
 
+def test_an_api_key_needs_the_scope_backtests(ada, key, client) -> None:
+    backtest_id = ada.backtest(1)
+    reader = {"Authorization": f"Bearer {key('read')}"}
+    writer = {"Authorization": f"Bearer {key('backtests')}"}
+
+    one = client.delete(f"/api/v1/backtests/{backtest_id}", headers=reader)
+    many = client.post("/api/v1/backtests/delete", json={"ids": [backtest_id]}, headers=reader)
+    assert ids(ada) == [backtest_id]
+    done = client.delete(f"/api/v1/backtests/{backtest_id}", headers=writer)
+
+    assert problem(one, 403, "missing-scope")["scope"] == "backtests"
+    assert problem(many, 403, "missing-scope")["scope"] == "backtests"
+    assert done.status_code == 204
+    assert ids(ada) == []
+
+
 def test_an_agent_deletes_only_the_count_it_confirmed(ada, key, mcp) -> None:
     first, second = ada.backtest(1), ada.backtest(2)
     writer, reader = key("backtests"), key("read")

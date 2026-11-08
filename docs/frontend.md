@@ -478,6 +478,22 @@ the longest of every date and time format. Trades is left out: with it the model
 at 1200 px, When at 800 (and from 980 to 1080 px), Model at 720, Sharpe at 560, Instruments at
 480.
 
+A checkbox before each row (the app's 18 px box, `src/components/Tick.tsx`, 26 px wide with the
+star's cell after it) and one in the header for the page choose backtests to delete. The header's
+box shows a dash while only some rows are chosen and chooses none once all are. Only the rows of
+the page shown count, so another page or search never deletes what is out of sight. While any
+are chosen, Delete with their count ("Delete 3", the page's Delete button) sits at the right of
+the search and Filters. It opens the backtest page's dialog for all of them: "Delete 3
+backtests?", that they go with their results and trades, that running ones are stopped, queued
+ones leave the queue and published ones also leave Experiments and the Compare of anyone who
+added them when any chosen one is such, and "This cannot be undone." Delete sends
+`POST /api/v1/backtests/delete` with their `ids` (one chosen row goes as
+`DELETE /api/v1/backtests/{id}`), and IDs in `not_found` count as deleted. Then the choice is
+cleared, the deleted ones leave Compare, the same queries as after a single delete are asked for
+again and a toast says "3 backtests were deleted" ("Bright Vega was deleted" for one). An error
+stays in the dialog with the choice kept. With the checkboxes the backtest's name keeps 120 px at
+the page's full width, not 150.
+
 A backtest without results has its badge in the Return column: Running, Failed, or Queued with
 its place in the user's queue (`queue_position`, 1 starts next), "Queued · 2", with "2 backtests
 ahead of it" in the title (the column has no room for more). While a list or the dashboard shows
@@ -569,12 +585,15 @@ so its back link returns there (else "← Backtests").
   The dialog cannot be closed while the request runs. Where the 2 s poll finds it running while
   the dialog is open, the dialog says it has left the queue and Cancel backtest turns off.
 - Delete (the user's own, any status, last in the header, `DeleteBacktest.tsx`): an outline button
-  with a bin that asks first (Delete Bright Vega?, a sentence by status, that a published one also
-  leaves Experiments, and "This cannot be undone.", Cancel or Delete) and sends
-  `DELETE /api/v1/backtests/{id}`. Then the backtest leaves Compare, the lists, the dashboard,
-  Experiments and the models are asked for again, the page goes to Backtests and the backtest's
-  cache is dropped; a 404 (deleted in another tab) counts as deleted, any other error shows its
-  detail in the dialog, which cannot be closed while the request runs.
+  with a bin, red on hover, that asks first in the dialog the list's bulk delete shares
+  (`src/features/backtests/DeleteDialog.tsx`): Delete Bright Vega?, a sentence by status (a
+  queued one leaves the queue, a running one is stopped), that a published one also leaves
+  Experiments and the Compare of anyone who added it, and "This cannot be undone.", then Cancel or
+  Delete. It sends `DELETE /api/v1/backtests/{id}`. Then the backtest leaves Compare, the lists,
+  the dashboard, Experiments and the models are asked for again, the page goes to Backtests and
+  the backtest's document leaves the cache, so going back says it is not found. A 404 (deleted in
+  another tab) counts as deleted. Any other error shows its detail in the dialog, which cannot be
+  closed while the request runs.
 - Finished: the six first results in a strip (`src/components/FactsStrip.tsx`, the model page's
   too), then the charts and the trades beside every metric of the engine and the setup (one column
   up to 980 px). Running: a moving bar and the setup. Failed: the error and the setup. A 404 says

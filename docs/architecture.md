@@ -893,7 +893,8 @@ user and locks the rows (a run that is finishing stores first, then its row goes
 
 - **Any status**. A queued backtest just leaves the queue. A running one is stopped rather than
   refused, so a sweep in progress can be deleted whole: its row goes, the transaction starts
-  the user's next queued backtest as the end of a run does, and after the commit the runner
+  the user's next queued backtest as the end of a run does (every delete does, so a queue that
+  stood still moves on too), and after the commit the runner
   cancels its task (`BacktestRunner.stop`). A job the worker took already runs to its end and
   nobody reads its answer. A run the runner cannot cancel (another process) finds its row gone:
   it stores nothing, and its steps and failure change no row.
@@ -904,7 +905,8 @@ user and locks the rows (a run that is finishing stores first, then its row goes
   name how many backtests it deletes in `confirm_count`; another number is
   `409 confirmation-mismatch` with the real `count` and deletes nothing, so an agent cannot
   wipe more than the user agreed to.
-- The web app deletes one from the backtest page, after a confirm dialog.
+- The web app deletes one from the backtest page, and the rows chosen on a page of the Backtests
+  list with `POST /api/v1/backtests/delete`, each after a confirm dialog that names the count.
 
 ## Experiments
 

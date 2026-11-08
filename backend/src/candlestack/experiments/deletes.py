@@ -104,8 +104,9 @@ class BacktestDeletes:
         ]
         await self._store.delete(sorted(found))
         await self._store.delete_empty_sweeps(user_id, sorted(filter(None, sweeps)))
-        # The user's queue moves on, as when a run ends.
-        started = await self._store.take_next(user_id, datetime.now(UTC)) if running else None
+        # The user's queue moves on, as when a run ends; also when none ran (a queue that stood
+        # still starts now instead of at the runner's next check).
+        started = await self._store.take_next(user_id, datetime.now(UTC))
         await self._store.commit()
         self._runner.stop(running)
         if started is not None:

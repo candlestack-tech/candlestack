@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query';
 
 import {
-  ApiError,
   backtestQueryOptions,
   backtestsQueryOptions,
   cancelBacktest,
   dashboardQueryOptions,
   deleteBacktest,
+  deleteBacktests,
+  isGone,
   updateBacktest,
   type Backtest,
   type BacktestsPage,
@@ -133,22 +134,31 @@ export function useCancelBacktest(id: string) {
   });
 }
 
-// A backtest that is gone already (deleted in another tab, say): the API answers 404 not-found.
-const isGone = (error: unknown) => error instanceof ApiError && error.status === 404;
+// Deletes one backtest (DELETE, as its page does) or several at once (POST .../delete), and gives
+// back the IDs that are gone now. One that was gone already (deleted in another tab, say) counts
+// as deleted.
+async function deleteAll(ids: readonly string[]): Promise<readonly string[]> {
+  const [only, ...more] = ids;
+  if (only === undefined || more.length > 0) {
+    const answer = await deleteBacktests(ids);
+    return [...answer.deleted, ...answer.not_found];
+  }
+  await deleteBacktest(only).catch((error: unknown) => {
+    if (!isGone(error)) throw error;
+  });
+  return ids;
+}
 
-// Deletes the user's backtest; one that is gone already counts as deleted. It leaves the
-// comparison at once, and the lists, the dashboard, Experiments and the models (their backtest
-// count and best Sharpe) are asked for again. Its own document stays until its page has gone
-// (forgetBacktest), so the page does not ask for it again meanwhile.
-export function useDeleteBacktest() {
+// Deletes the user's backtests: they leave the comparison at once, and the lists, the dashboard,
+// Experiments and the models (their backtest count and best Sharpe) are asked for again. A deleted
+// backtest's own document stays until its page has gone (forgetBacktest), so the page does not ask
+// for it again meanwhile.
+export function useDeleteBacktests() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      deleteBacktest(id).catch((error: unknown) => {
-        if (!isGone(error)) throw error;
-      }),
-    onSuccess: (_answer, id) => {
-      removeFromCompare(id);
+    mutationFn: deleteAll,
+    onSuccess: (gone) => {
+      for (const id of gone) removeFromCompare(id);
       for (const queryKey of [LISTS, DASHBOARD, EXPERIMENTS, MODELS]) void queryClient.invalidateQueries({ queryKey });
     },
   });

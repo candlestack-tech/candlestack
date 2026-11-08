@@ -198,8 +198,8 @@ the files older than its setting (`BACKUP_KEEP_DAYS` 1 for `daily/`, `BACKUP_KEE
 default 1440 minutes for `last/`), which is the previous week's dump. Between two Sundays one
 dump is there, up to a week old. The backups live on the VM's disk: they cover a broken
 migration or deleted data, not the loss of the VM. To take one now (SSM shell on the VM):
-`sudo docker exec prod-backup-1 /backup.sh`; it deletes nothing younger than a day, so the
-newest weekly dump stays next to it until the next Sunday.
+`sudo docker exec prod-backup-1 /backup.sh`. A manual dump replaces the weekly one when the
+weekly one is 2 or more days old, else both stay until the next Sunday.
 
 To restore the dump, e.g. prod (stage: `stage-` instead of `prod-`):
 
