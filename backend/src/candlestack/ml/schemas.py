@@ -244,6 +244,10 @@ class ModelUploadOut(BaseModel):
     status: UploadStatus
     created_at: datetime = Field(description="When the link was made (UTC)")
     expires_at: datetime = Field(description="Until when the link takes its file (UTC)")
+    finished_at: datetime | None = Field(
+        description="When the upload ended, `done` or `failed` (UTC); null before",
+        examples=[None],
+    )
     model_id: str | None = Field(
         description="The model the upload made, once `done`; null before",
         examples=[None],
@@ -271,6 +275,13 @@ class ModelUploadCreated(ModelUploadOut):
         description="Where the file goes: `PUT` it there as the body, with no other sign-in. "
         "Shown only in this response: CandleStack keeps just the SHA-256 of its token",
         examples=["https://app.candlestack.tech/api/v1/uploads/" + "x" * 40],
+    )
+    page_url: str = Field(
+        repr=False,  # it holds the token
+        description="The upload page of the link in the app: a person signed in as the user "
+        "drops the file there in the browser, for a client that cannot run `command`. Shown only "
+        "in this response",
+        examples=["https://app.candlestack.tech/upload/" + "x" * 40],
     )
     command: str = Field(
         repr=False,

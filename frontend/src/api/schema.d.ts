@@ -671,11 +671,11 @@ export interface paths {
          * Create Model Upload
          * @description Makes a one-time link to upload a model file through, for a client that cannot send
          *     the file itself (an agent in a chat): `PUT` the file to `url` within 15 minutes, as
-         *     `command` does with `curl -T`. The link takes one upload of a file no larger than
-         *     `size_bytes`, with no other sign-in, and the upload is checked as `POST /api/v1/models`
-         *     checks it. The URL is shown only here; `GET /api/v1/models/uploads/{upload_id}` says how
-         *     the upload stands. The name and the size must fit now, and are checked again when the file
-         *     comes.
+         *     `command` does with `curl -T`, or have the user drop it on the upload page `page_url` in
+         *     the browser. The link takes one upload of a file no larger than `size_bytes`, with no other
+         *     sign-in, and the upload is checked as `POST /api/v1/models` checks it. The URLs are shown
+         *     only here; `GET /api/v1/models/uploads/{upload_id}` says how the upload stands. The name
+         *     and the size must fit now, and are checked again when the file comes.
          */
         post: operations["create_model_upload_api_v1_models_uploads_post"];
         delete?: never;
@@ -865,7 +865,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Get Upload By Token
+         * @description The upload link of the token for the upload page it opens in the browser: the file it
+         *     is made for (`name`, `size_bytes`) and how its upload stands, as
+         *     `GET /api/v1/models/uploads/{upload_id}` says it. Only the session of the user who made the
+         *     link reads it: an API key is refused, and another user learns nothing of the link. The file
+         *     itself never comes back.
+         */
+        get: operations["get_upload_by_token_api_v1_uploads__token__get"];
         /**
          * Upload By Link
          * @description Uploads the model file of a one-time link (`POST /api/v1/models/uploads`): the body is
@@ -3523,6 +3531,12 @@ export interface components {
              */
             expires_at: string;
             /**
+             * Finished At
+             * @description When the upload ended, `done` or `failed` (UTC); null before
+             * @example null
+             */
+            finished_at: string | null;
+            /**
              * Id
              * @description Public ID of the upload link
              * @example upl_7f3k2m9qx4
@@ -3540,6 +3554,12 @@ export interface components {
              * @example lstm-signals.keras
              */
             name: string;
+            /**
+             * Page Url
+             * @description The upload page of the link in the app: a person signed in as the user drops the file there in the browser, for a client that cannot run `command`. Shown only in this response
+             * @example https://app.candlestack.tech/upload/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+             */
+            page_url: string;
             /**
              * Problem
              * @description The problem the upload answered once `failed` (`model-check-failed`, `storage-full`, ...); null otherwise
@@ -3603,6 +3623,12 @@ export interface components {
              * @description Until when the link takes its file (UTC)
              */
             expires_at: string;
+            /**
+             * Finished At
+             * @description When the upload ended, `done` or `failed` (UTC); null before
+             * @example null
+             */
+            finished_at: string | null;
             /**
              * Id
              * @description Public ID of the upload link
@@ -7284,6 +7310,65 @@ export interface operations {
             };
             /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_upload_by_token_api_v1_uploads__token__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The token of the upload link */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelUploadOut"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Another user made this upload link (`upload-link-of-another-user`): sign in with the account that asked for it. API keys cannot do this, only the signed-in browser (`session-required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No upload link has this token (`upload-link-not-found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

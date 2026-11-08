@@ -262,12 +262,13 @@ def test_an_upload_links_token_is_not_sent(
 ) -> None:
     token = "q" * 40
 
-    # Named as the route names it: a variable of any other name would be sent.
-    @app.get("/api/v1/uploads/{token}")
+    # Named as the routes name it: a variable of any other name would be sent. A method the
+    # upload link's routes do not take, so this one is reached.
+    @app.delete("/api/v1/uploads/{token}")
     async def link_crash(token: str) -> None:
         raise RuntimeError(f"failed after {len(token)} characters")
 
-    client.get(f"/api/v1/uploads/{token}")
+    client.delete(f"/api/v1/uploads/{token}")
 
     [event] = sentry.items("event")
     assert event["request"]["url"] == "http://testserver/api/v1/uploads/[Filtered]"
@@ -327,6 +328,7 @@ def test_redact_url_ignores_what_is_no_url() -> None:
         ("api_key=k&apikey=k&secret=s", "api_key=[Filtered]&apikey=[Filtered]&secret=[Filtered]"),
         ("mytoken=keep&token=", "mytoken=keep&token=[Filtered]"),
         ("symbol=AAPL&interval=1m&token", "symbol=AAPL&interval=1m&token"),
+        ("next=/upload/" + "q" * 40, "next=[Filtered]"),
         ("", ""),
     ],
 )

@@ -74,6 +74,10 @@ PARITY: dict[str, Entry] = {
     "POST /api/v1/models": Tools(("create_model_upload", "get_model_upload")),
     "POST /api/v1/models/uploads": Tools(("create_model_upload",)),
     "GET /api/v1/models/uploads/{upload_id}": Tools(("get_model_upload",)),
+    "GET /api/v1/uploads/{token}": WebOnly(
+        "The upload page reads its link for the signed-in browser; an agent reads the upload "
+        "with get_model_upload."
+    ),
     "PUT /api/v1/uploads/{token}": WebOnly(
         "The file goes to the one-time link with curl or the upload page, not through a tool."
     ),

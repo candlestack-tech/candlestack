@@ -159,6 +159,16 @@ const modelRoute = createRoute({
   component: lazyRouteComponent(() => import('@/pages/ModelPage'), 'ModelPage'),
 });
 
+// /upload/<token>: the upload page of a one-time link (#406), without the sidebar. The token is the
+// link's secret: the API filters it from its logs, and from Sentry the sign-in's `next` it rides in
+// while signed out.
+const uploadRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/upload/$token',
+  staticData: { sidebar: false },
+  component: lazyRouteComponent(() => import('@/pages/UploadPage'), 'UploadPage'),
+});
+
 // /instruments?q=btc&market=crypto&page=2; broken values are dropped in validateSearch. Market
 // data is for signed-in accounts only (#340), so the list is part of the app.
 const instrumentsRoute = createRoute({
@@ -222,6 +232,7 @@ export const routeTree = rootRoute.addChildren([
     experimentsRoute,
     modelsRoute,
     modelRoute,
+    uploadRoute,
     instrumentsRoute,
     instrumentRoute,
     settingsRoute,

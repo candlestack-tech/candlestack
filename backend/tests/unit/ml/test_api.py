@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from candlestack.accounts import User
-from candlestack.accounts.dependencies import current_user
+from candlestack.accounts.dependencies import current_user, session_user
 from candlestack.core import Settings
 from candlestack.ml.api import _link_failure
 from candlestack.ml.errors import (
@@ -60,6 +60,7 @@ def signed_in(app: FastAPI) -> FastAPI:
         ("GET", "/api/v1/models/mdl_7f3k2m9qx4/manifest"),
         ("POST", "/api/v1/models/uploads"),
         ("GET", "/api/v1/models/uploads/upl_7f3k2m9qx4"),
+        ("GET", "/api/v1/uploads/" + "q" * 40),
     ],
 )
 def test_the_models_need_a_session(client: TestClient, method: str, path: str) -> None:
@@ -274,6 +275,23 @@ def test_an_upload_link_needs_no_session_nor_the_apps_origin(
         "detail": "No upload link has this token. Check that the whole link was copied, or ask "
         "for a new one.",
     }
+
+
+def test_an_upload_link_is_read_by_its_token_only_with_the_session(client: TestClient) -> None:
+    response = client.get("/api/v1/uploads/" + "q" * 40, headers={"Authorization": "Bearer cs_any"})
+
+    assert response.status_code == 403
+    assert response.json()["type"] == PROBLEMS + "session-required"
+
+
+@pytest.mark.parametrize("token", ["short", "Q" * 40, "q" * 41])
+def test_a_token_not_of_its_form_is_not_found(app: FastAPI, client: TestClient, token: str) -> None:
+    app.dependency_overrides[session_user] = lambda: USER
+
+    response = client.get(f"/api/v1/uploads/{token}")
+
+    assert response.status_code == 404
+    assert response.json()["type"] == PROBLEMS + "upload-link-not-found"
 
 
 @pytest.mark.parametrize(
