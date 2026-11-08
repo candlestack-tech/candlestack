@@ -9,7 +9,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from candlestack.core.errors import internal_error_response
 from candlestack.core.logging import request_id_var
-from candlestack.core.observability import tag_request, without_secrets
+from candlestack.core.observability import redacted_path, tag_request
 
 access_logger = logging.getLogger("candlestack.access")
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ class RequestContextMiddleware:
     It is sent back as ``X-Request-ID`` and added to every log record and Sentry event of the
     request. Every response also carries ``Server-Timing: app;dur=<ms>``, the time the app took
     until the response started, so it can be measured from outside. The access line leaves out
-    the secret a path may hold (``without_secrets``: an upload link's token).
+    the secret a path may hold (``redacted_path``: an upload link's token).
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -58,7 +58,7 @@ class RequestContextMiddleware:
                 raise
             await internal_error_response()(scope, receive, send_with_id)
         finally:
-            path = without_secrets(scope["path"])
+            path = redacted_path(scope["path"])
             access_logger.info(
                 "%s %s %s",
                 scope["method"],

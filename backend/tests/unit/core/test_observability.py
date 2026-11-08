@@ -24,9 +24,9 @@ from candlestack.core.observability import (
     ErrorBudget,
     _before_send_log,
     _hide_query_secrets,
-    _hide_url_secrets,
+    _redact_url,
     _traces_sampler,
-    without_secrets,
+    redacted_path,
 )
 from candlestack.main import create_app
 
@@ -289,15 +289,15 @@ def test_an_upload_links_token_is_not_sent(
         ("/api/health", "/api/health"),
     ],
 )
-def test_without_secrets(path: str, kept: str) -> None:
-    assert without_secrets(path) == kept
+def test_redacted_path(path: str, kept: str) -> None:
+    assert redacted_path(path) == kept
 
 
-def test_hide_url_secrets_ignores_what_is_no_url() -> None:
+def test_redact_url_ignores_what_is_no_url() -> None:
     for request in (None, {}, {"url": None}, {"url": "no-scheme/api/v1/uploads/x"}):
-        _hide_url_secrets(request)
+        _redact_url(request)
     request = {"url": "https://app.candlestack.tech"}
-    _hide_url_secrets(request)
+    _redact_url(request)
     assert request == {"url": "https://app.candlestack.tech"}
 
 

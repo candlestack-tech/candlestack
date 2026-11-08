@@ -296,8 +296,9 @@ flowchart LR
   lock lasts (5 minutes) reads as interrupted. `GET /api/v1/models/uploads/{upload_id}` shows
   the user's link, without its URL: `waiting`, `checking`, `done`, `failed`, or `expired` for a
   waiting one past its expiry. The token never reaches the logs: the access line and the URLs
-  sent to Sentry show `/api/v1/uploads/[Filtered]` (`without_secrets` in `core/observability.py`). The upload page
-  for the browser (#406) and the MCP tools (#403) build on these routes.
+  sent to Sentry show `/api/v1/uploads/[Filtered]` (`redacted_path` in
+  `core/observability.py`). The upload page for the browser (#406) and the MCP tools (#403)
+  build on these routes.
 - **The check** (`ml/inspect.py`) reads the file and never loads it: a `.keras` file is a zip of
   `config.json` (the architecture), `metadata.json` (the Keras version) and
   `model.weights.h5` (the weights), and loading it could run code from it. It runs in a child
