@@ -15,7 +15,7 @@ from mcp.types import CallToolResult, InputRequiredResult
 from pydantic import ValidationError
 
 from candlestack.core import ProblemError
-from candlestack.mcp import account
+from candlestack.mcp import account, sweeps
 from candlestack.mcp.convention import ToolSpec, problem_result, tool_call
 from candlestack.mcp.docs import DOCS_TEXT, DOCS_URI, INSTRUCTIONS
 
@@ -25,7 +25,7 @@ NAME = "candlestack"
 TITLE = "CandleStack"
 WEBSITE = "https://candlestack.tech"
 # Every tool of the server, in the order tools/list and the tool reference show them.
-TOOLS: tuple[ToolSpec, ...] = (*account.TOOLS,)
+TOOLS: tuple[ToolSpec, ...] = (*account.TOOLS, *sweeps.TOOLS)
 
 
 def _invalid_arguments(error: ValidationError) -> ProblemError:
