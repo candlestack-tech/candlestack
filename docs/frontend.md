@@ -306,8 +306,10 @@ The two sections with the account's preferences load them in the route's loader
   its scopes, last use and when it connected, and Disconnect, which asks first
   (`DELETE /api/v1/me/connected-apps/{id}`; a 404 counts as gone). Without apps a dashed box says
   how to connect one. The app's tile (`src/components/AppTile.tsx`) draws the mark of a known app
-  by the host it returns to (claude.ai, chatgpt.com: the API checks that host against the
-  registered redirect URIs, so a name cannot borrow it), else the `logo_uri` the app gave (sent
+  (claude.ai, chatgpt.com) by the host that vouches for it: for an app named by a client ID
+  metadata document that document's host (`document_host`; a document elsewhere that returns to
+  claude.ai gets no mark), else the host it returns to (the API checks that host against the
+  registered redirect URIs, so a name cannot borrow it); else the `logo_uri` the app gave (sent
   without a referrer), else its initial; a logo that does not load falls back to the initial.
 - Account: Sign out everywhere (`POST /api/v1/auth/sign-out-everywhere`) and Delete account
   (`DELETE /api/v1/me`, after the app's dialog). Both then forget the user and their data and go
@@ -327,12 +329,16 @@ is not asked again on mount.
 
 - Signed in: the app's tile linked to the CandleStack mark, "Claude wants access to your
   CandleStack account", "From claude.ai" (the host it returns to, as anyone can register an app
-  called Claude), Signed in as with Not you? (signs out and stays on the page), the scopes in the
-  API's plain words with boxes (read always and faded, the others only when the app asked for
-  them; Run backtests and Manage models start on, Publish off), what an app can never do, Cancel
-  and Allow. Either posts `POST /api/v1/oauth/requests/{id}` (`deny`, or `allow` with the ticked
-  scopes) and sends the browser to the answer's `redirect_to`; the buttons stay off until it has
-  left.
+  called Claude), who names it: "Named by claude.ai" for an app named by a client ID metadata
+  document (its `document_host`, which a document cannot fake), "Named by the app itself, not
+  checked" for one that registered itself; Signed in as with Not you? (signs out and stays on the
+  page), the scopes in the API's plain words with boxes (read always and faded, the others only
+  when the app asked for them; Run backtests and Manage models start on, Publish off), what an
+  app can never do, Cancel and Allow. Either posts `POST /api/v1/oauth/requests/{id}` (`deny`, or
+  `allow` with the ticked scopes) and sends the browser to the answer's `redirect_to`; the
+  buttons, the boxes and Not you? stay off until it has left. Back from the app, a page the
+  browser restores from its back-forward cache (`pageshow` with `persisted`) offers the buttons
+  again; the request is used by then, so either says it has expired.
 - Signed out: the same card offers GitHub and Google and names the app; signing in comes back to
   the page.
 - Off the beta list (`403 not-on-beta-list` on Allow): the sign-in page's words, with Use another

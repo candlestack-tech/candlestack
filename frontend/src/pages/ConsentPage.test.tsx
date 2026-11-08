@@ -71,6 +71,7 @@ describe('Consent page, signed in', () => {
     expect((await heading()).textContent).toBe('Claude wants access to your CandleStack account');
     expect(document.title).toBe('Allow access · CandleStack');
     expect(screen.getByText('From claude.ai. It acts as you with what you allow here.')).toBeDefined();
+    expect(screen.getByText('Named by claude.ai')).toBeDefined();
     expect(screen.getByText('arsen@example.com')).toBeDefined();
     expect(screen.getByRole('button', { name: 'Not you?' })).toBeDefined();
 
@@ -107,6 +108,56 @@ describe('Consent page, signed in', () => {
     });
     expect(screen.getByRole('button', { name: 'Allow' })).toHaveProperty('disabled', true);
     expect(screen.getByRole('button', { name: 'Cancel' })).toHaveProperty('disabled', true);
+  });
+
+  it('says the name of an app that registered itself is its own', async () => {
+    const own = { ...CLAUDE.client, redirect_host: 'claude.ai.example', document_host: null };
+    await open({ ...session(ARSEN), ...requestAnswer({ ...CLAUDE, client: own }) });
+    await heading();
+    expect(screen.getByText('From claude.ai.example. It acts as you with what you allow here.')).toBeDefined();
+    expect(screen.getByText('Named by the app itself, not checked')).toBeDefined();
+    expect(screen.queryByText(/^Named by claude/)).toBeNull();
+  });
+
+  it('holds the boxes and Not you? while the decision is on its way', async () => {
+    // The decision's answer, held back until the test lets it come.
+    let answer: (value: { status: number; body: unknown }) => void = () => {};
+    const { user } = await open({
+      ...session(ARSEN),
+      ...requestAnswer(),
+      [`POST ${REQUEST_PATH}`]: () => new Promise((resolve) => (answer = resolve)),
+    });
+    await heading();
+    await user.click(screen.getByRole('button', { name: 'Allow' }));
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Allow' })).toHaveProperty('disabled', true));
+    for (const name of ['Start, rename and star backtests', 'Publish and unpublish backtests in Experiments'])
+      expect(box(name)).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Not you?' })).toHaveProperty('disabled', true);
+
+    answer({ status: 503, body: { detail: 'Down for a minute.' } });
+    await screen.findByRole('alert');
+    expect(box('Start, rename and star backtests')).toHaveProperty('disabled', false);
+    expect(screen.getByRole('button', { name: 'Not you?' })).toHaveProperty('disabled', false);
+  });
+
+  it('offers the buttons again when Back brings the decided page out of the cache', async () => {
+    const { user } = await open({
+      ...session(ARSEN),
+      ...requestAnswer(),
+      [`POST ${REQUEST_PATH}`]: { status: 200, body: { redirect_to: BACK } },
+    });
+    await heading();
+    const assign = stubLeaving();
+    await user.click(screen.getByRole('button', { name: 'Allow' }));
+    await vi.waitFor(() => expect(assign).toHaveBeenCalledWith(BACK));
+    const allow = () => screen.getByRole('button', { name: 'Allow' });
+
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: false }));
+    expect(allow()).toHaveProperty('disabled', true);
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    await vi.waitFor(() => expect(allow()).toHaveProperty('disabled', false));
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveProperty('disabled', false);
+    expect(box('Start, rename and star backtests')).toHaveProperty('disabled', false);
   });
 
   it('denies on Cancel, and the app hears it', async () => {
