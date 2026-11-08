@@ -1711,7 +1711,7 @@
     "WarmUpReport": {
       "properties": {
         "candles": {
-          "description": "Candles loaded before the period for the warm-up",
+          "description": "Candles the model needs before the period (its warm-up), loaded with it; where an `estimate` fell short the run loaded more, from `loaded.start`",
           "title": "Candles",
           "type": "integer"
         },
