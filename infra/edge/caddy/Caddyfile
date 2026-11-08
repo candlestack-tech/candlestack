@@ -21,12 +21,14 @@
 	header Reporting-Endpoints `csp="https://o4512154553942016.ingest.de.sentry.io/api/4512157493362768/security/?sentry_key=889214b3abf0734910f9a3103dda8242&sentry_environment={args[0]}"`
 }
 
-# One environment: /api/* to its backend, everything else to its frontend.
+# One environment: the API, the MCP server (/mcp) and its OAuth metadata to its backend,
+# everything else to its frontend.
 # Usage: import env <env name> <Sentry environment of its CSP reports>
 (env) {
 	import compress
 	import csp {args[1]}
-	handle /api/* {
+	@backend path /api/* /mcp /.well-known/oauth-protected-resource/*
+	handle @backend {
 		reverse_proxy {args[0]}-backend:8000
 	}
 	handle {
