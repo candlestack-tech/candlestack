@@ -293,6 +293,21 @@ def test_registration_refuses_bad_metadata(app_client, metadata, error) -> None:
     oauth_error(response, 400, error)
 
 
+def test_registration_keeps_only_the_types_the_server_offers(app_client) -> None:
+    # Claude's client ID metadata document names more grant types than this server offers.
+    body = {
+        "redirect_uris": [REDIRECT],
+        "grant_types": ["authorization_code", "refresh_token", "client_credentials"],
+        "response_types": ["code", "token"],
+    }
+
+    response = app_client.request("POST", "/api/v1/oauth/register", json=body)
+
+    assert response.status_code == 201
+    assert response.json()["grant_types"] == ["authorization_code", "refresh_token"]
+    assert response.json()["response_types"] == ["code"]
+
+
 def test_registrations_are_limited_per_address(app_client) -> None:
     for _ in range(10):
         app_client.register()

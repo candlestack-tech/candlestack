@@ -8100,7 +8100,7 @@ export interface operations {
                     client_uri?: string | null;
                     /**
                      * Grant Types
-                     * @description `authorization_code` and `refresh_token` only
+                     * @description Must name `authorization_code`; the server keeps it and `refresh_token`, and ignores the types it does not offer
                      * @default [
                      *       "authorization_code",
                      *       "refresh_token"
@@ -8119,7 +8119,7 @@ export interface operations {
                     redirect_uris: string[];
                     /**
                      * Response Types
-                     * @description `code` only
+                     * @description Must name `code`; the server keeps only `code`
                      * @default [
                      *       "code"
                      *     ]

@@ -1343,7 +1343,9 @@ backend like the rest of the API; the metadata (RFC 8414) is served at
   checked for another host on the same address could carry it), no proxy from the environment.
   No redirects; at most 16 KB as sent (`Accept-Encoding: identity`, nothing is inflated) in 5
   seconds; the document's `client_id` must be its URL, it may hold no secret and its method must
-  be `none`. Redirect URIs are https, or http on a loopback address
+  be `none`. Its `grant_types` must name `authorization_code` and its `response_types` `code`;
+  other types it names are ignored (Claude's document names more) and only `authorization_code`,
+  `refresh_token` and `code` are kept. Redirect URIs are https, or http on a loopback address
   (RFC 8252), without fragments, and must match a registered one exactly; on a loopback address
   the port may differ, but the URI an authorize request gives is at most 512 characters too.
 - **Authorize** (`GET /api/v1/oauth/authorize`): every error is a `400
