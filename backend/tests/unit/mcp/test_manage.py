@@ -386,6 +386,9 @@ def test_list_backtests_answers_the_counts_on_page_1_or_when_asked(
         {"instrument": "AAPL"},
         {"instrument": "bonds:AAPL"},
         {"min_max_drawdown": 0.1},
+        {"min_sharpe": "nan"},
+        {"min_total_return": "inf"},
+        {"min_max_drawdown": "-inf"},
         {"status": ["lost"]},
     ],
 )

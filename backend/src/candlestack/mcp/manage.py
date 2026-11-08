@@ -309,14 +309,17 @@ async def list_backtests(  # noqa: PLR0913 (one argument per filter, as GET /bac
         Field(description="Only those started before this time (UTC)"),
         AfterValidator(as_utc),
     ] = None,
-    min_sharpe: Annotated[float | None, Field(description="Sharpe ratio at least this")] = None,
+    min_sharpe: Annotated[
+        float | None, Field(allow_inf_nan=False, description="Sharpe ratio at least this")
+    ] = None,
     min_total_return: Annotated[
-        float | None, Field(description="Return at least this, a fraction")
+        float | None, Field(allow_inf_nan=False, description="Return at least this, a fraction")
     ] = None,
     min_max_drawdown: Annotated[
         float | None,
         Field(
             le=0,
+            allow_inf_nan=False,
             description="Largest fall no deeper than this, 0 or below: -0.2 keeps falls of up "
             "to 20 percent",
         ),

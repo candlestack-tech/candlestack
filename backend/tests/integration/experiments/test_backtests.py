@@ -384,7 +384,15 @@ def test_the_model_id_filter(ada, varied) -> None:
 
 
 @pytest.mark.parametrize(
-    "params", [{"instrument": "AAPL"}, {"min_max_drawdown": 0.1}, {"status": "lost"}]
+    "params",
+    [
+        {"instrument": "AAPL"},
+        {"min_max_drawdown": 0.1},
+        {"status": "lost"},
+        {"min_sharpe": "nan"},
+        {"min_total_return": "inf"},
+        {"min_max_drawdown": "-inf"},
+    ],
 )
 def test_a_filter_the_api_cannot_read_is_invalid(ada, params) -> None:
     response = ada.backtests(**params)

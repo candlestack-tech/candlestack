@@ -168,15 +168,18 @@ def list_query(  # noqa: PLR0913 (one argument per query parameter)
         CreatedFilter, Query(description="Only those started before this time (UTC)")
     ] = None,
     min_sharpe: Annotated[
-        float | None, Query(description="Only those with at least this Sharpe ratio")
+        float | None,
+        Query(allow_inf_nan=False, description="Only those with at least this Sharpe ratio"),
     ] = None,
     min_total_return: Annotated[
-        float | None, Query(description="Only those with at least this return, a fraction")
+        float | None,
+        Query(allow_inf_nan=False, description="Only those with at least this return, a fraction"),
     ] = None,
     min_max_drawdown: Annotated[
         float | None,
         Query(
             le=0,
+            allow_inf_nan=False,
             description="Only those whose largest fall is no deeper than this, 0 or below: "
             "-0.2 keeps falls of up to 20 percent",
         ),
