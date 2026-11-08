@@ -280,7 +280,13 @@ The two sections with the account's preferences load them in the route's loader
   `role="alert"`; what to fix in a field is a red line under it.
 - Data and storage shows the market data and the storage the models take (the sidebar's meter
   and numbers, how many were uploaded); the backtests row comes with that page.
-  API and MCP shows both cards as Coming soon, with the API docs of the same host.
+- API and MCP (`ApiKeysCard.tsx`, design `mockups/api-mcp`, #398): the API keys under
+  `['account', 'api-keys']` (`src/api/apiKeys.ts`), oldest first, with how many of the limit of
+  10 work (expired keys stay listed, greyed, and do not count). Create key asks for a name (up to
+  40 characters), the scopes (`read` always on) and an expiry (30 days, 90, a year or never), then
+  shows the secret once in the same dialog with Copy and Try it examples; the secret lives only in
+  that dialog and never enters the query cache. Revoke and Delete ask first. The MCP server card
+  stays Coming soon, with the server address of the same host.
 - Account: Sign out everywhere (`POST /api/v1/auth/sign-out-everywhere`) and Delete account
   (`DELETE /api/v1/me`, after the app's dialog). Both then forget the user and their data and go
   to the home page, as Sign out does (`useLeaveAccount.ts`).
