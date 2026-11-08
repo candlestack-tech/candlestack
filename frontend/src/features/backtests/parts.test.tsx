@@ -14,7 +14,10 @@ afterEach(() => {
 describe('the return of a backtest in a list', () => {
   it('is the badge with its place for a queued backtest, what it means in the title', () => {
     render(<BacktestReturn backtest={backtest({ status: 'queued', queue_position: 2, total_return: null })} />);
-    expect(screen.getByText('Queued · 2').getAttribute('title')).toBe('2 backtests ahead of it');
+    const badge = screen.getByText('Queued · 2');
+    expect(badge.getAttribute('title')).toBe('2 backtests ahead of it');
+    // A screen reader hears what the title says.
+    expect(badge.textContent).toBe('Queued · 2 ahead');
   });
 
   it('says 1 backtest for the first in the queue', () => {

@@ -162,15 +162,17 @@ const BADGES: Record<BacktestStatus, { text: string; tone: string }> = {
 
 // How far a backtest got (.badge.ok, .badge.run, .badge.bad): Queued in grey, Finished in green,
 // Running in the accent, Failed in red; `detail` after a dot ("Running · 1 min 5 s", "Queued · 2
-// ahead"), `title` on hover.
+// ahead"), `title` on hover and `spoken` after it for screen readers only.
 export function StatusBadge({
   status,
   detail,
   title,
+  spoken,
 }: {
   status: BacktestStatus;
   detail?: string | undefined;
   title?: string | undefined;
+  spoken?: string | undefined;
 }) {
   const { text, tone } = BADGES[status];
   return (
@@ -182,6 +184,7 @@ export function StatusBadge({
       )}
     >
       {detail ? `${text} · ${detail}` : text}
+      {spoken && <span className="sr-only">{spoken}</span>}
     </span>
   );
 }
@@ -225,11 +228,12 @@ export function ModelName({ name, framework, wrap = false }: { name: string; fra
 }
 
 // The badge of a backtest in a list: a queued one with its place in the queue, "Queued · 2" (the
-// Return column has no room for more), what it means in the title.
+// Return column has no room for more), what it means in the title and, for screen readers, " ahead"
+// after it.
 function ListBadge({ backtest }: { backtest: Backtest }) {
   const ahead = aheadOf(backtest);
   if (ahead === null) return <StatusBadge status={backtest.status} />;
-  return <StatusBadge status="queued" detail={String(ahead)} title={aheadText(ahead)} />;
+  return <StatusBadge status="queued" detail={String(ahead)} title={aheadText(ahead)} spoken=" ahead" />;
 }
 
 // A backtest's return, or its badge (Queued, Running, Failed) when it has none.

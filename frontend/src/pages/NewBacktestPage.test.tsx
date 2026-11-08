@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -387,6 +387,25 @@ describe('the backtest builder', () => {
     await user.click(screen.getByRole('button', { name: '2025' }));
     await goTo(user, 'Run');
     expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('sends one start for a quick double click, and says Queued without a place the API did not give', async () => {
+    const queued = queuedDocument();
+    let answer: ((value: { status: number; body: unknown }) => void) | undefined;
+    const { user, fetch } = await openBuilder('/backtests/new', {
+      [RUN]: () => new Promise((resolve) => (answer = resolve)),
+    });
+    const starts = () =>
+      fetch.mock.calls.filter(([path, init]) => path === '/api/v1/backtests' && init?.method === 'POST').length;
+    await goTo(user, 'Run');
+    const button = screen.getByRole('button', { name: 'Run backtest' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await vi.waitFor(() => expect(answer).toBeDefined());
+    answer?.({ status: 201, body: { ...queued, backtest: { ...queued.backtest, queue_position: null } } });
+    const note = await screen.findByRole('status');
+    expect(note.textContent).toBe('QueuedBright Vega starts on its own. You can run another one.Open it');
+    expect(starts()).toBe(1);
   });
 
   it('goes back to the page it was opened from', async () => {

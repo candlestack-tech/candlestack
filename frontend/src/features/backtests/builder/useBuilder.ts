@@ -109,7 +109,7 @@ function useRun({ onProblem, onQueued }: RunHandlers, context: () => Parameters<
       // The answer is the new backtest's document: its page shows it at once and polls it.
       const { id, name, status, queue_position: ahead } = document.backtest;
       queryClient.setQueryData(backtestQueryOptions(id).queryKey, document);
-      if (status === 'queued') onQueued({ id, name, ahead: ahead ?? 1 });
+      if (status === 'queued') onQueued({ id, name, ahead });
       else void navigate({ to: '/backtests/$backtestId', params: { backtestId: id } });
     },
     onError: (error) => {

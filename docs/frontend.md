@@ -354,8 +354,8 @@ delete modals):
 ## Lists of backtests
 
 The Backtests page (`src/features/backtests/BacktestsTable.tsx`, #315) follows the approved
-table design: the star and the number, the instruments, the model, the status, Return, Sharpe, Max
-drawdown and When. A backtest in Experiments has a 14 px globe after its number, here and in the
+table design: the star and the number, the instruments, the model, Return (or the status badge),
+Sharpe, Max drawdown, When and Compare. A backtest in Experiments has a 14 px globe after its number, here and in the
 dashboard's widgets; the line under the title adds how many are public ("13 backtests · 2
 public"), and Filters' Show has Public only (`?show=public`, `counts.public`) between Starred and
 Failed. The layout is fixed (`table-fixed`): every column but the model has the width
@@ -365,7 +365,8 @@ row's 13 px), ends in an ellipsis when it does not fit, shows in full in its tit
 the model while it exists. The backtest has room for the star, "#999" and the globe, Return for "+9,999.9 %", When for "28 May 2025 11:58 AM",
 the longest of every date and time format. Trades is left out: with it the model would keep under
 100 px. From which width down a column hides, so the table never scrolls sideways: Max drawdown
-at 1150 px, When at 800, Model at 620, Status at 500 (Return then shows the badge), Sharpe at 420.
+at 1200 px, When at 800 (and from 980 to 1080 px), Model at 720, Sharpe at 560, Instruments at
+480.
 
 A backtest without results has its badge in the Return column: Running, Failed, or Queued with
 its place in the user's queue (`queue_position`, 1 starts next), "Queued · 2", with "2 backtests
@@ -437,8 +438,9 @@ so its back link returns there (else "← Backtests").
 
 - The page reads the result document in the light view (`GET /api/v1/backtests/{id}`,
   `backtestQueryOptions` under `['account', 'backtest', <id>]`). A queued or running backtest is
-  asked for again every 2 s, so it turns into running and then finished by itself; a finished or failed one is never asked for again while it is in the cache. When
-  a run the page watched ends, the lists, the dashboard and the models are asked for again.
+  asked for again every 2 s, so it turns into running and then finished by itself. A finished or
+  failed one is never asked for again while it is in the cache. When a run the page watched ends,
+  the lists, the dashboard and the models are asked for again.
 - The header: "Backtest #N" with its status, then the instrument (icon and symbol), the model (a
   link while it exists),
   the period's first and last UTC day, when it ran and how long. A finished one has
@@ -454,6 +456,8 @@ so its back link returns there (else "← Backtests").
   it ran.", goes into the cache at once, a toast says it, and the lists, the dashboard and the
   models are asked for again as after any run that ended. Where it began to run meanwhile, the
   dialog shows the API's sentence (`409 backtest-not-queued`) and the page is asked for again.
+  The dialog cannot be closed while the request runs. Where the 2 s poll finds it running while
+  the dialog is open, the dialog says it has left the queue and Cancel backtest turns off.
 - Finished: the six first results in a strip (`src/components/FactsStrip.tsx`, the model page's
   too), then the charts and the trades beside every metric of the engine and the setup (one column
   up to 980 px). Running: a moving bar and the setup. Failed: the error and the setup. A 404 says

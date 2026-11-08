@@ -31,14 +31,35 @@ type DialogProps = {
   onDone: () => void;
 };
 
+// Keep it and Cancel backtest: neither while the request runs, no Cancel once it left the queue.
+function CancelFooter({ pending, left, onConfirm }: { pending: boolean; left: boolean; onConfirm: () => void }) {
+  return (
+    <DialogFooter>
+      <DialogClose asChild>
+        <OutlineButton disabled={pending}>Keep it</OutlineButton>
+      </DialogClose>
+      <DangerButton disabled={pending || left} onClick={onConfirm}>
+        Cancel backtest
+      </DangerButton>
+    </DialogFooter>
+  );
+}
+
 // Cancel Bright Vega? (the dialogs' 560 px): it leaves the queue and stays in Backtests as failed.
-// Keep it closes the dialog. Where it began to run meanwhile, the API's sentence says so.
+// Keep it closes the dialog, though not while the request runs, so its answer still closes it with
+// the toast. Where it began to run meanwhile, the API's sentence says so; where the page's poll
+// finds it running first, the dialog says it has left the queue and Cancel backtest turns off.
 function CancelDialog({ backtest, open, onOpenChange, onDone }: DialogProps) {
   const cancel = useCancelBacktest(backtest.id);
+  const left = backtest.status !== 'queued';
+  const refusal = cancel.isError
+    ? errorMessage(cancel.error, 'Could not cancel the backtest. Try again.')
+    : left && cancel.isIdle && 'It has left the queue, so it can no longer be cancelled.';
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
+        if (cancel.isPending) return;
         cancel.reset();
         onOpenChange(next);
       }}
@@ -51,20 +72,17 @@ function CancelDialog({ backtest, open, onOpenChange, onDone }: DialogProps) {
           <DialogDescription className="text-sm/[1.5] text-foreground">
             It leaves your queue and never runs. It stays in your Backtests as failed.
           </DialogDescription>
-          {cancel.isError && (
+          {refusal && (
             <p role="alert" className="text-[12.5px] text-down">
-              {errorMessage(cancel.error, 'Could not cancel the backtest. Try again.')}
+              {refusal}
             </p>
           )}
         </DialogBody>
-        <DialogFooter>
-          <DialogClose asChild>
-            <OutlineButton>Keep it</OutlineButton>
-          </DialogClose>
-          <DangerButton disabled={cancel.isPending} onClick={() => cancel.mutate(undefined, { onSuccess: onDone })}>
-            Cancel backtest
-          </DangerButton>
-        </DialogFooter>
+        <CancelFooter
+          pending={cancel.isPending}
+          left={left}
+          onConfirm={() => cancel.mutate(undefined, { onSuccess: onDone })}
+        />
       </DialogContent>
     </Dialog>
   );

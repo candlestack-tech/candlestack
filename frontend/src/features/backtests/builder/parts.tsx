@@ -36,16 +36,17 @@ export function StepError({ children }: { children: ReactNode }) {
   );
 }
 
-// A backtest Run put in the queue: its page, its name and how many are ahead of it.
-export type QueuedBacktest = { id: string; name: string; ahead: number };
+// A backtest Run put in the queue: its page, its name and how many are ahead of it (null when the
+// API did not say, as the badges then show plain Queued).
+export type QueuedBacktest = { id: string; name: string; ahead: number | null };
 
 // That the backtest waits in the queue (in the accent's soft tint, as the Publish dialog's note):
-// "Queued, 2 ahead", and a link to its page.
+// "Queued, 2 ahead" (or just Queued), and a link to its page.
 export function QueuedNote({ queued }: { queued: QueuedBacktest }) {
   return (
     <output className="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg bg-accent-soft px-3 py-2.5 text-[13px]">
       <Clock aria-hidden="true" className="size-4 flex-none text-primary" />
-      <b className="font-semibold">Queued, {queued.ahead} ahead</b>
+      <b className="font-semibold">{queued.ahead === null ? 'Queued' : `Queued, ${queued.ahead} ahead`}</b>
       <span className="min-w-0 [overflow-wrap:anywhere]">
         {queued.name} starts on its own. You can run another one.
       </span>

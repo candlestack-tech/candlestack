@@ -120,6 +120,38 @@ describe("a queued backtest's page", () => {
     expect(screen.queryByRole('button', { name: 'Cancel backtest' })).toBeNull();
   });
 
+  it('cannot be closed while the cancel runs, and closes with the toast once it answers', async () => {
+    let answer: ((value: { status: number; body: unknown }) => void) | undefined;
+    await openPage({
+      [DOCUMENT]: { status: 200, body: queuedDocument(2) },
+      [CANCEL]: () => new Promise((resolve) => (answer = resolve)),
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Cancel backtest' }));
+    const dialog = within(await screen.findByRole('dialog', { name: 'Cancel Bright Vega?' }));
+    await user.click(dialog.getByRole('button', { name: 'Cancel backtest' }));
+    await vi.waitFor(() => expect(dialog.getByRole('button', { name: 'Keep it' }).hasAttribute('disabled')).toBe(true));
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('dialog')).toBeDefined();
+    answer?.({ status: 200, body: cancelled() });
+    expect(await screen.findByText('Bright Vega was cancelled')).toBeDefined();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('turns Cancel off in the open dialog once the page finds it running', async () => {
+    const { all, fetch, queryClient } = await openPage({ [DOCUMENT]: { status: 200, body: queuedDocument() } });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Cancel backtest' }));
+    const dialog = within(await screen.findByRole('dialog', { name: 'Cancel Bright Vega?' }));
+    all[DOCUMENT] = { status: 200, body: runningDocument() };
+    await queryClient.refetchQueries({ queryKey: ['account', 'backtest', ID] });
+    expect((await dialog.findByRole('alert')).textContent).toBe(
+      'It has left the queue, so it can no longer be cancelled.',
+    );
+    expect(dialog.getByRole('button', { name: 'Cancel backtest' }).hasAttribute('disabled')).toBe(true);
+    expect(cancels(fetch)).toBe(0);
+  });
+
   it('has no Cancel once it runs', async () => {
     await openPage({ [DOCUMENT]: { status: 200, body: runningDocument() } });
     expect(await screen.findByText(/^Running · /)).toBeDefined();
