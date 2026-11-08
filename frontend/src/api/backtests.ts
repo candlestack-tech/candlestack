@@ -1,6 +1,6 @@
 import { keepPreviousData, queryOptions } from '@tanstack/react-query';
 
-import { get, getBlob, patch, postJson } from './client';
+import { get, getBlob, patch, postFor, postJson } from './client';
 import type { components } from './schema';
 
 // A backtest as the API sends it. Returns and rates are fractions (0.246 is 24.6 %); the results
@@ -53,6 +53,9 @@ export type BacktestsParams = {
 
 const backtestPath = (id: string) => `/v1/backtests/${encodeURIComponent(id)}`;
 
+// Whether a backtest has not ended yet: queued or running.
+export const isUnderway = (status: BacktestStatus | undefined) => status === 'queued' || status === 'running';
+
 // GET /api/v1/backtests: a page of 10, with the counts and the models the filters offer.
 function listBacktests(params: BacktestsParams, signal?: AbortSignal): Promise<BacktestsPage> {
   const query = new URLSearchParams();
@@ -63,6 +66,13 @@ function listBacktests(params: BacktestsParams, signal?: AbortSignal): Promise<B
   return get<BacktestsPage>(text === '' ? '/v1/backtests' : `/v1/backtests?${text}`, signal);
 }
 
+// While a list shows a backtest that waits or runs, it is asked for again this often, so its
+// place in the queue and its status keep up.
+const LIST_POLL_MS = 5000;
+
+const listPoll = (backtests: readonly Backtest[] | undefined) =>
+  backtests?.some((backtest) => isUnderway(backtest.status)) ? LIST_POLL_MS : false;
+
 // Under ['account', 'backtests', ...] so signing out forgets them and a star can update every
 // page at once. While the next page, search or order loads, the previous one stays on screen.
 export function backtestsQueryOptions(params: BacktestsParams) {
@@ -70,6 +80,7 @@ export function backtestsQueryOptions(params: BacktestsParams) {
     queryKey: ['account', 'backtests', params],
     queryFn: ({ signal }) => listBacktests(params, signal),
     placeholderData: keepPreviousData,
+    refetchInterval: ({ state }) => listPoll(state.data?.backtests),
   });
 }
 
@@ -79,6 +90,7 @@ export function dashboardQueryOptions() {
   return queryOptions({
     queryKey: ['account', 'dashboard'],
     queryFn: ({ signal }) => get<Dashboard>('/v1/dashboard', signal),
+    refetchInterval: ({ state }) => listPoll(state.data && [...state.data.last, ...state.data.starred.backtests]),
   });
 }
 
@@ -89,9 +101,6 @@ export function updateBacktest(id: string, update: components['schemas']['Backte
 
 // While a backtest waits or runs, its page asks again this often until it finished or failed.
 export const POLL_MS = 2000;
-
-// Whether a backtest has not ended yet: queued or running.
-export const isUnderway = (status: BacktestStatus | undefined) => status === 'queued' || status === 'running';
 
 // GET /api/v1/backtests/{id}: the result document in the light view, whatever its status. A
 // queued or running one is asked for again every POLL_MS; a finished or failed one never changes,
@@ -124,3 +133,8 @@ export function compareQueryOptions(ids: readonly string[]) {
     placeholderData: keepPreviousData,
   });
 }
+
+// POST /api/v1/backtests/{id}/cancel: takes the user's queued backtest out of the queue, so it
+// never runs, and answers with its document, `failed` with the cancel in its error. One that has
+// begun to run or has ended is 409 `backtest-not-queued`.
+export const cancelBacktest = (id: string) => postFor<BacktestDocument>(`${backtestPath(id)}/cancel`);

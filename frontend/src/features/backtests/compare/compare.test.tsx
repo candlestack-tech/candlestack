@@ -108,7 +108,7 @@ describe('choosing backtests to compare', () => {
     expect(toggle(/: Radiant Altair$/).title).toBe('Still running');
     expect(toggle(/: Quiet Lyra$/).title).toBe('Queued: no results yet');
     // Its badge says it waits.
-    expect(screen.getByText('Queued')).toBeDefined();
+    expect(screen.getByText('Queued · 1')).toBeDefined();
     expect(toggle(/: Hidden Quasar$/)).toHaveProperty('disabled', true);
     expect(toggle(/: Hidden Quasar$/).title).toBe('Test data: no results to compare');
     for (const number of [12, 13, 14, 15]) {

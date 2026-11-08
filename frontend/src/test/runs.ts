@@ -25,8 +25,9 @@ export const runningDocument = (
   };
 };
 
-// The same document while it waits in the user's queue, first in line: no step has begun.
-export const queuedDocument = (): BacktestDocument => {
+// The same document while it waits in the user's queue, first in line unless `position` says
+// otherwise: no step has begun.
+export const queuedDocument = (position = 1): BacktestDocument => {
   const doc = runningDocument([step('candles'), step('queue'), step('model'), step('trades')]);
-  return { ...doc, backtest: { ...doc.backtest, status: 'queued', queue_position: 1, started_at: null } };
+  return { ...doc, backtest: { ...doc.backtest, status: 'queued', queue_position: position, started_at: null } };
 };

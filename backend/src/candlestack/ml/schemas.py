@@ -18,6 +18,8 @@ MANIFEST_MAX_BYTES = 1 * MB
 QUOTA_BYTES = 100 * MB
 # Models a user may keep.
 MODELS_MAX = 100
+# How long an upload link takes its file.
+UPLOAD_LINK_MINUTES = 15
 # Unicode categories a name never holds: control and format characters (bidirectional
 # overrides, zero-width spaces), which make a name read other than it is.
 _INVISIBLE = frozenset({"Cc", "Cf"})
@@ -196,3 +198,84 @@ class ModelUpdate(BaseModel):
         if name is not None and without_invisible(name) != name:
             raise ValueError("must not hold control or format characters")
         return name
+
+
+class ModelUploadIn(BaseModel):
+    """The file an upload link is made for."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        min_length=1,
+        # A path is fine: the model gets its base name, cut as an upload's name is.
+        max_length=4096,
+        description="Name of the file, extension included (`.keras` or `.onnx`), or its path; "
+        "the model gets the base name, as an upload's name",
+        examples=["lstm-signals.keras"],
+    )
+    size_bytes: int = Field(
+        gt=0,
+        description="Size of the file in bytes: the link takes no larger file",
+        examples=[14_889_779],
+    )
+
+
+class UploadStatus(StrEnum):
+    """Where an upload through a link stands: `waiting` for the file, `checking` while it comes
+    in and is checked, `done` (the model is made), `failed` (`problem` says why) or `expired`
+    (the link was not used in time)."""
+
+    waiting = "waiting"
+    checking = "checking"
+    done = "done"
+    failed = "failed"
+    expired = "expired"
+
+
+class ModelUploadOut(BaseModel):
+    id: str = Field(description="Public ID of the upload link", examples=["upl_7f3k2m9qx4"])
+    name: str = Field(
+        description="The name the model gets; a name the user has already gets a number then",
+        examples=["lstm-signals.keras"],
+    )
+    size_bytes: int = Field(description="The largest file the link takes", examples=[14_889_779])
+    status: UploadStatus
+    created_at: datetime = Field(description="When the link was made (UTC)")
+    expires_at: datetime = Field(description="Until when the link takes its file (UTC)")
+    model_id: str | None = Field(
+        description="The model the upload made, once `done`; null before",
+        examples=[None],
+    )
+    problem: str | None = Field(
+        description="The problem the upload answered once `failed` (`model-check-failed`, "
+        "`storage-full`, ...); null otherwise",
+        examples=[None],
+    )
+    check: ModelCheck | None = Field(
+        description="The check that failed, for `model-check-failed`; null otherwise",
+        examples=[None],
+    )
+    error: str | None = Field(
+        description="Why the upload failed and what to do, in plain words; null otherwise",
+        examples=[None],
+    )
+
+
+class ModelUploadCreated(ModelUploadOut):
+    """A new upload link with its URL, which only this response shows."""
+
+    url: str = Field(
+        repr=False,  # it holds the token
+        description="Where the file goes: `PUT` it there as the body, with no other sign-in. "
+        "Shown only in this response: CandleStack keeps just the SHA-256 of its token",
+        examples=["https://app.candlestack.tech/api/v1/uploads/" + "x" * 40],
+    )
+    command: str = Field(
+        repr=False,
+        description="The `curl` command that uploads the file from the folder it is in; it "
+        "exits with an error and prints the problem when the upload is refused",
+        examples=[
+            "curl --fail-with-body -T lstm-signals.keras https://app.candlestack.tech/api/v1/uploads/"
+            + "x" * 40
+        ],
+    )

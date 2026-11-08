@@ -58,6 +58,7 @@ const LATER_STEPS: Record<number, (builder: Ready) => ReactNode> = {
         instrument={builder.instrument}
         write={builder.write}
         problem={builder.stepProblem(4)}
+        queued={builder.queued}
         onEdit={builder.open}
       />
     ),

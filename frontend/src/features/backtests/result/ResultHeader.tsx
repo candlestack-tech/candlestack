@@ -15,9 +15,11 @@ import { cn } from '@/lib/utils';
 import { CompareButton } from '../compare/CompareToggle';
 import { AuthorAvatar } from '../experiments/AuthorAvatar';
 import { firstName } from '../experiments/format';
+import { aheadOf } from '../format';
 import { documentDescription, documentReads } from '../names';
 import { RenameBacktest } from '../RenameBacktest';
 import { BacktestTitle, StatusBadge } from '../parts';
+import { CancelQueued } from './CancelQueued';
 import { durationText, periodText } from './format';
 import { PublicPill, PublishActions } from './PublishActions';
 
@@ -191,6 +193,7 @@ function Actions({ doc }: { doc: BacktestDocument }) {
   return (
     <div className="flex flex-wrap gap-2">
       {!others && <RenameBacktest backtest={backtest} />}
+      {!others && <CancelQueued backtest={backtest} />}
       {backtest.status === 'finished' && <FinishedActions id={backtest.id} number={backtest.number} others={others} />}
       {!others && <PublishActions doc={doc} />}
       <CompareButton
@@ -238,14 +241,20 @@ function When({ backtest }: { backtest: BacktestDocument['backtest'] }) {
 const numberTitle = ({ number, author }: BacktestDocument['backtest']) =>
   `Backtest number ${String(number)} in ${author.mine ? 'your' : `${firstName(author.name)}’s`} account`;
 
-// The name on up to two lines, then on its first line the number, the status (with how long a
-// running one runs) and the Public pill of the user's own published one (backtest-names, .r7-t).
-function TitleRow({ backtest }: { backtest: BacktestDocument['backtest'] }) {
+// What follows the status: how long a running backtest runs, how many are ahead of a queued one.
+function useStatusDetail(backtest: BacktestDocument['backtest']): string | undefined {
   const now = useNow(backtest.status === 'running');
-  const runs =
-    backtest.status === 'running'
-      ? durationText(secondsSince(backtest.started_at ?? backtest.created_at, now) ?? 0)
-      : undefined;
+  const ahead = aheadOf(backtest);
+  if (ahead !== null) return `${String(ahead)} ahead`;
+  if (backtest.status !== 'running') return undefined;
+  return durationText(secondsSince(backtest.started_at ?? backtest.created_at, now) ?? 0);
+}
+
+// The name on up to two lines, then on its first line the number, the status (with how long a
+// running one runs, or how many are ahead of a queued one) and the Public pill of the user's own
+// published one (backtest-names, .r7-t).
+function TitleRow({ backtest }: { backtest: BacktestDocument['backtest'] }) {
+  const detail = useStatusDetail(backtest);
   return (
     <div className="flex min-w-0 flex-[1_1_420px] items-start gap-2.5">
       <BacktestTitle name={backtest.name} className="text-[22px]/7 font-semibold tracking-[-0.02em]" />
@@ -253,7 +262,7 @@ function TitleRow({ backtest }: { backtest: BacktestDocument['backtest'] }) {
         #{backtest.number}
       </span>
       <span className="mt-[5px] flex flex-none">
-        <StatusBadge status={backtest.status} detail={runs} />
+        <StatusBadge status={backtest.status} detail={detail} />
       </span>
       {backtest.author.mine && backtest.public && (
         <span className="mt-1 flex flex-none">

@@ -7,6 +7,11 @@ It takes Keras (``.keras``) and ONNX (``.onnx``) files and runs two checks on th
 ``opens`` and ``weights`` (``ModelCheck``), without executing anything from it; a failed check
 answers 422 ``model-check-failed`` naming the check.
 
+An agent that cannot send a file uploads it through a one-time link instead: it asks for one
+with ``POST /api/v1/models/uploads`` (the file's name and size), the file goes to the link with
+``PUT /api/v1/uploads/{token}`` (``curl -T``), whose token is its only sign-in, and
+``GET /api/v1/models/uploads/{upload_id}`` says how the upload stands.
+
 A model's manifest is its own resource, ``/api/v1/models/{model_id}/manifest``: added or
 replaced with PUT, which keeps it only when every check passed (else 422
 ``manifest-check-failed`` with the problems) and then starts its trial run in the worker
@@ -18,12 +23,20 @@ from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
+from starlette.requests import ClientDisconnect
 
 from candlestack.accounts import CurrentUserDep, ModelsUserDep
-from candlestack.core import NO_STORE, ProblemError, problem_doc, require_same_origin
+from candlestack.core import (
+    NO_STORE,
+    ProblemError,
+    SettingsDep,
+    problem_doc,
+    require_same_origin,
+)
 from candlestack.ml.dependencies import ModelChecksDep, ModelsServiceDep
 from candlestack.ml.errors import (
     AccountGone,
+    LargerThanLink,
     ManifestCheckFailed,
     ManifestTooLarge,
     ModelCheckFailed,
@@ -35,6 +48,9 @@ from candlestack.ml.errors import (
     TooManyModels,
     UnsupportedModelFormat,
     UploadInProgress,
+    UploadLinkGone,
+    UploadLinkNotFound,
+    UploadNotFound,
     UploadTimeout,
 )
 from candlestack.ml.schemas import (
@@ -42,11 +58,15 @@ from candlestack.ml.schemas import (
     MANIFEST_MAX_BYTES,
     MB,
     MODELS_MAX,
+    UPLOAD_LINK_MINUTES,
     ModelOut,
     ModelsOut,
     ModelUpdate,
+    ModelUploadCreated,
+    ModelUploadIn,
+    ModelUploadOut,
 )
-from candlestack.ml.service import RECEIVE_TIMEOUT
+from candlestack.ml.service import INTERRUPTED, RECEIVE_TIMEOUT, UploadFailure
 from candlestack.preprocessing import CatalogOut, Manifest, describe_catalog
 
 logger = logging.getLogger(__name__)
@@ -64,6 +84,10 @@ PROBLEMS_SHOWN = 10
 
 
 ModelId = Annotated[str, Path(description="Public ID of the model", examples=["mdl_7f3k2m9qx4"])]
+UploadId = Annotated[
+    str, Path(description="Public ID of the upload link", examples=["upl_7f3k2m9qx4"])
+]
+UploadToken = Annotated[str, Path(description="The token of the upload link")]
 FileName = Annotated[
     str,
     Query(
@@ -225,6 +249,58 @@ _UPLOAD_PROBLEMS: dict[type[Exception], Callable[[Exception], ProblemError]] = {
 }
 
 
+def _larger_than_link(error: Exception) -> ProblemError:
+    assert isinstance(error, LargerThanLink)
+    return ProblemError(
+        413,
+        "larger-than-link",
+        "Larger than the link",
+        f"The file is larger than the {error.size_bytes} bytes this link was made for. Ask for "
+        "a new link with the file's size.",
+        extensions={"size_bytes": error.size_bytes},
+    )
+
+
+def _link_account_gone(_error: Exception) -> ProblemError:
+    return ProblemError(
+        410,
+        "upload-link-gone",
+        "Upload link gone",
+        "The account of this link was deleted while the file was uploading, so it was not kept.",
+    )
+
+
+# The problems of an upload through a link that started: those of an upload, the file larger
+# than the link, and the account gone, which answers for the link (there is no session here).
+_LINK_PROBLEMS: dict[type[Exception], Callable[[Exception], ProblemError]] = {
+    **_UPLOAD_PROBLEMS,
+    LargerThanLink: _larger_than_link,
+    AccountGone: _link_account_gone,
+}
+
+
+def _link_failure(error: Exception) -> UploadFailure | None:
+    """What the link records of an upload that failed with `error`: the problem it answers."""
+    make = _LINK_PROBLEMS.get(type(error))
+    if make is None:
+        return None
+    problem = make(error)
+    check = error.check if isinstance(error, ModelCheckFailed) else None
+    return UploadFailure(problem.slug, problem.detail, check)
+
+
+def _link_gone(error: UploadLinkGone) -> ProblemError:
+    detail = (
+        "This upload link took its file already: a link takes one upload. Ask for a new link."
+        if error.reason == "used"
+        else f"This upload link expired: a link takes its file within {UPLOAD_LINK_MINUTES} "
+        "minutes. Ask for a new link."
+    )
+    return ProblemError(
+        410, "upload-link-gone", "Upload link gone", detail, extensions={"reason": error.reason}
+    )
+
+
 def _upload_problem(user_id: str, error: Exception) -> ProblemError:
     """The problem of an upload that failed with `error`, one of the service's errors; logged
     with the user's ID only."""
@@ -319,6 +395,145 @@ async def upload_model(
         return await service.upload(user.id, name, _declared_size(request), request.stream())
     except tuple(_UPLOAD_PROBLEMS) as error:
         raise _upload_problem(user.id, error) from None
+
+
+@router.post(
+    "/api/v1/models/uploads",
+    status_code=201,
+    responses={
+        **_NOT_SIGNED_IN,
+        **_CROSS_ORIGIN,
+        **problem_doc(
+            409,
+            "The file does not fit into the user's storage now (`storage-full`; `used_bytes` "
+            "and `quota_bytes`), or the user has 100 models already (`too-many-models`; "
+            "`limit`).",
+        ),
+        **problem_doc(413, "The size is larger than 50 MB (`model-too-large`)."),
+        **problem_doc(
+            415,
+            "The name is not that of a Keras (`.keras`) or ONNX (`.onnx`) file "
+            "(`unsupported-model-format`).",
+        ),
+    },
+    dependencies=[Depends(require_same_origin)],
+)
+async def create_model_upload(
+    body: ModelUploadIn,
+    user: ModelsUserDep,
+    service: ModelsServiceDep,
+    settings: SettingsDep,
+    response: Response,
+) -> ModelUploadCreated:
+    """Makes a one-time link to upload a model file through, for a client that cannot send
+    the file itself (an agent in a chat): `PUT` the file to `url` within 15 minutes, as
+    `command` does with `curl -T`. The link takes one upload of a file no larger than
+    `size_bytes`, with no other sign-in, and the upload is checked as `POST /api/v1/models`
+    checks it. The URL is shown only here; `GET /api/v1/models/uploads/{upload_id}` says how
+    the upload stands. The name and the size must fit now, and are checked again when the file
+    comes."""
+    response.headers.update(NO_STORE)
+    try:
+        return await service.create_upload(user.id, body, settings.public_url)
+    except (UnsupportedModelFormat, ModelTooLarge, StorageFull, TooManyModels) as error:
+        raise _upload_problem(user.id, error) from None
+
+
+@router.get(
+    "/api/v1/models/uploads/{upload_id}",
+    responses={
+        **_NOT_SIGNED_IN,
+        **problem_doc(404, "The user has no upload link with this ID (`not-found`)."),
+    },
+)
+async def get_model_upload(
+    upload_id: UploadId, user: CurrentUserDep, service: ModelsServiceDep, response: Response
+) -> ModelUploadOut:
+    """How the upload through the link stands: `waiting` for the file, `checking` while it
+    comes in and is checked, `done` with the model it made (`model_id`), `failed` with the
+    problem it answered (`problem`, `check`, `error`), or `expired` unused. A link stays
+    readable for at least a day after it expired."""
+    response.headers.update(NO_STORE)
+    try:
+        return await service.upload_status(user.id, upload_id)
+    except UploadNotFound:
+        raise ProblemError(
+            404, "not-found", "Not Found", "You have no upload link with this ID."
+        ) from None
+
+
+@router.put(
+    "/api/v1/uploads/{token}",
+    status_code=201,
+    responses={
+        **problem_doc(
+            400,
+            "The client went away before the whole file came (`upload-interrupted`); the link "
+            "is used and reads `failed`.",
+        ),
+        **problem_doc(
+            404,
+            "No upload link has this token (`upload-link-not-found`).",
+        ),
+        **problem_doc(408, "The file did not arrive within 2 minutes (`upload-timeout`)."),
+        **problem_doc(
+            409,
+            "Another upload of the user is in progress (`upload-in-progress`; the link stays "
+            "unused), the file does not fit into the user's storage (`storage-full`), the user "
+            "has 100 models already (`too-many-models`), or, rarely, the numbered name is one "
+            "the user has in another case (`model-name-taken`).",
+        ),
+        **problem_doc(
+            410,
+            "The link took its file already or expired (`upload-link-gone`; `reason` says "
+            "`used` or `expired`), or its account was deleted while the file was uploading.",
+        ),
+        **problem_doc(
+            413,
+            "The file is larger than the link's size (`larger-than-link`; `size_bytes`) or "
+            "than 50 MB (`model-too-large`).",
+        ),
+        **problem_doc(
+            422,
+            "A check failed (`model-check-failed`): `check` names it (`opens` or `weights`) and "
+            "`detail` says why.",
+        ),
+    },
+    openapi_extra=_UPLOAD_BODY,
+)
+async def upload_by_link(
+    token: UploadToken, request: Request, service: ModelsServiceDep, response: Response
+) -> ModelOut:
+    """Uploads the model file of a one-time link (`POST /api/v1/models/uploads`): the body is
+    the file, as `curl -T <file> <url>` sends it. The token in the path is the only sign-in: a
+    session or an API key is not needed and does not stand in for it. The link is used once
+    the upload starts, whatever comes of it; a file larger than the link's size by its
+    `Content-Length`, or another upload of the user in progress, leaves it unused. The file is
+    checked as `POST /api/v1/models` checks it and becomes a model of the link's user, under
+    the link's name (numbered when the user has it)."""
+    response.headers.update(NO_STORE)
+    try:
+        return await service.upload_by_link(
+            token, _declared_size(request), request.stream(), _link_failure
+        )
+    except UploadLinkNotFound:
+        raise ProblemError(
+            404,
+            "upload-link-not-found",
+            "Upload link not found",
+            "No upload link has this token. Check that the whole link was copied, or ask for a "
+            "new one.",
+        ) from None
+    except UploadLinkGone as gone:
+        raise _link_gone(gone) from None
+    except ClientDisconnect:
+        # The service recorded it on the link; an answer, not an error, as nothing is wrong here.
+        raise ProblemError(
+            400, INTERRUPTED.problem, "Upload interrupted", INTERRUPTED.error
+        ) from None
+    except tuple(_LINK_PROBLEMS) as error:
+        # The service logged the failure with the link's user.
+        raise _LINK_PROBLEMS[type(error)](error) from None
 
 
 @router.patch(

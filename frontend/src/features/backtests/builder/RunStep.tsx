@@ -5,7 +5,7 @@ import { InstrumentSymbol } from '@/components/InstrumentSymbol';
 
 import type { BuilderForm, ChosenInstrument, DateWriter } from './form';
 import { costsLine, decisionLine, fillLine, periodLine, preprocessingLine } from './format';
-import { StepError } from './parts';
+import { QueuedNote, StepError, type QueuedBacktest } from './parts';
 
 type Props = {
   form: BuilderForm;
@@ -13,6 +13,7 @@ type Props = {
   instrument: ChosenInstrument;
   write: DateWriter;
   problem: string | undefined;
+  queued: QueuedBacktest | null;
   onEdit: (step: number) => void;
 };
 
@@ -60,8 +61,8 @@ function Warnings({ form }: { form: BuilderForm }) {
 }
 
 // Step 5 (stepRun): the four steps in a line each, with Edit (the data's instrument with its icon),
-// then the warnings.
-export function RunStep({ form, model, instrument, write, problem, onEdit }: Props) {
+// then the warnings, and what the API said after Run: a refusal, or that the backtest is queued.
+export function RunStep({ form, model, instrument, write, problem, queued, onEdit }: Props) {
   const summary = model.manifest_summary;
   const lines: Line[] = [
     { step: 0, title: 'Model', main: model.name, detail: summary ? preprocessingLine(summary) : undefined },
@@ -83,6 +84,7 @@ export function RunStep({ form, model, instrument, write, problem, onEdit }: Pro
       </dl>
       <Warnings form={form} />
       {problem && <StepError>{problem}</StepError>}
+      {queued && <QueuedNote queued={queued} />}
     </>
   );
 }

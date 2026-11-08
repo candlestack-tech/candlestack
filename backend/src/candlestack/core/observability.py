@@ -80,6 +80,36 @@ _PII_DENYLIST = [
 
 _ACCESS_LOGGER = "candlestack.access"
 _HEALTH_PATH = "/api/health"
+# Paths whose last part is a secret: the token of a one-time upload link (ml), which is the
+# request's only sign-in.
+_REDACTED_PATHS = ("/api/v1/uploads/",)
+
+
+def redacted_path(path: str) -> str:
+    """`path` with the secret it ends in, if any, filtered: for the access log and Sentry."""
+    for prefix in _REDACTED_PATHS:
+        if path.startswith(prefix) and len(path) > len(prefix):
+            return prefix + _FILTERED
+    return path
+
+
+def _redact_url(request: Any) -> None:
+    """Filters the secret of the recorded ``url`` of the incoming request (``redacted_path``)."""
+    if not isinstance(request, dict) or not isinstance(url := request.get("url"), str):
+        return
+    scheme, separator, rest = url.partition("://")
+    host, slash, path = rest.partition("/")
+    if separator and slash:
+        request["url"] = f"{scheme}://{host}{redacted_path('/' + path)}"
+
+
+def _redact_paths(event: Event) -> None:
+    """Filters the secret of the incoming request's recorded URL, and of the transaction's
+    name when it is the path itself (no route matched; a route's template ends in ``}``)."""
+    _redact_url(event.get("request"))
+    name = event.get("transaction")
+    if isinstance(name, str) and not name.endswith("}"):
+        event["transaction"] = redacted_path(name)
 
 
 class ErrorBudget:
@@ -137,6 +167,7 @@ def _before_send(budget: ErrorBudget) -> Callable[[Event, Hint], Event | None]:
             return None
         _drop_request_variables(event)
         _hide_query_secrets(event.get("request"), _REQUEST_QUERY)
+        _redact_paths(event)
         return event
 
     return before_send
@@ -162,6 +193,7 @@ def _before_breadcrumb(crumb: Breadcrumb, _hint: BreadcrumbHint) -> Breadcrumb |
 
 def _before_send_transaction(event: Event, _hint: Hint) -> Event | None:
     _hide_query_secrets(event.get("request"), _REQUEST_QUERY)
+    _redact_paths(event)
     spans = event.get("spans")
     if isinstance(spans, list):
         for span in spans:
