@@ -859,8 +859,9 @@ checked at the next start.
   client that goes away leaves no backtest running without a run); as a net, every check puts
   back at the head of its queue a backtest running for a minute without a run of this process
   (an error in the log). As each running backtest has at most one
-  job in the worker's queue, which takes the oldest job first, the worker's queue holds as
-  many jobs as there are slots: one user's 20 queued backtests never hold back another user's
+  job in the worker's queue, which takes the oldest job first, the worker's queue holds about
+  as many jobs as there are slots (a deleted run's job the worker took already still runs to its
+  end, up to about 180 s): one user's 20 queued backtests never hold back another user's
   backtest, and a job waits for the worker a few runs at most. `queue_position` (in
   `BacktestOut` and the document's `backtest`, null for any other status) is 1 for the next of
   the user's to start, counted on request over the partial index `ix_backtests_queued`
@@ -951,14 +952,17 @@ document and other people's comparisons answer 404. The delete runs under the lo
 user and locks the rows (a run that is finishing stores first, then its row goes):
 
 - **Any status**. A queued backtest just leaves the queue. A running one is stopped rather than
-  refused, so a sweep in progress can be deleted whole: its row goes, the transaction starts
-  the user's next queued backtest as the end of a run does (every delete does, so a queue that
-  stood still moves on too), and after the commit the runner
-  cancels its task (`BacktestRunner.stop`). A job the worker took already runs to its end and
-  nobody reads its answer. A run the runner cannot cancel (another process) finds its row gone:
+  refused, so a sweep in progress can be deleted whole: its row goes, and after the commit the
+  runner cancels its task (`BacktestRunner.stop`, which also wakes the waits for it). Then, on
+  every delete, the free slots go to the queues in turn (`BacktestRunner.fill`), as when a run
+  ends, so a queue that stood still moves on too; a stopped run's slot is handed on once its
+  task has ended. A job the worker took already runs to its end and nobody reads its answer. A run the runner cannot cancel (another process) finds its row gone:
   it stores nothing, and its steps and failure change no row.
 - **Sweeps** read their backtests by `sweep_id`, so they lose a deleted one from their list,
   progress and ranking; a sweep with no backtest left is deleted with the last one.
+- **Idempotency keys** are not forgotten: a start sent again with the key of a backtest or
+  sweep deleted since answers its first answer (201, `Idempotent-Replayed: true`) for what no
+  longer exists, for the rest of the key's 24 hours.
 - **Bulk**: IDs the user has no backtest with (deleted already, another account's) are listed
   in `not_found` and change nothing, so the same request can be sent again. The MCP tool must
   name how many backtests it deletes in `confirm_count`; another number is

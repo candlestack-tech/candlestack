@@ -663,15 +663,15 @@ async def start_backtest(
     idempotency_key: IdempotencyKey = None,
 ) -> Response:
     """Starts a backtest of one of the user's models on one instrument and period and returns
-    its document with its number: `running`, or `queued` with its `queue_position` while
-    another backtest of the user runs (one runs at a time per user, up to 20 more wait, and
-    the oldest starts when the running one ends). Checked first: the model is the user's and
-    has a manifest, the instrument fits the model, the period with the candles the model needs
-    before it fits the data and the candle limit, the user's queue has room, and the worker
-    that runs the models can be reached. The run goes on after the response; the document
-    (`GET /api/v1/backtests/{backtest_id}`) has the results once it finished. With an
-    `Idempotency-Key`, the same request sent again within 24 hours answers the first document
-    again instead of starting another backtest."""
+    its document with its number: `running`, or `queued` with its `queue_position` until one
+    of the run slots shared by all users frees and it is the user's turn (users take turns;
+    one of a user's backtests runs at a time, up to 20 more wait, oldest first). Checked first:
+    the model is the user's and has a manifest, the instrument fits the model, the period with
+    the candles the model needs before it fits the data and the candle limit, the user's queue
+    has room, and the worker that runs the models can be reached. The run goes on after the
+    response; the document (`GET /api/v1/backtests/{backtest_id}`) has the results once it
+    finished. With an `Idempotency-Key`, the same request sent again within 24 hours answers
+    the first document again instead of starting another backtest."""
 
     async def started(committed: Committed) -> bytes:
         _, content = await runs.start(user.id, body, committed)
@@ -716,8 +716,9 @@ def _replayed(*, replayed: bool) -> dict[str, str]:
         **problem_doc(
             409,
             "The model has no manifest (`model-needs-setup`), the user has "
-            f"{QUEUE_MAX} backtests waiting already (`queue-full`, with `limit`), or as many "
-            "backtests as an account keeps (`backtest-limit`, with `limit` and `count`).",
+            f"{QUEUE_MAX} backtests waiting already (`queue-full`, with `limit` and "
+            "`retry_after_s`), or as many backtests as an account keeps (`backtest-limit`, with "
+            "`limit` and `count`).",
         ),
         **problem_doc(
             422,

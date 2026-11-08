@@ -8783,7 +8783,7 @@
         ]
       },
       "post": {
-        "description": "Starts a backtest of one of the user's models on one instrument and period and returns\nits document with its number: `running`, or `queued` with its `queue_position` while\nanother backtest of the user runs (one runs at a time per user, up to 20 more wait, and\nthe oldest starts when the running one ends). Checked first: the model is the user's and\nhas a manifest, the instrument fits the model, the period with the candles the model needs\nbefore it fits the data and the candle limit, the user's queue has room, and the worker\nthat runs the models can be reached. The run goes on after the response; the document\n(`GET /api/v1/backtests/{backtest_id}`) has the results once it finished. With an\n`Idempotency-Key`, the same request sent again within 24 hours answers the first document\nagain instead of starting another backtest.",
+        "description": "Starts a backtest of one of the user's models on one instrument and period and returns\nits document with its number: `running`, or `queued` with its `queue_position` until one\nof the run slots shared by all users frees and it is the user's turn (users take turns;\none of a user's backtests runs at a time, up to 20 more wait, oldest first). Checked first:\nthe model is the user's and has a manifest, the instrument fits the model, the period with\nthe candles the model needs before it fits the data and the candle limit, the user's queue\nhas room, and the worker that runs the models can be reached. The run goes on after the\nresponse; the document (`GET /api/v1/backtests/{backtest_id}`) has the results once it\nfinished. With an `Idempotency-Key`, the same request sent again within 24 hours answers\nthe first document again instead of starting another backtest.",
         "operationId": "start_backtest_api_v1_backtests_post",
         "parameters": [
           {
@@ -8985,7 +8985,7 @@
                 }
               }
             },
-            "description": "The model has no manifest (`model-needs-setup`), the user has 20 backtests waiting already (`queue-full`, with `limit`), or as many backtests as an account keeps (`backtest-limit`, with `limit` and `count`)."
+            "description": "The model has no manifest (`model-needs-setup`), the user has 20 backtests waiting already (`queue-full`, with `limit` and `retry_after_s`), or as many backtests as an account keeps (`backtest-limit`, with `limit` and `count`)."
           },
           "422": {
             "content": {

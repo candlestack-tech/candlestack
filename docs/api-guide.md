@@ -218,8 +218,10 @@ it answers the first answer again, with `Idempotent-Replayed: true`, instead of 
 second one, also when the first request stopped after it stored the backtest (then the
 answer is the backtest as it is now). The same key with another body is 422
 `idempotency-key-reused`; while the first request is still being answered and has stored
-nothing yet it is 409 `idempotency-key-in-use`: wait `retry_after_s`. A
-start your queue has no room for is 409 `queue-full` with `retry_after_s` (and `Retry-After`),
+nothing yet it is 409 `idempotency-key-in-use`: wait `retry_after_s`. Deleting the backtest
+does not free its key: the same request with it still answers the first answer (201,
+`Idempotent-Replayed: true`) for a backtest that no longer exists, so start it again with a new
+key. A start your queue has no room for is 409 `queue-full` with `retry_after_s` (and `Retry-After`),
 about when one of your queued backtests has started.
 
 ## Compare backtests
