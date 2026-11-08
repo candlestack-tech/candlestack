@@ -6,7 +6,7 @@ A backtest that finished before has none: its first read builds them from the ca
 read did before, and stores them.
 
 Revision ID: d2a7c5e93f18
-Revises: b7d3e9a1c524
+Revises: e2a7c5f9d413
 Create Date: 2026-11-08 20:00:00.000000
 """
 
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "d2a7c5e93f18"
-down_revision: str | None = "b7d3e9a1c524"
+down_revision: str | None = "e2a7c5f9d413"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
