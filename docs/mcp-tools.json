@@ -9,7 +9,7 @@
     }
   ],
   "server": {
-    "instructions": "CandleStack is a lab for experiments on financial time series: a user uploads a trading model (Keras or ONNX), describes its input in a manifest and backtests it on market data, crypto from Binance and US stocks from Alpaca, then compares the results and publishes the good ones.\n\nYou act as the user whose API key signed in. The key's scopes decide which tools work: read (everything that only reads), backtests, models and publish. Call get_me first to see who you act for and what the key may do. A tool that changes data says so in its annotations.\n\nA failed tool call answers a problem as JSON: its type (https://candlestack.tech/problems/<slug>) names what went wrong and its detail says what to do.\n\nDocs for agents: https://candlestack.tech/docs/agents/ and for this server: https://candlestack.tech/docs/mcp/. The resource candlestack://docs lists every docs page and reference.",
+    "instructions": "CandleStack is a lab for experiments on financial time series: a user uploads a trading model (Keras or ONNX), describes its input in a manifest and backtests it on market data, crypto from Binance and US stocks from Alpaca, then compares the results and publishes the good ones.\n\nYou act as the user who signed you in, with an API key or by allowing you on CandleStack (OAuth). The scopes of that sign-in decide which tools work: read (everything that only reads), backtests, models and publish. Call get_me first to see who you act for and what you may do. A tool that changes data says so in its annotations.\n\nA failed tool call answers a problem as JSON: its type (https://candlestack.tech/problems/<slug>) names what went wrong and its detail says what to do.\n\nDocs for agents: https://candlestack.tech/docs/agents/ and for this server: https://candlestack.tech/docs/mcp/. The resource candlestack://docs lists every docs page and reference.",
     "name": "candlestack",
     "title": "CandleStack"
   },
@@ -21,7 +21,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Who you act for: the CandleStack user whose API key signed in, and the key's scopes, which decide the tools you may call. Call it first to check the connection, and when a tool answers the problem missing-scope.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_me",
+      "description": "Who you act for: the CandleStack user who signed you in (an API key or OAuth), and the scopes of that sign-in, which decide the tools you may call. Call it first to check the connection, and when a tool answers the problem missing-scope.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_me",
       "endpoints": [
         "GET /api/v1/me"
       ],
@@ -13374,6 +13374,38 @@
     {
       "endpoint": "DELETE /api/v1/me/api-keys/{key_id}",
       "reason": "API keys are managed in the signed-in browser only, so a key cannot make or revoke keys."
+    },
+    {
+      "endpoint": "GET /api/v1/oauth/authorize",
+      "reason": "The OAuth sign-in of MCP clients itself: the client and the browser call it to sign in, before any tool can run."
+    },
+    {
+      "endpoint": "POST /api/v1/oauth/token",
+      "reason": "The OAuth sign-in of MCP clients itself: the client and the browser call it to sign in, before any tool can run."
+    },
+    {
+      "endpoint": "POST /api/v1/oauth/register",
+      "reason": "The OAuth sign-in of MCP clients itself: the client and the browser call it to sign in, before any tool can run."
+    },
+    {
+      "endpoint": "POST /api/v1/oauth/revoke",
+      "reason": "The OAuth sign-in of MCP clients itself: the client and the browser call it to sign in, before any tool can run."
+    },
+    {
+      "endpoint": "GET /api/v1/oauth/requests/{request_id}",
+      "reason": "The consent page in the signed-in browser decides what an app may do, never the app."
+    },
+    {
+      "endpoint": "POST /api/v1/oauth/requests/{request_id}",
+      "reason": "The consent page in the signed-in browser decides what an app may do, never the app."
+    },
+    {
+      "endpoint": "GET /api/v1/me/connected-apps",
+      "reason": "Connected apps are managed in the signed-in browser only, so an app cannot disconnect apps."
+    },
+    {
+      "endpoint": "DELETE /api/v1/me/connected-apps/{app_id}",
+      "reason": "Connected apps are managed in the signed-in browser only, so an app cannot disconnect apps."
     },
     {
       "endpoint": "PATCH /api/v1/me/preferences/appearance",

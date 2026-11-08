@@ -18,6 +18,7 @@ from candlestack.accounts import (
     dev_sign_in_allowed,
     dev_sign_in_router,
     document_api_keys,
+    oauth_router,
 )
 from candlestack.core import (
     Database,
@@ -223,6 +224,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.include_router(data_router)
     app.include_router(accounts_router)
+    app.include_router(oauth_router)
     app.include_router(models_router)
     app.include_router(preprocessing_router)
     app.include_router(backtests_router)

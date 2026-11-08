@@ -27,15 +27,22 @@
 	}
 }
 
-# One environment: the API, the MCP server (/mcp) and its OAuth metadata to its backend,
+# One environment: the API, the MCP server (/mcp), its OAuth metadata and that of its
+# authorization server (whose endpoints are under /api/v1/oauth) to its backend, any other
+# /.well-known/ path a 404 (not the frontend's index.html, which an MCP client probing OpenID
+# discovery or the root metadata would read as a broken answer instead of falling back),
 # everything else to its frontend.
 # Usage: import env <env name> <Sentry environment of its CSP reports>
 (env) {
 	import compress
 	import csp {args[1]}
-	@backend path /api/* /mcp /.well-known/oauth-protected-resource/*
+	@backend path /api/* /mcp /.well-known/oauth-protected-resource/* /.well-known/oauth-authorization-server/*
 	handle @backend {
 		reverse_proxy {args[0]}-backend:8000
+	}
+	@unrouted path /.well-known/*
+	handle @unrouted {
+		respond "Not found" 404
 	}
 	handle {
 		reverse_proxy {args[0]}-frontend:8080

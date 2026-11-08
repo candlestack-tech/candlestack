@@ -5,10 +5,11 @@ metadata it points to."""
 import pytest
 from fastapi.testclient import TestClient
 
-from candlestack.accounts import Caller
+from candlestack.accounts import Caller, Scope, User
 from candlestack.core import ProblemError
 from candlestack.mcp import http
 
+ADA = User(id="usr_adaaaaaaaa", display_name="Ada", email="ada@example.com")
 PROBLEMS = "https://candlestack.tech/problems/"
 METADATA = "http://testserver/.well-known/oauth-protected-resource/mcp"
 INITIALIZE = {
@@ -105,13 +106,16 @@ def test_the_app_s_own_origin_may_call(mcp_client: TestClient, keys) -> None:
     assert response.status_code == 200
 
 
-def test_the_metadata_names_the_server_its_scopes_and_docs(mcp_client: TestClient) -> None:
+def test_the_metadata_names_the_server_its_authorization_server_scopes_and_docs(
+    mcp_client: TestClient,
+) -> None:
     response = mcp_client.get("/.well-known/oauth-protected-resource/mcp")
 
     assert response.status_code == 200
     assert response.json() == {
         "resource": "http://testserver/mcp",
         "resource_name": "CandleStack",
+        "authorization_servers": ["http://testserver/api/v1/oauth"],
         "resource_documentation": "https://candlestack.tech/docs/mcp/",
         "bearer_methods_supported": ["header"],
         "scopes_supported": ["read", "backtests", "models", "publish"],
@@ -122,3 +126,42 @@ def test_mcp_is_not_in_the_api_reference(mcp_client: TestClient) -> None:
     paths = mcp_client.get("/api/v1/openapi.json").json()["paths"]
 
     assert not [path for path in paths if "mcp" in path or "well-known" in path]
+
+
+def test_an_access_token_signs_in_through_oauth_bound_to_the_server(
+    mcp_client: TestClient, keys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[str, str]] = []
+
+    async def token_caller(token: str, *, resource: str, **_clients: object) -> Caller:
+        seen.append((token, resource))
+        return Caller(ADA, frozenset({Scope.read}))
+
+    monkeypatch.setattr(http, "token_caller", token_caller)
+
+    response = mcp_client.post(
+        "/mcp", json=INITIALIZE, headers={**ACCEPT, "Authorization": "Bearer csa_token"}
+    )
+
+    assert response.status_code == 200
+    assert seen == [("csa_token", "http://testserver/mcp")]
+    assert keys.tokens == []
+
+
+def test_an_access_token_that_does_not_sign_in_is_an_invalid_token(
+    mcp_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def token_caller(_token: str, **_clients: object) -> Caller:
+        raise ProblemError(401, "invalid-access-token", "Invalid access token", "Unknown.")
+
+    monkeypatch.setattr(http, "token_caller", token_caller)
+
+    response = mcp_client.post(
+        "/mcp", json=INITIALIZE, headers={**ACCEPT, "Authorization": "Bearer csa_nope"}
+    )
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == (
+        f'Bearer error="invalid_token", resource_metadata="{METADATA}"'
+    )
+    assert response.json()["type"] == PROBLEMS + "invalid-access-token"

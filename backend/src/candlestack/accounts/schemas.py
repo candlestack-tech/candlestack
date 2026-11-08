@@ -330,3 +330,192 @@ class ApiKeysOut(BaseModel):
         description="The most keys a user can have that are neither revoked nor expired",
         examples=[API_KEYS_MAX],
     )
+
+
+# --- OAuth for MCP clients -----------------------------------------------------------------------
+
+# What each scope lets an app do, in the words of the consent screen.
+SCOPE_WORDS = {
+    Scope.read: "See your backtests, models and market data",
+    Scope.backtests: "Start, rename and star backtests",
+    Scope.models: "Upload, rename and delete your models",
+    Scope.publish: "Publish and unpublish backtests in Experiments",
+}
+
+
+class Decision(StrEnum):
+    allow = "allow"
+    deny = "deny"
+
+
+class ScopeOut(BaseModel):
+    """A scope an app asks for, in plain words."""
+
+    scope: Scope
+    description: str = Field(examples=[SCOPE_WORDS[Scope.read]])
+
+
+class ClientOut(BaseModel):
+    """The app as it describes itself: anyone can register an app named Claude, so the host it
+    returns to is what tells apps apart."""
+
+    name: str = Field(
+        description="The app's name; the host it returns to when it gave none",
+        examples=["Claude"],
+    )
+    logo_uri: str | None = Field(
+        description="The app's logo, if it gave one: an address the app chose, not checked"
+    )
+    client_uri: str | None = Field(description="The app's home page, if it gave one")
+    redirect_host: str = Field(
+        description="The host the browser returns to after the decision", examples=["claude.ai"]
+    )
+    document_host: str | None = Field(
+        description="For an app whose client ID is the URL of its client ID metadata document: "
+        "that URL's host, which vouches for the name; null for an app that registered itself",
+        examples=["claude.ai"],
+    )
+
+
+class AuthorizationRequestOut(BaseModel):
+    """An app's request for access to the user's account, for the consent screen."""
+
+    client: ClientOut
+    scopes: list[ScopeOut] = Field(
+        description="What the app asks for, in the order read, backtests, models, publish; read "
+        "is always granted"
+    )
+    expires_at: datetime = Field(description="Until when the request can be decided (UTC)")
+
+
+class ConsentIn(BaseModel):
+    """The user's decision on an app's request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Decision
+    scopes: list[Scope] = Field(
+        default_factory=list,
+        max_length=len(Scope),
+        description="With `allow`: the scopes to grant, each one the app asked for; read is "
+        "always granted. Ignored with `deny`",
+        examples=[["read", "backtests"]],
+    )
+
+
+class ConsentOut(BaseModel):
+    """Where the browser goes next: back to the app, with a code or `error=access_denied`."""
+
+    redirect_to: str = Field(
+        description="The app's redirect URI with `code` (or `error`), `state` and `iss`",
+        examples=["https://claude.ai/api/mcp/auth_callback?code=...&state=...&iss=..."],
+    )
+
+
+class ConnectedAppOut(BaseModel):
+    """An app the user allowed to act for them."""
+
+    id: str = Field(
+        pattern=r"^app_[a-z2-7]{10}$",
+        description="Public ID of the connected app, for disconnecting it",
+        examples=["app_7f3k2m4qx4"],
+    )
+    client: ClientOut
+    scopes: list[Scope] = Field(
+        description="What the app may do: the scopes of the last consent and of the app's "
+        "earlier authorizations that still worked then",
+        examples=[["read", "backtests"]],
+    )
+    connected_at: datetime = Field(description="When the user first allowed the app (UTC)")
+    last_used_at: datetime | None = Field(
+        description="When the app last called the MCP server (UTC); written at most once a "
+        "minute; null: never"
+    )
+
+
+class ConnectedAppsOut(BaseModel):
+    """The apps the user allowed, the most recently connected first."""
+
+    items: list[ConnectedAppOut]
+
+
+class TokenEndpointAuthMethod(StrEnum):
+    """How a client proves itself at the token endpoint: `none` for a public client (PKCE
+    alone), or with the secret it got at registration."""
+
+    none = "none"
+    client_secret_post = "client_secret_post"  # noqa: S105 (a method's name)
+    client_secret_basic = "client_secret_basic"  # noqa: S105 (a method's name)
+
+
+class ClientMetadataIn(BaseModel):
+    """What a client says about itself (RFC 7591), in a registration request or its client ID
+    metadata document. Members the server does not use are ignored."""
+
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+
+    redirect_uris: list[str] = Field(
+        min_length=1,
+        max_length=10,
+        description="Where the browser returns with the code: https URLs, or http on a "
+        "loopback address (127.0.0.1, [::1], localhost) for a native app, whose port may "
+        "change from one sign-in to the next",
+        examples=[["https://claude.ai/api/mcp/auth_callback"]],
+    )
+    client_name: str | None = Field(
+        default=None, max_length=100, description="The app's name", examples=["Claude"]
+    )
+    client_uri: str | None = Field(default=None, max_length=512)
+    logo_uri: str | None = Field(default=None, max_length=512)
+    token_endpoint_auth_method: TokenEndpointAuthMethod = Field(
+        default=TokenEndpointAuthMethod.client_secret_basic,
+        description="`none`, `client_secret_post` or `client_secret_basic` (the default of "
+        "RFC 7591); a metadata document may only say `none`",
+    )
+    grant_types: list[str] = Field(
+        default=["authorization_code", "refresh_token"],
+        description="`authorization_code` and `refresh_token` only",
+    )
+    response_types: list[str] = Field(default=["code"], description="`code` only")
+
+
+class ClientRegistrationOut(BaseModel):
+    """A registered client (RFC 7591): its ID, its secret when it asked for one, and its
+    metadata as the server keeps it."""
+
+    client_id: str = Field(examples=["ocl_7f3k2m4qx4abcdef"])
+    client_secret: str | None = Field(
+        default=None,
+        repr=False,
+        description="Only for `client_secret_post` and `client_secret_basic`; shown only here",
+    )
+    client_id_issued_at: int = Field(description="When it was registered (epoch seconds)")
+    client_secret_expires_at: int | None = Field(
+        default=None, description="0 with a secret: it does not expire"
+    )
+    redirect_uris: list[str]
+    client_name: str | None = None
+    client_uri: str | None = None
+    logo_uri: str | None = None
+    token_endpoint_auth_method: TokenEndpointAuthMethod
+    grant_types: list[str]
+    response_types: list[str]
+
+
+class TokenOut(BaseModel):
+    """The tokens of an authorization or a refresh (RFC 6749, section 5.1)."""
+
+    access_token: str = Field(repr=False, description="`csa_...`, for `Authorization: Bearer`")
+    token_type: str = Field(default="Bearer", examples=["Bearer"])
+    expires_in: int = Field(description="Seconds the access token works", examples=[3600])
+    refresh_token: str = Field(
+        repr=False, description="`csr_...`, works once: the answer to it holds a new one"
+    )
+    scope: str = Field(description="The granted scopes, space-separated", examples=["read"])
+
+
+class OAuthErrorOut(BaseModel):
+    """An OAuth error (RFC 6749, section 5.2; RFC 7591, section 3.2.2)."""
+
+    error: str = Field(examples=["invalid_grant"])
+    error_description: str = Field(examples=["The code is unknown, used or expired."])
