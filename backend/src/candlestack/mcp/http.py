@@ -1,12 +1,15 @@
-"""The MCP server over HTTP: Streamable HTTP at ``/mcp`` in the app, signed in with an API key.
+"""The MCP server over HTTP: Streamable HTTP at ``/mcp`` in the app, signed in with an API key
+or an OAuth access token.
 
-Every request to ``/mcp`` needs ``Authorization: Bearer cs_...``, checked as on a route (the
-beta list, the key's rate limit, its last use); the key's user and scopes go to the tools on
-``request.state``. Without a key the answer is 401 with ``WWW-Authenticate: Bearer
-resource_metadata=...``, as the MCP authorization spec asks: the URL of the protected resource
-metadata (RFC 9728) at ``/.well-known/oauth-protected-resource/mcp``, which names the server,
-its scopes and docs. It lists no authorization server until OAuth comes (#408). A request from a
-browser page of another origin is refused, against DNS rebinding.
+Every request to ``/mcp`` needs ``Authorization: Bearer``: an API key (``cs_...``), checked as
+on a route (the beta list, the key's rate limit, its last use), or an access token of the app's
+OAuth authorization server (``csa_...``, what claude.ai and ChatGPT sign in with), checked the
+same way and bound to this server; the user and scopes go to the tools on ``request.state``.
+Without either the answer is 401 with ``WWW-Authenticate: Bearer resource_metadata=...``, as the
+MCP authorization spec asks: the URL of the protected resource metadata (RFC 9728) at
+``/.well-known/oauth-protected-resource/mcp``, which names the server, its authorization server,
+its scopes and docs. A request from a browser page of another origin is refused, against DNS
+rebinding.
 
 The transport is stateless with JSON answers: every request stands alone, so any process can
 answer it and a deploy breaks no session. ``serving_mcp`` runs the SDK's session manager with
@@ -25,7 +28,7 @@ from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
 from candlestack.accounts import Scope as KeyScope
-from candlestack.accounts import key_caller
+from candlestack.accounts import is_access_token, key_caller, oauth_issuer, token_caller
 from candlestack.core import ProblemError, Settings, bearer_token
 from candlestack.mcp.convention import CALLER_STATE
 from candlestack.mcp.docs import MCP_DOCS
@@ -62,14 +65,25 @@ async def _sign_in(request: Request, settings: Settings) -> None:
             401,
             "not-signed-in",
             "Not signed in",
-            "The MCP server needs an API key: send Authorization: Bearer cs_... Create a key in "
-            "Settings, API and MCP.",
+            "The MCP server needs a sign-in: connect from an MCP client with OAuth, or send an "
+            "API key as Authorization: Bearer cs_... Create a key in Settings, API and MCP.",
             headers={"WWW-Authenticate": _challenge(settings)},
         )
     state = request.app.state
     async with state.db.sessions() as db:
         try:
-            caller = await key_caller(token, settings=settings, db=db, limiter=state.rate_limiter)
+            if is_access_token(token):
+                caller = await token_caller(
+                    token,
+                    resource=resource_url(settings),
+                    settings=settings,
+                    db=db,
+                    limiter=state.rate_limiter,
+                )
+            else:
+                caller = await key_caller(
+                    token, settings=settings, db=db, limiter=state.rate_limiter
+                )
         except ProblemError as problem:
             if problem.status == 401:
                 problem.headers["WWW-Authenticate"] = _challenge(settings, "invalid_token")
@@ -94,6 +108,7 @@ async def _metadata(request: Request) -> JSONResponse:
         {
             "resource": resource_url(settings),
             "resource_name": TITLE,
+            "authorization_servers": [oauth_issuer(settings)],
             "resource_documentation": MCP_DOCS,
             "bearer_methods_supported": ["header"],
             "scopes_supported": [scope.value for scope in KeyScope],

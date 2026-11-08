@@ -24,9 +24,10 @@ CandleStack is a lab for experiments on financial time series: a user uploads a 
 (Keras or ONNX), describes its input in a manifest and backtests it on market data, crypto from \
 Binance and US stocks from Alpaca, then compares the results and publishes the good ones.
 
-You act as the user whose API key signed in. The key's scopes decide which tools work: read \
-(everything that only reads), backtests, models and publish. Call get_me first to see who you \
-act for and what the key may do. A tool that changes data says so in its annotations.
+You act as the user who signed you in, with an API key or by allowing you on CandleStack (OAuth). \
+The scopes of that sign-in decide which tools work: read (everything that only reads), \
+backtests, models and publish. Call get_me first to see who you act for and what you may do. \
+A tool that changes data says so in its annotations.
 
 A failed tool call answers a problem as JSON: its type (https://candlestack.tech/problems/<slug>) \
 names what went wrong and its detail says what to do.

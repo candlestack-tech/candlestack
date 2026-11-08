@@ -8,7 +8,13 @@ import {
   redirect,
 } from '@tanstack/react-router';
 
-import { deniedSignInQueryOptions, instrumentQueryOptions, meQueryOptions, preferencesQueryOptions } from '@/api';
+import {
+  authorizationRequestQueryOptions,
+  deniedSignInQueryOptions,
+  instrumentQueryOptions,
+  meQueryOptions,
+  preferencesQueryOptions,
+} from '@/api';
 import { Layout } from '@/components/Layout';
 import { RouteError } from '@/components/RouteStates';
 import { AppearanceSync } from '@/features/preferences';
@@ -18,6 +24,7 @@ import { SignInPage } from '@/pages/SignInPage';
 import { requireSignedIn, skipSignInWhenSignedIn } from '@/routes/accountGuards';
 import { validateBacktestsSearch } from '@/routes/backtestsSearch';
 import { validateBuilderSearch } from '@/routes/builderSearch';
+import { isConsentPath, validateConsentSearch } from '@/routes/consentSearch';
 import { validateExperimentsSearch } from '@/routes/experimentsSearch';
 import { validateInstrumentSearch } from '@/routes/instrumentSearch';
 import { validateInstrumentsSearch } from '@/routes/instrumentsSearch';
@@ -67,16 +74,37 @@ const homeRoute = createRoute({
 });
 
 // /signin?next=/backtests&error=denied. An open session skips it. After a denied sign-in the
-// loader fetches who was turned away; when that fails, the page shows its buttons instead.
+// loader fetches who was turned away; when that fails, the page shows its buttons instead. On its
+// way to the consent page it hands over to that page, which signs in itself and names the app.
 const signInRoute = createRoute({
   getParentRoute: () => publicRoute,
   path: '/signin',
   validateSearch: validateSignInSearch,
-  beforeLoad: ({ context, search }) => skipSignInWhenSignedIn({ queryClient: context.queryClient, search }),
+  beforeLoad: ({ context, search }) => {
+    if (search.error === undefined && search.next !== undefined && isConsentPath(search.next))
+      throw redirect({ href: search.next, replace: true });
+    return skipSignInWhenSignedIn({ queryClient: context.queryClient, search });
+  },
   loaderDeps: ({ search }) => ({ error: search.error }),
   loader: ({ context, deps }) =>
     deps.error === 'denied' ? context.queryClient.prefetchQuery(deniedSignInQueryOptions()) : undefined,
   component: SignInPage,
+});
+
+// /oauth/consent?request=<id>: an app (Claude, ChatGPT) asks for access to the account, on its own
+// card like the sign-in page (design/mockups/api-mcp, #consent). No guard: signed out, the card
+// offers the sign-in and names the app, as reading the request needs no session. The loader asks
+// for the request while the page's code loads.
+const consentRoute = createRoute({
+  getParentRoute: () => publicRoute,
+  path: '/oauth/consent',
+  validateSearch: validateConsentSearch,
+  loaderDeps: ({ search }) => ({ request: search.request }),
+  loader: ({ context, deps }) =>
+    deps.request === undefined
+      ? undefined
+      : context.queryClient.prefetchQuery(authorizationRequestQueryOptions(deps.request)),
+  component: lazyRouteComponent(() => import('@/pages/ConsentPage'), 'ConsentPage'),
 });
 
 // The signed-in pages, under the app header beside the sidebar. Signed out, the guard sends the
@@ -222,7 +250,7 @@ const settingsSectionRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  publicRoute.addChildren([homeRoute, signInRoute]),
+  publicRoute.addChildren([homeRoute, signInRoute, consentRoute]),
   appRoute.addChildren([
     dashboardRoute,
     backtestsRoute,

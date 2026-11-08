@@ -38,6 +38,14 @@ _MONITORING = "Health of the service for monitoring and the status page, not the
 _SIGN_IN = "Signing in with GitHub or Google happens in the browser; an agent signs in with a key."
 _SESSION = "The browser's session only: API keys cannot sign out or end sessions."
 _KEYS = "API keys are managed in the signed-in browser only, so a key cannot make or revoke keys."
+_OAUTH = (
+    "The OAuth sign-in of MCP clients itself: the client and the browser call it to sign in, "
+    "before any tool can run."
+)
+_CONSENT = "The consent page in the signed-in browser decides what an app may do, never the app."
+_APPS = (
+    "Connected apps are managed in the signed-in browser only, so an app cannot disconnect apps."
+)
 
 PARITY: dict[str, Entry] = {
     "GET /api/health": WebOnly(_MONITORING),
@@ -57,6 +65,14 @@ PARITY: dict[str, Entry] = {
     "GET /api/v1/me/api-keys": WebOnly(_KEYS),
     "POST /api/v1/me/api-keys": WebOnly(_KEYS),
     "DELETE /api/v1/me/api-keys/{key_id}": WebOnly(_KEYS),
+    "GET /api/v1/oauth/authorize": WebOnly(_OAUTH),
+    "POST /api/v1/oauth/token": WebOnly(_OAUTH),
+    "POST /api/v1/oauth/register": WebOnly(_OAUTH),
+    "POST /api/v1/oauth/revoke": WebOnly(_OAUTH),
+    "GET /api/v1/oauth/requests/{request_id}": WebOnly(_CONSENT),
+    "POST /api/v1/oauth/requests/{request_id}": WebOnly(_CONSENT),
+    "GET /api/v1/me/connected-apps": WebOnly(_APPS),
+    "DELETE /api/v1/me/connected-apps/{app_id}": WebOnly(_APPS),
     "GET /api/v1/me/preferences": Tools(("get_preferences", "get_backtest_defaults")),
     "PUT /api/v1/me/preferences/backtest-defaults": Tools(("update_backtest_defaults",)),
     "PATCH /api/v1/me/preferences/appearance": WebOnly(

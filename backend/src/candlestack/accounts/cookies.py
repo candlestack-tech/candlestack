@@ -1,5 +1,5 @@
-"""The cookies of signing in: the session, the state of a sign-in in progress and the ID of a
-denied sign-in.
+"""The cookies of signing in: the session, the state of a sign-in in progress, the ID of a
+denied sign-in, and the browser an MCP client's authorization request started in.
 
 All are HttpOnly (no script reads them), SameSite=Lax (sent when the provider redirects back,
 not with requests other sites start) and for the whole host (Path=/). Over https they are
@@ -13,10 +13,11 @@ from fastapi import Depends, Request, Response
 
 from candlestack.core import SettingsDep
 
-CookieName = Literal["session", "sign_in_state", "sign_in_denied"]
+CookieName = Literal["session", "sign_in_state", "sign_in_denied", "oauth_request"]
 SESSION: CookieName = "session"
 STATE: CookieName = "sign_in_state"
 DENIED: CookieName = "sign_in_denied"
+OAUTH_REQUEST: CookieName = "oauth_request"
 
 
 class Cookies:

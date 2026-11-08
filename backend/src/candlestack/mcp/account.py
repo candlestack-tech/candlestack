@@ -27,9 +27,9 @@ class MeResult(BaseModel):
 
 
 async def get_me(ctx: Context) -> MeResult:
-    """Who you act for: the CandleStack user whose API key signed in, and the key's scopes,
-    which decide the tools you may call. Call it first to check the connection, and when a tool
-    answers the problem missing-scope."""
+    """Who you act for: the CandleStack user who signed you in (an API key or OAuth), and the
+    scopes of that sign-in, which decide the tools you may call. Call it first to check the
+    connection, and when a tool answers the problem missing-scope."""
     call = tool_call(ctx)
     async with call.db() as db:
         state = call.state

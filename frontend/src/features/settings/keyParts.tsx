@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import type { ApiKey, Scope } from '@/api';
 import { BUTTON_SIZES, OUTLINE_BUTTON } from '@/components/buttonStyles';
+import { ErrorNote } from '@/components/ErrorNote';
 import { KeyIcon, WarnIcon } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -143,5 +144,23 @@ export function GuideLink({ className }: { className?: string }) {
       API docs
       <ExternalLink aria-hidden="true" className="size-3" />
     </a>
+  );
+}
+
+// What went wrong loading the keys or the connected apps, and Try again.
+export function LoadError({ error, retrying, onRetry }: { error: Error; retrying: boolean; onRetry: () => void }) {
+  return (
+    <div className="mb-2 flex items-center gap-3">
+      <ErrorNote>{error.message}</ErrorNote>
+      <Button
+        type="button"
+        variant="outline"
+        className={cn(BUTTON_SIZES.sm, OUTLINE_BUTTON)}
+        disabled={retrying}
+        onClick={onRetry}
+      >
+        Try again
+      </Button>
+    </div>
   );
 }
