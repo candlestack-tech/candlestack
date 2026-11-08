@@ -1,5 +1,5 @@
-"""The models table in Postgres: the queries the service needs, in the request's session.
-Nothing here commits; the service does, once a change is complete."""
+"""The models and model uploads tables in Postgres: the queries the service needs, in the
+request's session. Nothing here commits; the service does, once a change is complete."""
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime
@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import with_expression
 
-from candlestack.ml.models import Model
+from candlestack.ml.models import Model, ModelUpload
 from candlestack.ml.schemas import CheckPart
 from candlestack.ml.usage import ModelUsage, ModelUsageStats, no_usage
 
@@ -27,14 +27,17 @@ class ModelStore:
         self._db = db
         self._backtests = backtests
 
-    def add(self, model: Model) -> None:
-        self._db.add(model)
+    def add(self, row: Model | ModelUpload) -> None:
+        self._db.add(row)
 
     async def flush(self) -> None:
         await self._db.flush()
 
     async def commit(self) -> None:
         await self._db.commit()
+
+    async def rollback(self) -> None:
+        await self._db.rollback()
 
     async def lock_user(self, user_id: str) -> None:
         """Takes the lock of the user's models until the transaction ends, so the uploads,
@@ -172,3 +175,61 @@ class ModelStore:
 
     async def delete_all(self, user_id: str) -> None:
         await self._db.execute(delete(Model).where(Model.user_id == user_id))
+
+    async def upload(self, user_id: str, upload_id: str) -> ModelUpload | None:
+        """The user's upload link with the ID; None also when it is another user's."""
+        return await self._db.scalar(
+            select(ModelUpload).where(ModelUpload.id == upload_id, ModelUpload.user_id == user_id)
+        )
+
+    async def upload_by_token(self, token_hash: bytes) -> ModelUpload | None:
+        """The upload link whose token has the SHA-256 `token_hash`, of any user."""
+        return await self._db.scalar(
+            select(ModelUpload).where(ModelUpload.token_hash == token_hash)
+        )
+
+    async def claim_upload(self, upload_id: str, now: datetime) -> bool:
+        """Starts the upload of the link while it is still ``waiting`` and not expired; False
+        when another request took it first or it expired. One statement, so two requests
+        with one link cannot both start."""
+        claimed = await self._db.scalar(
+            update(ModelUpload)
+            .where(
+                ModelUpload.id == upload_id,
+                ModelUpload.status == "waiting",
+                ModelUpload.expires_at > now,
+            )
+            .values(status="checking", started_at=now)
+            .returning(ModelUpload.id)
+        )
+        return claimed is not None
+
+    async def finish_upload(self, upload_id: str, model_id: str, now: datetime) -> None:
+        await self._db.execute(
+            update(ModelUpload)
+            .where(ModelUpload.id == upload_id)
+            .values(status="done", model_id=model_id, finished_at=now)
+        )
+
+    async def fail_upload(
+        self, upload_id: str, *, problem: str, check: str | None, error: str, now: datetime
+    ) -> None:
+        await self._db.execute(
+            update(ModelUpload)
+            .where(ModelUpload.id == upload_id)
+            .values(
+                status="failed",
+                problem=problem,
+                failed_check=check,
+                error=error,
+                finished_at=now,
+            )
+        )
+
+    async def delete_uploads_before(self, user_id: str, before: datetime) -> None:
+        """Deletes the user's upload links that expired before `before`."""
+        await self._db.execute(
+            delete(ModelUpload).where(
+                ModelUpload.user_id == user_id, ModelUpload.expires_at < before
+            )
+        )

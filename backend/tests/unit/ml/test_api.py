@@ -12,9 +12,10 @@ from fastapi.testclient import TestClient
 from candlestack.accounts import User
 from candlestack.accounts.dependencies import current_user
 from candlestack.core import Settings
-from candlestack.ml.api import _manifest_problem, _upload_problem
+from candlestack.ml.api import _link_failure, _manifest_problem, _upload_problem
 from candlestack.ml.errors import (
     AccountGone,
+    LargerThanLink,
     ManifestCheckFailed,
     ModelCheckFailed,
     ModelNameTaken,
@@ -26,6 +27,7 @@ from candlestack.ml.errors import (
     UploadTimeout,
 )
 from candlestack.ml.schemas import ModelCheck
+from candlestack.ml.service import UploadFailure
 from candlestack.preprocessing import ManifestProblem
 
 PROBLEMS = "https://candlestack.tech/problems/"
@@ -55,6 +57,8 @@ def signed_in(app: FastAPI) -> FastAPI:
         ("DELETE", "/api/v1/models/mdl_7f3k2m9qx4"),
         ("PUT", "/api/v1/models/mdl_7f3k2m9qx4/manifest"),
         ("GET", "/api/v1/models/mdl_7f3k2m9qx4/manifest"),
+        ("POST", "/api/v1/models/uploads"),
+        ("GET", "/api/v1/models/uploads/upl_7f3k2m9qx4"),
     ],
 )
 def test_the_models_need_a_session(client: TestClient, method: str, path: str) -> None:
@@ -73,6 +77,7 @@ def test_the_models_need_a_session(client: TestClient, method: str, path: str) -
         ("PATCH", "/api/v1/models/mdl_7f3k2m9qx4"),
         ("DELETE", "/api/v1/models/mdl_7f3k2m9qx4"),
         ("PUT", "/api/v1/models/mdl_7f3k2m9qx4/manifest"),
+        ("POST", "/api/v1/models/uploads"),
     ],
 )
 @pytest.mark.usefixtures("signed_in")
@@ -230,3 +235,105 @@ def test_the_timeout_problem_names_the_minutes() -> None:
     assert _upload_problem("usr_7f3k2m9qx4", UploadTimeout()).detail == (
         "The file did not arrive within 2 minutes. Check the connection and upload it again."
     )
+
+
+# --- Upload links --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("token", ["short", "Q" * 40, "q" * 41, "q" * 39 + "1"])
+def test_an_upload_link_needs_no_session_nor_the_apps_origin(
+    client: TestClient, token: str
+) -> None:
+    response = client.put(
+        f"/api/v1/uploads/{token}", content=b"x", headers={"Origin": "https://evil.example"}
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "type": PROBLEMS + "upload-link-not-found",
+        "title": "Upload link not found",
+        "status": 404,
+        "detail": "No upload link has this token. Check that the whole link was copied, or ask "
+        "for a new one.",
+    }
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"name": "lstm.keras"},
+        {"size_bytes": 10},
+        {"name": "", "size_bytes": 10},
+        {"name": "lstm.keras", "size_bytes": 0},
+        {"name": "lstm.keras", "size_bytes": 10, "url": "https://evil.example"},
+    ],
+    ids=["no size", "no name", "empty name", "empty file", "unknown field"],
+)
+@pytest.mark.usefixtures("signed_in")
+def test_an_upload_link_is_validated(client: TestClient, body: dict[str, object]) -> None:
+    response = client.post("/api/v1/models/uploads", json=body, headers=ORIGIN)
+
+    assert response.status_code == 422
+    assert response.json()["type"] == PROBLEMS + "validation"
+
+
+@pytest.mark.usefixtures("signed_in")
+def test_an_upload_link_for_another_format_is_refused(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/models/uploads", json={"name": "model.pt", "size_bytes": 10}, headers=ORIGIN
+    )
+
+    assert response.status_code == 415
+    assert response.json()["type"] == PROBLEMS + "unsupported-model-format"
+
+
+@pytest.mark.usefixtures("signed_in")
+def test_an_upload_link_for_more_than_50_mb_is_refused(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/models/uploads",
+        json={"name": "lstm.keras", "size_bytes": 50 * MB + 1},
+        headers=ORIGIN,
+    )
+
+    assert response.status_code == 413
+    assert response.json()["type"] == PROBLEMS + "model-too-large"
+
+
+@pytest.mark.parametrize(
+    ("error", "failure"),
+    [
+        (
+            ModelCheckFailed(ModelCheck.weights, "No weights."),
+            UploadFailure("model-check-failed", "No weights.", ModelCheck.weights),
+        ),
+        (
+            LargerThanLink(1000),
+            UploadFailure(
+                "larger-than-link",
+                "The file is larger than the 1000 bytes this link was made for. Ask for a new "
+                "link with the file's size.",
+            ),
+        ),
+        (
+            AccountGone(),
+            UploadFailure(
+                "upload-link-gone",
+                "The account of this link was deleted while the file was uploading, so it was "
+                "not kept.",
+            ),
+        ),
+        (
+            UploadTimeout(),
+            UploadFailure(
+                "upload-timeout",
+                "The file did not arrive within 2 minutes. Check the connection and upload it "
+                "again.",
+            ),
+        ),
+        (RuntimeError("unexpected"), None),
+    ],
+)
+def test_what_a_link_records_of_a_failed_upload(
+    error: Exception, failure: UploadFailure | None
+) -> None:
+    assert _link_failure(error) == failure

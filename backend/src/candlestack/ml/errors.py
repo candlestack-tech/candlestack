@@ -78,3 +78,28 @@ class ModelNameTaken(Exception):
     def __init__(self, name: str) -> None:
         super().__init__(name)
         self.name = name
+
+
+class UploadNotFound(Exception):
+    """The user has no upload link with the ID (another user's included)."""
+
+
+class UploadLinkNotFound(Exception):
+    """No upload link has the token."""
+
+
+class UploadLinkGone(Exception):
+    """The upload link took its file already, or expired: `reason` is ``used`` or
+    ``expired``."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class LargerThanLink(Exception):
+    """The file is larger than the size its upload link was made for."""
+
+    def __init__(self, size_bytes: int) -> None:
+        super().__init__(f"more than {size_bytes} bytes")
+        self.size_bytes = size_bytes

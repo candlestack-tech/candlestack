@@ -8,6 +8,12 @@ transaction under the lock of the user's models, so two uploads cannot both pass
 take the same name, its row goes in and the file moves to its place; the file goes again when
 the commit fails. The incoming files are removed whatever happens.
 
+A model can also come through a one-time upload link (``create_upload``): made by the user for
+one file of a name and a size, it takes one upload (``upload_by_link``) within
+``UPLOAD_LINK_MINUTES``, whose request carries no other sign-in than the link's token. That upload
+runs as any other, the file at most the size the link was made for, and the link records how it
+ended: the model it made, or the problem it answered.
+
 A manifest is added to a model that is kept, and replaces the one it had: it is checked alone,
 then against the shapes the upload's check read from the file, and kept only when every check
 passed, which makes the model ``ready``.
@@ -15,8 +21,11 @@ passed, which makes the model ``ready``.
 
 import hashlib
 import logging
-from collections.abc import AsyncIterable, Collection
-from datetime import UTC, datetime
+import re
+import shlex
+from collections.abc import AsyncIterable, Callable, Collection
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
 
@@ -27,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from candlestack.accounts import AfterDeletion
 from candlestack.ml.errors import (
     AccountGone,
+    LargerThanLink,
     ManifestCheckFailed,
     ManifestTooLarge,
     ModelCheckFailed,
@@ -37,10 +47,20 @@ from candlestack.ml.errors import (
     StorageFull,
     TooManyModels,
     UnsupportedModelFormat,
+    UploadLinkGone,
+    UploadLinkNotFound,
+    UploadNotFound,
     UploadTimeout,
 )
 from candlestack.ml.inspect import ModelFacts
-from candlestack.ml.models import Model, new_model_id
+from candlestack.ml.models import (
+    UPLOAD_TOKEN_LENGTH,
+    Model,
+    ModelUpload,
+    new_model_id,
+    new_upload_id,
+    new_upload_token,
+)
 from candlestack.ml.sandbox import check_upload
 from candlestack.ml.schemas import (
     FILE_MAX_BYTES,
@@ -49,6 +69,7 @@ from candlestack.ml.schemas import (
     NAME_MAX,
     QUOTA_BYTES,
     SUFFIXES,
+    UPLOAD_LINK_MINUTES,
     BlockUse,
     CheckPart,
     Framework,
@@ -58,13 +79,17 @@ from candlestack.ml.schemas import (
     ModelsOut,
     ModelState,
     ModelUpdate,
+    ModelUploadCreated,
+    ModelUploadIn,
+    ModelUploadOut,
     StorageUsage,
+    UploadStatus,
     WarmUpOut,
     without_invisible,
 )
 from candlestack.ml.storage import ModelStorage
 from candlestack.ml.store import ModelStore
-from candlestack.ml.uploads import UploadLocks
+from candlestack.ml.uploads import UPLOAD_LOCK_TTL, UploadLocks
 from candlestack.ml.usage import UNUSED, ModelUsageStats
 from candlestack.preprocessing import (
     InvalidManifest,
@@ -93,6 +118,32 @@ _FOREIGN_KEY_VIOLATION = "23503"
 _UNIQUE_VIOLATION = "23505"
 _NAME_INDEX = "uq_models_user_id_name"
 _EMPTY = "The file is empty. Choose the model's {suffix} file and upload it again."
+# Where an upload link points, after the public URL.
+UPLOAD_PATH = "/api/v1/uploads/"
+_TOKEN = re.compile(rf"[a-z2-7]{{{UPLOAD_TOKEN_LENGTH}}}")
+# How long a link that expired stays readable; older ones go when the user makes a new one.
+UPLOAD_KEPT = timedelta(days=1)
+
+
+@dataclass(frozen=True, slots=True)
+class UploadFailure:
+    """How an upload through a link failed, as its link records it: the slug of the problem
+    the upload answered, the problem's detail, and the check that failed, if any."""
+
+    problem: str
+    error: str
+    check: ModelCheck | None = None
+
+
+# What an upload through a link records for the error it failed with; None for an error it did
+# not expect. The API gives it, as it words the problems.
+DescribeFailure = Callable[[Exception], UploadFailure | None]
+# What a link records when its upload stopped otherwise: the client went away, or the process
+# died during it (a link ``checking`` for longer than an upload may take).
+INTERRUPTED = UploadFailure(
+    "upload-interrupted",
+    "The upload stopped before the file was checked. Ask for a new link and upload the file again.",
+)
 
 
 def _now() -> datetime:
@@ -195,6 +246,35 @@ def _out(
     )
 
 
+def upload_token_hash(token: str) -> bytes:
+    return hashlib.sha256(token.encode()).digest()
+
+
+def _upload_out(upload: ModelUpload, now: datetime) -> ModelUploadOut:
+    """The upload link as the API shows it at `now`."""
+    status = UploadStatus(upload.status)
+    problem, error = upload.problem, upload.error
+    if status is UploadStatus.waiting and upload.expires_at <= now:
+        status = UploadStatus.expired
+    stalled = upload.started_at is not None and now - upload.started_at > timedelta(
+        seconds=UPLOAD_LOCK_TTL
+    )
+    if status is UploadStatus.checking and stalled:
+        status, problem, error = UploadStatus.failed, INTERRUPTED.problem, INTERRUPTED.error
+    return ModelUploadOut(
+        id=upload.id,
+        name=upload.name,
+        size_bytes=upload.size_bytes,
+        status=status,
+        created_at=upload.created_at,
+        expires_at=upload.expires_at,
+        model_id=upload.model_id,
+        problem=problem,
+        check=None if upload.failed_check is None else ModelCheck(upload.failed_check),
+        error=error,
+    )
+
+
 def _check_room(used: int, count: int, size: int) -> None:
     """Fails unless a file of `size` bytes fits next to `count` models taking `used` bytes.
 
@@ -209,12 +289,14 @@ def _check_room(used: int, count: int, size: int) -> None:
 
 
 async def _receive(
-    chunks: AsyncIterable[bytes], path: Path, framework: Framework
+    chunks: AsyncIterable[bytes], path: Path, framework: Framework, limit: int | None = None
 ) -> tuple[int, bytes]:
     """Writes the uploaded file, of the format `framework`, to `path`; its size and SHA-256.
+    `limit` is the size of the upload link it comes through, if any.
 
     Raises:
         UploadTimeout: The file did not arrive within ``RECEIVE_TIMEOUT``.
+        LargerThanLink: It is larger than `limit` (it stops reading there).
         ModelTooLarge: It is larger than an upload may be (it stops reading there).
         ModelCheckFailed: It is empty.
     """
@@ -226,6 +308,8 @@ async def _receive(
             with anyio.fail_after(RECEIVE_TIMEOUT):
                 async for chunk in chunks:
                     size += len(chunk)
+                    if limit is not None and size > limit:
+                        raise LargerThanLink(limit)
                     if size > FILE_MAX_BYTES:
                         raise ModelTooLarge
                     digest.update(chunk)
@@ -350,12 +434,18 @@ class ModelsService:
         return _out(model)
 
     async def _receive_and_keep(
-        self, user_id: str, name: str, framework: Framework, chunks: AsyncIterable[bytes]
+        self,
+        user_id: str,
+        name: str,
+        framework: Framework,
+        chunks: AsyncIterable[bytes],
+        link: ModelUpload | None = None,
     ) -> Model:
         incoming = self._storage.incoming_path()
         scratch = self._storage.incoming_path()
+        limit = None if link is None else link.size_bytes
         try:
-            size, sha256 = await _receive(chunks, incoming, framework)
+            size, sha256 = await _receive(chunks, incoming, framework, limit)
             facts = await check_upload(incoming, scratch, framework)
             return await self._keep(
                 user_id,
@@ -365,6 +455,7 @@ class ModelsService:
                 size=size,
                 sha256=sha256,
                 facts=facts,
+                upload_id=None if link is None else link.id,
             )
         finally:
             # Also when the request is cancelled (the client went away).
@@ -382,9 +473,11 @@ class ModelsService:
         size: int,
         sha256: bytes,
         facts: ModelFacts,
+        upload_id: str | None = None,
     ) -> Model:
         """Adds the model of a checked file and moves the file to its place, in one transaction
-        under the lock of the user's models.
+        under the lock of the user's models; with the upload link it came through, which is
+        ``done`` in the same transaction.
 
         Raises:
             TooManyModels: The user has as many models as a user may keep.
@@ -420,6 +513,8 @@ class ModelsService:
             if state == _UNIQUE_VIOLATION and _NAME_INDEX in str(error.orig):
                 raise ModelNameTaken(model.name) from None
             raise
+        if upload_id is not None:
+            await self._store.finish_upload(upload_id, model.id, _now())
         await self._storage.save(incoming, user_id, model.id, framework)
         try:
             await self._store.commit()
@@ -428,6 +523,151 @@ class ModelsService:
                 await self._storage.delete(user_id, model.id)
             raise
         return model
+
+    async def create_upload(
+        self, user_id: str, new: ModelUploadIn, public_url: str
+    ) -> ModelUploadCreated:
+        """Makes a one-time link that takes the upload of the file `new` within
+        ``UPLOAD_LINK_MINUTES``; the answer holds its URL, of the app at `public_url`, which
+        nothing keeps. The user's links that expired more than ``UPLOAD_KEPT`` ago go.
+
+        Raises:
+            UnsupportedModelFormat: Not the name of a Keras or ONNX file.
+            ModelTooLarge: The size is larger than an upload may be.
+            TooManyModels: The user has as many models as a user may keep.
+            StorageFull: The file does not fit into the user's storage now.
+        """
+        name, framework = upload_name(new.name)
+        if new.size_bytes > FILE_MAX_BYTES:
+            raise ModelTooLarge
+        _check_room(*await self._store.usage(user_id), new.size_bytes)
+        now = _now()
+        token = new_upload_token()
+        upload = ModelUpload(
+            id=new_upload_id(),
+            user_id=user_id,
+            name=name,
+            framework=framework.value,
+            size_bytes=new.size_bytes,
+            token_hash=upload_token_hash(token),
+            status=UploadStatus.waiting.value,
+            created_at=now,
+            expires_at=now + timedelta(minutes=UPLOAD_LINK_MINUTES),
+        )
+        await self._store.delete_uploads_before(user_id, now - UPLOAD_KEPT)
+        self._store.add(upload)
+        await self._store.commit()
+        logger.info("User %s made the upload link %s", user_id, upload.id)
+        # No local variable holds the URL: Sentry filters only the token's by its name.
+        return ModelUploadCreated(
+            **_upload_out(upload, now).model_dump(),
+            url=public_url + UPLOAD_PATH + token,
+            command=f"curl -T {shlex.quote(new.name)} {public_url}{UPLOAD_PATH}{token}",
+        )
+
+    async def upload_status(self, user_id: str, upload_id: str) -> ModelUploadOut:
+        """The user's upload link and how its upload stands.
+
+        Raises:
+            UploadNotFound: The user has no upload link with the ID.
+        """
+        upload = await self._store.upload(user_id, upload_id)
+        if upload is None:
+            raise UploadNotFound
+        return _upload_out(upload, _now())
+
+    async def upload_by_link(
+        self,
+        token: str,
+        declared_size: int | None,
+        chunks: AsyncIterable[bytes],
+        describe: DescribeFailure,
+    ) -> ModelOut:
+        """Takes the upload of the link with `token` and keeps the file as a model of the
+        link's user, as ``upload`` does. A link is used once its upload starts, whatever comes
+        of it: the link records the model it made, or how it failed (`describe` words the
+        error). A link refused before its upload starts (a file larger than its size by
+        `declared_size`, another upload of the user in progress) stays as it was.
+
+        Raises:
+            UploadLinkNotFound: No link has the token.
+            UploadLinkGone: The link took its file already, or expired.
+            LargerThanLink: The file is larger than the link's size.
+            UploadInProgress: Another upload of the user is in progress.
+            TooManyModels, StorageFull, UploadTimeout, ModelTooLarge, ModelCheckFailed,
+                AccountGone, ModelNameTaken: As for ``upload``, once the upload started.
+        """
+        link = await self._link(token) if _TOKEN.fullmatch(token) else None
+        if link is None:
+            raise UploadLinkNotFound
+        if declared_size is not None and declared_size > link.size_bytes:
+            raise LargerThanLink(link.size_bytes)
+        async with self._uploads.hold(link.user_id):
+            now = _now()
+            claimed = await self._store.claim_upload(link.id, now)
+            await self._store.commit()
+            if not claimed:
+                raise UploadLinkGone("expired" if link.expires_at <= now else "used")
+            try:
+                used, count = await self._store.usage(link.user_id)
+                await self._store.commit()
+                _check_room(used, count, declared_size or 1)
+                model = await self._receive_and_keep(
+                    link.user_id, link.name, Framework(link.framework), chunks, link
+                )
+            except BaseException as error:
+                failure = describe(error) if isinstance(error, Exception) else None
+                with anyio.CancelScope(shield=True):
+                    await self._fail_upload(link, failure or INTERRUPTED)
+                raise
+        logger.info(
+            "User %s uploaded model %s through the link %s (%d bytes)",
+            model.user_id,
+            model.id,
+            link.id,
+            model.size_bytes,
+        )
+        return _out(model)
+
+    async def _link(self, token: str) -> ModelUpload | None:
+        """The link with `token` while it may still take its file; None when no link has it.
+
+        Raises:
+            UploadLinkGone: The link took its file already, or expired.
+        """
+        link = await self._store.upload_by_token(upload_token_hash(token))
+        # Ends the transaction, so its connection goes back to the pool while the file comes in.
+        await self._store.commit()
+        if link is None:
+            return None
+        if link.status != UploadStatus.waiting:
+            raise UploadLinkGone("used")
+        if link.expires_at <= _now():
+            raise UploadLinkGone("expired")
+        return link
+
+    async def _fail_upload(self, link: ModelUpload, failure: UploadFailure) -> None:
+        """Records that the upload of `link` failed, after rolling back the transaction it
+        failed in. A link whose account was deleted meanwhile went with it."""
+        # Read first: the rollback expires what the session loaded.
+        link_id, user_id = link.id, link.user_id
+        await self._store.rollback()
+        await self._store.fail_upload(
+            link_id,
+            problem=failure.problem,
+            check=None if failure.check is None else failure.check.value,
+            error=failure.error,
+            now=_now(),
+        )
+        await self._store.commit()
+        check = "" if failure.check is None else f" {failure.check}"
+        logger.info(
+            "The upload of user %s through the link %s failed (%s%s)",
+            user_id,
+            link_id,
+            failure.problem,
+            check,
+        )
 
     async def _free_name(self, user_id: str, name: str) -> str:
         """`name`, or with the first number that makes it one the user does not have yet: the

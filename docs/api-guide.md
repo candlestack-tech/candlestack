@@ -186,6 +186,25 @@ drawdown and buy and hold curves on one time axis of at most 200 times (`times`)
 backtest comes with its status and no values; an ID you cannot see is a 404 whose `id` names it.
 The fields: [architecture.md](architecture.md#compare).
 
+## Upload a model through a link
+
+A script can send the file itself (`POST /api/v1/models?name=lstm.keras` with the file as the
+body). An agent that cannot pass a file through a chat asks for a one-time link instead, with a
+key of the scope `models`:
+
+```sh
+curl -s -X POST -H "Authorization: Bearer $CANDLESTACK_API_KEY"     -H 'Content-Type: application/json' -d '{"name": "lstm.keras", "size_bytes": 14889779}'     https://app.candlestack.tech/api/v1/models/uploads
+```
+
+The answer holds the link's `id`, its `url`, `expires_at` (15 minutes) and the `command` that
+sends the file from the folder it is in: `curl -T lstm.keras https://app.candlestack.tech/api/v1/uploads/<token>`.
+That request needs no key: the token in the link is its only sign-in, so treat the link like a
+key until it is used. A link takes one file of the name's format, no larger than `size_bytes`,
+and the file is checked as any upload. `GET /api/v1/models/uploads/<id>` says how it stands:
+`waiting`, `checking`, `done` with the `model_id`, `failed` with the `problem` and the `check`
+that failed, or `expired`. A used or expired link answers 410 `upload-link-gone`: ask for a new
+one.
+
 ## Errors
 
 Every error is an RFC 9457 `application/problem+json` body: `type`
@@ -209,6 +228,7 @@ change. Some add fields, such as `errors` of a 422 `validation`:
 | 403 | `missing-scope` | the key lacks the scope `scope` names: create a key with it |
 | 403 | `session-required` | keys cannot do this: do it in the app |
 | 404 | `instrument-not-found` | check the id with the instrument search |
+| 410 | `upload-link-gone` | the upload link was used or expired: ask for a new one |
 | 422 | `validation` | fix the parameters `errors` names |
 | 422 | `period-out-of-range` | `start` before the first candle, `end` at or before it (paging past the start of the data) or `end` in the future: `available_from` and `available_to` say what fits |
 | 422 | `too-many-candles` | a shorter period, a longer timeframe or paging (`suggestion`) |

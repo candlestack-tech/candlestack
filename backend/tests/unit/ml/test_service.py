@@ -3,18 +3,20 @@ taken is a taken name, anything else goes on as it is; the state and the summary
 manifest. The flows with a real Postgres: tests/integration/ml."""
 
 import json
-from datetime import UTC, datetime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from candlestack.ml.errors import ModelNameTaken
+from candlestack.ml.errors import ModelNameTaken, UploadLinkGone
 from candlestack.ml.inspect import ModelFacts
-from candlestack.ml.models import Model
-from candlestack.ml.schemas import CheckPart, Framework, ModelState
-from candlestack.ml.service import ModelsService, _checked_alone, _out
+from candlestack.ml.models import Model, ModelUpload
+from candlestack.ml.schemas import CheckPart, Framework, ModelCheck, ModelState, UploadStatus
+from candlestack.ml.service import ModelsService, _checked_alone, _out, _upload_out
 from candlestack.preprocessing import Manifest, ManifestProblem, parse_manifest
 
 if TYPE_CHECKING:
@@ -224,3 +226,113 @@ async def test_a_deletion_waits_for_the_lock_of_the_users_models() -> None:
     await service.delete("usr_7f3k2m9qx4", "mdl_7f3k2m9qx4")
 
     assert store.calls == ["lock_user", "delete", "commit"]
+
+
+# --- Upload links ----------------------------------------------------------------------------
+
+MADE = datetime(2026, 11, 8, 12, 0, tzinfo=UTC)
+
+
+def link(status: str = "waiting", **fields: object) -> ModelUpload:
+    values: dict[str, object] = {
+        "id": "upl_7f3k2m9qx4",
+        "user_id": "usr_7f3k2m9qx4",
+        "name": "lstm.keras",
+        "framework": "keras",
+        "size_bytes": 1000,
+        "token_hash": b"\0" * 32,
+        "status": status,
+        "created_at": MADE,
+        "expires_at": MADE + timedelta(minutes=15),
+        "started_at": None,
+        "model_id": None,
+        "problem": None,
+        "failed_check": None,
+        "error": None,
+    }
+    return ModelUpload(**{**values, **fields})
+
+
+def test_a_link_waits_until_it_expires() -> None:
+    assert _upload_out(link(), MADE + timedelta(minutes=14)).status is UploadStatus.waiting
+    assert _upload_out(link(), MADE + timedelta(minutes=15)).status is UploadStatus.expired
+
+
+def test_a_used_link_does_not_expire() -> None:
+    done = link("done", model_id="mdl_7f3k2m9qx4")
+
+    out = _upload_out(done, MADE + timedelta(hours=1))
+
+    assert (out.status, out.model_id, out.problem) == (UploadStatus.done, "mdl_7f3k2m9qx4", None)
+
+
+def test_a_failed_link_says_the_problem_and_the_check() -> None:
+    failed = link("failed", problem="model-check-failed", failed_check="opens", error="Not a zip.")
+
+    out = _upload_out(failed, MADE + timedelta(minutes=1))
+
+    assert (out.status, out.problem, out.check, out.error) == (
+        UploadStatus.failed,
+        "model-check-failed",
+        ModelCheck.opens,
+        "Not a zip.",
+    )
+
+
+def test_a_link_checking_longer_than_an_upload_may_take_was_interrupted() -> None:
+    started = MADE + timedelta(minutes=1)
+    checking = link("checking", started_at=started)
+
+    assert _upload_out(checking, started + timedelta(minutes=5)).status is UploadStatus.checking
+    out = _upload_out(checking, started + timedelta(minutes=5, seconds=1))
+    assert (out.status, out.problem) == (UploadStatus.failed, "upload-interrupted")
+    assert out.error is not None
+    assert out.error.startswith("The upload stopped before the file was checked.")
+
+
+class RacedStore:
+    """A waiting link that another request starts first."""
+
+    def __init__(self, expires_at: datetime) -> None:
+        self._link = link(expires_at=expires_at)
+
+    async def upload_by_token(self, token_hash: bytes) -> ModelUpload:
+        return self._link
+
+    async def claim_upload(self, upload_id: str, now: datetime) -> bool:
+        return False
+
+    async def commit(self) -> None:
+        pass
+
+
+class NoLock:
+    @asynccontextmanager
+    async def hold(self, user_id: str) -> AsyncIterator[None]:
+        yield
+
+
+@pytest.mark.parametrize(
+    ("expires_in", "reason"), [(timedelta(minutes=10), "used"), (timedelta(0), "expired")]
+)
+async def test_a_link_another_request_started_first_is_gone(
+    monkeypatch: pytest.MonkeyPatch, expires_in: timedelta, reason: str
+) -> None:
+    now = datetime.now(UTC)
+    # The link reads as waiting, then `now` reaches its expiry before the claim.
+    times = iter([now - timedelta(seconds=1), now])
+    monkeypatch.setattr("candlestack.ml.service._now", lambda: next(times))
+    service = ModelsService(
+        cast("ModelStore", RacedStore(now + expires_in)),
+        cast("ModelStorage", None),
+        cast("UploadLocks", NoLock()),
+    )
+
+    with pytest.raises(UploadLinkGone) as gone:
+        await service.upload_by_link("q" * 40, None, empty(), lambda _error: None)
+
+    assert gone.value.reason == reason
+
+
+async def empty() -> AsyncIterator[bytes]:
+    yield b""
