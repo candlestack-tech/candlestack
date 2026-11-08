@@ -74,6 +74,7 @@ from candlestack.experiments.document import (
     WarmUpReport,
 )
 from candlestack.experiments.errors import (
+    BacktestLimitReached,
     BacktestNotFinished,
     BacktestNotFound,
     BacktestNotQueued,
@@ -134,12 +135,20 @@ class Prepared(NamedTuple):
 
 class BacktestRuns:
     def __init__(
-        self, store: BacktestStore, data: DataService, runner: BacktestRunner, app_version: str
+        self,
+        store: BacktestStore,
+        data: DataService,
+        runner: BacktestRunner,
+        app_version: str,
+        *,
+        limit: int,
     ) -> None:
         self._store = store
         self._data = data
         self._runner = runner
         self._app_version = app_version
+        # The most backtests an account keeps (``BACKTEST_LIMIT``).
+        self._limit = limit
 
     async def check(self, user_id: str, body: BacktestIn) -> BacktestCheck:
         """Checks a new backtest of the user as ``start`` does, stores nothing, and says what
@@ -153,6 +162,7 @@ class BacktestRuns:
         # As in ``start``, before the slower checks.
         if await self._store.queued(user_id) >= QUEUE_MAX:
             raise QueueFull
+        await self.fits(user_id, 1)
         await self.ready()
         spec = await self.spec(prepared)
         queued = await self._store.queued(user_id)
@@ -183,19 +193,21 @@ class BacktestRuns:
 
         Raises:
             InvalidBacktest, ModelNotFound, ModelNeedsSetup, InstrumentNotForModel, QueueFull,
-            BacktestsUnavailable, and the data module's errors of the instrument and the
-            period (``data.DataError``).
+            BacktestLimitReached, BacktestsUnavailable, and the data module's errors of the
+            instrument and the period (``data.DataError``).
         """
         prepared = await self.prepare(user_id, body)
         author = DocumentAuthor(id=user_id, name=await self._store.author_name(user_id), mine=True)
         # Before the slower checks; again under the lock below, where it counts.
         if await self._store.queued(user_id) >= QUEUE_MAX:
             raise QueueFull
+        await self.fits(user_id, 1)
         await self.ready()
         spec = await self.spec(prepared)
         await self._store.lock_user(user_id)
         if await self._store.queued(user_id) >= QUEUE_MAX:
             raise QueueFull
+        await self.fits(user_id, 1)
         # The model may have been deleted meanwhile; held now until the backtest is stored.
         if not await self._store.hold_model(user_id, prepared.model.id):
             raise ModelNotFound
@@ -209,6 +221,16 @@ class BacktestRuns:
         self.run(started)
         document = _document(backtest, spec, author=author, queue_position=position)
         return backtest, dumps(document)
+
+    async def fits(self, user_id: str, adding: int) -> None:
+        """Checks that the user can keep ``adding`` more backtests, failed ones counted.
+
+        Raises:
+            BacktestLimitReached.
+        """
+        count = await self._store.count(user_id, [])
+        if count + adding > self._limit:
+            raise BacktestLimitReached(self._limit, count, adding)
 
     async def prepare(self, user_id: str, body: BacktestIn) -> Prepared:
         """The reads of a new backtest's checks: its benchmarks, and the user's model with the

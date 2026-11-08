@@ -1,8 +1,8 @@
 """HTTP API of the experiments module: the signed-in user's backtests under
 ``/api/v1/backtests`` (the list, starting one, cancelling a queued one, its result document and
-its download), the backtests every account published under ``/api/v1/experiments``, the
-comparison of backtests under ``/api/v1/compare``, sweeps of many backtests under
-``/api/v1/sweeps`` and the Dashboard under ``/api/v1/dashboard``.
+its download, deleting them), the backtests every account published under
+``/api/v1/experiments``, the comparison of backtests under ``/api/v1/compare``, sweeps of many
+backtests under ``/api/v1/sweeps`` and the Dashboard under ``/api/v1/dashboard``.
 """
 
 from collections.abc import Iterator
@@ -20,6 +20,8 @@ from candlestack.accounts import (
     CurrentUserDep,
     ReaderDep,
     Scope,
+    heavy,
+    heavy_unless,
 )
 from candlestack.core import NO_STORE, ProblemError, problem_doc, require_same_origin
 from candlestack.data import data_problems
@@ -33,13 +35,21 @@ from candlestack.experiments.compare import (
     compare,
     parse_ids,
 )
-from candlestack.experiments.dependencies import BacktestRunsDep, BacktestsServiceDep, SweepsDep
+from candlestack.experiments.deletes import DELETE_MAX, BacktestsDeleted, BacktestsDeleteIn
+from candlestack.experiments.dependencies import (
+    BacktestRunsDep,
+    BacktestsServiceDep,
+    DeletesDep,
+    SweepsDep,
+)
 from candlestack.experiments.document import BacktestCheck, BacktestDocument, BacktestIn
 from candlestack.experiments.errors import (
+    BacktestLimitReached,
     BacktestNotFinished,
     BacktestNotFound,
     BacktestNotQueued,
     BacktestsUnavailable,
+    CountMismatch,
     InstrumentNotForModel,
     InvalidBacktest,
     ModelNeedsSetup,
@@ -461,6 +471,17 @@ def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911, P
                 "them has started, or cancel one.",
                 extensions={"limit": QUEUE_MAX},
             )
+        case BacktestLimitReached():
+            return _limit_problem(error)
+        case CountMismatch():
+            return ProblemError(
+                409,
+                "confirmation-mismatch",
+                "Confirmation mismatch",
+                f"{error.count} backtests match, which is not the count confirmed, so nothing was "
+                "deleted. Check what you are deleting with the user, then confirm that count.",
+                extensions={"count": error.count},
+            )
         case BacktestNotQueued():
             detail = (
                 "The backtest is running already, so it can no longer be cancelled."
@@ -510,6 +531,25 @@ def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911, P
     return None
 
 
+def _limit_problem(error: BacktestLimitReached) -> ProblemError:
+    """``backtest-limit``: the account keeps ``limit`` backtests at most."""
+    have = f"You have {error.count:,} backtests, and an account keeps at most {error.limit:,}."
+    if error.adding == 1:
+        detail = f"{have} Delete old backtests you no longer need, then start this one."
+    else:
+        over = error.count + error.adding - error.limit
+        detail = (
+            f"The sweep has {error.adding} backtests. {have} Delete at least {over:,} old "
+            "backtests you no longer need, or vary fewer values."
+        )
+    extensions = {"limit": error.limit, "count": error.count}
+    if error.adding != 1:
+        extensions["adding"] = error.adding
+    return ProblemError(
+        409, "backtest-limit", "Backtest limit reached", detail, extensions=extensions
+    )
+
+
 @contextmanager
 def backtest_problems() -> Iterator[None]:
     """Raises the errors of starting or cancelling a backtest, of its document, of a comparison
@@ -554,8 +594,9 @@ def _json(
         ),
         **problem_doc(
             409,
-            "The model has no manifest (`model-needs-setup`), or the user has "
-            f"{QUEUE_MAX} backtests waiting already (`queue-full`, with `limit`).",
+            "The model has no manifest (`model-needs-setup`), the user has "
+            f"{QUEUE_MAX} backtests waiting already (`queue-full`, with `limit`), or as many "
+            "backtests as an account keeps (`backtest-limit`, with `limit` and `count`).",
         ),
         **problem_doc(
             422,
@@ -568,6 +609,7 @@ def _json(
     },
     dependencies=[Depends(require_same_origin)],
 )
+@heavy
 async def start_backtest(
     body: BacktestIn, user: BacktestsUserDep, runs: BacktestRunsDep, response: Response
 ) -> Response:
@@ -598,8 +640,9 @@ async def start_backtest(
         ),
         **problem_doc(
             409,
-            "The model has no manifest (`model-needs-setup`), or the user has "
-            f"{QUEUE_MAX} backtests waiting already (`queue-full`, with `limit`).",
+            "The model has no manifest (`model-needs-setup`), the user has "
+            f"{QUEUE_MAX} backtests waiting already (`queue-full`, with `limit`), or as many "
+            "backtests as an account keeps (`backtest-limit`, with `limit` and `count`).",
         ),
         **problem_doc(
             422,
@@ -650,6 +693,59 @@ async def cancel_backtest(
     return _json(content, response)
 
 
+@router.delete(
+    "/api/v1/backtests/{backtest_id}",
+    status_code=204,
+    responses={
+        **_NOT_SIGNED_IN,
+        **problem_doc(
+            403, "The request does not come from the app's own pages (`cross-origin-request`)."
+        ),
+        **problem_doc(404, "The user has no backtest with this ID (`not-found`)."),
+    },
+    dependencies=[Depends(require_same_origin)],
+)
+async def delete_backtest(
+    backtest_id: BacktestId, user: BacktestsUserDep, deletes: DeletesDep
+) -> None:
+    """Deletes the user's backtest for good, with everything its run stored. A queued one
+    leaves the queue, a running one is stopped first. A published one leaves Experiments, and
+    its page answers 404 to everyone. Its sweep no longer lists it, and a sweep without any
+    backtest left is deleted too."""
+    deleted = await deletes.delete(user.id, ids=[backtest_id])
+    if not deleted.count:
+        with backtest_problems():
+            raise BacktestNotFound
+
+
+@router.post(
+    "/api/v1/backtests/delete",
+    responses={
+        **_NOT_SIGNED_IN,
+        **problem_doc(
+            403, "The request does not come from the app's own pages (`cross-origin-request`)."
+        ),
+        **problem_doc(404, "The user has no sweep with `sweep_id` (`not-found`)."),
+        **problem_doc(
+            422,
+            f"Neither or both of `ids` and `sweep_id`, or more than {DELETE_MAX} IDs "
+            "(`validation`).",
+        ),
+    },
+    dependencies=[Depends(require_same_origin)],
+)
+async def delete_backtests(
+    body: BacktestsDeleteIn, user: BacktestsUserDep, deletes: DeletesDep, response: Response
+) -> BacktestsDeleted:
+    """Deletes the user's backtests for good, as `DELETE /api/v1/backtests/{backtest_id}` does
+    one: up to 100 by their `ids`, or every backtest of a sweep with `sweep_id`, which deletes
+    the sweep too. IDs the user has no backtest with are listed in `not_found` and change
+    nothing, so sending the same request again is safe."""
+    response.headers.update(NO_STORE)
+    with sweep_problems():
+        return await deletes.delete(user.id, ids=body.ids or (), sweep_id=body.sweep_id)
+
+
 @router.get(
     "/api/v1/backtests/{backtest_id}",
     response_model=BacktestDocument,
@@ -662,6 +758,9 @@ async def cancel_backtest(
         **_SOURCE_ERRORS,
     },
 )
+# The summary is the setup and the statistics the run stored (only a backtest from before the
+# light results were stored is built again, once): a plain request.
+@heavy_unless(lambda request: request.query_params.get("view") == "summary")
 async def get_backtest(
     backtest_id: BacktestId,
     user: CurrentUserDep,
@@ -702,6 +801,7 @@ async def get_backtest(
         **_SOURCE_ERRORS,
     },
 )
+@heavy
 async def download_backtest(
     backtest_id: BacktestId, user: CurrentUserDep, runs: BacktestRunsDep, response: Response
 ) -> Response:
@@ -732,6 +832,7 @@ async def download_backtest(
         ),
     },
 )
+@heavy
 async def compare_backtests(
     ids: Annotated[
         str,
@@ -852,9 +953,10 @@ def sweep_problems() -> Iterator[None]:
         ),
         **problem_doc(
             409,
-            "A model has no manifest (`model-needs-setup`, with `setup`), or the user's queue has "
+            "A model has no manifest (`model-needs-setup`, with `setup`), the user's queue has "
             "room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count` "
-            "and `room`).",
+            "and `room`), or the account cannot keep that many more backtests (`backtest-limit`, "
+            "with `limit`, `count` and `adding`).",
         ),
         **problem_doc(
             422,
@@ -867,6 +969,7 @@ def sweep_problems() -> Iterator[None]:
     },
     dependencies=[Depends(require_same_origin)],
 )
+@heavy
 async def start_sweep(
     body: SweepIn, user: BacktestsUserDep, sweeps: SweepsDep, response: Response
 ) -> SweepOut | Response:

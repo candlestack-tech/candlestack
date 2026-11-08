@@ -10,7 +10,8 @@ the problems of their errors from here too. ``candlestack.main`` puts a ``Backte
 ``model_usage`` on ``app.state.model_usage``,
 so the models list of ``ml``, which cannot import this module, shows how the backtests used
 each model. The MCP tools of sweeps build the service with ``build_sweeps`` and raise its
-errors as problems with ``sweep_problems``, as the routes do. A user's backtests and sweeps go
+errors as problems with ``sweep_problems``, as the routes do; the MCP tool that deletes
+backtests builds ``build_deletes`` and raises the same problems. A user's backtests and sweeps go
 with the account by the foreign keys' cascade: no hook. Importing the module declares its
 tables (``backend/migrations`` relies on it).
 
@@ -38,7 +39,13 @@ from candlestack.experiments.compare import (
     check_ids,
 )
 from candlestack.experiments.compare import compare as compare_backtests
-from candlestack.experiments.dependencies import backtest_runs, build_sweeps, get_backtests_service
+from candlestack.experiments.deletes import DELETE_MAX, BacktestsDeleted
+from candlestack.experiments.dependencies import (
+    backtest_runs,
+    build_deletes,
+    build_sweeps,
+    get_backtests_service,
+)
 from candlestack.experiments.document import (
     BacktestCheck,
     BacktestHeader,
@@ -96,6 +103,7 @@ __all__ = [
     "BACKTEST_NAME_MAX",
     "COMPARE_MAX",
     "CURVE_POINTS",
+    "DELETE_MAX",
     "EXPERIMENTS_PAGE_SIZE",
     "MODEL_NAME_MAX",
     "PAGE_MAX",
@@ -117,6 +125,7 @@ __all__ = [
     "BacktestSort",
     "BacktestStatus",
     "BacktestUpdate",
+    "BacktestsDeleted",
     "BenchmarkIn",
     "CompareOut",
     "ComparedBacktest",
@@ -148,6 +157,7 @@ __all__ = [
     "backtest_problems",
     "backtest_runs",
     "backtests_router",
+    "build_deletes",
     "build_sweeps",
     "check_ids",
     "compare_backtests",

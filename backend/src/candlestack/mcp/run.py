@@ -20,7 +20,7 @@ from mcp.server.mcpserver import Context
 from pydantic import BaseModel, Field
 
 from candlestack import experiments
-from candlestack.accounts import Scope
+from candlestack.accounts import HEAVY, Scope
 from candlestack.experiments import (
     COMPARE_MAX,
     CURVE_POINTS,
@@ -859,6 +859,14 @@ _COMPARE = CompareResult.model_validate(
     }
 )
 
+
+def _get_backtest_cost(arguments: dict[str, Any]) -> int:
+    """``get_backtest``'s cost: its default answer (setup, metrics, benchmark returns) is read
+    from stored data and costs 1; asking for trades or equity points costs ``HEAVY``."""
+    asks_more = arguments.get("trades_per_page") or arguments.get("equity_points")
+    return HEAVY if asks_more else 1
+
+
 TOOLS = (
     ToolSpec(
         validate_backtest,
@@ -875,6 +883,7 @@ TOOLS = (
         scopes=(Scope.backtests,),
         annotations=changes(destructive=False, idempotent=False),
         example=Example(arguments=_SETUP_ARGUMENTS, result=_QUEUED),
+        cost=HEAVY,
     ),
     ToolSpec(
         wait_for_backtest,
@@ -902,6 +911,7 @@ TOOLS = (
             arguments={"backtest_id": _ID, "trades_per_page": 50, "equity_points": 3},
             result=_RESULT,
         ),
+        cost=_get_backtest_cost,
     ),
     ToolSpec(
         compare_backtests,
@@ -912,5 +922,6 @@ TOOLS = (
         example=Example(
             arguments={"ids": [_ID, "bt_t9n8v7d6a5"], "curve_points": 2}, result=_COMPARE
         ),
+        cost=HEAVY,
     ),
 )

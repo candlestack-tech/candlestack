@@ -9,6 +9,8 @@ import {
   backtestsQueryOptions,
   cancelBacktest,
   dashboardQueryOptions,
+  deleteBacktest,
+  deleteBacktests,
   getBacktestFile,
   updateBacktest,
   type BacktestDocument,
@@ -106,6 +108,31 @@ describe('cancelBacktest', () => {
       status: 409,
       problem: 'backtest-not-queued',
     });
+  });
+});
+
+describe('deleteBacktest', () => {
+  it('deletes the backtest', async () => {
+    const fetch = stubApi({ 'DELETE /api/v1/backtests/bt_7f3k2m9qx4': { status: 204 } });
+    await expect(deleteBacktest('bt_7f3k2m9qx4')).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/backtests/bt_7f3k2m9qx4',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+
+  it('passes a backtest that is gone on as not-found', async () => {
+    stubApi({ 'DELETE /api/v1/backtests/bt_7f3k2m9qx4': problem(404, 'not-found', 'No such backtest.') });
+    await expect(deleteBacktest('bt_7f3k2m9qx4')).rejects.toMatchObject({ status: 404, problem: 'not-found' });
+  });
+});
+
+describe('deleteBacktests', () => {
+  it('posts the IDs and gives back what was deleted and what was not found', async () => {
+    const answer = { deleted: ['bt_7f3k2m9qx4'], count: 1, not_found: ['bt_t9n8v7d6a5'] };
+    const fetch = stubApi({ 'POST /api/v1/backtests/delete': { status: 200, body: answer } });
+    await expect(deleteBacktests(['bt_7f3k2m9qx4', 'bt_t9n8v7d6a5'])).resolves.toEqual(answer);
+    expect(fetch.mock.calls[0]?.[1]?.body).toBe('{"ids":["bt_7f3k2m9qx4","bt_t9n8v7d6a5"]}');
   });
 });
 

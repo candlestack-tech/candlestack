@@ -4,6 +4,7 @@ import { useCallback } from 'react';
 import {
   ApiError,
   deleteModel,
+  isGone,
   manifestQueryOptions,
   modelsQueryOptions,
   setManifest,
@@ -101,9 +102,6 @@ export function useStarModel() {
     onSettled: () => queryClient.invalidateQueries({ queryKey: KEY }),
   });
 }
-
-// The model is gone already (deleted in another tab, say): the API answers 404 not-found.
-export const isGone = (error: unknown) => error instanceof ApiError && error.status === 404;
 
 // A model that is gone leaves the list: the list is asked for again.
 function forgetIfGone(queryClient: QueryClient, error: unknown) {

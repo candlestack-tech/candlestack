@@ -36,7 +36,7 @@ flowchart LR
             backend --> redis[("redis<br/>cache only")]
             backend --> postgres[("postgres<br/>users, sessions, settings, models, backtests")]
             backend --> models[("models volume<br/>uploaded model files")]
-            modelsbackup["models-backup<br/>nightly archive"] -.->|"read-only"| models
+            modelsbackup["models-backup<br/>weekly archive"] -.->|"read-only"| models
             subgraph jobsnet["jobs network (internal, no way out)"]
                 backend -->|"jobs, results"| queue[("queue<br/>Redis of the jobs")]
                 worker["worker<br/>runs the models, one job at a time"] -->|"takes jobs"| queue
@@ -57,8 +57,8 @@ flowchart LR
 | `backend` | `ghcr.io/candlestack-tech/candlestack/backend` | calls Binance and Alpaca; gets the environment's Alpaca keys at deploy time; keeps the uploaded model files in the volume `models` (`/data/models`, its only writable path) |
 | `frontend` | `ghcr.io/candlestack-tech/candlestack/frontend` | the web app, static files served by Caddy |
 | `redis` | `redis:8-alpine` | private network of the environment, no persistence, `allkeys-lru` |
-| `postgres` | `postgres:18-alpine` | private network of the environment, data in a volume; migrated by a one-shot `migrate` container (the backend image, `alembic upgrade head`) before the backend starts; prod and stage dump it every night (`backup`) |
-| `models-backup` | `offen/docker-volume-backup` | archives the `models` volume (read-only) every night at 00:30 UTC into the volume `model_backups`, keeps 7 days; no network |
+| `postgres` | `postgres:18-alpine` | private network of the environment, data in a volume; migrated by a one-shot `migrate` container (the backend image, `alembic upgrade head`) before the backend starts; prod and stage dump it every Sunday and keep the newest dump (`backup`) |
+| `models-backup` | `offen/docker-volume-backup` | archives the `models` volume (read-only) every Sunday at 00:30 UTC into the volume `model_backups`, keeps the newest archive; no network |
 | `worker` | `ghcr.io/candlestack-tech/candlestack/worker` (the stage `worker` of `backend/Dockerfile`) | runs the uploaded models ([Worker](#worker)); only on the internal network `jobs`, the `models` volume read-only, the `jobs` volume shared with the backend, a read-only root filesystem, 1 GB without swap, one CPU; in `compose.yaml`, where the deploy of prod and stage starts the profile `worker` ([infra/README.md](../infra/README.md#worker)) |
 | `queue` | `redis:8-alpine` | the job queue: only on the network `jobs`, no persistence, `noeviction`; with the worker |
 
@@ -107,9 +107,11 @@ flowchart LR
 | `GET /api/v1/models/{model_id}/manifest` | the model's manifest as it was given (`404 no-manifest` without one) |
 | `POST /api/v1/models/{model_id}/manifest/check` | a dry run of the PUT: the same checks on the manifest (the body), nothing kept; 200 with `valid`, the `problems` (each with its `field`, `detail` and `allowed` values), `more_problems` and `unknown_blocks`; a key needs `read` only ([Models](#models)) |
 | `GET /api/v1/preprocessing/catalog` | the blocks a model's manifest can name, by step: id, description, the display group of a feature (`Candle`, `Bands`, `Momentum`, `Trend`, `Volume`, `Brick`, `Line`), warm-up and parameters (type, range, default, `tunable`); public, served by `ml` ([preprocessing.md](preprocessing.md#the-blocks)) |
-| `POST /api/v1/backtests` | starts a backtest of one of the user's models: the body is the setup groups of the result document (`model`, `data`, `decision`, `execution`, `benchmarks`); checked first, then stored `running` and run after the response, or `queued` while another backtest of the user runs (1 runs and up to 20 wait per user, `409 queue-full` beyond); 201 with its result document ([Backtests](#backtests)) |
+| `POST /api/v1/backtests` | starts a backtest of one of the user's models: the body is the setup groups of the result document (`model`, `data`, `decision`, `execution`, `benchmarks`); checked first, then stored `running` and run after the response, or `queued` while another backtest of the user runs (1 runs and up to 20 wait per user, `409 queue-full` beyond; an account keeps at most `BACKTEST_LIMIT` backtests, 2,000, `409 backtest-limit` beyond); 201 with its result document ([Backtests](#backtests)) |
 | `POST /api/v1/backtests/check` | checks a new backtest as `POST /api/v1/backtests` does, with the same body and the same problems, and stores nothing: 200 with what would run (the model, the instrument as the catalog has it, the model's timeframe and session, the warm-up and where the load starts, the benchmarks) and whether it would wait (`starts` `now` or `queued`, `queue_position`); a key needs only `read` ([Backtests](#backtests)) |
 | `POST /api/v1/backtests/{backtest_id}/cancel` | cancels the user's queued backtest: it fails as cancelled and never runs; 200 with its result document, `409 backtest-not-queued` for one that runs or has ended ([Backtests](#backtests)) |
+| `DELETE /api/v1/backtests/{backtest_id}` | deletes the user's backtest for good with what its run stored, whatever its status (a queued one leaves the queue, a running one is stopped); a published one leaves Experiments and its page answers 404; 204 ([Deleting backtests](#deleting-backtests)) |
+| `POST /api/v1/backtests/delete` | deletes up to 100 of the user's backtests by `ids`, or every backtest of a sweep and the sweep with `sweep_id`; 200 with `deleted`, `count` and `not_found` (IDs the user has no backtest with) ([Deleting backtests](#deleting-backtests)) |
 | `GET /api/v1/backtests/{backtest_id}` | the result document in the light view of the user's backtest, whatever its status, or of another account's while it is published, from what the run stored; `?view=summary` for the setup and the statistics only ([engine.md](engine.md#the-result-document)) |
 | `GET /api/v1/backtests/{backtest_id}/download` | the result document of a finished backtest, the user's or a published one of another account, with every row and trade, as an attachment |
 | `GET /api/v1/backtests` | a page of the user's backtests, 10 or `per_page` up to 100: search `q` (name, number, symbol or model name), `show` (`all`, `starred`, `failed`, `public`), `model` (a model's name), the filters for the API and the agents (`status`, repeated, `sweep_id`, `model_id`, `instrument`, `timeframe`, `representation`, `created_after`, `created_before`, `min_sharpe`, `min_total_return`, `min_max_drawdown`, `starred`, `public`), `sort` and `order`, `page`; with the total, the pages and what the filter panel shows (the counts of all, starred, failed and published backtests, the models used) ([Backtests](#backtests)) |
@@ -151,7 +153,8 @@ flowchart LR
   `not-on-beta-list` (403: allowing an app from an account off the beta list) and
   `scope-not-requested` (422: granting a scope the app did not ask for, with `scope`), and uses
   `not-found` (404) and `rate-limited` (429: also more than 120 requests a minute with one
-  key) too. The ml module adds `model-too-large` (413: a
+  key or connected app, or 300 across all of an account's, a heavy request counting 5, with
+  `limit`) too. The ml module adds `model-too-large` (413: a
   file over 50 MB), `storage-full` (409: the file does not fit into the user's 100 MB, with
   `used_bytes` and `quota_bytes`), `unsupported-model-format` (415: not `.keras`, "coming
   soon"), `model-check-failed` (422: a check failed, `check` names it, `opens` or `weights`)
@@ -171,7 +174,11 @@ flowchart LR
   module adds `model-needs-setup` (409: the model has no manifest),
   `instrument-not-for-model` (422: a model of US trading hours on a crypto pair or the other
   way round, with `session` and `market`), `queue-full` (409: 20 backtests of the user wait
-  already, with `limit`), `backtest-not-queued` (409: cancelling a backtest that runs or has
+  already, with `limit`), `backtest-limit` (409: the account has as many backtests as it keeps,
+  `BACKTEST_LIMIT`, 2,000, or a sweep would pass it; with `limit`, `count` and for a sweep
+  `adding`; the detail tells to delete old ones), `confirmation-mismatch` (409, the MCP tool
+  `delete_backtests`: `confirm_count` is not how many backtests match, with `count`; nothing was
+  deleted), `backtest-not-queued` (409: cancelling a backtest that runs or has
   ended), `backtests-unavailable` (503: the worker's queue cannot be reached),
   `backtest-not-finished` (409: a download of a queued, running or failed backtest, or
   publishing one),
@@ -264,7 +271,18 @@ flowchart LR
   list, checked on every request, so taking someone off the list stops their keys at once
   (the dev user's keys work where the dev sign-in does). A request with a key ignores any
   cookie; a wrong key is 401 `invalid-api-key`, whatever is wrong with it. Each key has 120
-  requests a minute (Redis, 429 `rate-limited` with `Retry-After` and `retry_after_s`), and its `last_used_at`
+  requests a minute, and the account 300 a minute across all its keys and connected apps
+  (`accounts/limits.py`; fixed windows in Redis, 429 `rate-limited` with `Retry-After`,
+  `retry_after_s` and the `limit` passed, the key's counted first and the account's only while
+  the key's holds). A request costs 1; a heavy one costs 5: the result document
+  (`GET /api/v1/backtests/{id}`; 1 with `?view=summary`, `@heavy_unless`), the download, the
+  comparison, starting a backtest and starting a sweep, marked `@heavy` on their routes and paid
+  at the sign-in, and the MCP tools `get_backtest` (only when it asks for trades or equity
+  points: its default answer is read from stored data and costs 1), `compare_backtests`,
+  `start_backtest` and `run_sweep` (`ToolSpec.cost`), which pay the 4 beyond the request's 1
+  when they run. On `/mcp`, what only connects or lists counts against a limit of the key or app
+  of its own, ten times looser, which the account's budget leaves out ([MCP](#mcp)). The
+  browser's session has no rate limit. Its `last_used_at`
   is written at most once a minute, in a transaction of its own on another connection: best
   effort, a failed write is a warning and the request goes on. At most 10 keys of a user are
   neither revoked nor expired; creating one locks the user's row, so two at once cannot pass
@@ -484,7 +502,7 @@ flowchart LR
   them in `MODEL_STORAGE_DIR` as `<user_id>/<model_id>.keras` or `.onnx` (by the model's
   `framework`; `ml.model_file` names it for the jobs) and the uploads in progress as
   `.incoming/<random>.part`, on one filesystem, so a move is an atomic rename. On the VM that is
-  the volume `models`, archived every night ([infra/README.md](../infra/README.md#backups)). The
+  the volume `models`, archived every week ([infra/README.md](../infra/README.md#backups)). The
   files are served only through the API.
 - **Limits**: 50 MB per file, 100 MB and 100 models per user (binary megabytes, as the app
   shows them), one upload at a time, 2 minutes to send a file.
@@ -827,6 +845,11 @@ checked at the next start.
   (`409 backtest-not-queued`), nor one that ended. A queued backtest has no download
   (`409 backtest-not-finished`) and cannot be published. `duration_s` is the time it ran, from
   `started_at` (the migration set `started_at` to `created_at` for the rows stored before).
+- **The limit**: an account keeps at most `BACKTEST_LIMIT` backtests (2,000; failed and
+  cancelled ones count). A start (`BacktestRuns.fits`), its check and a sweep (all its
+  backtests must fit) beyond it are `409 backtest-limit` with `limit` and `count` (a sweep also
+  `adding`), whose detail tells the user to delete old ones; checked before the slower checks
+  and again under the lock of the user, as the queue is.
 - **The run** (`experiments/runner.py`, `BacktestRunner` on `app.state.backtest_runner`) is a
   task of the API process, so it outlives the request: the candles with the warm-up from the
   data module (and the period's candles of the fund a benchmark holds, which only the document
@@ -891,6 +914,33 @@ checked at the next start.
 - A user's backtests go with the account by the foreign key's cascade (no deletion hook: no
   files), out of Experiments too. Another user's backtest is a 404, unless it is published
   and only for its result document and download.
+
+### Deleting backtests
+
+`DELETE /api/v1/backtests/{id}` deletes one, `POST /api/v1/backtests/delete` up to 100 by
+`ids` or every backtest of a sweep by `sweep_id` (`experiments/deletes.py`, the scope
+`backtests`), and the MCP tool `delete_backtests` either way with `confirm_count`. A backtest
+is one row that holds what its run stored (setup, report, statistics, predictions, curves), so
+deleting the row deletes it all; a published one leaves Experiments, and its page, its
+document and other people's comparisons answer 404. The delete runs under the lock of the
+user and locks the rows (a run that is finishing stores first, then its row goes):
+
+- **Any status**. A queued backtest just leaves the queue. A running one is stopped rather than
+  refused, so a sweep in progress can be deleted whole: its row goes, the transaction starts
+  the user's next queued backtest as the end of a run does (every delete does, so a queue that
+  stood still moves on too), and after the commit the runner
+  cancels its task (`BacktestRunner.stop`). A job the worker took already runs to its end and
+  nobody reads its answer. A run the runner cannot cancel (another process) finds its row gone:
+  it stores nothing, and its steps and failure change no row.
+- **Sweeps** read their backtests by `sweep_id`, so they lose a deleted one from their list,
+  progress and ranking; a sweep with no backtest left is deleted with the last one.
+- **Bulk**: IDs the user has no backtest with (deleted already, another account's) are listed
+  in `not_found` and change nothing, so the same request can be sent again. The MCP tool must
+  name how many backtests it deletes in `confirm_count`; another number is
+  `409 confirmation-mismatch` with the real `count` and deletes nothing, so an agent cannot
+  wipe more than the user agreed to.
+- The web app deletes one from the backtest page, and the rows chosen on a page of the Backtests
+  list with `POST /api/v1/backtests/delete`, each after a confirm dialog that names the count.
 
 ## Experiments
 
@@ -1049,16 +1099,16 @@ call, as the routes' dependencies do), never the API over HTTP.
   so it stops first. The SDK's Host check is off (the edge sets the host); a request with an
   `Origin` other than `PUBLIC_URL` is `403 cross-origin-request`, against DNS rebinding.
 - **Sign-in**: an API key in `Authorization: Bearer`, checked by `accounts.key_caller` as on a
-  route (the hash, revoked, expired, the beta list, 120 requests a minute, the last use), or an
+  route (the hash, revoked, expired, the beta list, the rate limits, the last use), or an
   OAuth access token (`csa_...`, [OAuth](#oauth)), checked by `accounts.token_caller` the same
   way, per connected app, and only for this resource. The key or token is checked first,
   without counting the request; then the body is read, at most 2 MiB (`413 request-too-large`
   by its `Content-Length` before anything is read, or once the bytes read pass the limit, the
   request still counted in full), and the request is counted by its JSON-RPC method
-  (`accounts.count_request`): `initialize`, `server/discover`, `ping`, the lists (`tools/list`,
+  (`accounts.count_request`, the key's or app's and the account's budgets): `initialize`, `server/discover`, `ping`, the lists (`tools/list`,
   `resources/list`, `resources/templates/list`, `prompts/list`) and notifications in a body of
   at most 64 KiB count against a limit of their own ten times looser (`accounts:key-rl-free:<id>`, `accounts:app-rl-free:<id>`), so a client
-  over the limit still connects; the rest against the 120 a minute. A `tools/call` over the
+  over the limit still connects; the rest against the 120 a minute and the account's 300. A `tools/call` over the
   limit is answered `200` as the tool's error (`isError`) with the problem `rate-limited` and
   its `retry_after_s`, which the model reads; any other request over it (and a `tools/call`
   whose ID is not a string or an integer) stays `429` with `Retry-After`, as on a route. The
@@ -1203,7 +1253,9 @@ call, as the routes' dependencies do), never the API over HTTP.
     of the beta and asks the agent to check with the user first) and `get_dashboard` (`read`;
     the counts, the 6 newest that ended, the 5 best by each result with the value and the 4
     best starred: each backtest once in `backtests` by ID and the lists as IDs, on
-    `BacktestsService.own_dashboard`, which skips the Dashboard's queries of Experiments). They
+    `BacktestsService.own_dashboard`, which skips the Dashboard's queries of Experiments), and
+    in `mcp/deletes.py` `delete_backtests` (`backtests`; up to 100 `ids` or a `sweep_id`, with
+    `confirm_count`; destructive, idempotent; [Deleting backtests](#deleting-backtests)). They
     answer a compact backtest with its page's `url` and its `sweep_id`: no equity series, generated name, duration or other fields only
     the app's cards and charts use, the model by its name and ID; Experiments the same, `url`
     included, with the author, never the model file. The Dashboard's newest published backtests are left out, as
@@ -1315,7 +1367,8 @@ backend like the rest of the API; the metadata (RFC 8414) is served at
   authorization: Settings names the app by that host (`redirect_host`), not by the first URI the
   app registered, so an app that registers `https://claude.ai/cb` and `https://evil.example/cb`
   and returns to the second shows `evil.example`; an app connected before the column existed
-  falls back to its first registered URI. Its requests at `/mcp` share 120 a minute. `GET` and `DELETE
+  falls back to its first registered URI. Its requests at `/mcp` share 120 a minute, and the
+  account's 300 ([Accounts](#accounts), API keys). `GET` and `DELETE
   /api/v1/me/connected-apps` list and disconnect apps with the browser session only; deleting
   the app deletes its tokens.
 - Clients authenticate at the token and revocation endpoints the way they registered: a public
@@ -1446,6 +1499,7 @@ Environment variables, read by pydantic-settings without a prefix. All are docum
 | `LOGO_DEV_KEY` | empty | logo.dev publishable key for the instrument icons (whitespace stripped); empty: every icon is the fallback |
 | `LOGO_DEV_URL` | `https://img.logo.dev` | logo images |
 | `CANDLES_MAX` | `50000` | max candles in one candle response |
+| `BACKTEST_LIMIT` | `2000` | most backtests one account keeps, failed ones counted; beyond, a start or a sweep is `409 backtest-limit` |
 | `CLIENT_RATE_LIMIT` | `60` | candle and instrument-detail requests per minute per client IP (IPv6: per /64); `0` disables |
 | `ALPACA_RATE_LIMIT` | prod and stage `180`, else `60` | our Alpaca request budget per minute |
 | `BINANCE_WEIGHT_LIMIT` | `1000` | our Binance REST weight budget per minute per environment |

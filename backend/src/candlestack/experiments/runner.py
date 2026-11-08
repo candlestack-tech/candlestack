@@ -27,7 +27,7 @@ another user's backtest.
 import asyncio
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from datetime import UTC, datetime
 from functools import partial
 
@@ -148,6 +148,14 @@ class BacktestRunner:
         task = asyncio.create_task(self._run(backtest_id), name=f"backtest {backtest_id}")
         self._tasks[task] = backtest_id
         task.add_done_callback(self._ended)
+
+    def stop(self, backtest_ids: Collection[str]) -> None:
+        """Cancels the runs of the backtests, deleted while they ran: no failure is stored and
+        the queue does not move on here (the delete started the next). The worker may still
+        finish a job it took; nothing reads its answer."""
+        for task, backtest_id in list(self._tasks.items()):
+            if backtest_id in backtest_ids:
+                task.cancel()
 
     def _ended(self, task: asyncio.Task[None]) -> None:
         self._tasks.pop(task, None)

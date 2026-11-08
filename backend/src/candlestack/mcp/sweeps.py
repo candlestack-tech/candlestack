@@ -8,7 +8,7 @@ from typing import Annotated
 from mcp.server.mcpserver import Context
 from pydantic import Field
 
-from candlestack.accounts import Scope
+from candlestack.accounts import HEAVY, Scope
 from candlestack.experiments import (
     PAGE_MAX,
     PAGE_SIZE,
@@ -229,6 +229,7 @@ TOOLS = (
         example=Example(
             arguments={"base": _BASE, "vary": _VARY, "metric": "sharpe"}, result=_STARTED
         ),
+        cost=HEAVY,
     ),
     ToolSpec(
         get_sweep,

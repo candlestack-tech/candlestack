@@ -377,7 +377,7 @@ class Sweeps:
 
         Raises:
             SweepTooLarge, InvalidBacktest (fewer than two setups), SweepQueueFull,
-            BacktestsUnavailable, and SetupFailed with the setup's error.
+            BacktestLimitReached, BacktestsUnavailable, and SetupFailed with the setup's error.
         """
         checked, _ = await self._checked(user_id, body)
         await self._store.lock_user(user_id)
@@ -438,10 +438,12 @@ class Sweeps:
 
         Raises:
             SweepQueueFull: It has room for fewer than ``count``.
+            BacktestLimitReached: The account cannot keep ``count`` more backtests.
         """
         room = max(0, QUEUE_MAX - await self._store.queued(user_id))
         if count > room:
             raise SweepQueueFull(count, room)
+        await self._runs.fits(user_id, count)
         return room
 
     async def sweep(

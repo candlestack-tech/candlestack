@@ -1,8 +1,8 @@
-import { Check } from 'lucide-react';
 import { useEffect, useRef, type ReactNode } from 'react';
 
 import type { Scope } from '@/api';
 import { HINT } from '@/components/Hint';
+import { Tick } from '@/components/Tick';
 import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
@@ -69,21 +69,6 @@ type ScopeProps = {
   // Off for a moment, as while the consent page sends the decision.
   disabled?: boolean;
 };
-
-// .box: the 18 px box, filled with the accent and its check when on.
-function Tick({ on, faded }: { on: boolean; faded: boolean }) {
-  return (
-    <span
-      className={cn(
-        'mt-px grid size-[18px] place-items-center rounded-[5px] border-[1.5px] text-primary-foreground peer-focus-visible:ring-[3px] peer-focus-visible:ring-ring/50',
-        on ? 'border-primary bg-primary' : 'border-[color-mix(in_srgb,var(--muted)_60%,var(--rule))]',
-        faded && 'opacity-55',
-      )}
-    >
-      {on && <Check aria-hidden="true" strokeWidth={3} className="size-3" />}
-    </span>
-  );
-}
 
 // .sc: a box, the scope in plain words with its API name, what it lets the key do. Read is always
 // on (every other scope needs it), its box faded and "Always" at the right.

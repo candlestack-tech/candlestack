@@ -5,11 +5,14 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi import FastAPI
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
-from candlestack.accounts import Scope, User
+from candlestack.accounts import HEAVY, Scope, User
 from candlestack.accounts.dependencies import Caller, authenticate, current_user
-from candlestack.experiments import model_usage
+from candlestack.accounts.limits import request_cost
+from candlestack.experiments import backtests_router, model_usage
 
 PROBLEMS = "https://candlestack.tech/problems/"
 ORIGIN = {"Origin": "http://testserver"}
@@ -274,3 +277,24 @@ def test_a_star_is_validated(client: TestClient, body: dict[str, object]) -> Non
 
 def test_the_app_counts_the_models_backtests_through_experiments(app: FastAPI) -> None:
     assert app.state.model_usage is model_usage
+
+
+@pytest.mark.parametrize(
+    ("path", "query", "cost"),
+    [
+        ("/api/v1/backtests/{backtest_id}", b"view=summary", 1),
+        ("/api/v1/backtests/{backtest_id}", b"", HEAVY),
+        ("/api/v1/backtests/{backtest_id}", b"view=light", HEAVY),
+        ("/api/v1/backtests/{backtest_id}/download", b"", HEAVY),
+        ("/api/v1/compare", b"ids=bt_7f3k2m9qx4", HEAVY),
+    ],
+)
+def test_what_a_key_pays_for_a_result(path: str, query: bytes, cost: int) -> None:
+    route = next(
+        route
+        for route in backtests_router.routes
+        if isinstance(route, APIRoute) and route.path == path and "GET" in (route.methods or ())
+    )
+    request = Request({"type": "http", "route": route, "query_string": query, "headers": []})
+
+    assert request_cost(request) == cost

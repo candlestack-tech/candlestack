@@ -5,7 +5,9 @@ A tool is an async function that takes its arguments, typed, and ``ctx: Context`
 a Pydantic model, which becomes its output schema. Its docstring is the description a model
 reads: what the tool does, when to use it and what it answers. ``ToolSpec`` adds a short
 ``verb_noun`` name, a title for people, the scopes an API key needs, the annotations (read-only,
-destructive, idempotent, always all three) and an example call for the tool reference.
+destructive, idempotent, always all three), an example call for the tool reference, and what a
+call costs of the rate limits (``cost``: 1, or ``HEAVY`` for one that builds or reruns much,
+or what works it out from the arguments).
 
 A tool raises ``ProblemError`` for what the agent should see, as a route does; the server turns
 it and every other failure into a tool error whose text is the problem as JSON
@@ -76,6 +78,9 @@ class ToolSpec:
     scopes: tuple[Scope, ...]
     annotations: ToolAnnotations
     example: Example
+    # What a call costs of the caller's rate limits (``accounts.charge_rate``), or what works
+    # it out from the call's arguments (a short answer from stored data costs less).
+    cost: int | Callable[[dict[str, Any]], int] = 1
     description: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -98,6 +103,10 @@ class ToolSpec:
         paragraphs = [" ".join(part.split()) for part in doc.split("\n\n")]
         paragraphs.append(f"Docs: {TOOLS_DOCS}#{self.name}")
         object.__setattr__(self, "description", "\n\n".join(paragraphs))
+
+    def cost_of(self, arguments: dict[str, Any]) -> int:
+        """What the call with `arguments` costs of the caller's rate limits."""
+        return self.cost if isinstance(self.cost, int) else self.cost(arguments)
 
 
 @dataclass(frozen=True, slots=True)

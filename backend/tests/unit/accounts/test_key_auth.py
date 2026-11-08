@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from candlestack.accounts import (
+    HEAVY,
     BacktestsUserDep,
     Caller,
     CallerDep,
@@ -19,17 +20,18 @@ from candlestack.accounts import (
     Scope,
     User,
     count_request,
+    heavy,
+    heavy_unless,
 )
 from candlestack.accounts.dependencies import (
     API_KEY_RATE_LIMIT,
-    LIGHT_RATE_LIMIT_FACTOR,
-    RateLimit,
     SessionUserDep,
     get_accounts_service,
     get_api_keys,
     reject_api_keys,
 )
 from candlestack.accounts.keys import KeyUser
+from candlestack.accounts.limits import LIGHT_RATE_LIMIT_FACTOR, USER_RATE_LIMIT, Budget
 from candlestack.accounts.models import ApiKey
 from candlestack.accounts.service import SignedIn
 from candlestack.core import ProblemError, Settings, install_error_handlers, require_same_origin
@@ -83,10 +85,14 @@ class FakeAccounts:
 class FakeLimiter:
     wait: float = 0.0
     keys: list[str] = field(default_factory=list)
+    costs: list[int] = field(default_factory=list)
+    # Only the counters that start with this are over their limit; all when None.
+    over: str | None = None
 
     async def hit(self, key: str, limit: int, cost: int = 1, window: int = 60) -> float:
         self.keys.append(f"{key} {limit}")
-        return self.wait
+        self.costs.append(cost)
+        return self.wait if self.over is None or key.startswith(self.over) else 0.0
 
 
 @pytest.fixture
@@ -105,6 +111,18 @@ CHANGES = [Depends(require_same_origin)]
 
 @router.get("/read")
 async def read(user: CurrentUserDep) -> str:
+    return user.id
+
+
+@router.get("/heavy")
+@heavy
+async def heavy_read(user: CurrentUserDep) -> str:
+    return user.id
+
+
+@router.get("/heavy-unless-summary")
+@heavy_unless(lambda request: request.query_params.get("view") == "summary")
+async def heavy_unless_summary(user: CurrentUserDep) -> str:
     return user.id
 
 
@@ -180,7 +198,11 @@ def test_a_key_with_read_reads(client: TestClient, keys: FakeKeys, limiter: Fake
     assert response.status_code == 200
     assert response.json() == ADA.id
     assert keys.used == ["key_readaaaaaa"]
-    assert limiter.keys == [f"accounts:key-rl:key_readaaaaaa {API_KEY_RATE_LIMIT}"]
+    assert limiter.keys == [
+        f"accounts:key-rl:key_readaaaaaa {API_KEY_RATE_LIMIT}",
+        f"accounts:user-rl:{ADA.id} {USER_RATE_LIMIT}",
+    ]
+    assert limiter.costs == [1, 1]
 
 
 def test_the_bearer_scheme_is_case_insensitive(client: TestClient) -> None:
@@ -288,6 +310,53 @@ def test_the_rate_limit_per_key(client: TestClient, keys: FakeKeys, limiter: Fak
     assert keys.used == []
 
 
+def test_the_rate_limit_per_account(
+    client: TestClient, keys: FakeKeys, limiter: FakeLimiter
+) -> None:
+    limiter.wait = 30.5
+    limiter.over = "accounts:user-rl:"
+
+    response = client.get("/read", headers=bearer(READ_KEY))
+
+    assert response.status_code == 429
+    assert response.json()["type"] == PROBLEMS + "rate-limited"
+    assert response.json()["limit"] == USER_RATE_LIMIT
+    assert "across all its API keys and connected apps" in response.json()["detail"]
+    assert response.headers["retry-after"] == "31"
+    assert keys.used == []
+
+
+def test_a_spent_key_does_not_count_against_the_account(
+    client: TestClient, limiter: FakeLimiter
+) -> None:
+    limiter.wait = 1.0
+
+    assert client.get("/read", headers=bearer(READ_KEY)).status_code == 429
+    assert limiter.keys == [f"accounts:key-rl:key_readaaaaaa {API_KEY_RATE_LIMIT}"]
+
+
+def test_a_heavy_route_costs_more(client: TestClient, limiter: FakeLimiter) -> None:
+    assert client.get("/heavy", headers=bearer(READ_KEY)).status_code == 200
+    assert limiter.costs == [HEAVY, HEAVY]
+
+
+@pytest.mark.parametrize(("query", "cost"), [("?view=summary", 1), ("", HEAVY), ("?view=x", HEAVY)])
+def test_a_route_heavy_unless_light_costs_by_the_request(
+    client: TestClient, limiter: FakeLimiter, query: str, cost: int
+) -> None:
+    response = client.get(f"/heavy-unless-summary{query}", headers=bearer(READ_KEY))
+
+    assert response.status_code == 200
+    assert limiter.costs == [cost, cost]
+
+
+def test_the_session_has_no_rate_limit(client: TestClient, limiter: FakeLimiter) -> None:
+    limiter.wait = 10.0
+
+    assert client.get("/heavy", headers=SESSION).status_code == 200
+    assert limiter.keys == []
+
+
 def test_a_key_signs_in_once_per_request(client: TestClient, keys: FakeKeys) -> None:
     assert client.get("/both", headers=bearer(READ_KEY)).status_code == 200
     assert keys.used == ["key_readaaaaaa"]
@@ -321,28 +390,34 @@ def test_other_authorization_keeps_the_origin_check(client: TestClient, authoriz
     assert "must not send cookies" not in response.json()["detail"]
 
 
-def _limit() -> RateLimit:
-    return RateLimit("accounts:key-rl:key_1", "accounts:key-rl-free:key_1", "API key")
+def _limit() -> Budget:
+    return Budget(
+        "accounts:key-rl:key_1", API_KEY_RATE_LIMIT, "API key", ADA.id, "accounts:key-rl-free:key_1"
+    )
 
 
 @pytest.mark.anyio
-async def test_count_request_counts_against_the_key_s_limit() -> None:
+async def test_count_request_counts_against_the_key_s_and_the_account_s_limit() -> None:
     limiter = FakeLimiter()
 
-    await count_request(limiter, Caller(ADA, frozenset({Scope.read}), rate_limit=_limit()))  # ty: ignore[invalid-argument-type]
+    await count_request(limiter, Caller(ADA, frozenset({Scope.read}), budget=_limit()))  # ty: ignore[invalid-argument-type]
 
-    assert limiter.keys == [f"accounts:key-rl:key_1 {API_KEY_RATE_LIMIT}"]
+    assert limiter.keys == [
+        f"accounts:key-rl:key_1 {API_KEY_RATE_LIMIT}",
+        f"accounts:user-rl:{ADA.id} {USER_RATE_LIMIT}",
+    ]
 
 
 @pytest.mark.anyio
 async def test_a_light_request_counts_against_a_looser_limit_of_its_own() -> None:
     limiter = FakeLimiter(wait=4.5)
-    caller = Caller(ADA, frozenset({Scope.read}), rate_limit=_limit())
+    caller = Caller(ADA, frozenset({Scope.read}), budget=_limit())
 
     with pytest.raises(ProblemError) as refused:
         await count_request(limiter, caller, light=True)  # ty: ignore[invalid-argument-type]
 
     light_limit = API_KEY_RATE_LIMIT * LIGHT_RATE_LIMIT_FACTOR
+    # The account's budget leaves out what only connects or lists.
     assert limiter.keys == [f"accounts:key-rl-free:key_1 {light_limit}"]
     problem = refused.value
     assert (problem.status, problem.slug) == (429, "rate-limited")
