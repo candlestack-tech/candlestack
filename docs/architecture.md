@@ -110,12 +110,12 @@ flowchart LR
 | `POST /api/v1/backtests` | starts a backtest of one of the user's models: the body is the setup groups of the result document (`model`, `data`, `decision`, `execution`, `benchmarks`); checked first, then stored `running` and run after the response, or `queued` while another backtest of the user runs (1 runs and up to 20 wait per user, `409 queue-full` beyond); 201 with its result document ([Backtests](#backtests)) |
 | `POST /api/v1/backtests/check` | checks a new backtest as `POST /api/v1/backtests` does, with the same body and the same problems, and stores nothing: 200 with what would run (the model, the instrument as the catalog has it, the model's timeframe and session, the warm-up and where the load starts, the benchmarks) and whether it would wait (`starts` `now` or `queued`, `queue_position`); a key needs only `read` ([Backtests](#backtests)) |
 | `POST /api/v1/backtests/{backtest_id}/cancel` | cancels the user's queued backtest: it fails as cancelled and never runs; 200 with its result document, `409 backtest-not-queued` for one that runs or has ended ([Backtests](#backtests)) |
-| `GET /api/v1/backtests/{backtest_id}` | the result document in the light view of the user's backtest, whatever its status, or of another account's while it is published ([engine.md](engine.md#the-result-document)) |
+| `GET /api/v1/backtests/{backtest_id}` | the result document in the light view of the user's backtest, whatever its status, or of another account's while it is published, from what the run stored; `?view=summary` for the setup and the statistics only ([engine.md](engine.md#the-result-document)) |
 | `GET /api/v1/backtests/{backtest_id}/download` | the result document of a finished backtest, the user's or a published one of another account, with every row and trade, as an attachment |
 | `GET /api/v1/backtests` | a page of 10 of the user's backtests: search `q` (name, number, symbol or model name), `show` (`all`, `starred`, `failed`, `public`), `model` (a model's name), `sort` and `order`, `page`; with the total, the pages and what the filter panel shows (the counts of all, starred, failed and published backtests, the models used) ([Backtests](#backtests)) |
 | `PATCH /api/v1/backtests/{backtest_id}` | stars, unstars, renames (`409 name-taken`; a name of null goes back to the generated one), publishes or unpublishes the user's backtest |
 | `GET /api/v1/experiments` | a page of 12 of the backtests every account published ([Experiments](#experiments)): search `q` (the backtest's name, symbol, model name or author's name), `mine` or `author` (a user ID), `market`, `symbol`, `representation`, `timeframe`, `sort` and `order`, `page`; with the total, the pages, the counts (all published, the user's, the accounts that published) and what the filters offer |
-| `GET /api/v1/compare?ids=<id>,<id>` | 1 to 20 backtests side by side, the user's own and others' published ones, as the Compare page shows them ([Compare](#compare)) |
+| `GET /api/v1/compare?ids=<id>,<id>` | 1 to 20 backtests side by side, the user's own and others' published ones, as the Compare page shows them; `curve_points` (0 to 200) and `setup_mode` (`full`, `diff`) optional ([Compare](#compare)) |
 | `POST /api/v1/sweeps` | starts a backtest for every combination of a base setup and the lists in `vary` (models, instruments, periods, decision rules), 2 to 20, all in the user's queue or none; 201 with the sweep and `Location`, or with `validate_only` 200 with the count and each setup and nothing started ([Sweeps](#sweeps)) |
 | `GET /api/v1/sweeps/{sweep_id}` | the user's sweep: progress, each backtest's ID, status and setup, and once all ended the ranking by `metric` (the sweep's own unless the query names another) ([Sweeps](#sweeps)) |
 | `GET /api/v1/dashboard` | everything the Dashboard shows in one response: the counts, the 6 newest backtests, the 5 best finished ones by Sharpe ratio, return, drawdown and win rate, the 4 best starred ones, and the 4 newest published backtests of anyone with how many are published |
@@ -681,19 +681,24 @@ checked at the next start.
   backtest run in the app also stores (deferred columns, which the list and the Dashboard
   never read) what the result document is built from (docs/engine.md, "Stored, and built on
   request"): `spec` (JSONB: the model's name, framework, SHA-256, size and a copy of its
-  manifest, the instrument as the catalog had it, the model's timeframe and session, the
+  manifest without its `example` and `about`, which the run does not need, the instrument as the catalog had it, the model's timeframe and session, the
   period, where the load with the warm-up starts, the decision, the execution, the benchmarks,
   the arguments of the statistics and the app's version), `report` (JSONB: the candles loaded
   with their range, count, gaps and fingerprint, the warm-up the model's input dropped, the
   rows the engine ran on, the predictions' count and SHA-256, the `AlignReport`, the model
-  runner's versions and the timings of the steps in milliseconds), `stats` (JSONB: the 12
+  runner's versions, the timings of the steps in milliseconds and each benchmark's total
+  return), `stats` (JSONB: the 12
   statistics, `max_drawdown` negative) and `predictions` (bytea: `ts` and `prediction` as zstd
   Parquet, about 140 KB for 10 years of 30-minute stock candles; in Postgres, so they are in its
   backups and go with the account's cascade, and no other volume is needed), `curves` (bytea:
-  `ts`, `close`, `equity` and `drawdown` of the light series as zstd Parquet, at most about
-  240 KB at 10,000 rows, about 90 KB for 10 years per day; what [Compare](#compare) draws
-  without the candles, null for a backtest that finished before it was stored), and `steps`
-  (JSONB: the steps of the run, below). The seed command's backtests have none of them, and no
+  `ts`, `close`, `equity` and `drawdown` of the light series as zstd Parquet, cut to 1,000
+  points (the first row, then each run's last row and lowest drawdown), about 10 to 30 KB;
+  what [Compare](#compare) draws without the candles, null for a backtest that finished
+  before it was stored, every row of the light series for one from before the cut), `series`
+  and `trades` (bytea: the light series, each benchmark's equity among its columns, and the
+  light trades as zstd Parquet, up to about 120 KB and 250 KB; what the light view and
+  `get_backtest` answer without the candles or the engine), and `steps` (JSONB: the steps of
+  the run, below). The seed command's backtests have none of them, and no
   result document.
 - **Names**: every backtest gets a generated name when it is created (`generated_name`,
   `experiments/names.py`): an adjective and a word from space, as `Silent Orion`, from 128
@@ -856,8 +861,14 @@ checked at the next start.
   started before the steps were recorded has none when it failed, and when it finished shows
   them from its report's timings, all done and without `started_at` (`queue` from
   `job_queued`, `model` from `job_total`, the time from the claim to the result).
-- **The result document** (`GET /api/v1/backtests/{backtest_id}`, and `/download`) is built
-  on request ([engine.md](engine.md#the-result-document)): the stored predictions, the
+- **The result document**: the light view (`GET /api/v1/backtests/{backtest_id}`) is what the
+  run stored (`BacktestRuns.light`): the statistics, `report` and the light series and trades
+  read from `series` and `trades` in a thread, no candles and no engine, so `data.changed` is
+  null; `?view=summary` reads neither and leaves `results.series` and `results.trades` empty
+  (`count` 0, `trades.total` still the run's trades) in the document's shape. A backtest that
+  finished before they were stored builds them once from the candles, as every read did
+  before, and stores them while its candles are still the run's. The download (`/download`) is
+  built on request ([engine.md](engine.md#the-result-document)): the stored predictions, the
   candles of the stored range from the cache and the engine, in a thread; `data.changed` is
   true when their fingerprint differs from the run's. Written with orjson from the Polars
   columns; `docs/backtest.schema.json` is its JSON Schema.
@@ -915,9 +926,11 @@ a single backtest that way while it asks for one more.
   status, and others' while published, in the order asked for; an ID the user cannot see is
   `404 not-found` and test data `409 no-document`, each with `id` naming that backtest. More
   than 20 IDs, an empty one or one twice is `422 validation`.
-- **Only what is stored** (`BacktestRuns.stored`): the setup (`spec`), the statistics (`stats`)
-  and the curves (`curves`) each backtest stored when it ran, never the candles, so it makes no
-  request to a data source. Rebuilding the documents did: on stage three backtests spent
+- **Only what is stored** (`BacktestStore.compared`, one `WHERE id IN (...)` query for all):
+  the parts of the setup it shows, cut from `spec` in Postgres (the manifest's copy stays
+  there), the statistics (`stats`) and the curves (`curves`) each backtest stored when it ran,
+  never the candles, so it makes no request to a data source. The curves are decoded and the
+  answer built in a thread. Rebuilding the documents did: on stage three backtests spent
   Alpaca's 180 requests a minute and the answer was `503 source-unavailable` (#413). An
   integration test swaps the data module for one that fails on any use.
 - **Statistics** (`metrics`): the 12 of `results.stats` in the Compare table's order, each with
@@ -933,7 +946,10 @@ a single backtest that way while it asks for one more.
   benchmarks' instruments) and `differs`, the dotted paths of the fields whose values differ
   (one only some have counts). `candles`, beside the setup, is how many candles of its period it
   ran on (null without results), so it never counts as a difference of the setups.
-- **Curves**: `times`, at most 200 times shared by all (the first and the last of each series,
+  `setup_mode=diff` answers what all share once in `shared_setup` and in each backtest's
+  `setup` only its fields of `differs` (default `full`: each whole, `shared_setup` null).
+- **Curves**: `times`, at most `curve_points` times shared by all (200 by default, 0 for no
+  curves, which are then not read; the first and the last of each series,
   the rest evenly spaced from the earliest to the latest), and for each backtest `equity` (its
   cumulative return), `drawdown` (its fall from the top, 0 or below) and `buy_and_hold` (the
   return of holding its instrument) as fractions to 0.1 %, the precision of the page's charts,
@@ -942,8 +958,10 @@ a single backtest that way while it asks for one more.
   10,000 candles has a point per UTC day (the day's last, the lowest drawdown), so its lines
   begin at the end of its first day; buy and hold is measured from the price held from, so it
   ends at the `buy_and_hold_return` statistic either way. The run stores those columns of its
-  light series (`ts`, `close`, `equity`, `drawdown`) as zstd Parquet in `curves`, so the answer
-  is the one the documents give (unless a source adjusted the candles since). A backtest that
+  light series (`ts`, `close`, `equity`, `drawdown`) as zstd Parquet in `curves`, cut to 1,000
+  points (the first row, then of each of evenly sized runs of rows the last with its lowest
+  drawdown), so the answer is the one the documents give to within a thousandth of the period
+  (unless a source adjusted the candles since); one from before the cut has every row. A backtest that
   finished before `curves` was stored is drawn from its short equity series (at most 60 points
   from its first row to its last, the drawdown of those points, buy and hold only when its
   benchmark held its own instrument): its candles are not stored, so no migration can work the
@@ -1124,14 +1142,17 @@ call, as the routes' dependencies do), never the API over HTTP.
     again every second until the backtest has ended or `timeout_s` passed (50 by default, 60 at
     most: the transport answers JSON at the end of the call, so a call never outlasts a client's
     timeout) and answers the same status, so the agent calls it again while `ended` is false.
-    `get_backtest` (`read`) answers the light result document cut down: the summary with the
-    link, the setup in the shape of `start_backtest`'s arguments (so it runs again as it is, or
-    changed), the candles it ran on, the 12 statistics, each benchmark's return, one page of
-    trades (`trades_page`, `trades_per_page` up to 500, oldest first, with `count`, `total` and
-    `complete`) and the equity, drawdown and benchmarks at most 200 rows (evenly spaced, the
-    first, the last and the deepest fall included, six decimals). `compare_backtests` (`read`)
-    answers `GET /api/v1/compare` for a list of 1 to 20 IDs, each backtest with its page's
-    `url` besides; its description says how to read `max_drawdown` (0 or below, a smaller fall
+    `get_backtest` (`read`) answers the light result document cut down, from what the run
+    stored (`BacktestRuns.light`, no candles, no engine): the summary with the link, the setup
+    in the shape of `start_backtest`'s arguments (so it runs again as it is, or changed), the
+    candles it ran on, the 12 statistics and each benchmark's return; only when asked, one page
+    of trades (`trades_page`, `trades_per_page` 0 to 500, 0 by default, oldest first, with
+    `count`, `total` and `complete`) and the equity, drawdown and benchmarks at `equity_points`
+    rows (0 to 200, 0 by default; evenly spaced, the first, the last and the deepest fall
+    included, six decimals). It reads the stored trades or series only when it answers them.
+    `compare_backtests` (`read`) answers `GET /api/v1/compare` for a list of 1 to 20 IDs, each
+    backtest with its page's `url` besides, with `curve_points` 0 by default (no curves; up to
+    200) and `setup_mode` (`full` or `diff`); its description says how to read `max_drawdown` (0 or below, a smaller fall
     is better, though `better` says `lower`). The access is that of the
     routes: the user's own backtests and other accounts' while they are published.
   - `manage` (#405): listing, managing and publishing backtests, on `BacktestsService` and

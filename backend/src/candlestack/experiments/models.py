@@ -135,10 +135,21 @@ class Backtest(Base):
         LargeBinary, deferred=True, deferred_raiseload=True
     )
     # The curves of the light result document (``ts``, ``close``, ``equity`` and ``drawdown`` of
-    # its series, a point per day past 10,000 candles) as zstd Parquet: what the comparison
-    # draws without loading the candles again. Null for a backtest that finished before they
-    # were stored, and until one finishes.
+    # its series, a point per day past 10,000 candles, cut to 1,000 points) as zstd Parquet:
+    # what the comparison draws without loading the candles again. Null for a backtest that
+    # finished before they were stored, and until one finishes; every row of the light series
+    # for one that finished before they were cut.
     curves: Mapped[bytes | None] = mapped_column(
+        LargeBinary, deferred=True, deferred_raiseload=True
+    )
+    # The series and the trades of the light result document as zstd Parquet
+    # (``assembly.stored_results``), with each benchmark's return in ``report``: what the light
+    # view and get_backtest answer without the candles or the engine. Null until it finished,
+    # and for one that finished before they were stored until its document is first read.
+    series: Mapped[bytes | None] = mapped_column(
+        LargeBinary, deferred=True, deferred_raiseload=True
+    )
+    trades: Mapped[bytes | None] = mapped_column(
         LargeBinary, deferred=True, deferred_raiseload=True
     )
     # The sweep that started it; null for a backtest started alone.

@@ -14,6 +14,7 @@ from candlestack.experiments.compare import (
     metric_rows,
     parse_ids,
     setup_of,
+    split_setup,
     time_axis,
     value_at,
 )
@@ -317,6 +318,77 @@ def test_a_comparison_lists_each_with_its_curves_on_one_axis() -> None:
     assert shown.metrics[0].values == [0.5, 0.5, None]
     assert [backtest.candles for backtest in shown.backtests] == [3, 2, None]
     assert shown.differs == ["decision.rule.limit"]
+
+
+def test_a_comparison_without_curve_points_has_no_curves() -> None:
+    shown = compared([document("bt_a"), document("bt_b", limit=0.2)], points=0)
+
+    assert shown.times == []
+    assert [backtest.equity for backtest in shown.backtests] == [None, None]
+    assert [backtest.buy_and_hold for backtest in shown.backtests] == [None, None]
+    assert shown.metrics[0].values == [0.5, 0.5]
+    assert [backtest.candles for backtest in shown.backtests] == [3, 3]
+
+
+def test_a_comparison_has_at_most_its_curve_points() -> None:
+    ts = list(range(0, 1000, 10))
+    long = document("bt_a", ts=ts, equity=[1.0] * 100, close=[100.0] * 100, drawdown=[0] * 100)
+
+    shown = compared([long, document("bt_b")], points=12)
+
+    assert len(shown.times) <= 12
+    assert len(shown.backtests[0].equity or []) == len(shown.times)
+
+
+def test_the_setups_in_diff_mode_are_shared_once_and_each_its_own() -> None:
+    docs = [
+        document("bt_a"),
+        document("bt_b", limit=0.2, calibrate={"name": "zscore", "window": 50}),
+    ]
+
+    shown = compared(docs, setup_mode="diff")
+    full = compared(docs)
+
+    assert shown.differs == full.differs
+    assert [backtest.setup for backtest in shown.backtests] == [
+        {"decision": {"calibrate": None, "rule": {"limit": 0.1}}},
+        {"decision": {"calibrate": {"name": "zscore", "window": 50}, "rule": {"limit": 0.2}}},
+    ]
+    assert shown.shared_setup is not None
+    assert shown.shared_setup["decision"]["rule"] == {"name": "threshold"}
+    assert shown.shared_setup["instrument"] == "stock:AAPL"
+    assert full.shared_setup is None
+    # Together they are each whole setup again.
+    for backtest, whole in zip(shown.backtests, full.backtests, strict=True):
+        merged = {**shown.shared_setup, **backtest.setup}
+        merged["decision"] = {**shown.shared_setup["decision"], **backtest.setup["decision"]}
+        merged["decision"]["rule"] = {
+            **shown.shared_setup["decision"]["rule"],
+            **backtest.setup["decision"]["rule"],
+        }
+        assert merged == whole.setup
+
+
+def test_a_setup_splits_by_the_differing_paths() -> None:
+    setup = {"a": 1, "b": {"c": 2, "d": {"e": 3}}, "f": {}, "g": [1, 2]}
+
+    assert split_setup(setup, ["b.d.e", "g"]) == (
+        {"a": 1, "b": {"c": 2}, "f": {}},
+        {
+            "b": {"d": {"e": 3}},
+            "g": [1, 2],
+        },
+    )
+    assert split_setup(setup, []) == (setup, {})
+    # A field that is a value in one setup and a group in another differs as a whole.
+    assert split_setup(setup, ["b"]) == ({"a": 1, "f": {}, "g": [1, 2]}, {"b": setup["b"]})
+
+
+def test_one_backtest_in_diff_mode_shares_its_whole_setup() -> None:
+    shown = compared([document("bt_a")], setup_mode="diff")
+
+    assert shown.backtests[0].setup == {}
+    assert shown.shared_setup == setup_of(document("bt_a"))
 
 
 def test_buy_and_hold_of_a_series_per_day_ends_at_its_statistic() -> None:

@@ -6898,13 +6898,15 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Reads a backtest, the user's own or one another account published: its status, its setup (which can be sent to start_backtest again, changed or not) and, once it finished, the 12 statistics, the benchmarks' returns, one page of its trades (oldest first) and the equity curve in at most 200 points, with a link to its page in the app.\n\nCall it after wait_for_backtest answered finished, or for a backtest the user names. A page of trades past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_backtest",
+      "description": "Reads a backtest, the user's own or one another account published: its status, its setup (which can be sent to start_backtest again, changed or not) and, once it finished, the 12 statistics and the benchmarks' returns, with a link to its page in the app.\n\nThat light answer is the default. For its trades (oldest first) pass `trades_per_page` (e.g. 50) and `trades_page`; a page past the last one is empty. For the equity curve pass `equity_points` (up to 200). Call it after wait_for_backtest answered finished, or for a backtest the user names; it reads what the run stored, so it is quick.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_backtest",
       "endpoints": [
         "GET /api/v1/backtests/{backtest_id}"
       ],
       "example": {
         "arguments": {
-          "backtest_id": "bt_7f3k2m9qx4"
+          "backtest_id": "bt_7f3k2m9qx4",
+          "equity_points": 3,
+          "trades_per_page": 50
         },
         "result": {
           "backtest": {
@@ -7061,6 +7063,14 @@
             "title": "Backtest Id",
             "type": "string"
           },
+          "equity_points": {
+            "default": 0,
+            "description": "Points of the equity curve, up to 200; 0 for no curve",
+            "maximum": 200,
+            "minimum": 0,
+            "title": "Equity Points",
+            "type": "integer"
+          },
           "trades_page": {
             "default": 1,
             "description": "The page of trades, from 1",
@@ -7069,10 +7079,10 @@
             "type": "integer"
           },
           "trades_per_page": {
-            "default": 50,
-            "description": "Trades per page",
+            "default": 0,
+            "description": "Trades per page, up to 500; 0 for no trades",
             "maximum": 500,
-            "minimum": 1,
+            "minimum": 0,
             "title": "Trades Per Page",
             "type": "integer"
           }
@@ -8056,7 +8066,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Its equity curve, once finished and asked for (`equity_points`)"
           },
           "metrics": {
             "anyOf": [
@@ -8080,7 +8091,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "A page of its trades, once finished and asked for (`trades_per_page`)"
           }
         },
         "required": [
@@ -8108,12 +8120,13 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Compares backtests side by side, as the app's Compare page does: each of the 12 statistics of each with the best and the worst marked (values that read the same count as equal), their setups and which setup fields differ, and the equity, drawdown and buy and hold of each on one time axis of at most 200 times. Use it to pick the best of several runs; it reads only what each stored, so it is quick. A running or failed backtest is listed with its status and no values. Each backtest has its `url`, the page to show the user.\n\nmax_drawdown is 0 or below and a smaller fall is better: -0.05 is better than -0.20, so its best value is the highest one; its `better` says `lower` as in a lower fall, by its size. The marks already account for it.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#compare_backtests",
+      "description": "Compares backtests side by side, as the app's Compare page does: each of the 12 statistics of each with the best and the worst marked (values that read the same count as equal), their setups and which setup fields differ. Use it to pick the best of several runs; it reads only what each stored, so it is quick. A running or failed backtest is listed with its status and no values. Each backtest has its `url`, the page to show the user.\n\nFor the equity, drawdown and buy and hold of each on one time axis pass `curve_points` (up to 200); without it the curves are null and `times` empty. With many similar backtests pass `setup_mode=\"diff\"` to read the shared setup once.\n\nmax_drawdown is 0 or below and a smaller fall is better: -0.05 is better than -0.20, so its best value is the highest one; its `better` says `lower` as in a lower fall, by its size. The marks already account for it.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#compare_backtests",
       "endpoints": [
         "GET /api/v1/compare"
       ],
       "example": {
         "arguments": {
+          "curve_points": 2,
           "ids": [
             "bt_7f3k2m9qx4",
             "bt_t9n8v7d6a5"
@@ -8210,6 +8223,7 @@
               ]
             }
           ],
+          "shared_setup": null,
           "times": [
             1717372800,
             1725147000
@@ -8218,6 +8232,14 @@
       },
       "inputSchema": {
         "properties": {
+          "curve_points": {
+            "default": 0,
+            "description": "Times of the curves, up to 200; 0 for none",
+            "maximum": 200,
+            "minimum": 0,
+            "title": "Curve Points",
+            "type": "integer"
+          },
           "ids": {
             "description": "1 to 20 backtest IDs: the user's own and published ones",
             "examples": [
@@ -8233,6 +8255,16 @@
             "minItems": 1,
             "title": "Ids",
             "type": "array"
+          },
+          "setup_mode": {
+            "default": "full",
+            "description": "full: each backtest's whole setup. diff: what all share once in `shared_setup`, each backtest's `setup` only its fields of `differs`",
+            "enum": [
+              "full",
+              "diff"
+            ],
+            "title": "Setup Mode",
+            "type": "string"
           }
         },
         "required": [
@@ -8424,7 +8456,7 @@
                     "type": "null"
                   }
                 ],
-                "description": "Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results. A long backtest's series has a point per day, so its line begins at the end of its first day. One that finished before its curves were stored is drawn from its short series of at most 60 points, with buy and hold only when its benchmark held its own instrument",
+                "description": "Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results and with `curve_points` 0. A long backtest's series has a point per day, so its line begins at the end of its first day, and its stored curve has at most 1,000 points. One that finished before its curves were stored is drawn from its short series of at most 60 points, with buy and hold only when its benchmark held its own instrument",
                 "title": "Equity"
               },
               "error": {
@@ -8468,7 +8500,7 @@
               },
               "setup": {
                 "additionalProperties": true,
-                "description": "What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `input` (the model's input, rows by features, from its manifest's signature), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document",
+                "description": "What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `input` (the model's input, rows by features, from its manifest's signature), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document. With `setup_mode=diff` only its fields of `differs`, the rest once in `shared_setup`",
                 "title": "Setup",
                 "type": "object"
               },
@@ -8565,8 +8597,22 @@
             "title": "Metrics",
             "type": "array"
           },
+          "shared_setup": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "With `setup_mode=diff`, the setup fields every backtest has alike, once; each backtest's `setup` then has only its fields of `differs`. Null otherwise",
+            "title": "Shared Setup"
+          },
           "times": {
-            "description": "The common time axis of the curves, at most 200 UTC epoch seconds: the first and the last time of each backtest's series and times evenly spaced between the earliest and the latest",
+            "description": "The common time axis of the curves, at most 200 UTC epoch seconds (`curve_points`; none with 0): the first and the last time of each backtest's series and times evenly spaced between the earliest and the latest",
             "items": {
               "type": "integer"
             },

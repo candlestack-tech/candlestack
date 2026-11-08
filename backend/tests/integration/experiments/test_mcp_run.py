@@ -124,7 +124,9 @@ def test_an_agent_checks_starts_waits_for_and_reads_a_backtest(ada, mcp, sql) ->
     assert status["status"] == "finished", status["error"]
     assert [step["state"] for step in status["steps"]] == ["done"] * 4
 
-    read = answer(mcp(secret, "get_backtest", {"backtest_id": backtest_id, "trades_per_page": 2}))
+    light = answer(mcp(secret, "get_backtest", {"backtest_id": backtest_id}))
+    more = {"trades_per_page": 2, "equity_points": 200}
+    read = answer(mcp(secret, "get_backtest", {"backtest_id": backtest_id, **more}))
 
     document = ada.document(backtest_id).json()
     results = document["results"]
@@ -144,6 +146,9 @@ def test_an_agent_checks_starts_waits_for_and_reads_a_backtest(ada, mcp, sql) ->
     assert equity["rows"] == 240
     assert equity["ts"][0] == results["series"]["columns"]["ts"][0]
     assert equity["ts"][-1] == results["series"]["columns"]["ts"][-1]
+    # By default the setup and the statistics alone.
+    assert (light["trades"], light["equity"]) == (None, None)
+    assert {**light, "trades": None, "equity": None} == {**read, "trades": None, "equity": None}
 
     again = answer(mcp(secret, "start_backtest", read["setup"]))
     status = ended(mcp, secret, again["id"])
@@ -164,7 +169,7 @@ def test_a_run_through_the_real_worker(ada, mcp) -> None:
     status = ended(mcp, secret, started["id"])
 
     assert status["status"] == "finished", status["error"]
-    read = answer(mcp(secret, "get_backtest", {"backtest_id": started["id"]}))
+    read = answer(mcp(secret, "get_backtest", {"backtest_id": started["id"], "trades_per_page": 1}))
     assert read["candles"] == 240
     assert read["metrics"]["num_trades"] == read["trades"]["count"]
 

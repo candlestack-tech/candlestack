@@ -16,6 +16,7 @@ import pytest
 from pydantic import ValidationError
 
 from candlestack.experiments.assembly import (
+    CURVES_MAX,
     NothingToTest,
     benchmark_equity,
     curves_parquet,
@@ -26,9 +27,12 @@ from candlestack.experiments.assembly import (
     predictions_parquet,
     read_curves,
     read_predictions,
+    read_series,
+    read_trades,
     results,
     run,
     stats_out,
+    stored_results,
 )
 from candlestack.experiments.document import (
     LIGHT_ROWS,
@@ -630,6 +634,77 @@ def test_the_stored_curves_are_the_light_series_columns(rows: int) -> None:
     assert read_curves(blob) == {
         name: light[name] for name in ("ts", "close", "equity", "drawdown")
     }
+
+
+def test_long_curves_are_cut_to_a_thousand_points() -> None:
+    """Past ``CURVES_MAX`` rows: the first row, then each run's last with its lowest fall."""
+    candles, predictions = long_run(LIGHT_ROWS)
+    done = run(
+        candles,
+        predictions,
+        period=Period(start=0, end=2**40),
+        decision=Decision(),
+        execution=Execution(),
+        periods_per_year=365,
+    )
+    light = orjson.loads(dumps(results(done, [BH], light=True)))["series"]["columns"]
+
+    stored = read_curves(curves_parquet(done))
+
+    assert len(stored["ts"]) == CURVES_MAX
+    assert [stored["ts"][0], stored["ts"][-1]] == [light["ts"][0], light["ts"][-1]]
+    assert stored["equity"][-1] == light["equity"][-1]
+    assert min(stored["drawdown"]) == min(light["drawdown"])
+    assert stored["ts"] == sorted(stored["ts"])
+    assert set(stored["ts"]) <= set(light["ts"])
+
+
+@pytest.mark.parametrize(("rows", "flips"), [(500, False), (LIGHT_ROWS + 1, True), (40, False)])
+def test_the_stored_light_results_read_back_as_the_same_document(rows: int, flips: bool) -> None:
+    """The light view from what the run stored is the light view built again, byte for byte:
+    a series of candles and of days, the newest trades of many, a fund's equity."""
+    candles, predictions = long_run(rows, flips=flips)
+    done = run(
+        candles,
+        predictions,
+        period=Period(start=0, end=2**40),
+        decision=Decision(),
+        execution=Execution(),
+        periods_per_year=365,
+    )
+    fund = BenchmarkIn(id="ts", kind="buy_and_hold", instrument="stock:SPY")
+    held = {"ts": candles.with_columns(pl.col("close") * 2)}
+    shown = results(done, [BH, fund], light=True, held=held)
+
+    kept = stored_results(shown)
+
+    again = {
+        "stats": shown["stats"],
+        "benchmarks": {key: {"total_return": value} for key, value in kept.benchmarks.items()},
+        "series": read_series(kept.series),
+        "trades": read_trades(kept.trades),
+    }
+    assert dumps(again) == dumps(shown)
+    assert kept.benchmarks["bh"] == shown["stats"]["buy_and_hold_return"]
+    assert set(kept.benchmarks) == {"bh", "ts"}
+
+
+def test_no_trades_are_stored_and_read_back_as_none() -> None:
+    candles, predictions = long_run(40)
+    done = run(
+        candles,
+        predictions.with_columns(prediction=pl.lit(0.0)),
+        period=Period(start=0, end=2**40),
+        decision=Decision(),
+        execution=Execution(),
+        periods_per_year=365,
+    )
+    shown = results(done, [], light=True)
+
+    trades = read_trades(stored_results(shown).trades)
+
+    assert (trades["count"], trades["total"], trades["complete"]) == (0, 0, True)
+    assert orjson.loads(dumps(trades)) == orjson.loads(dumps(shown["trades"]))
 
 
 def test_a_stored_value_that_is_not_a_number_reads_as_none() -> None:

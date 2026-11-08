@@ -4,13 +4,18 @@ in the order of docs/engine.md, and the results of the result document from what
 The engine is deterministic, so the run of a backtest and every later build of its document
 call ``run`` with the same inputs and get the same numbers. The long tables are written with
 orjson straight from the Polars columns (``dumps``), never as Python lists of every value.
+
+A run stores its light results (``stored_results``): the light series and trades as zstd
+Parquet, read back as the same arrays (``read_series``, ``read_trades``), so the light view is
+served without the candles or the engine, and the curves of the comparison cut to
+``CURVES_MAX`` points.
 """
 
 import hashlib
 import io
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 import orjson
@@ -46,6 +51,11 @@ _DAY = 86_400
 _PRICES = ("ts", "open", "high", "low", "close")
 # The columns of the light series a backtest stores for the comparison (``curves_parquet``).
 CURVES = ("ts", "close", "equity", "drawdown")
+# The most points of the stored curves: the comparison draws at most 200 times, so more only
+# cost the decode of up to 20 of them on every comparison.
+CURVES_MAX = 1_000
+# The light series stores each benchmark's equity as a column of this prefix and its ID.
+_BENCHMARK = "benchmark:"
 _NUMPY = orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_UTC_Z
 
 
@@ -361,17 +371,123 @@ def read_predictions(blob: bytes) -> pl.DataFrame:
 
 
 def curves_parquet(done: Run) -> bytes:
-    """The stored form of a run's curves: the ``CURVES`` columns of its light series, as its
-    document has them (a point per UTC day past ``LIGHT_ROWS`` rows), as zstd Parquet."""
-    columns = _series(done, {}, light=True)["columns"]
-    buffer = io.BytesIO()
-    pl.DataFrame({name: columns[name] for name in CURVES}).write_parquet(buffer, compression="zstd")
-    return buffer.getvalue()
+    """The stored form of a run's curves (``Stored.curves``)."""
+    return _curves(_series(done, {}, light=True))
+
+
+def _curves(series: Mapping[str, Any]) -> bytes:
+    """The curves of a light series (``results(...)["series"]``): its ``CURVES`` columns as
+    zstd Parquet, cut to ``CURVES_MAX`` points past that many rows: the first row, then of each
+    of evenly sized runs of the others the last row with the run's lowest drawdown, as the
+    series of days does."""
+    columns = series["columns"]
+    frame = pl.DataFrame({name: columns[name] for name in CURVES})
+    count = frame.height
+    if count > CURVES_MAX:
+        index = np.arange(count)
+        run = np.where(index == 0, 0, 1 + (index - 1) * (CURVES_MAX - 1) // (count - 1))
+        frame = (
+            frame.with_columns(pl.Series("run", run))
+            .group_by("run", maintain_order=True)
+            .agg(
+                *(pl.col(name).last() for name in CURVES if name != "drawdown"),
+                pl.col("drawdown").min(),
+            )
+            .select(CURVES)
+        )
+    return _parquet(frame)
 
 
 def read_curves(blob: bytes) -> dict[str, list[Any]]:
     """The stored curves by column, a value that is not a number as None, as the document's
-    JSON has it."""
+    JSON has it. Those of a backtest that ran before they were cut have every row of its light
+    series."""
     frame = pl.read_parquet(io.BytesIO(blob))
     frame = frame.with_columns(pl.col(pl.Float32, pl.Float64).fill_nan(None))
     return {name: frame[name].to_list() for name in CURVES}
+
+
+class Stored(NamedTuple):
+    """What a run stores of its light results besides the statistics (``stored_results``):
+    the series and the trades, the curves of the comparison, and each benchmark's total return
+    by its ID."""
+
+    series: bytes
+    trades: bytes
+    curves: bytes
+    benchmarks: dict[str, float | None]
+
+
+def stored_results(shown: Mapping[str, Any]) -> Stored:
+    """The stored form of the light ``results`` group (``results(..., light=True)``): the
+    series and the trades as zstd Parquet, which ``read_series`` and ``read_trades`` give back
+    as the same arrays, so the light view is the same document without the candles and the
+    engine."""
+    benchmarks = {
+        benchmark: None if value["total_return"] is None else float(value["total_return"])
+        for benchmark, value in shown["benchmarks"].items()
+    }
+    return Stored(
+        series=series_parquet(shown["series"]),
+        trades=trades_parquet(shown["trades"]),
+        curves=_curves(shown["series"]),
+        benchmarks=benchmarks,
+    )
+
+
+def series_parquet(series: Mapping[str, Any]) -> bytes:
+    """A light series as zstd Parquet: its columns, each benchmark's equity as the column
+    ``benchmark:<ID>``, and its resolution in the file's metadata."""
+    named = {f"{_BENCHMARK}{key}": values for key, values in series["benchmarks"].items()}
+    frame = pl.DataFrame({**series["columns"], **named})
+    return _parquet(frame, {"resolution": series["resolution"]})
+
+
+def read_series(blob: bytes) -> dict[str, Any]:
+    """The light series ``series_parquet`` stored, as ``results`` has it."""
+    frame, metadata = _read(blob)
+    return {
+        "resolution": metadata["resolution"],
+        "count": frame.height,
+        "columns": {
+            name: frame[name].to_numpy()
+            for name in frame.columns
+            if not name.startswith(_BENCHMARK)
+        },
+        "benchmarks": {
+            name.removeprefix(_BENCHMARK): frame[name].to_numpy()
+            for name in frame.columns
+            if name.startswith(_BENCHMARK)
+        },
+    }
+
+
+def trades_parquet(trades: Mapping[str, Any]) -> bytes:
+    """The light trades as zstd Parquet, how many the run had in the file's metadata."""
+    return _parquet(pl.DataFrame(trades["columns"]), {"total": str(trades["total"])})
+
+
+def read_trades(blob: bytes) -> dict[str, Any]:
+    """The light trades ``trades_parquet`` stored, as ``results`` has them."""
+    frame, metadata = _read(blob)
+    total = int(metadata["total"])
+    return {
+        "count": frame.height,
+        "total": total,
+        "complete": frame.height == total,
+        "columns": {
+            # Text as a list, as ``_trades`` gives it to orjson.
+            name: frame[name].to_list() if name == "exit_reason" else frame[name].to_numpy()
+            for name in frame.columns
+        },
+    }
+
+
+def _parquet(frame: pl.DataFrame, metadata: dict[str, str] | None = None) -> bytes:
+    buffer = io.BytesIO()
+    frame.write_parquet(buffer, compression="zstd", metadata=metadata)
+    return buffer.getvalue()
+
+
+def _read(blob: bytes) -> tuple[pl.DataFrame, dict[str, str]]:
+    return pl.read_parquet(io.BytesIO(blob)), pl.read_parquet_metadata(io.BytesIO(blob))

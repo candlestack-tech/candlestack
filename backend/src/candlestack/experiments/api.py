@@ -7,7 +7,7 @@ comparison of backtests under ``/api/v1/compare``, sweeps of many backtests unde
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Path, Query, Response
 
@@ -24,8 +24,10 @@ from candlestack.data import data_problems
 from candlestack.experiments.compare import (
     COMPARE_MAX,
     COMPARE_MIN,
+    CURVE_POINTS,
     IDS_MAX_LENGTH,
     CompareOut,
+    SetupMode,
     compare,
     parse_ids,
 )
@@ -559,14 +561,28 @@ async def cancel_backtest(
     },
 )
 async def get_backtest(
-    backtest_id: BacktestId, user: CurrentUserDep, runs: BacktestRunsDep, response: Response
+    backtest_id: BacktestId,
+    user: CurrentUserDep,
+    runs: BacktestRunsDep,
+    response: Response,
+    view: Annotated[
+        Literal["light", "summary"],
+        Query(
+            description="`light`: the light view. `summary`: the setup and the statistics only, "
+            "`results.series` and `results.trades` left empty (`count` 0, `trades.total` still "
+            "the trades the run had)"
+        ),
+    ] = "light",
 ) -> Response:
     """The result document of the user's backtest, whatever its status (`results` is null until
     it finished), or of another account's while it is published (`backtest.author`, read only,
     `model.id` null), in the light view: a series of more than 10,000 rows has one point per
-    UTC day, and only the newest 10,000 trades are in it (`trades.complete` false)."""
+    UTC day, and only the newest 10,000 trades are in it (`trades.complete` false). It is what
+    the run stored, so `data.changed` is null: the download compares the candles again."""
     with backtest_problems():
-        _, content = await runs.document(user.id, backtest_id, light=True)
+        _, content = await runs.document(
+            user.id, backtest_id, light=True, summary=view == "summary"
+        )
     return _json(content, response)
 
 
@@ -629,6 +645,22 @@ async def compare_backtests(
     user: CurrentUserDep,
     runs: BacktestRunsDep,
     response: Response,
+    *,
+    curve_points: Annotated[
+        int,
+        Query(
+            ge=0,
+            le=CURVE_POINTS,
+            description="The most times of the curves; 0 for none (`times` empty, the curves null)",
+        ),
+    ] = CURVE_POINTS,
+    setup_mode: Annotated[
+        SetupMode,
+        Query(
+            description="`full`: each backtest's whole setup. `diff`: what all share once in "
+            "`shared_setup`, each backtest's `setup` only its fields of `differs`"
+        ),
+    ] = "full",
 ) -> CompareOut:
     """Backtests side by side, as the Compare page shows them: each statistic of each with the
     best and the worst marked, the setups and which of their fields differ, and the equity and
@@ -639,7 +671,9 @@ async def compare_backtests(
     backtest stored when it ran, so it loads no candles from a data source."""
     response.headers.update(NO_STORE)
     with backtest_problems():
-        return await compare(runs, user.id, parse_ids(ids))
+        return await compare(
+            runs, user.id, parse_ids(ids), curve_points=curve_points, setup_mode=setup_mode
+        )
 
 
 # --- Sweeps -----------------------------------------------------------------------------------

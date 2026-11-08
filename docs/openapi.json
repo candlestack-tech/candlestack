@@ -2719,8 +2719,21 @@
             "title": "Metrics",
             "type": "array"
           },
+          "shared_setup": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With `setup_mode=diff`, the setup fields every backtest has alike, once; each backtest's `setup` then has only its fields of `differs`. Null otherwise",
+            "title": "Shared Setup"
+          },
           "times": {
-            "description": "The common time axis of the curves, at most 200 UTC epoch seconds: the first and the last time of each backtest's series and times evenly spaced between the earliest and the latest",
+            "description": "The common time axis of the curves, at most 200 UTC epoch seconds (`curve_points`; none with 0): the first and the last time of each backtest's series and times evenly spaced between the earliest and the latest",
             "items": {
               "type": "integer"
             },
@@ -2820,7 +2833,7 @@
                 "type": "null"
               }
             ],
-            "description": "Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results. A long backtest's series has a point per day, so its line begins at the end of its first day. One that finished before its curves were stored is drawn from its short series of at most 60 points, with buy and hold only when its benchmark held its own instrument",
+            "description": "Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results and with `curve_points` 0. A long backtest's series has a point per day, so its line begins at the end of its first day, and its stored curve has at most 1,000 points. One that finished before its curves were stored is drawn from its short series of at most 60 points, with buy and hold only when its benchmark held its own instrument",
             "title": "Equity"
           },
           "error": {
@@ -2864,7 +2877,7 @@
           },
           "setup": {
             "additionalProperties": true,
-            "description": "What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `input` (the model's input, rows by features, from its manifest's signature), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document",
+            "description": "What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `input` (the model's input, rows by features, from its manifest's signature), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document. With `setup_mode=diff` only its fields of `differs`, the rest once in `shared_setup`",
             "title": "Setup",
             "type": "object"
           },
@@ -3086,7 +3099,7 @@
                 "type": "null"
               }
             ],
-            "description": "The candles' fingerprint differs from the run's: the source changed them",
+            "description": "The candles' fingerprint differs from the run's: the source changed them. Only the download loads the candles again to compare; the light view is what the run stored, so null there",
             "title": "Changed"
           },
           "instrument": {
@@ -8502,7 +8515,7 @@
     },
     "/api/v1/backtests/{backtest_id}": {
       "get": {
-        "description": "The result document of the user's backtest, whatever its status (`results` is null until\nit finished), or of another account's while it is published (`backtest.author`, read only,\n`model.id` null), in the light view: a series of more than 10,000 rows has one point per\nUTC day, and only the newest 10,000 trades are in it (`trades.complete` false).",
+        "description": "The result document of the user's backtest, whatever its status (`results` is null until\nit finished), or of another account's while it is published (`backtest.author`, read only,\n`model.id` null), in the light view: a series of more than 10,000 rows has one point per\nUTC day, and only the newest 10,000 trades are in it (`trades.complete` false). It is what\nthe run stored, so `data.changed` is null: the download compares the candles again.",
         "operationId": "get_backtest_api_v1_backtests__backtest_id__get",
         "parameters": [
           {
@@ -8516,6 +8529,22 @@
                 "bt_7f3k2m9qx4"
               ],
               "title": "Backtest Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "`light`: the light view. `summary`: the setup and the statistics only, `results.series` and `results.trades` left empty (`count` 0, `trades.total` still the trades the run had)",
+            "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "default": "light",
+              "description": "`light`: the light view. `summary`: the setup and the statistics only, `results.series` and `results.trades` left empty (`count` 0, `trades.total` still the trades the run had)",
+              "enum": [
+                "light",
+                "summary"
+              ],
+              "title": "View",
               "type": "string"
             }
           }
@@ -8990,6 +9019,36 @@
               ],
               "maxLength": 400,
               "title": "Ids",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The most times of the curves; 0 for none (`times` empty, the curves null)",
+            "in": "query",
+            "name": "curve_points",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "description": "The most times of the curves; 0 for none (`times` empty, the curves null)",
+              "maximum": 200,
+              "minimum": 0,
+              "title": "Curve Points",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`full`: each backtest's whole setup. `diff`: what all share once in `shared_setup`, each backtest's `setup` only its fields of `differs`",
+            "in": "query",
+            "name": "setup_mode",
+            "required": false,
+            "schema": {
+              "default": "full",
+              "description": "`full`: each backtest's whole setup. `diff`: what all share once in `shared_setup`, each backtest's `setup` only its fields of `differs`",
+              "enum": [
+                "full",
+                "diff"
+              ],
+              "title": "Setup Mode",
               "type": "string"
             }
           }

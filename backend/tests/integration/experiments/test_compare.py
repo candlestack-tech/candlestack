@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from fastapi import FastAPI
+from sqlalchemy import event
 
 from candlestack.experiments.compare import compared
 
@@ -208,3 +209,53 @@ def test_one_to_twenty_different_backtests(ada, ids: list[str]) -> None:
     response = compare(ada, *ids)
 
     assert (response.status_code, response.json()["type"]) == (422, PROBLEMS + "validation")
+
+
+def test_curve_points_and_the_setup_shown_once(ada, worker) -> None:
+    model_id = ada.runnable_model()
+    first = ada.start(body(model_id)).json()["backtest"]["id"]
+    ada.ended(first)
+    second = ada.start(body(model_id, 0.3)).json()["backtest"]["id"]
+    ada.ended(second)
+    ids = f"{first},{second}"
+
+    bare = ada.request(
+        "GET", "/api/v1/compare", params={"ids": ids, "curve_points": 0, "setup_mode": "diff"}
+    ).json()
+    few = ada.request("GET", "/api/v1/compare", params={"ids": ids, "curve_points": 5}).json()
+
+    assert bare["times"] == []
+    assert [item["equity"] for item in bare["backtests"]] == [None, None]
+    assert bare["metrics"][0]["values"][0] is not None
+    assert bare["differs"] == ["decision.rule.limit"]
+    assert [item["setup"] for item in bare["backtests"]] == [
+        {"decision": {"rule": {"limit": 0.1}}},
+        {"decision": {"rule": {"limit": 0.3}}},
+    ]
+    assert bare["shared_setup"]["instrument"] == "stock:AAPL"
+    assert 2 <= len(few["times"]) <= 5
+    assert few["shared_setup"] is None
+    assert few["backtests"][0]["setup"]["decision"]["rule"]["limit"] == 0.1
+
+
+def test_the_comparison_reads_all_backtests_in_one_query(ada, app: FastAPI, worker) -> None:
+    model_id = ada.runnable_model()
+    ids = []
+    for limit in (0.1, 0.2, 0.3):
+        ids.append(ada.start(body(model_id, limit)).json()["backtest"]["id"])
+        ada.ended(ids[-1])
+    statements: list[str] = []
+
+    def count(_conn: Any, _cursor: Any, statement: str, *_args: Any) -> None:
+        if "backtests" in statement:
+            statements.append(statement)
+
+    engine = app.state.db.engine.sync_engine
+    event.listen(engine, "before_cursor_execute", count)
+    try:
+        response = compare(ada, *ids)
+    finally:
+        event.remove(engine, "before_cursor_execute", count)
+
+    assert response.status_code == 200, response.text
+    assert len(statements) == 1, statements

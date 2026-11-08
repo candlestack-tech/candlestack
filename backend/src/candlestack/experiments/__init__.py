@@ -29,7 +29,14 @@ from candlestack.experiments.api import (
     update_problems,
 )
 from candlestack.experiments.api import router as backtests_router
-from candlestack.experiments.compare import COMPARE_MAX, ComparedBacktest, CompareOut, check_ids
+from candlestack.experiments.compare import (
+    COMPARE_MAX,
+    CURVE_POINTS,
+    ComparedBacktest,
+    CompareOut,
+    SetupMode,
+    check_ids,
+)
 from candlestack.experiments.compare import compare as compare_backtests
 from candlestack.experiments.dependencies import backtest_runs, build_sweeps, get_backtests_service
 from candlestack.experiments.document import (
@@ -78,6 +85,7 @@ from candlestack.experiments.sweeps import SweepIn, SweepMetric, SweepOut, Sweep
 __all__ = [
     "BACKTEST_NAME_MAX",
     "COMPARE_MAX",
+    "CURVE_POINTS",
     "EXPERIMENTS_PAGE_SIZE",
     "MODEL_NAME_MAX",
     "PAGE_MAX",
@@ -114,6 +122,7 @@ __all__ = [
     "ModelRef",
     "Period",
     "Representation",
+    "SetupMode",
     "SetupTimeframe",
     "SortOrder",
     "Stats",

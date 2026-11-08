@@ -432,7 +432,9 @@ class DataOut(BaseModel):
     period: Period
     loaded: Loaded | None
     changed: bool | None = Field(
-        description="The candles' fingerprint differs from the run's: the source changed them"
+        description="The candles' fingerprint differs from the run's: the source changed them. "
+        "Only the download loads the candles again to compare; the light view is what the run "
+        "stored, so null there"
     )
     warm_up: WarmUpReport
     rows: Rows | None

@@ -4,7 +4,8 @@ the queue and while it runs, read its results in a compact form and compare back
 They call the services of the backtests routes (``experiments.backtest_runs``) with the same
 access rules: the user's own backtests and other accounts' published ones, read only. The
 answers are smaller than the API's: the result document is cut to what an agent reads (the
-statistics, the setup, a page of trades, at most ``EQUITY_POINTS`` points of the equity).
+statistics and the setup, and only when asked a page of trades and at most ``EQUITY_POINTS``
+points of the equity), read from what the run stored.
 """
 
 import json
@@ -14,6 +15,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 import anyio
+import numpy as np
 from mcp.server.mcpserver import Context
 from pydantic import BaseModel, Field
 
@@ -21,6 +23,7 @@ from candlestack import experiments
 from candlestack.accounts import Scope
 from candlestack.experiments import (
     COMPARE_MAX,
+    CURVE_POINTS,
     BacktestCheck,
     BacktestHeader,
     BacktestIn,
@@ -32,6 +35,7 @@ from candlestack.experiments import (
     Decision,
     Execution,
     ModelRef,
+    SetupMode,
     Stats,
     backtest_problems,
     backtest_runs,
@@ -225,8 +229,12 @@ class BacktestResult(BaseModel):
     benchmark_returns: dict[str, float | None] = Field(
         description="Each benchmark's total return, by its ID"
     )
-    trades: TradesPage | None
-    equity: EquityOut | None
+    trades: TradesPage | None = Field(
+        description="A page of its trades, once finished and asked for (`trades_per_page`)"
+    )
+    equity: EquityOut | None = Field(
+        description="Its equity curve, once finished and asked for (`equity_points`)"
+    )
 
 
 # --- Helpers ----------------------------------------------------------------------------------
@@ -275,27 +283,32 @@ async def _header(call: ToolCall, backtest_id: str) -> BacktestHeader:
 
 def equity_rows(drawdown: Sequence[float], points: int = EQUITY_POINTS) -> list[int]:
     """The rows of a series of ``len(drawdown)`` rows to show at most ``points`` of: evenly
-    spaced, the first and the last, and the deepest point of the drawdown."""
+    spaced, the first and the last, and the deepest point of the drawdown (only the last of
+    one point, the first and the last of two)."""
     count = len(drawdown)
     if count <= points:
         return list(range(count))
+    if points <= 2:
+        return [0, count - 1][-points:]
     spaced = {round(i * (count - 1) / (points - 2)) for i in range(points - 1)}
     deepest = min(range(count), key=drawdown.__getitem__)
     return sorted(spaced | {deepest})
 
 
 def _rounded(values: Sequence[float | None], rows: Sequence[int]) -> list[float]:
-    return [round(float(values[row] or 0.0), _DECIMALS) for row in rows]
+    # A value that is not a number (null in the document) reads as 0.
+    picked = np.asarray([values[row] for row in rows], dtype=np.float64)
+    return [round(value, _DECIMALS) for value in np.nan_to_num(picked, nan=0.0).tolist()]
 
 
-def _equity(series: dict[str, Any]) -> EquityOut:
+def _equity(series: dict[str, Any], points: int) -> EquityOut:
     columns = series["columns"]
-    rows = equity_rows(columns["drawdown"])
+    rows = equity_rows(columns["drawdown"], points)
     return EquityOut(
         points=len(rows),
         rows=series["count"],
         resolution=series["resolution"],
-        ts=[columns["ts"][row] for row in rows],
+        ts=[int(columns["ts"][row]) for row in rows],
         equity=_rounded(columns["equity"], rows),
         drawdown=_rounded(columns["drawdown"], rows),
         benchmarks={key: _rounded(line, rows) for key, line in series["benchmarks"].items()},
@@ -303,9 +316,15 @@ def _equity(series: dict[str, Any]) -> EquityOut:
 
 
 def _trades(trades: dict[str, Any], page: int, per_page: int) -> TradesPage:
-    columns = trades["columns"]
     count = trades["count"]
     first = (page - 1) * per_page
+    # The page's rows of each column as Python values (the stored columns are NumPy arrays).
+    columns = {
+        name: list(values[first : first + per_page])
+        if isinstance(values, list)
+        else values[first : first + per_page].tolist()
+        for name, values in trades["columns"].items()
+    }
     items = [
         TradeOut(
             open_ts=columns["open_ts"][row],
@@ -318,7 +337,7 @@ def _trades(trades: dict[str, Any], page: int, per_page: int) -> TradesPage:
             exit_reason=columns["exit_reason"][row],
             candles_held=columns["candles_held"][row],
         )
-        for row in range(first, min(first + per_page, count))
+        for row in range(min(per_page, max(count - first, 0)))
     ]
     return TradesPage(
         page=page,
@@ -351,9 +370,15 @@ def _setup(document: dict[str, Any]) -> SetupOut:
 
 
 def backtest_result(
-    document: dict[str, Any], url: str, *, trades_page: int, trades_per_page: int
+    document: dict[str, Any],
+    url: str,
+    *,
+    trades_page: int = 1,
+    trades_per_page: int = 0,
+    equity_points: int = 0,
 ) -> BacktestResult:
-    """The compact answer of get_backtest from the light result document."""
+    """The compact answer of get_backtest from the light result document: a page of trades
+    only with ``trades_per_page`` and the equity only with ``equity_points``."""
     header, data, results = document["backtest"], document["data"], document["results"]
     return BacktestResult(
         backtest=BacktestSummary(
@@ -378,9 +403,11 @@ def backtest_result(
         if results is None
         else {key: value["total_return"] for key, value in results["benchmarks"].items()},
         trades=None
-        if results is None
+        if results is None or trades_per_page == 0
         else _trades(results["trades"], trades_page, trades_per_page),
-        equity=None if results is None else _equity(results["series"]),
+        equity=None
+        if results is None or equity_points == 0
+        else _equity(results["series"], equity_points),
     )
 
 
@@ -501,26 +528,43 @@ async def get_backtest(
     backtest_id: BacktestId,
     trades_page: Annotated[int, Field(ge=1, description="The page of trades, from 1")] = 1,
     trades_per_page: Annotated[
-        int, Field(ge=1, le=TRADES_PER_PAGE_MAX, description="Trades per page")
-    ] = 50,
+        int,
+        Field(
+            ge=0,
+            le=TRADES_PER_PAGE_MAX,
+            description=f"Trades per page, up to {TRADES_PER_PAGE_MAX}; 0 for no trades",
+        ),
+    ] = 0,
+    equity_points: Annotated[
+        int,
+        Field(
+            ge=0,
+            le=EQUITY_POINTS,
+            description=f"Points of the equity curve, up to {EQUITY_POINTS}; 0 for no curve",
+        ),
+    ] = 0,
     *,
     ctx: Context,
 ) -> BacktestResult:
     """Reads a backtest, the user's own or one another account published: its status, its
     setup (which can be sent to start_backtest again, changed or not) and, once it finished,
-    the 12 statistics, the benchmarks' returns, one page of its trades (oldest first) and the
-    equity curve in at most 200 points, with a link to its page in the app.
+    the 12 statistics and the benchmarks' returns, with a link to its page in the app.
 
-    Call it after wait_for_backtest answered finished, or for a backtest the user names. A
-    page of trades past the last one is empty."""
+    That light answer is the default. For its trades (oldest first) pass `trades_per_page`
+    (e.g. 50) and `trades_page`; a page past the last one is empty. For the equity curve pass
+    `equity_points` (up to 200). Call it after wait_for_backtest answered finished, or for a
+    backtest the user names; it reads what the run stored, so it is quick."""
     call = tool_call(ctx)
     async with _runs(call) as runs:
-        _, content = await runs.document(call.user.id, backtest_id, light=True)
+        _, document = await runs.light(
+            call.user.id, backtest_id, series=equity_points > 0, trades=trades_per_page > 0
+        )
     return backtest_result(
-        json.loads(content),
+        document,
         backtest_url(call, backtest_id),
         trades_page=trades_page,
         trades_per_page=trades_per_page,
+        equity_points=equity_points,
     )
 
 
@@ -534,23 +578,43 @@ async def compare_backtests(
             examples=[["bt_7f3k2m9qx4", "bt_t9n8v7d6a5"]],
         ),
     ],
+    curve_points: Annotated[
+        int,
+        Field(
+            ge=0,
+            le=CURVE_POINTS,
+            description=f"Times of the curves, up to {CURVE_POINTS}; 0 for none",
+        ),
+    ] = 0,
+    setup_mode: Annotated[
+        SetupMode,
+        Field(
+            description="full: each backtest's whole setup. diff: what all share once in "
+            "`shared_setup`, each backtest's `setup` only its fields of `differs`"
+        ),
+    ] = "full",
     *,
     ctx: Context,
 ) -> CompareResult:
     """Compares backtests side by side, as the app's Compare page does: each of the 12
     statistics of each with the best and the worst marked (values that read the same count as
-    equal), their setups and which setup fields differ, and the equity, drawdown and buy and
-    hold of each on one time axis of at most 200 times. Use it to pick the best of several
+    equal), their setups and which setup fields differ. Use it to pick the best of several
     runs; it reads only what each stored, so it is quick. A running or failed backtest is
     listed with its status and no values. Each backtest has its `url`, the page to show the
     user.
+
+    For the equity, drawdown and buy and hold of each on one time axis pass `curve_points` (up
+    to 200); without it the curves are null and `times` empty. With many similar backtests
+    pass `setup_mode="diff"` to read the shared setup once.
 
     max_drawdown is 0 or below and a smaller fall is better: -0.05 is better than -0.20, so its
     best value is the highest one; its `better` says `lower` as in a lower fall, by its size.
     The marks already account for it."""
     call = tool_call(ctx)
     async with _runs(call) as runs:
-        compared = await experiments.compare_backtests(runs, call.user.id, check_ids(ids))
+        compared = await experiments.compare_backtests(
+            runs, call.user.id, check_ids(ids), curve_points=curve_points, setup_mode=setup_mode
+        )
     return CompareResult(
         **compared.model_dump(exclude={"backtests"}),
         backtests=[
@@ -828,7 +892,10 @@ TOOLS = (
         title="Read a backtest",
         scopes=(Scope.read,),
         annotations=reads(),
-        example=Example(arguments={"backtest_id": _ID}, result=_RESULT),
+        example=Example(
+            arguments={"backtest_id": _ID, "trades_per_page": 50, "equity_points": 3},
+            result=_RESULT,
+        ),
     ),
     ToolSpec(
         compare_backtests,
@@ -836,6 +903,8 @@ TOOLS = (
         title="Compare backtests",
         scopes=(Scope.read,),
         annotations=reads(),
-        example=Example(arguments={"ids": [_ID, "bt_t9n8v7d6a5"]}, result=_COMPARE),
+        example=Example(
+            arguments={"ids": [_ID, "bt_t9n8v7d6a5"], "curve_points": 2}, result=_COMPARE
+        ),
     ),
 )
