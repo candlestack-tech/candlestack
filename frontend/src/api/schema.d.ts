@@ -163,7 +163,9 @@ export interface paths {
          *     has a manifest, the instrument fits the model, the period with the candles the model needs
          *     before it fits the data and the candle limit, the user's queue has room, and the worker
          *     that runs the models can be reached. The run goes on after the response; the document
-         *     (`GET /api/v1/backtests/{backtest_id}`) has the results once it finished.
+         *     (`GET /api/v1/backtests/{backtest_id}`) has the results once it finished. With an
+         *     `Idempotency-Key`, the same request sent again within 24 hours answers the first document
+         *     again instead of starting another backtest.
          */
         post: operations["start_backtest_api_v1_backtests_post"];
         delete?: never;
@@ -1035,7 +1037,8 @@ export interface paths {
          *     all go to the end of the queue, or none does. With `validate_only` nothing starts: the
          *     answer is 200 with the count and each setup. The sweep's backtests are ordinary backtests
          *     with its `sweep_id`. `GET /api/v1/sweeps/{sweep_id}` follows them and ranks them once all
-         *     ended.
+         *     ended. With an `Idempotency-Key`, the same request sent again within 24 hours answers the
+         *     first sweep again instead of starting another.
          */
         post: operations["start_sweep_api_v1_sweeps_post"];
         delete?: never;
@@ -1587,7 +1590,7 @@ export interface components {
             published_at: string | null;
             /**
              * Queue Position
-             * @description Where a queued backtest is in its author's queue: 1 starts next, when the running one ends; null for any other status
+             * @description Where a queued backtest is in its author's queue: 1 starts next, when their running one ended and a run slot is free; null for any other status
              */
             queue_position: number | null;
             /**
@@ -1779,7 +1782,7 @@ export interface components {
             published_at: string | null;
             /**
              * Queue Position
-             * @description Where a queued backtest is in the user's queue: 1 starts next, when the running one ends; null for any other status
+             * @description Where a queued backtest is in the user's queue: 1 starts next, when their running one ended and a run slot is free; null for any other status
              * @example null
              */
             queue_position: number | null;
@@ -5502,7 +5505,10 @@ export interface operations {
     start_backtest_api_v1_backtests_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Any 1 to 255 visible ASCII characters, such as a UUID: the same request sent again with it within 24 hours gets the first answer (with `Idempotent-Replayed: true`) instead of a second start */
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5548,7 +5554,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The model has no manifest (`model-needs-setup`), the user has 20 backtests waiting already (`queue-full`, with `limit`), or as many backtests as an account keeps (`backtest-limit`, with `limit` and `count`). */
+            /** @description The model has no manifest (`model-needs-setup`), the user has 20 backtests waiting already (`queue-full`, with `limit` and `retry_after_s`), as many backtests as an account keeps (`backtest-limit`, with `limit` and `count`), or the first request with the `Idempotency-Key` is still being answered (`idempotency-key-in-use`, with `retry_after_s`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5557,7 +5563,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description An invalid setup (`validation`), a model of another market (`instrument-not-for-model`), a period outside the data (`period-out-of-range`), without the candles the model needs before it (`warm-up-out-of-range`), or with more candles than allowed (`too-many-candles`). */
+            /** @description An invalid setup (`validation`), a model of another market (`instrument-not-for-model`), a period outside the data (`period-out-of-range`), without the candles the model needs before it (`warm-up-out-of-range`), with more candles than allowed (`too-many-candles`), or an `Idempotency-Key` sent before with another body (`idempotency-key-reused`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8461,7 +8467,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -8475,7 +8481,10 @@ export interface operations {
     start_sweep_api_v1_sweeps_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Any 1 to 255 visible ASCII characters, such as a UUID: the same request sent again with it within 24 hours gets the first answer (with `Idempotent-Replayed: true`) instead of a second start */
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -8530,7 +8539,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description A model has no manifest (`model-needs-setup`, with `setup`), the user's queue has room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count` and `room`), or the account cannot keep that many more backtests (`backtest-limit`, with `limit`, `count` and `adding`). */
+            /** @description A model has no manifest (`model-needs-setup`, with `setup`), the user's queue has room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count`, `room` and `retry_after_s`), the account cannot keep that many more backtests (`backtest-limit`, with `limit`, `count` and `adding`), or the first request with the `Idempotency-Key` is still being answered (`idempotency-key-in-use`, with `retry_after_s`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8539,7 +8548,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description An invalid body or fewer than 2 or more than 20 backtests (`validation`, the latter with `count` and `limit`), or a setup that fails a check of `POST /api/v1/backtests` (`instrument-not-for-model`, `period-out-of-range`, `warm-up-out-of-range`, `too-many-candles`, `validation`; `setup` names it, from 1). */
+            /** @description An invalid body or fewer than 2 or more than 20 backtests (`validation`, the latter with `count` and `limit`), a setup that fails a check of `POST /api/v1/backtests` (`instrument-not-for-model`, `period-out-of-range`, `warm-up-out-of-range`, `too-many-candles`, `validation`; `setup` names it, from 1), or an `Idempotency-Key` sent before with another body (`idempotency-key-reused`). */
             422: {
                 headers: {
                     [name: string]: unknown;
