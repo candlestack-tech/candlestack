@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import anyio
 import numpy as np
 import polars as pl
 import pytest
@@ -372,3 +373,32 @@ async def test_a_warm_up_is_not_lengthened_without_earlier_candles_or_a_manifest
     assert await runs._with_warm_up(_spec(MANIFEST), loaded) is loaded  # ty: ignore[invalid-argument-type]
     # A manifest that does not parse is the worker's to refuse.
     assert await runs._with_warm_up(_spec({"version": 0}), loaded) is loaded
+
+
+async def test_a_turn_taken_is_a_run_started_even_when_the_fill_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runs = runner(_NoDatabase())
+    committing = asyncio.Event()
+    started: list[str] = []
+    turns = iter(["bt_aaaaaaaaaa"])
+
+    async def take_turn() -> str | None:
+        committing.set()
+        await asyncio.sleep(0.05)  # the commit, while the request goes away
+        return next(turns, None)
+
+    async def run(backtest_id: str) -> None:
+        started.append(backtest_id)
+
+    monkeypatch.setattr(runs, "_take_turn", take_turn)
+    monkeypatch.setattr(runs, "_run", run)
+
+    # As the request's task group is cancelled (a client that went away, MCP's cancel).
+    async with anyio.create_task_group() as group:
+        group.start_soon(runs.fill)
+        await committing.wait()
+        group.cancel_scope.cancel()
+    await asyncio.gather(*list(runs._tasks))
+
+    assert started == ["bt_aaaaaaaaaa"]

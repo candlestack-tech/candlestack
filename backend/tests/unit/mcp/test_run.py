@@ -169,7 +169,7 @@ class FakeRuns:
         self.bodies.append(body)
         return BacktestCheck.model_validate(run.TOOLS[0].example.result.model_dump())
 
-    async def start(self, user_id: str, body: Any) -> tuple[None, bytes]:
+    async def start(self, user_id: str, body: Any, _committed: Any = None) -> tuple[None, bytes]:
         self._call(user_id)
         self.bodies.append(body)
         self.sequence.setdefault("bt_newnewnewn", ["queued"])

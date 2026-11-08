@@ -22,6 +22,7 @@ from itertools import product
 from math import prod
 from typing import Annotated, Any, Literal, Self
 
+import anyio
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from candlestack.data import DataError, InstrumentId
@@ -45,6 +46,7 @@ from candlestack.experiments.errors import (
     SweepQueueFull,
     SweepTooLarge,
 )
+from candlestack.experiments.idempotency import Committed
 from candlestack.experiments.models import Sweep, new_sweep_id
 from candlestack.experiments.runs import BacktestRuns, Prepared
 from candlestack.experiments.schemas import BacktestStatus, Representation
@@ -339,9 +341,12 @@ class Sweeps:
         setups = [_setup_of(prepared, spec) for prepared, spec in checked]
         return SweepPlan(count=len(setups), limit=SWEEP_MAX, queue_room=room, setups=setups)
 
-    async def start(self, user_id: str, body: SweepIn) -> SweepOut:
+    async def start(
+        self, user_id: str, body: SweepIn, committed: Committed | None = None
+    ) -> SweepOut:
         """Checks every setup of the sweep as a new backtest, then stores the sweep and its
         backtests at the end of the user's queue, all or none. Returns the sweep.
+        ``committed`` is awaited with its ID once it is stored (``idempotency.once``).
 
         Raises:
             SweepTooLarge, InvalidBacktest (fewer than two setups), SweepQueueFull,
@@ -378,8 +383,12 @@ class Sweeps:
         )
         for backtest in backtests:
             await self._store.add_named(backtest)
-        await self._store.commit()
-        await self._runs.schedule()
+        # From the commit on nothing cancels the start: its backtests get their slots.
+        with anyio.CancelScope(shield=True):
+            await self._store.commit()
+            if committed is not None:
+                await committed(sweep_id)
+            await self._runs.schedule()
         return await self.sweep(user_id, sweep_id)
 
     async def _checked(

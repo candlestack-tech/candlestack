@@ -8,11 +8,12 @@ import json
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
+import anyio
 import numpy as np
 import pytest
 import redis
@@ -27,7 +28,7 @@ from candlestack.data import (
     WarmUpOutOfRange,
 )
 from candlestack.engine import ENGINE_VERSION
-from candlestack.experiments import BacktestRunner
+from candlestack.experiments import BacktestIn, BacktestRunner, backtest_runs
 from candlestack.experiments import names as names_module
 from candlestack.experiments import runner as runner_module
 from candlestack.experiments import store as store_module
@@ -1022,6 +1023,83 @@ def test_the_users_take_turns_at_the_slots(ada, bob, app, worker) -> None:
         bobs[1],
         adas[2],
     ]
+
+
+@pytest.mark.usefixtures("market")
+def test_a_start_whose_request_goes_away_after_its_commit_still_gets_its_run(
+    ada, app, client
+) -> None:
+    setup = BacktestIn.model_validate(body(ada.runnable_model()))
+    stored: list[str] = []
+
+    async def start_and_go_away() -> None:
+        async with app.state.db.sessions() as db, anyio.create_task_group() as group:
+
+            async def committed(backtest_id: str) -> None:
+                stored.append(backtest_id)
+                group.cancel_scope.cancel()  # the client went away
+
+            group.start_soon(backtest_runs(app.state, db).start, ada.id, setup, committed)
+
+    client.portal.call(start_and_go_away)
+    (backtest_id,) = stored
+
+    assert ada.document(backtest_id).json()["backtest"]["status"] == "running"
+    assert backtest_id in app.state.backtest_runner._tasks.values()
+
+
+@pytest.mark.usefixtures("market")
+def test_a_backtest_running_without_a_run_is_queued_again_and_run(ada, app, client) -> None:
+    model_id = ada.runnable_model()
+    orphan = ada.start(body(model_id)).json()["backtest"]["id"]  # no worker answers
+    runner = app.state.backtest_runner
+    # As a turn whose run was never started: running in the table, no task here.
+    client.portal.call(runner.close)
+    restarted = BacktestRunner(app.state.db, runner._data, runner._jobs)
+    app.state.backtest_runner = restarted
+    ada.sql(
+        "UPDATE backtests SET status = 'running', error = NULL, finished_at = NULL, "
+        "started_at = now() - interval '2 minutes' WHERE id = :id",
+        id=orphan,
+    )
+    restarted._recovered = True  # its start found nothing left by a stopped process
+    try:
+        client.portal.call(restarted._check)
+        again = ada.document(orphan).json()["backtest"]
+        ours = set(restarted._tasks.values())
+    finally:
+        client.portal.call(restarted.close)
+
+    assert again["status"] == "running"
+    assert at({"backtest": again}, "started_at") > datetime.now(UTC) - timedelta(minutes=1)
+    assert orphan in ours
+
+
+@pytest.mark.usefixtures("market")
+def test_queued_backtests_of_several_users_fill_the_slots_after_a_restart(
+    ada, bob, app, client, market
+) -> None:
+    adas_model, bobs_model = ada.runnable_model(), bob.runnable_model()
+    adas = [ada.start(body(adas_model)).json()["backtest"]["id"] for _ in range(2)]
+    bobs = [bob.start(body(bobs_model)).json()["backtest"]["id"] for _ in range(2)]
+    stopping = app.state.backtest_runner
+    client.portal.call(stopping.close)
+    restarted = BacktestRunner(app.state.db, market, stopping._jobs, slots=2)
+    app.state.backtest_runner = restarted
+    try:
+        client.portal.call(restarted.recover)
+        statuses = {
+            backtest_id: ada.document(backtest_id).json()["backtest"]["status"]
+            for backtest_id in adas[1:]
+        } | {
+            backtest_id: bob.document(backtest_id).json()["backtest"]["status"]
+            for backtest_id in bobs[1:]
+        }
+    finally:
+        client.portal.call(restarted.close)
+
+    # The runs the stop ended failed; the next of each user took the two slots.
+    assert statuses == {adas[1]: "running", bobs[1]: "running"}
 
 
 # --- The name it gets --------------------------------------------------------------------------

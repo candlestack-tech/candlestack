@@ -43,8 +43,9 @@ DEFAULT_WAIT = 180.0
 # How long a job may wait in the queue for a worker by default: past it the worker fails it as
 # ``expired`` without running it, and the backend stops waiting. The backtests' runner hands the
 # worker as many jobs at once as it has run slots, and the models' checks one per user, so a job
-# waits for a few runs at most; it waits this long only when no worker runs.
-QUEUE_WAIT = 600.0
+# waits for a few runs at most (a run stops at JOB_TIME_LIMIT, 2 minutes by default); it waits
+# this long only when no worker runs.
+QUEUE_WAIT = 240.0
 # The output of the manifest's example must be within this of the expected one.
 EXAMPLE_TOLERANCE = 1e-4
 

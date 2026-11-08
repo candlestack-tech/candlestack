@@ -52,7 +52,7 @@ from candlestack.experiments.errors import (
     SweepQueueFull,
     SweepTooLarge,
 )
-from candlestack.experiments.idempotency import KEY_MAX, KEY_PATTERN, once
+from candlestack.experiments.idempotency import KEY_MAX, KEY_PATTERN, Committed, once
 from candlestack.experiments.schemas import (
     EXPERIMENTS_PAGE_SIZE,
     MODEL_NAME_MAX,
@@ -527,8 +527,12 @@ async def start_backtest(
     `Idempotency-Key`, the same request sent again within 24 hours answers the first document
     again instead of starting another backtest."""
 
-    async def started() -> bytes:
-        _, content = await runs.start(user.id, body)
+    async def started(committed: Committed) -> bytes:
+        _, content = await runs.start(user.id, body, committed)
+        return content
+
+    async def again(backtest_id: str) -> bytes:
+        _, content = await runs.document(user.id, backtest_id, light=True)
         return content
 
     with backtest_problems():
@@ -539,6 +543,7 @@ async def start_backtest(
             key=idempotency_key,
             body=body.model_dump_json().encode(),
             answer=started,
+            rebuild=again,
         )
     backtest_id = json.loads(content)["backtest"]["id"]
     headers = {"Location": f"/api/v1/backtests/{backtest_id}", **_replayed(replayed=replayed)}
@@ -830,8 +835,11 @@ async def start_sweep(
     first sweep again instead of starting another."""
     response.headers.update(NO_STORE)
 
-    async def started() -> bytes:
-        return (await sweeps.start(user.id, body)).model_dump_json().encode()
+    async def started(committed: Committed) -> bytes:
+        return (await sweeps.start(user.id, body, committed)).model_dump_json().encode()
+
+    async def again(sweep_id: str) -> bytes:
+        return (await sweeps.sweep(user.id, sweep_id)).model_dump_json().encode()
 
     with sweep_problems():
         if body.validate_only:
@@ -844,6 +852,7 @@ async def start_sweep(
             key=idempotency_key,
             body=body.model_dump_json().encode(),
             answer=started,
+            rebuild=again,
         )
     sweep_id = json.loads(content)["id"]
     headers = {"Location": f"/api/v1/sweeps/{sweep_id}", **_replayed(replayed=replayed)}

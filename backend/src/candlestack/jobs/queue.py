@@ -125,25 +125,40 @@ class JobQueue:
         to have taken the job (it holds its lease), and until then it waits for that up to
         ``claim_by``. ``claimed`` is awaited once, at most ``_WAIT_STEP`` after a worker took
         the job, when that is seen before the result."""
-        taken = claim_by is None
-        if claim_by is None:
-            end = time.monotonic() + wait
-        else:
-            end = time.monotonic() + max(claim_by - time.time(), 0)
-        while (left := end - time.monotonic()) > 0:
-            popped = await self._redis.blpop(
-                [RESULT_PREFIX + job_id], timeout=min(left, _WAIT_STEP)
-            )
+        if claim_by is not None:
+            first = await self._until_taken(job_id, claim_by)
+            if isinstance(first, JobResult) or not first:
+                return first or None
+            if claimed is not None:
+                await claimed()
+                claimed = None
+        deadline = time.monotonic() + wait
+        while (left := deadline - time.monotonic()) > 0:
+            popped = await self._pop(job_id, left)
             if popped is not None:
-                return JobResult.model_validate_json(popped[1])
-            if (not taken or claimed is not None) and await self.taken(job_id):
-                if not taken:
-                    taken = True
-                    end = time.monotonic() + wait
-                if claimed is not None:
-                    await claimed()
-                    claimed = None
+                return popped
+            if claimed is not None and await self.taken(job_id):
+                await claimed()
+                claimed = None
         return None
+
+    async def _until_taken(self, job_id: str, claim_by: float) -> JobResult | bool:
+        """Whether a worker took the job by ``claim_by`` (epoch seconds), or its result when
+        that came first."""
+        deadline = time.monotonic() + max(claim_by - time.time(), 0)
+        while (left := deadline - time.monotonic()) > 0:
+            popped = await self._pop(job_id, left)
+            if popped is not None:
+                return popped
+            if await self.taken(job_id):
+                return True
+        # A worker may have taken it in the last step, just before its deadline.
+        return await self.taken(job_id)
+
+    async def _pop(self, job_id: str, left: float) -> JobResult | None:
+        """The job's result, waiting a step of at most ``left`` seconds for it."""
+        popped = await self._redis.blpop([RESULT_PREFIX + job_id], timeout=min(left, _WAIT_STEP))
+        return None if popped is None else JobResult.model_validate_json(popped[1])
 
     async def taken(self, job_id: str) -> bool:
         """Whether a worker runs the job: it holds the job's lease from its claim until it

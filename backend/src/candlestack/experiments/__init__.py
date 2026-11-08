@@ -48,6 +48,7 @@ from candlestack.experiments.document import (
 )
 from candlestack.experiments.idempotency import KEY_MAX as IDEMPOTENCY_KEY_MAX
 from candlestack.experiments.idempotency import KEY_PATTERN as IDEMPOTENCY_KEY_PATTERN
+from candlestack.experiments.idempotency import Committed
 from candlestack.experiments.idempotency import once as idempotent
 from candlestack.experiments.runner import BacktestRunner
 from candlestack.experiments.runs import BacktestRuns
@@ -113,6 +114,7 @@ __all__ = [
     "BacktestStatus",
     "BacktestUpdate",
     "BenchmarkIn",
+    "Committed",
     "CompareOut",
     "ComparedBacktest",
     "DataIn",

@@ -13,6 +13,7 @@ adjusted old prices), ``data.changed`` says so and the results come from the can
 are now. The comparison reads only what the run stored (``stored``), so it never loads candles.
 """
 
+import logging
 import math
 from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
@@ -24,6 +25,7 @@ import numpy as np
 import polars as pl
 from redis.exceptions import RedisError
 
+from candlestack.core import DATABASE_ERRORS
 from candlestack.data import (
     CandleSet,
     DataService,
@@ -81,6 +83,7 @@ from candlestack.experiments.errors import (
     NotComparable,
     QueueFull,
 )
+from candlestack.experiments.idempotency import Committed
 from candlestack.experiments.models import Backtest, new_backtest_id
 from candlestack.experiments.runner import BacktestRunner
 from candlestack.experiments.schemas import (
@@ -104,6 +107,7 @@ _SESSIONS = {"stock": "regular", "crypto": "24/7"}
 # candles (candles@1) for any other.
 _REPRESENTATIONS = {"renko": Representation.renko, "kagi": Representation.kagi}
 CANCELLED = "You cancelled the backtest before it ran."
+logger = logging.getLogger(__name__)
 # What an estimate counts a run of a user without a finished one as, in seconds.
 RUN_SECONDS = 60.0
 _ENDED = {BacktestStatus.finished, BacktestStatus.failed}
@@ -178,10 +182,17 @@ class BacktestRuns:
             queue_position=queued + 1 if waits else None,
         )
 
-    async def start(self, user_id: str, body: BacktestIn) -> tuple[Backtest, bytes]:
+    async def start(
+        self, user_id: str, body: BacktestIn, committed: Committed | None = None
+    ) -> tuple[Backtest, bytes]:
         """Checks a new backtest of the user, stores it, and returns it with its document: it
         runs at once when no other backtest of the user runs or waits and a run slot is free,
-        else it waits at the end of their queue (``queued``).
+        else it waits at the end of their queue (``queued``). ``committed`` is awaited with its
+        ID once it is stored (an idempotency key keeps it, ``idempotency.once``).
+
+        From its commit on nothing cancels the start (a client that went away): the new
+        backtest gets its slot or stays queued, never running without a run. A read that fails
+        after the commit answers it as stored, queued and without its place.
 
         Raises:
             InvalidBacktest, ModelNotFound, ModelNeedsSetup, InstrumentNotForModel, QueueFull,
@@ -205,14 +216,29 @@ class BacktestRuns:
             user_id, prepared, spec, number=await self._store.last_number(user_id) + 1
         )
         await self._store.add_named(backtest)
-        await self._store.commit()
-        await self.schedule()
-        # Running now when a slot was free for it, else queued in its place.
-        await self._store.refresh_status(backtest)
-        position = await self._store.queue_position(backtest.id)
-        await self._store.commit()
+        with anyio.CancelScope(shield=True):
+            await self._store.commit()
+            if committed is not None:
+                await committed(backtest.id)
+            await self.schedule()
+            position = await self._stored_place(backtest)
         document = _document(backtest, spec, author=author, queue_position=position)
         return backtest, dumps(document)
+
+    async def _stored_place(self, backtest: Backtest) -> int | None:
+        """Reads the new backtest's status again (running now when a slot was free for it)
+        and its place in the queue. Postgres out of reach is a warning: it is answered queued,
+        as stored, without its place."""
+        try:
+            await self._store.refresh_status(backtest)
+            position = await self._store.queue_position(backtest.id)
+            await self._store.commit()
+        except DATABASE_ERRORS as error:
+            logger.warning(
+                "Backtest %s was answered as stored (%s)", backtest.id, type(error).__name__
+            )
+            return None
+        return position
 
     async def prepare(self, user_id: str, body: BacktestIn) -> Prepared:
         """The reads of a new backtest's checks: its benchmarks, and the user's model with the

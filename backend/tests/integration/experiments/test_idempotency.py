@@ -1,7 +1,9 @@
 """The idempotency keys of the starts against a real Redis at REDIS_URL, flushed before each
 test: the first answer given again, another body refused, a key held while its first request
-runs, freed when it fails, and Redis out of reach worked around."""
+runs, freed when it fails before its commit, kept with the ID of what it committed when it
+stops after, and Redis out of reach worked around."""
 
+import asyncio
 from collections.abc import AsyncIterator
 
 import pytest
@@ -9,7 +11,7 @@ from redis.asyncio import Redis
 
 from candlestack.core import create_redis
 from candlestack.experiments.errors import IdempotencyKeyInUse, IdempotencyKeyReused
-from candlestack.experiments.idempotency import PENDING_TTL, TTL, once
+from candlestack.experiments.idempotency import PENDING_TTL, TTL, Committed, once
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
@@ -23,20 +25,38 @@ async def redis(redis_url: str) -> AsyncIterator[Redis]:
 
 
 class Starts:
-    """What a start answers, counted."""
+    """What a start answers, counted; it commits ``bt_<count>`` first. ``fail_after_commit``
+    makes it fail between its commit and its answer."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, fail_after_commit: BaseException | None = None) -> None:
         self.count = 0
+        self.fail_after_commit = fail_after_commit
+        self.rebuilt: list[str] = []
 
-    async def __call__(self) -> bytes:
+    async def __call__(self, committed: Committed) -> bytes:
         self.count += 1
+        await committed(f"bt_{self.count}")
+        if self.fail_after_commit is not None:
+            raise self.fail_after_commit
         return f'{{"id": "bt_{self.count}"}}'.encode()
+
+    async def rebuild(self, made: str) -> bytes:
+        self.rebuilt.append(made)
+        return f'{{"id": "{made}", "again": true}}'.encode()
 
 
 async def start(
-    redis: Redis, starts: Starts, key: str | None, body: bytes = b"{}"
+    redis: Redis, starts: Starts, key: str | None, body: bytes = b"{}", user: str = "usr_ada"
 ) -> tuple[bytes, bool]:
-    return await once(redis, user_id="usr_ada", kind="start", key=key, body=body, answer=starts)
+    return await once(
+        redis,
+        user_id=user,
+        kind="start",
+        key=key,
+        body=body,
+        answer=starts,
+        rebuild=starts.rebuild,
+    )
 
 
 async def test_the_same_key_and_body_answer_the_first_answer_for_a_day(redis: Redis) -> None:
@@ -47,7 +67,7 @@ async def test_the_same_key_and_body_answer_the_first_answer_for_a_day(redis: Re
 
     assert first == (b'{"id": "bt_1"}', False)
     assert again == (b'{"id": "bt_1"}', True)
-    assert starts.count == 1
+    assert (starts.count, starts.rebuilt) == (1, [])
     (name,) = await redis.keys("idempotency:*")
     assert TTL - 5 < await redis.ttl(name) <= TTL
 
@@ -58,8 +78,16 @@ async def test_keys_are_apart_by_user_and_kind_and_without_a_key_it_always_start
     starts = Starts()
 
     await start(redis, starts, "k1")
-    await once(redis, user_id="usr_bob", kind="start", key="k1", body=b"{}", answer=starts)
-    await once(redis, user_id="usr_ada", kind="sweep", key="k1", body=b"{}", answer=starts)
+    await start(redis, starts, "k1", user="usr_bob")
+    await once(
+        redis,
+        user_id="usr_ada",
+        kind="sweep",
+        key="k1",
+        body=b"{}",
+        answer=starts,
+        rebuild=starts.rebuild,
+    )
     await start(redis, starts, None)
     await start(redis, starts, None)
 
@@ -80,44 +108,67 @@ async def test_a_key_is_held_while_its_first_request_runs(redis: Redis) -> None:
     starts = Starts()
     seen: list[BaseException] = []
 
-    async def slow() -> bytes:
-        # The same request again, while this one has not answered.
+    async def slow(_committed: Committed) -> bytes:
+        # The same request again, while this one has committed nothing yet.
         try:
             await start(redis, starts, "k1")
         except IdempotencyKeyInUse as error:
             seen.append(error)
+        (name,) = await redis.keys("idempotency:*")
+        assert PENDING_TTL - 5 < await redis.ttl(name) <= PENDING_TTL
         return b'{"id": "bt_first"}'
 
-    answer = await once(redis, user_id="usr_ada", kind="start", key="k1", body=b"{}", answer=slow)
+    answer = await once(
+        redis,
+        user_id="usr_ada",
+        kind="start",
+        key="k1",
+        body=b"{}",
+        answer=slow,
+        rebuild=starts.rebuild,
+    )
 
     assert answer == (b'{"id": "bt_first"}', False)
     assert len(seen) == 1
     assert starts.count == 0
 
 
-async def test_a_start_that_fails_frees_its_key(redis: Redis) -> None:
-    async def refused() -> bytes:
+async def test_a_start_that_fails_before_its_commit_frees_its_key(redis: Redis) -> None:
+    async def refused(_committed: Committed) -> bytes:
         raise ValueError("the queue is full")
 
     with pytest.raises(ValueError, match="full"):
-        await once(redis, user_id="usr_ada", kind="start", key="k1", body=b"{}", answer=refused)
+        await once(
+            redis,
+            user_id="usr_ada",
+            kind="start",
+            key="k1",
+            body=b"{}",
+            answer=refused,
+            rebuild=Starts().rebuild,
+        )
     starts = Starts()
     again = await start(redis, starts, "k1")
 
     assert again == (b'{"id": "bt_1"}', False)
 
 
-async def test_a_held_key_expires_with_a_request_that_never_answered(redis: Redis) -> None:
-    starts = Starts()
+@pytest.mark.parametrize(
+    "stop", [OSError("the read failed"), asyncio.CancelledError()], ids=["error", "cancel"]
+)
+async def test_a_start_that_stops_after_its_commit_is_answered_again_never_started_twice(
+    redis: Redis, stop: BaseException
+) -> None:
+    stopped = Starts(fail_after_commit=stop)
+    with pytest.raises(type(stop)):
+        await start(redis, stopped, "k1")
 
-    async def stuck() -> bytes:
-        (name,) = await redis.keys("idempotency:*")
-        assert PENDING_TTL - 5 < await redis.ttl(name) <= PENDING_TTL
-        return b"{}"
+    again = await start(redis, Starts(), "k1")
 
-    await once(redis, user_id="usr_ada", kind="start", key="k1", body=b"{}", answer=stuck)
-
-    assert starts.count == 0
+    assert again == (b'{"id": "bt_1", "again": true}', True)
+    assert stopped.count == 1
+    (name,) = await redis.keys("idempotency:*")
+    assert TTL - 5 < await redis.ttl(name) <= TTL
 
 
 async def test_without_redis_the_start_goes_on_without_the_key(

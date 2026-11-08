@@ -4,7 +4,7 @@ among the account's own and generated names; the rows that run and the custom na
 among all.
 
 Revision ID: d2e6b4a8f913
-Revises: b7d3e9a1c524
+Revises: e2a7c5f9d413
 Create Date: 2026-11-08 18:00:00.000000
 """
 
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "d2e6b4a8f913"
-down_revision: str | None = "b7d3e9a1c524"
+down_revision: str | None = "e2a7c5f9d413"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

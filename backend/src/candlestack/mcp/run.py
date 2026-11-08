@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from candlestack import experiments
 from candlestack.accounts import Scope
-from candlestack.core import ProblemError
+from candlestack.core import DATABASE_ERRORS, ProblemError
 from candlestack.experiments import (
     COMPARE_MAX,
     BacktestCheck,
@@ -27,6 +27,7 @@ from candlestack.experiments import (
     BacktestIn,
     BacktestRuns,
     BenchmarkIn,
+    Committed,
     ComparedBacktest,
     CompareOut,
     DataIn,
@@ -518,10 +519,18 @@ async def start_backtest(  # noqa: PLR0913 (the setup's groups)
         model=model, data=data, decision=decision, execution=execution, benchmarks=benchmarks
     )
 
-    async def started() -> bytes:
+    async def started(committed: Committed) -> bytes:
         async with _runs(call) as runs:
-            _, content = await runs.start(call.user.id, body)
-            backtest_id = json.loads(content)["backtest"]["id"]
+            _, content = await runs.start(call.user.id, body, committed)
+        header = BacktestHeader.model_validate(json.loads(content)["backtest"])
+        try:
+            return await again(header.id)
+        except DATABASE_ERRORS:
+            # Stored and scheduled already: answered as the start saw it, without the estimate.
+            return _status(call, header).model_dump_json().encode()
+
+    async def again(backtest_id: str) -> bytes:
+        async with _runs(call) as runs:
             (standing,) = await runs.statuses(call.user.id, [backtest_id])
         return _status(call, standing.header, standing.eta_s).model_dump_json().encode()
 
@@ -533,6 +542,7 @@ async def start_backtest(  # noqa: PLR0913 (the setup's groups)
             key=idempotency_key,
             body=body.model_dump_json().encode(),
             answer=started,
+            rebuild=again,
         )
     return BacktestStatusResult.model_validate_json(content)
 

@@ -36,7 +36,7 @@ import logging
 import time
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 
 import anyio
@@ -91,6 +91,9 @@ MODEL_GONE = "The model was deleted before the backtest could run it."
 QUEUE_CHECK_EVERY = 30.0
 # How many backtests run at once by default, over all users (``BACKTEST_SLOTS``).
 SLOTS = 2
+# How long a backtest may be running without a run of the process before a check queues it
+# again, in seconds: far longer than a turn takes from its commit to its run.
+ORPHAN_GRACE = 60.0
 # How many times a run loads further back when its warm-up fell short, each time twice as many
 # candles before the period: 403 estimated candles become up to 3224.
 LONGER_WARM_UPS = 3
@@ -135,6 +138,7 @@ class BacktestRunner:
         self._wait = wait
         self._queue_wait = queue_wait
         self._check_every = check_every
+        self._orphan_grace = ORPHAN_GRACE
         # The runs going on, by their backtest: each holds a slot.
         self._tasks: dict[asyncio.Task[None], str] = {}
         self._watch: asyncio.Task[None] | None = None
@@ -237,7 +241,36 @@ class BacktestRunner:
             self._recovered = True
             if left:
                 logger.warning("%d backtests left running by a stopped process failed", left)
+        await self._requeue_orphans()
         await self.resume()
+
+    async def _requeue_orphans(self) -> None:
+        """Puts back at the head of their queues the backtests running for ``orphan_grace``
+        seconds without a run of this process, the only one: they never began (nothing should
+        leave one, this is the net). Under the lock of the fills, so none is taken meanwhile.
+        Postgres out of reach is a warning: the next check tries again."""
+        async with self._filling:
+            ours = set(self._tasks.values())
+            before = _now() - timedelta(seconds=self._orphan_grace)
+            try:
+                async with self._db.sessions() as session:
+                    store = BacktestStore(session)
+                    orphans = [
+                        backtest_id
+                        for backtest_id in await store.running_since(before)
+                        if backtest_id not in ours
+                    ]
+                    for backtest_id in orphans:
+                        await store.requeue(backtest_id)
+                    await store.commit()
+            except DATABASE_ERRORS as error:
+                logger.warning(
+                    "The backtests running without a run were not checked (%s)",
+                    type(error).__name__,
+                )
+                return
+        if orphans:
+            logger.error("%d backtests ran without a run and were queued again", len(orphans))
 
     async def resume(self) -> None:
         """Gives the free slots to the queues in turn (``fill``)."""
@@ -275,16 +308,19 @@ class BacktestRunner:
         async with self._filling:
             self._woken = False
             while not self._closed and len(self._tasks) < self._slots:
-                try:
-                    started = await self._take_turn()
-                except DATABASE_ERRORS as error:
-                    logger.warning(
-                        "The backtest queues were not checked (%s)", type(error).__name__
-                    )
-                    return
-                if started is None:
-                    return
-                self.start(started)
+                # A turn taken is a run started: a cancel (the request went away) between the
+                # two would leave a backtest running without a run.
+                with anyio.CancelScope(shield=True):
+                    try:
+                        started = await self._take_turn()
+                    except DATABASE_ERRORS as error:
+                        logger.warning(
+                            "The backtest queues were not checked (%s)", type(error).__name__
+                        )
+                        return
+                    if started is None:
+                        return
+                    self.start(started)
 
     async def _take_turn(self) -> str | None:
         """Marks running the oldest queued backtest of the next user in turn and returns its ID;

@@ -693,6 +693,13 @@ class BacktestStore:
             backtest.started_at = now
         return backtest
 
+    async def running_since(self, before: datetime) -> list[str]:
+        """The IDs of the backtests of any user that began to run before ``before`` and
+        still run (``ix_backtests_running``)."""
+        began = func.coalesce(Backtest.started_at, Backtest.created_at)
+        rows = await self._db.scalars(select(Backtest.id).where(_RUNNING, began < before))
+        return list(rows)
+
     async def requeue(self, backtest_id: str) -> None:
         """Puts the running backtest that never began back in its queue, where its number
         keeps it first."""

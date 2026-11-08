@@ -549,11 +549,12 @@ sequenceDiagram
   `sha256` (of the upload), `manifest` (the model's manifest, as data; a `predict` leaves
   out its `example` and `about`, which it does not use, so a job stays small in the queue's
   Redis of 16 MB without eviction), `enqueued_at`, `deadline` (epoch seconds: when the backend
-  stops waiting for a worker to take it; `QUEUE_WAIT`, 10 minutes) and `wait` (seconds the
+  stops waiting for a worker to take it; `QUEUE_WAIT`, 4 minutes) and `wait` (seconds the
   backend waits for the result from the claim on, 180 by default: the time in the queue does
   not shorten the run; a job without it, of an older backend, runs until `deadline`). The
   backend's wait (`JobQueue.result` with `claim_by`) first waits for the claim, which it sees
-  by the lease, then `wait` for the result. The candles of a `predict` are
+  by the lease (once more at the deadline, for a claim in its last second), then `wait` for
+  the result. The candles of a `predict` are
   `<job_id>/candles.parquet` in the jobs' volume (`ts`, open, high, low, close, volume, and
   for stocks `session_last`, the mark of each session's last candle from the calendar:
   [data.md](data.md#last-candle-of-a-session)), and its
@@ -816,7 +817,12 @@ checked at the next start.
   (Postgres out of reach); a new start fills them too. With Postgres out of reach at the
   start, failing those left running is tried again at each check; it fails only backtests
   that began to run before the process started. A backtest the runner is handed after its
-  shutdown began goes back to the head of its queue. As each running backtest has at most one
+  shutdown began goes back to the head of its queue. A turn taken is a run started: the
+  commit of the turn and the start of its run are one step no cancel interrupts (a shielded
+  anyio scope, as a start that commits its backtest is from its commit to its answer, so a
+  client that goes away leaves no backtest running without a run); as a net, every check puts
+  back at the head of its queue a backtest running for a minute without a run of this process
+  (an error in the log). As each running backtest has at most one
   job in the worker's queue, which takes the oldest job first, the worker's queue holds as
   many jobs as there are slots: one user's 20 queued backtests never hold back another user's
   backtest, and a job waits for the worker a few runs at most. `queue_position` (in

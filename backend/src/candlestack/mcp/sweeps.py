@@ -12,8 +12,10 @@ from mcp.server.mcpserver import Context
 from pydantic import BaseModel, Field
 
 from candlestack.accounts import Scope
+from candlestack.core import DATABASE_ERRORS
 from candlestack.experiments import (
     BacktestIn,
+    Committed,
     SweepIn,
     SweepMetric,
     SweepOut,
@@ -129,10 +131,21 @@ async def run_sweep(
     call = tool_call(ctx)
     body = SweepIn(base=base, vary=vary or SweepVary(), metric=metric)
 
-    async def started() -> bytes:
+    async def started(committed: Committed) -> bytes:
         async with call.db() as db:
             sweep = await build_sweeps(call.state, db, call.settings.app_version).start(
-                call.user.id, body
+                call.user.id, body, committed
+            )
+        try:
+            eta = await _eta(call, [backtest.id for backtest in sweep.backtests])
+        except DATABASE_ERRORS:
+            eta = None  # started already: answered without the estimate
+        return SweepStarted(**sweep.model_dump(), eta_s=eta).model_dump_json().encode()
+
+    async def again(sweep_id: str) -> bytes:
+        async with call.db() as db:
+            sweep = await build_sweeps(call.state, db, call.settings.app_version).sweep(
+                call.user.id, sweep_id
             )
         eta = await _eta(call, [backtest.id for backtest in sweep.backtests])
         return SweepStarted(**sweep.model_dump(), eta_s=eta).model_dump_json().encode()
@@ -145,6 +158,7 @@ async def run_sweep(
             key=idempotency_key,
             body=body.model_dump_json().encode(),
             answer=started,
+            rebuild=again,
         )
     return SweepStarted.model_validate_json(content)
 
