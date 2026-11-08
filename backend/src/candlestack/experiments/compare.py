@@ -47,9 +47,10 @@ class CompareMetric(BaseModel):
     key: str = Field(description="The statistic of `results.stats`", examples=["total_return"])
     label: str = Field(description="What the app calls it", examples=["Total return"])
     better: Better = Field(
-        description="Which way is better: `higher`, `lower` (a fall by its size, whatever its "
-        "sign; the fees) or `none` (more trades, time in the market and buy and hold are not "
-        "better in themselves, so none is marked)"
+        description="Which way is better: `higher`, `lower` or `none` (more trades, time in the "
+        "market and buy and hold are not better in themselves, so none is marked). `lower` is "
+        "the fees, and the max drawdown by the size of the fall: its values are 0 or below and "
+        "a smaller fall is better, so -0.05 beats -0.20 and its best is the highest value"
     )
     values: list[float | None] = Field(
         description="The value of each backtest, as in `results.stats`; null without results "

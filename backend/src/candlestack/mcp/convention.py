@@ -137,6 +137,11 @@ def tool_call(ctx: Context) -> ToolCall:
     return ToolCall(getattr(request.state, CALLER_STATE), request.app.state)
 
 
+def backtest_url(call: ToolCall, backtest_id: str) -> str:
+    """The backtest's page in the app, which the agent gives the user to open."""
+    return f"{call.settings.public_url}/backtests/{backtest_id}"
+
+
 def problem_body(problem: ProblemError) -> dict[str, Any]:
     """The problem as the API sends it (RFC 9457)."""
     return {

@@ -48,6 +48,7 @@ from candlestack.ml import (
     model_not_found,
     no_manifest,
     rename_taken,
+    upload_curl,
     upload_not_found,
     upload_problem,
 )
@@ -177,7 +178,9 @@ async def _model(call: ToolCall, model_id: str) -> ModelOut:
 async def get_model(model_id: ModelId, ctx: Context) -> ModelOut:
     """One of the user's models in full: its file (format, size, weights, input and output
     shapes), its state, what its manifest says in short (representation, timeframe, session,
-    input shape, warm-up), its backtests, and how the trial run of its manifest went.
+    input shape, warm-up), how many backtests used it (`backtest_count`) and the best Sharpe
+    ratio of them, and how the trial run of its manifest went. The backtests themselves are
+    list_backtests with `model` set to the model's name.
 
     After set_manifest, call it to see the trial run: `checked_at` is set when it ended,
     `state` is `verified` when it passed, and `check_failed` with `check_error` say why it
@@ -387,6 +390,15 @@ async def delete_model(
     return DeletedModel(id=model.id, name=model.name, freed_bytes=model.size_bytes)
 
 
+# What the command of a link names instead of the folder of a file given by its name alone.
+_PLACEHOLDER = "./path/to/"
+
+
+def _local_path(file_name: str) -> str:
+    """The file's path for curl: the one given, or the placeholder's folder for a bare name."""
+    return file_name if "/" in file_name or "\\" in file_name else _PLACEHOLDER + file_name
+
+
 class UploadLink(BaseModel):
     """A one-time link to upload a model file through."""
 
@@ -397,8 +409,12 @@ class UploadLink(BaseModel):
     size_bytes: int = Field(description="The largest file the link takes")
     expires_at: datetime = Field(description="Until when the link takes its file (UTC)")
     command: str = Field(
-        description="The curl command that uploads the file, run in the folder it is in on "
-        "the user's computer; it prints the problem when the upload is refused"
+        description="The curl command that uploads the file from the user's computer; it "
+        "prints the problem when the upload is refused. It is for a POSIX shell (bash, zsh: "
+        "macOS, Linux, WSL, Git Bash), not cmd.exe or PowerShell. The file's local path "
+        "follows `-T`: the path given as "
+        f"`file_name`, or `{_PLACEHOLDER}<name>` for a bare name, to replace with where the "
+        "file is"
     )
     url: str = Field(
         description="Where the file goes with PUT, with no other sign-in; the token in it is "
@@ -417,8 +433,9 @@ async def create_model_upload(
         Field(
             min_length=1,
             max_length=4096,
-            description="The model file's name, extension included (`.keras` or `.onnx`), or "
-            "its path on the user's computer; the model gets the base name",
+            description="The model file's path on the user's computer, or only its name, "
+            "extension included (`.keras` or `.onnx`); the model gets the base name. With a "
+            "path, `command` runs as it is; with a name, its path is a placeholder",
             examples=["lstm.keras"],
         ),
     ],
@@ -430,8 +447,12 @@ async def create_model_upload(
 ) -> UploadLink:
     """Makes a one-time link to upload a model file (Keras `.keras` or ONNX `.onnx`, at most
     50 MB) into the user's models. You never send the file through a tool: the file goes from
-    the user's computer to the link, either by running `command` (curl) in the folder the file
-    is in, or by opening `page_url` in the browser and dropping the file there.
+    the user's computer to the link, either by running `command` (curl), or by opening
+    `page_url` in the browser and dropping the file there.
+
+    `command` sends the file at the path given as `file_name`. Given only a name, it reads
+    ./path/to/<name>: replace ./path/to/ with the folder the file is in (the file on disk may
+    have another name than the model gets) before it runs.
 
     The link takes one file within 15 minutes and counts against the user's
     storage; the file is checked as any upload (a real model with trained weights, nothing
@@ -453,12 +474,14 @@ async def create_model_upload(
         name=link.name,
         size_bytes=link.size_bytes,
         expires_at=link.expires_at,
-        command=link.command,
+        # The path given, or a placeholder of its folder: a bare name is often not where the
+        # file is, and curl would fail on it.
+        command=f"{upload_curl(_local_path(file_name))} {link.url}",
         url=link.url,
         page_url=link.page_url,
         next_steps=f"Ask the user to upload {link.name} before {link.expires_at:%H:%M} UTC: "
-        "either run the command in the folder the file is in, or open the page and drop the "
-        f"file there. Then call get_model_upload with id {link.id}.",
+        "either run the command with the file's path on their computer after -T, or open the "
+        f"page and drop the file there. Then call get_model_upload with id {link.id}.",
     )
 
 
@@ -694,12 +717,12 @@ TOOLS = (
                 name="lstm.keras",
                 size_bytes=1_489_779,
                 expires_at=_EXPIRES,
-                command=f"curl --fail-with-body -T lstm.keras {_UPLOAD_URL}",
+                command=f"curl --fail-with-body -T ./path/to/lstm.keras {_UPLOAD_URL}",
                 url=_UPLOAD_URL,
                 page_url="https://app.candlestack.tech/upload/" + "x" * 40,
                 next_steps="Ask the user to upload lstm.keras before 09:45 UTC: either run the "
-                "command in the folder the file is in, or open the page and drop the file "
-                "there. Then call get_model_upload with id upl_7f3k2m9qx4.",
+                "command with the file's path on their computer after -T, or open the page and "
+                "drop the file there. Then call get_model_upload with id upl_7f3k2m9qx4.",
             ),
         ),
     ),

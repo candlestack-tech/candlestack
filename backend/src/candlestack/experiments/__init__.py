@@ -29,7 +29,7 @@ from candlestack.experiments.api import (
     update_problems,
 )
 from candlestack.experiments.api import router as backtests_router
-from candlestack.experiments.compare import COMPARE_MAX, CompareOut, check_ids
+from candlestack.experiments.compare import COMPARE_MAX, ComparedBacktest, CompareOut, check_ids
 from candlestack.experiments.compare import compare as compare_backtests
 from candlestack.experiments.dependencies import backtest_runs, build_sweeps, get_backtests_service
 from candlestack.experiments.document import (
@@ -41,6 +41,7 @@ from candlestack.experiments.document import (
     Decision,
     Execution,
     ModelRef,
+    Period,
     Stats,
 )
 from candlestack.experiments.runner import BacktestRunner
@@ -98,6 +99,7 @@ __all__ = [
     "BacktestUpdate",
     "BenchmarkIn",
     "CompareOut",
+    "ComparedBacktest",
     "DataIn",
     "Decision",
     "Execution",
@@ -110,6 +112,7 @@ __all__ = [
     "ListQuery",
     "ModelCount",
     "ModelRef",
+    "Period",
     "Representation",
     "SetupTimeframe",
     "SortOrder",

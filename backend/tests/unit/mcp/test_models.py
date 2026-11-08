@@ -330,6 +330,15 @@ def test_get_model_answers_one_model_in_full(mcp, service: FakeService) -> None:
     assert got["input_shape"] == [25, 1]
 
 
+def test_get_model_says_it_counts_the_backtests() -> None:
+    """It answers how many backtests used the model, not the list: that is list_backtests."""
+    text = description("get_model")
+
+    assert "how many backtests used it (`backtest_count`)" in text
+    assert "list_backtests with `model` set to the model's name" in text
+    assert "backtest_count" in models.ModelOut.model_fields
+
+
 def test_another_s_or_an_unknown_model_is_not_found(mcp, service: FakeService) -> None:
     result = call(mcp, "get_model", {"model_id": "mdl_nobodyxxxx"})
 
@@ -533,12 +542,47 @@ def test_create_model_upload_answers_the_link_the_command_and_the_page(
     token = "t" * 40
     assert link["url"] == f"http://testserver/api/v1/uploads/{token}"
     assert link["page_url"] == f"http://testserver/upload/{token}"
-    assert link["command"] == f"curl --fail-with-body -T lstm.keras {link['url']}"
+    # A bare name is rarely where the file is: the command says where its path goes.
+    assert link["command"] == f"curl --fail-with-body -T ./path/to/lstm.keras {link['url']}"
     assert link["expires_at"] == "2026-11-02T09:45:00Z"
     assert "upl_7f3k2m9qx4" in link["next_steps"]
     assert "09:45 UTC" in link["next_steps"]
     [(_, user_id, new, _)] = service.calls
     assert (user_id, new) == (ADA.id, ModelUploadIn(name="lstm.keras", size_bytes=1000))
+
+
+@pytest.mark.parametrize(
+    ("file_name", "path"),
+    [
+        ("models/lstm.keras", "models/lstm.keras"),
+        ("/home/ada/my models/lstm.keras", "'/home/ada/my models/lstm.keras'"),
+        (r"C:\Users\Ada\lstm.onnx", r"'C:\Users\Ada\lstm.onnx'"),
+        # The home is left for the shell to expand: quoted, ~ stays a plain character.
+        ("~/models/lstm.keras", "~/models/lstm.keras"),
+        ("~/my models/lstm.keras", "~/'my models/lstm.keras'"),
+        ("$HOME/models/lstm.keras", '"$HOME"/models/lstm.keras'),
+    ],
+)
+def test_the_command_sends_the_file_at_the_path_given(
+    mcp, service: FakeService, file_name: str, path: str
+) -> None:
+    result = call(
+        mcp, "create_model_upload", {"file_name": file_name, "size_bytes": 1000}, MODELS_KEY
+    )
+
+    link = answer(result)
+    assert link["command"] == f"curl --fail-with-body -T {path} {link['url']}"
+
+
+def description(name: str) -> str:
+    return next(spec.description for spec in models.TOOLS if spec.name == name)
+
+
+def test_the_description_says_where_the_path_goes() -> None:
+    command = models.UploadLink.model_json_schema()["properties"]["command"]
+
+    assert "`./path/to/<name>` for a bare name" in command["description"]
+    assert "replace ./path/to/ with the folder the file is in" in description("create_model_upload")
 
 
 def test_a_link_that_does_not_fit_is_the_upload_s_problem(mcp, service: FakeService) -> None:

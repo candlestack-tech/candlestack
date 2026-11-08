@@ -1037,7 +1037,11 @@ call, as the routes' dependencies do), never the API over HTTP.
   scopes work, how errors read and link `https://candlestack.tech/docs/agents/` and
   `https://candlestack.tech/docs/mcp/`; the resource `candlestack://docs` (Markdown) lists the
   docs pages, the tool reference, the manifest and backtest result references with their JSON
-  Schemas, the problem pages and the API reference.
+  Schemas, the problem pages and the API reference. The manifest and the result document link
+  their sections of `docs/preprocessing.md` and `docs/engine.md` on GitHub until the website has
+  their pages (website#63, #64); a unit test fails when the instructions, the resource, a tool's
+  description or a description in its schemas links a page that is not in its list of known
+  pages.
 - **Tools**: one module per area, each with its `TOOLS`, which `server.TOOLS` puts together.
   - `account`: `get_me` (scope `read`): the key's user (ID, name, email, created) and the
     key's scopes.
@@ -1047,8 +1051,12 @@ call, as the routes' dependencies do), never the API over HTTP.
     timeframes and the period of its candles), `get_candles`, `preprocessing_catalog` (the
     blocks of a manifest, optionally of one step, without the app's `group` and `tunable`
     and without the bounds and options a parameter does not have), `get_backtest_defaults` (as
-    saved in Settings), `update_backtest_defaults` (scope `backtests`, as its route; replaces
-    every setting, so destructive and idempotent) and `get_preferences` (time zone, date and
+    saved in Settings, in percent and days, and the same settings in the units of
+    `start_backtest` to pass through: `period` in epoch seconds, ending now at the latest as
+    the builder's, `decision`, `execution` with the stop loss a fraction and the fees and
+    slippage in basis points, and `benchmark_instrument`), `update_backtest_defaults` (scope
+    `backtests`, as its route; replaces every setting, so destructive and idempotent; it takes
+    `get_backtest_defaults`' answer back as it is and ignores the four derived fields) and `get_preferences` (time zone, date and
     time format, so an agent writes times as the app shows them; not the theme). The
     instruments are compact: ID, name, exchange, price, 24 h change and volume, first candle;
     no symbol, source, feed or mini chart. They call the `DataService` of the routes and answer
@@ -1068,7 +1076,8 @@ call, as the routes' dependencies do), never the API over HTTP.
   - `models` (#403), on the models service and its problems (`ml.problems`):
     `list_models` (the models in short: ID, name, format, state, star, the manifest's
     timeframe and session, backtests, best Sharpe; and the storage), `get_model` (one in
-    full, as `GET /api/v1/models` shows it), `get_manifest` (the manifest with its defaults,
+    full, as `GET /api/v1/models` shows it, with `backtest_count`, not the list of its
+    backtests), `get_manifest` (the manifest with its defaults,
     its example left out unless `include_example`, with `example_samples`) and
     `validate_manifest` (the dry run of `POST .../manifest/check`), all `read`;
     `set_manifest` (destructive, as it replaces the manifest; starts the trial run as the
@@ -1078,8 +1087,10 @@ call, as the routes' dependencies do), never the API over HTTP.
     the same checks as a route's body (never by the tool's input schema), so a wrong one
     answers `manifest-check-failed` with the `field`, `detail` and `allowed` of each problem.
     The upload: `create_model_upload` (`models`) makes the one-time link of
-    `POST /api/v1/models/uploads` and answers its `id`, `expires_at`, the ready `curl`
-    `command`, the `url`, the app's upload page of the link (`page_url`,
+    `POST /api/v1/models/uploads` and answers its `id`, `expires_at`, the `curl` `command`
+    (with the path given as `file_name`, quoted but with a leading `~/` or `$HOME/` left for
+    the shell, or `./path/to/<name>` for a bare name, which the description asks to replace
+    with the file's folder; `ml.upload_curl` builds it for the route too), the `url`, the app's upload page of the link (`page_url`,
     `<PUBLIC_URL>/upload/<token>`, #406) and `next_steps` to tell the user: the file goes
     from the user's disk with curl or through that page, never through a tool.
     `get_model_upload` (`read`) says how it stands (`waiting`, `checking`, `done` with the
@@ -1110,7 +1121,9 @@ call, as the routes' dependencies do), never the API over HTTP.
     trades (`trades_page`, `trades_per_page` up to 500, oldest first, with `count`, `total` and
     `complete`) and the equity, drawdown and benchmarks at most 200 rows (evenly spaced, the
     first, the last and the deepest fall included, six decimals). `compare_backtests` (`read`)
-    answers `GET /api/v1/compare` for a list of 1 to 20 IDs, as it is. The access is that of the
+    answers `GET /api/v1/compare` for a list of 1 to 20 IDs, each backtest with its page's
+    `url` besides; its description says how to read `max_drawdown` (0 or below, a smaller fall
+    is better, though `better` says `lower`). The access is that of the
     routes: the user's own backtests and other accounts' while they are published.
   - `manage` (#405): listing, managing and publishing backtests, on `BacktestsService` and
     `BacktestRuns` with the routes' problems (`experiments.update_problems`,
@@ -1122,9 +1135,9 @@ call, as the routes' dependencies do), never the API over HTTP.
     (`publish`; destructive, the description says the backtest becomes visible to every account
     of the beta and asks the agent to check with the user first) and `get_dashboard` (`read`;
     the counts, the 6 newest that ended, the 5 best by each result and the 4 best starred). They
-    answer a compact backtest: no equity series, generated name, duration or other fields only
-    the app's cards and charts use, the model by its name and ID; Experiments the same with the
-    author, never the model file. The Dashboard's newest published backtests are left out, as
+    answer a compact backtest with its page's `url`: no equity series, generated name, duration or other fields only
+    the app's cards and charts use, the model by its name and ID; Experiments the same, `url`
+    included, with the author, never the model file. The Dashboard's newest published backtests are left out, as
     `list_experiments` lists them.
   - The tools of the other areas come with #399.
 - **Parity table** (`mcp/parity.py`): every endpoint of the API reference, by method and path,
@@ -1212,7 +1225,8 @@ backend like the rest of the API; the metadata (RFC 8414) is served at
   after its use deletes the whole family, as a copy is in someone else's hands. Within those 60
   seconds it is only refused (`invalid_grant`): that is a retry after a lost answer, or two
   sessions of one client sharing the token, and ending the family would sign the user out
-  everywhere. A refresh may narrow the scopes, never widen them (`invalid_scope`); one without
+  everywhere; it is logged as a warning, since a stolen copy used in time looks the same. A
+  refresh may narrow the scopes, never widen them (`invalid_scope`); one without
   `scope` keeps the scopes of the token it uses, so after a narrowing it stays narrow (not the
   scopes first granted, which RFC 6749 section 6 allows). Every use checks the beta list and the client the token belongs to;
   expired tokens of an app go when it gets new ones. `POST /api/v1/oauth/revoke` (RFC 7009)

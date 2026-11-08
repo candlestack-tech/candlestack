@@ -943,9 +943,11 @@ export interface paths {
         /**
          * Token
          * @description The token endpoint: trades a code and its PKCE verifier, or a refresh token, for an
-         *     access token (`csa_...`, an hour) and a new refresh token (`csr_...`, 30 days, works once;
-         *     bringing a used one again revokes every token of that sign-in). A public client sends its
-         *     `client_id`; a client with a secret authenticates as it registered.
+         *     access token (`csa_...`, an hour) and a new refresh token (`csr_...`, 30 days, works once).
+         *     A used refresh token brought again within 60 seconds of its use is only refused
+         *     (`invalid_grant`), as a retry or another session of the client; later, it revokes every token
+         *     of that sign-in. A public client sends its `client_id`; a client with a secret authenticates
+         *     as it registered.
          */
         post: operations["token_api_v1_oauth_token_post"];
         delete?: never;
@@ -2426,7 +2428,7 @@ export interface components {
         CompareMetric: {
             /**
              * Better
-             * @description Which way is better: `higher`, `lower` (a fall by its size, whatever its sign; the fees) or `none` (more trades, time in the market and buy and hold are not better in themselves, so none is marked)
+             * @description Which way is better: `higher`, `lower` or `none` (more trades, time in the market and buy and hold are not better in themselves, so none is marked). `lower` is the fees, and the max drawdown by the size of the fall: its values are 0 or below and a smaller fall is better, so -0.05 beats -0.20 and its best is the highest value
              * @enum {string}
              */
             better: "higher" | "lower" | "none";
@@ -4663,7 +4665,7 @@ export interface components {
             backtests: components["schemas"]["SweepRanked"][];
             /**
              * Better
-             * @description Which way is better: `lower` for a fall by its size and for the fees
+             * @description Which way is better: `lower` for the fees, and for the max drawdown by the size of the fall: its values are 0 or below and a smaller fall is better, so -0.05 beats -0.20 and ranks first
              * @enum {string}
              */
             better: "higher" | "lower";

@@ -293,6 +293,7 @@ def test_list_backtests_passes_the_search_filters_sort_and_page(mcp, service) ->
     assert listed["model"] == "blesk.keras"
     assert listed["model_id"] == "mdl_k2m9qx47f3"
     assert listed["setup"]["timeframe"] == "1h"
+    assert listed["url"] == "http://testserver/backtests/bt_0000000012"
     for left_out in ("equity", "generated_name", "seeded", "duration_s", "finished_at"):
         assert left_out not in listed
 
@@ -468,6 +469,13 @@ def test_list_experiments_passes_the_search_scope_filters_sort_and_page(mcp, ser
     assert "equity" not in listed
 
 
+def test_list_experiments_gives_each_backtest_s_page(mcp, service) -> None:
+    [listed] = call(mcp, "list_experiments", {}, READ).structured_content["experiments"]
+
+    # The page of a published backtest, which every signed-in account can open.
+    assert listed["url"] == f"http://testserver/backtests/{EXPERIMENT.id}"
+
+
 def test_list_experiments_defaults_to_everyones_newest(mcp, service) -> None:
     assert not call(mcp, "list_experiments", {}, READ).is_error
 
@@ -539,3 +547,10 @@ def test_get_dashboard(mcp, service) -> None:
     [starred] = dashboard["starred"]
     assert starred["starred"] is True
     assert "equity" not in starred
+    # Every backtest it names has its page, to show the user.
+    listed = [*dashboard["newest"], *dashboard["starred"]]
+    listed += [item for items in dashboard["best"].values() for item in items]
+    assert len(listed) == 6
+    assert [item["url"] for item in listed] == [
+        f"http://testserver/backtests/{item['id']}" for item in listed
+    ]

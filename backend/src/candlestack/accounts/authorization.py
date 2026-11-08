@@ -702,7 +702,14 @@ class AuthorizationServer:
         now = _now()
         if token.rotated_at is not None:
             if now - token.rotated_at < REFRESH_GRACE:
-                # A retry, or another session of the client that holds the same token.
+                # A retry, or another session of the client that holds the same token; logged,
+                # as it could also be a stolen copy used in time.
+                logger.warning(
+                    "A used refresh token of the connected app %s came again within %d s: "
+                    "refused, its family of tokens kept",
+                    app.id,
+                    REFRESH_GRACE.total_seconds(),
+                )
                 raise _invalid_grant("The refresh token was used already.")
             await self._store.delete_family(token.family)
             await self._store.commit()

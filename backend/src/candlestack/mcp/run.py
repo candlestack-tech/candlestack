@@ -26,6 +26,7 @@ from candlestack.experiments import (
     BacktestIn,
     BacktestRuns,
     BenchmarkIn,
+    ComparedBacktest,
     CompareOut,
     DataIn,
     Decision,
@@ -36,7 +37,15 @@ from candlestack.experiments import (
     backtest_runs,
     check_ids,
 )
-from candlestack.mcp.convention import Example, ToolCall, ToolSpec, changes, reads, tool_call
+from candlestack.mcp.convention import (
+    Example,
+    ToolCall,
+    ToolSpec,
+    backtest_url,
+    changes,
+    reads,
+    tool_call,
+)
 
 # The longest wait of one call of wait_for_backtest: clients give up on a call after a minute
 # or so, and the transport answers JSON at the end of the call, so the agent calls again.
@@ -118,6 +127,16 @@ class BacktestSummary(BaseModel):
     finished_at: datetime | None
     duration_s: float | None
     url: str = Field(description="The backtest's page in the app, to show the user")
+
+
+class ComparedBacktestOut(ComparedBacktest):
+    url: str = Field(description="The backtest's page in the app, to show the user")
+
+
+class CompareResult(CompareOut):
+    """Backtests side by side, in the order asked for, each with its page in the app."""
+
+    backtests: list[ComparedBacktestOut]
 
 
 class ModelOut(BaseModel):
@@ -221,10 +240,6 @@ async def _runs(call: ToolCall) -> AsyncIterator[BacktestRuns]:
             yield backtest_runs(call.state, db)
 
 
-def _url(call: ToolCall, backtest_id: str) -> str:
-    return f"{call.settings.public_url}/backtests/{backtest_id}"
-
-
 def _status(call: ToolCall, header: BacktestHeader) -> BacktestStatusResult:
     return BacktestStatusResult(
         id=header.id,
@@ -249,7 +264,7 @@ def _status(call: ToolCall, header: BacktestHeader) -> BacktestStatusResult:
             )
             for step in header.steps
         ],
-        url=_url(call, header.id),
+        url=backtest_url(call, header.id),
     )
 
 
@@ -422,9 +437,15 @@ async def start_backtest(
     with a manifest), data.instrument.id (<market>:<symbol>: a stock for a model of US trading
     hours, a crypto pair for one of 24/7) and data.period ([start, end) in UTC epoch seconds),
     and optionally decision (how the predictions become a signal: threshold 0 by default),
-    execution (fills, stop loss, position size, fees and slippage in basis points) and
-    benchmarks (buy and hold of the instrument, or of SPY, QQQ or DIA for a stock). The `setup`
-    get_backtest answers has this shape, so a backtest can be run again with changes.
+    execution (fills, stop loss, position size, fees and slippage) and benchmarks (buy and
+    hold of the instrument, or of SPY, QQQ or DIA for a stock). The `setup` get_backtest
+    answers has this shape, so a backtest can be run again with changes.
+
+    Units: execution.stop_loss and position_size are fractions (0.07 is 7 %), fee_bps and
+    slippage_bps basis points (10 is 0.1 %), not the percent of the app's Settings.
+    get_backtest_defaults answers the user's defaults in these units too (`period`,
+    `decision`, `execution`, `benchmark_instrument`): pass them through for every setting the
+    user does not name.
 
     Answers its ID and status at once; the run takes from seconds to minutes. Then call
     wait_for_backtest with the ID until it has ended, and get_backtest for the results."""
@@ -497,7 +518,7 @@ async def get_backtest(
         _, content = await runs.document(call.user.id, backtest_id, light=True)
     return backtest_result(
         json.loads(content),
-        _url(call, backtest_id),
+        backtest_url(call, backtest_id),
         trades_page=trades_page,
         trades_per_page=trades_per_page,
     )
@@ -515,16 +536,28 @@ async def compare_backtests(
     ],
     *,
     ctx: Context,
-) -> CompareOut:
+) -> CompareResult:
     """Compares backtests side by side, as the app's Compare page does: each of the 12
     statistics of each with the best and the worst marked (values that read the same count as
     equal), their setups and which setup fields differ, and the equity, drawdown and buy and
     hold of each on one time axis of at most 200 times. Use it to pick the best of several
     runs; it reads only what each stored, so it is quick. A running or failed backtest is
-    listed with its status and no values."""
+    listed with its status and no values. Each backtest has its `url`, the page to show the
+    user.
+
+    max_drawdown is 0 or below and a smaller fall is better: -0.05 is better than -0.20, so its
+    best value is the highest one; its `better` says `lower` as in a lower fall, by its size.
+    The marks already account for it."""
     call = tool_call(ctx)
     async with _runs(call) as runs:
-        return await experiments.compare_backtests(runs, call.user.id, check_ids(ids))
+        compared = await experiments.compare_backtests(runs, call.user.id, check_ids(ids))
+    return CompareResult(
+        **compared.model_dump(exclude={"backtests"}),
+        backtests=[
+            ComparedBacktestOut(**backtest.model_dump(), url=backtest_url(call, backtest.id))
+            for backtest in compared.backtests
+        ],
+    )
 
 
 # --- Examples for the tool reference ----------------------------------------------------------
@@ -708,7 +741,7 @@ _RESULT = BacktestResult(
         benchmarks={"bh": [1.0, 1.1213, 1.0544]},
     ),
 )
-_COMPARE = CompareOut.model_validate(
+_COMPARE = CompareResult.model_validate(
     {
         "backtests": [
             {
@@ -724,6 +757,7 @@ _COMPARE = CompareOut.model_validate(
                 "equity": [0.0, 0.0812],
                 "drawdown": [0.0, 0.0],
                 "buy_and_hold": [0.0, 0.0544],
+                "url": _URL,
             },
             {
                 "id": "bt_t9n8v7d6a5",
@@ -738,6 +772,7 @@ _COMPARE = CompareOut.model_validate(
                 "equity": [0.0, -0.031],
                 "drawdown": [0.0, -0.05],
                 "buy_and_hold": [0.0, 0.0544],
+                "url": "https://app.candlestack.tech/backtests/bt_t9n8v7d6a5",
             },
         ],
         "metrics": [

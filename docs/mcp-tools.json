@@ -1009,7 +1009,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Every block a model's manifest can name, by step: the representation (which rows the model sees), the features (its columns, in order), their normalization and the window (rows to samples), each with its versioned ID, what it does, its warm-up and its parameters with types, ranges and defaults. Use it to write or check a manifest, or to explain what a model's input is made of; the manifest format is on https://candlestack.tech/docs/manifest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#preprocessing_catalog",
+      "description": "Every block a model's manifest can name, by step: the representation (which rows the model sees), the features (its columns, in order), their normalization and the window (rows to samples), each with its versioned ID, what it does, its warm-up and its parameters with types, ranges and defaults. Use it to write or check a manifest, or to explain what a model's input is made of. The manifest format: https://github.com/candlestack-tech/candlestack/blob/main/docs/preprocessing.md#the-manifest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#preprocessing_catalog",
       "endpoints": [
         "GET /api/v1/preprocessing/catalog"
       ],
@@ -1295,7 +1295,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "How the user's new backtests start, as saved in Settings, Backtest defaults (or the app's defaults): timeframe, period, direction (long only or both), the signal threshold, stop loss, fees, slippage and the benchmark. Use these for every setting of a backtest the user does not name, so it runs as the app would start it.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_backtest_defaults",
+      "description": "How the user's new backtests start, as saved in Settings, Backtest defaults (or the app's defaults): timeframe, period, direction (long only or both), the signal threshold, stop loss, fees, slippage and the benchmark. Use these for every setting of a backtest the user does not name, so it runs as the app would start it.\n\nThe settings come twice. As Settings shows them: `stop_loss_pct`, `fees_pct` and `slippage_pct` in percent, the period in days. And in the units start_backtest takes, to pass through unchanged: `period` (data.period, UTC epoch seconds), `decision`, `execution` (stop_loss a fraction, fee_bps and slippage_bps in basis points) and `benchmark_instrument` (the instrument of the buy and hold benchmark; null for the backtest's own). The timeframe is not an argument of start_backtest: a backtest runs at its model's.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_backtest_defaults",
       "endpoints": [
         "GET /api/v1/me/preferences"
       ],
@@ -1303,8 +1303,32 @@
         "arguments": {},
         "result": {
           "benchmark": "bh",
+          "benchmark_instrument": null,
+          "decision": {
+            "calibrate": null,
+            "confirm": null,
+            "ema": null,
+            "long_only": true,
+            "min_hold": null,
+            "rule": {
+              "limit": 0.05,
+              "name": "threshold"
+            }
+          },
           "direction": "long",
+          "execution": {
+            "drawdown_stop": null,
+            "fee_bps": 10.0,
+            "fill": "next_open",
+            "position_size": 1.0,
+            "slippage_bps": 2.0,
+            "stop_loss": 0.07
+          },
           "fees_pct": 0.1,
+          "period": {
+            "end": 1735689600,
+            "start": 1609718400
+          },
           "period_end": "2024-12-31",
           "period_start": "2021-01-04",
           "slippage_pct": 0.02,
@@ -1346,6 +1370,133 @@
             "title": "Benchmark",
             "type": "string"
           },
+          "CalibrateStep": {
+            "additionalProperties": false,
+            "description": "`zscore` or `rank` over the `window` predictions ending at each one.",
+            "properties": {
+              "name": {
+                "enum": [
+                  "zscore",
+                  "rank"
+                ],
+                "title": "Name",
+                "type": "string"
+              },
+              "window": {
+                "maximum": 1000,
+                "minimum": 2,
+                "title": "Window",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "name",
+              "window"
+            ],
+            "title": "CalibrateStep",
+            "type": "object"
+          },
+          "CandlesStep": {
+            "additionalProperties": false,
+            "properties": {
+              "candles": {
+                "minimum": 1,
+                "title": "Candles",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "candles"
+            ],
+            "title": "CandlesStep",
+            "type": "object"
+          },
+          "Decision": {
+            "additionalProperties": false,
+            "description": "How the predictions become a signal: each step of docs/engine.md (Signals) in the order\napplied, null when off; exactly what the command's `run.json` records.",
+            "properties": {
+              "calibrate": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CalibrateStep"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "confirm": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CandlesStep"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Count a value only once it held this many candles"
+              },
+              "ema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/EmaStep"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "long_only": {
+                "default": false,
+                "description": "Flat instead of short",
+                "title": "Long Only",
+                "type": "boolean"
+              },
+              "min_hold": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CandlesStep"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Keep each new position for at least this many candles"
+              },
+              "rule": {
+                "default": {
+                  "limit": 0.0,
+                  "name": "threshold"
+                },
+                "discriminator": {
+                  "mapping": {
+                    "hysteresis": "#/$defs/HysteresisRule",
+                    "kmeans": "#/$defs/KmeansRule",
+                    "threshold": "#/$defs/ThresholdRule"
+                  },
+                  "propertyName": "name"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/ThresholdRule"
+                  },
+                  {
+                    "$ref": "#/$defs/HysteresisRule"
+                  },
+                  {
+                    "$ref": "#/$defs/KmeansRule"
+                  }
+                ],
+                "title": "Rule"
+              }
+            },
+            "title": "Decision",
+            "type": "object"
+          },
           "Direction": {
             "enum": [
               "long",
@@ -1353,19 +1504,240 @@
             ],
             "title": "Direction",
             "type": "string"
+          },
+          "EmaStep": {
+            "additionalProperties": false,
+            "properties": {
+              "span": {
+                "description": "The span of the exponential moving average",
+                "minimum": 1,
+                "title": "Span",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "span"
+            ],
+            "title": "EmaStep",
+            "type": "object"
+          },
+          "Execution": {
+            "additionalProperties": false,
+            "description": "How the engine fills orders and what they cost: the engine's `Settings`\n(docs/engine.md, Settings). Fractions: 0.05 is 5%; a basis point is 0.01%.",
+            "properties": {
+              "drawdown_stop": {
+                "anyOf": [
+                  {
+                    "exclusiveMaximum": 1,
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Drawdown Stop"
+              },
+              "fee_bps": {
+                "default": 0.0,
+                "minimum": 0,
+                "title": "Fee Bps",
+                "type": "number"
+              },
+              "fill": {
+                "default": "next_open",
+                "enum": [
+                  "next_open",
+                  "signal_close"
+                ],
+                "title": "Fill",
+                "type": "string"
+              },
+              "position_size": {
+                "default": 1.0,
+                "exclusiveMinimum": 0,
+                "maximum": 1,
+                "title": "Position Size",
+                "type": "number"
+              },
+              "slippage_bps": {
+                "default": 0.0,
+                "minimum": 0,
+                "title": "Slippage Bps",
+                "type": "number"
+              },
+              "stop_loss": {
+                "anyOf": [
+                  {
+                    "exclusiveMaximum": 1,
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Stop Loss"
+              }
+            },
+            "title": "Execution",
+            "type": "object"
+          },
+          "HysteresisRule": {
+            "additionalProperties": false,
+            "properties": {
+              "enter": {
+                "description": "The limit a position opens at",
+                "minimum": 0,
+                "title": "Enter",
+                "type": "number"
+              },
+              "exit": {
+                "description": "The limit it closes below, at most `enter`",
+                "minimum": 0,
+                "title": "Exit",
+                "type": "number"
+              },
+              "name": {
+                "const": "hysteresis",
+                "title": "Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "enter",
+              "exit"
+            ],
+            "title": "HysteresisRule",
+            "type": "object"
+          },
+          "KmeansRule": {
+            "additionalProperties": false,
+            "properties": {
+              "k": {
+                "description": "Groups: long in the highest, short in the lowest",
+                "maximum": 5,
+                "minimum": 2,
+                "title": "K",
+                "type": "integer"
+              },
+              "name": {
+                "const": "kmeans",
+                "title": "Name",
+                "type": "string"
+              },
+              "refit_every": {
+                "description": "Rows a fit is used for, at least `window / 20`",
+                "minimum": 1,
+                "title": "Refit Every",
+                "type": "integer"
+              },
+              "window": {
+                "description": "Earlier predictions a fit uses, at least `2 * k`",
+                "maximum": 5000,
+                "title": "Window",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "name",
+              "k",
+              "window",
+              "refit_every"
+            ],
+            "title": "KmeansRule",
+            "type": "object"
+          },
+          "Period": {
+            "additionalProperties": false,
+            "description": "The test period `[start, end)` in UTC epoch seconds of a candle's open.",
+            "properties": {
+              "end": {
+                "description": "End of the test, excluded",
+                "examples": [
+                  1717459200
+                ],
+                "minimum": 0,
+                "title": "End",
+                "type": "integer"
+              },
+              "start": {
+                "description": "First second of the test",
+                "examples": [
+                  1717372800
+                ],
+                "minimum": 0,
+                "title": "Start",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "start",
+              "end"
+            ],
+            "title": "Period",
+            "type": "object"
+          },
+          "ThresholdRule": {
+            "additionalProperties": false,
+            "properties": {
+              "limit": {
+                "description": "Long at a prediction of `limit` or more, short at `-limit` or less",
+                "minimum": 0,
+                "title": "Limit",
+                "type": "number"
+              },
+              "name": {
+                "const": "threshold",
+                "title": "Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "limit"
+            ],
+            "title": "ThresholdRule",
+            "type": "object"
           }
         },
-        "description": "How new backtests start (Settings, Backtest defaults).",
+        "description": "The backtest defaults twice: as Settings shows them, in percent (`stop_loss_pct`,\n`fees_pct`, `slippage_pct`) and days, and in the units start_backtest takes (`period`,\n`decision`, `execution`, `benchmark_instrument`).",
         "properties": {
           "benchmark": {
             "$ref": "#/$defs/Benchmark",
             "default": "bh",
             "description": "What the result is measured against: bh buy and hold of the backtest's own instrument, or the ETF SPY, QQQ or DIA"
           },
+          "benchmark_instrument": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`benchmark` as the `instrument` of start_backtest's `benchmarks` item (`kind` buy_and_hold): null for the backtest's own instrument, else stock:SPY, stock:QQQ or stock:DIA, for a stock backtest only",
+            "examples": [
+              null
+            ],
+            "title": "Benchmark Instrument"
+          },
+          "decision": {
+            "$ref": "#/$defs/Decision",
+            "description": "`threshold` and `direction` as start_backtest's `decision`: the threshold rule with `limit` the threshold, `long_only` for the direction long"
+          },
           "direction": {
             "$ref": "#/$defs/Direction",
             "default": "long",
             "description": "long: long trades only, flat on a sell signal; both: long and short"
+          },
+          "execution": {
+            "$ref": "#/$defs/Execution",
+            "description": "`stop_loss_pct`, `fees_pct` and `slippage_pct` as start_backtest's `execution`: `stop_loss` a fraction (7 % is 0.07), `fee_bps` and `slippage_bps` in basis points (0.1 % is 10)"
           },
           "fees_pct": {
             "default": 0.1,
@@ -1374,6 +1746,10 @@
             "minimum": 0,
             "title": "Fees Pct",
             "type": "number"
+          },
+          "period": {
+            "$ref": "#/$defs/Period",
+            "description": "`period_start` to `period_end` as start_backtest's `data.period`: UTC epoch seconds from the first day's midnight to the midnight after the last day (excluded), or to now while that day has not ended, as the app's builder sends it"
           },
           "period_end": {
             "default": "2024-12-31",
@@ -1420,7 +1796,13 @@
             "description": "Length of one candle the model sees"
           }
         },
-        "title": "BacktestDefaults",
+        "required": [
+          "period",
+          "decision",
+          "execution",
+          "benchmark_instrument"
+        ],
+        "title": "BacktestDefaultsOut",
         "type": "object"
       },
       "scopes": [
@@ -1467,17 +1849,32 @@
       },
       "inputSchema": {
         "$defs": {
-          "BacktestDefaultsIn": {
+          "BacktestDefaultsArg": {
             "additionalProperties": false,
-            "description": "The backtest defaults to save (Save defaults): every field, and no other. The same\nchecks as `BacktestDefaults`, but no defaults, so a body that leaves a field out is\nrefused instead of filled in.",
+            "description": "The backtest defaults to save, in Settings' units. The settings in start_backtest's\nunits that get_backtest_defaults adds are taken and ignored, so its answer can come back\nwith one setting changed.",
             "properties": {
               "benchmark": {
                 "$ref": "#/$defs/Benchmark",
                 "description": "What the result is measured against: bh buy and hold of the backtest's own instrument, or the ETF SPY, QQQ or DIA"
               },
+              "benchmark_instrument": {
+                "default": null,
+                "description": "Ignored: get_backtest_defaults derives it from the settings above",
+                "title": "Benchmark Instrument"
+              },
+              "decision": {
+                "default": null,
+                "description": "Ignored: get_backtest_defaults derives it from the settings above",
+                "title": "Decision"
+              },
               "direction": {
                 "$ref": "#/$defs/Direction",
                 "description": "long: long trades only, flat on a sell signal; both: long and short"
+              },
+              "execution": {
+                "default": null,
+                "description": "Ignored: get_backtest_defaults derives it from the settings above",
+                "title": "Execution"
               },
               "fees_pct": {
                 "description": "Fees in percent per side",
@@ -1485,6 +1882,11 @@
                 "minimum": 0,
                 "title": "Fees Pct",
                 "type": "number"
+              },
+              "period": {
+                "default": null,
+                "description": "Ignored: get_backtest_defaults derives it from the settings above",
+                "title": "Period"
               },
               "period_end": {
                 "description": "Last day of the test",
@@ -1536,7 +1938,7 @@
               "slippage_pct",
               "benchmark"
             ],
-            "title": "BacktestDefaultsIn",
+            "title": "BacktestDefaultsArg",
             "type": "object"
           },
           "BacktestTimeframe": {
@@ -1575,8 +1977,8 @@
         },
         "properties": {
           "defaults": {
-            "$ref": "#/$defs/BacktestDefaultsIn",
-            "description": "Every setting, as get_backtest_defaults answers them"
+            "$ref": "#/$defs/BacktestDefaultsArg",
+            "description": "Every setting in Settings' units, as get_backtest_defaults answers them in percent and days: timeframe, period_start, period_end, direction, threshold, stop_loss_pct, fees_pct, slippage_pct and benchmark. Its answer can be sent back as it is: `period`, `decision`, `execution` and `benchmark_instrument` are ignored"
           }
         },
         "required": [
@@ -1986,7 +2388,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "One of the user's models in full: its file (format, size, weights, input and output shapes), its state, what its manifest says in short (representation, timeframe, session, input shape, warm-up), its backtests, and how the trial run of its manifest went.\n\nAfter set_manifest, call it to see the trial run: `checked_at` is set when it ended, `state` is `verified` when it passed, and `check_failed` with `check_error` say why it failed (the model stays `ready`). get_manifest gives the whole manifest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_model",
+      "description": "One of the user's models in full: its file (format, size, weights, input and output shapes), its state, what its manifest says in short (representation, timeframe, session, input shape, warm-up), how many backtests used it (`backtest_count`) and the best Sharpe ratio of them, and how the trial run of its manifest went. The backtests themselves are list_backtests with `model` set to the model's name.\n\nAfter set_manifest, call it to see the trial run: `checked_at` is set when it ended, `state` is `verified` when it passed, and `check_failed` with `check_error` say why it failed (the model stays `ready`). get_manifest gives the whole manifest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_model",
       "endpoints": [
         "GET /api/v1/models"
       ],
@@ -2955,7 +3357,7 @@
         "properties": {
           "manifest": {
             "additionalProperties": true,
-            "description": "The manifest as a JSON object, version 1: `version`, `input` (timeframe, session, representation, features with their normalization, window), `signature` (input and output shapes) and optionally `example` and `about`. Guide: https://candlestack.tech/docs/manifest; JSON Schema: https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/manifest.schema.json. At most 1 MB as JSON.",
+            "description": "The manifest as a JSON object, version 1: `version`, `input` (timeframe, session, representation, features with their normalization, window), `signature` (input and output shapes) and optionally `example` and `about`. Guide: https://github.com/candlestack-tech/candlestack/blob/main/docs/preprocessing.md#the-manifest; JSON Schema: https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/manifest.schema.json. At most 1 MB as JSON.",
             "title": "Manifest",
             "type": "object"
           },
@@ -3208,7 +3610,7 @@
         "properties": {
           "manifest": {
             "additionalProperties": true,
-            "description": "The manifest as a JSON object, version 1: `version`, `input` (timeframe, session, representation, features with their normalization, window), `signature` (input and output shapes) and optionally `example` and `about`. Guide: https://candlestack.tech/docs/manifest; JSON Schema: https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/manifest.schema.json. At most 1 MB as JSON.",
+            "description": "The manifest as a JSON object, version 1: `version`, `input` (timeframe, session, representation, features with their normalization, window), `signature` (input and output shapes) and optionally `example` and `about`. Guide: https://github.com/candlestack-tech/candlestack/blob/main/docs/preprocessing.md#the-manifest; JSON Schema: https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/manifest.schema.json. At most 1 MB as JSON.",
             "title": "Manifest",
             "type": "object"
           },
@@ -4027,7 +4429,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Makes a one-time link to upload a model file (Keras `.keras` or ONNX `.onnx`, at most 50 MB) into the user's models. You never send the file through a tool: the file goes from the user's computer to the link, either by running `command` (curl) in the folder the file is in, or by opening `page_url` in the browser and dropping the file there.\n\nThe link takes one file within 15 minutes and counts against the user's storage; the file is checked as any upload (a real model with trained weights, nothing from it run). Treat `url` and `command` like a key until the upload is done. Then call get_model_upload with the link's `id` to see how it went and get the new model's ID; give the model a manifest with set_manifest before backtesting it.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#create_model_upload",
+      "description": "Makes a one-time link to upload a model file (Keras `.keras` or ONNX `.onnx`, at most 50 MB) into the user's models. You never send the file through a tool: the file goes from the user's computer to the link, either by running `command` (curl), or by opening `page_url` in the browser and dropping the file there.\n\n`command` sends the file at the path given as `file_name`. Given only a name, it reads ./path/to/<name>: replace ./path/to/ with the folder the file is in (the file on disk may have another name than the model gets) before it runs.\n\nThe link takes one file within 15 minutes and counts against the user's storage; the file is checked as any upload (a real model with trained weights, nothing from it run). Treat `url` and `command` like a key until the upload is done. Then call get_model_upload with the link's `id` to see how it went and get the new model's ID; give the model a manifest with set_manifest before backtesting it.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#create_model_upload",
       "endpoints": [
         "POST /api/v1/models",
         "POST /api/v1/models/uploads"
@@ -4038,11 +4440,11 @@
           "size_bytes": 1489779
         },
         "result": {
-          "command": "curl --fail-with-body -T lstm.keras https://app.candlestack.tech/api/v1/uploads/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "command": "curl --fail-with-body -T ./path/to/lstm.keras https://app.candlestack.tech/api/v1/uploads/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
           "expires_at": "2026-11-02T09:45:00Z",
           "id": "upl_7f3k2m9qx4",
           "name": "lstm.keras",
-          "next_steps": "Ask the user to upload lstm.keras before 09:45 UTC: either run the command in the folder the file is in, or open the page and drop the file there. Then call get_model_upload with id upl_7f3k2m9qx4.",
+          "next_steps": "Ask the user to upload lstm.keras before 09:45 UTC: either run the command with the file's path on their computer after -T, or open the page and drop the file there. Then call get_model_upload with id upl_7f3k2m9qx4.",
           "page_url": "https://app.candlestack.tech/upload/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
           "size_bytes": 1489779,
           "url": "https://app.candlestack.tech/api/v1/uploads/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
@@ -4051,7 +4453,7 @@
       "inputSchema": {
         "properties": {
           "file_name": {
-            "description": "The model file's name, extension included (`.keras` or `.onnx`), or its path on the user's computer; the model gets the base name",
+            "description": "The model file's path on the user's computer, or only its name, extension included (`.keras` or `.onnx`); the model gets the base name. With a path, `command` runs as it is; with a name, its path is a placeholder",
             "examples": [
               "lstm.keras"
             ],
@@ -4079,7 +4481,7 @@
         "description": "A one-time link to upload a model file through.",
         "properties": {
           "command": {
-            "description": "The curl command that uploads the file, run in the folder it is in on the user's computer; it prints the problem when the upload is refused",
+            "description": "The curl command that uploads the file from the user's computer; it prints the problem when the upload is refused. It is for a POSIX shell (bash, zsh: macOS, Linux, WSL, Git Bash), not cmd.exe or PowerShell. The file's local path follows `-T`: the path given as `file_name`, or `./path/to/<name>` for a bare name, to replace with where the file is",
             "title": "Command",
             "type": "string"
           },
@@ -5116,7 +5518,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Starts a backtest of one of the user's models on one instrument and period. One backtest of a user runs at a time and up to 20 more wait in the queue, so it starts running at once or waits (queued, with its place).\n\nThe arguments are the body of POST /api/v1/backtests: model.id (one of the user's models with a manifest), data.instrument.id (<market>:<symbol>: a stock for a model of US trading hours, a crypto pair for one of 24/7) and data.period ([start, end) in UTC epoch seconds), and optionally decision (how the predictions become a signal: threshold 0 by default), execution (fills, stop loss, position size, fees and slippage in basis points) and benchmarks (buy and hold of the instrument, or of SPY, QQQ or DIA for a stock). The `setup` get_backtest answers has this shape, so a backtest can be run again with changes.\n\nAnswers its ID and status at once; the run takes from seconds to minutes. Then call wait_for_backtest with the ID until it has ended, and get_backtest for the results.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#start_backtest",
+      "description": "Starts a backtest of one of the user's models on one instrument and period. One backtest of a user runs at a time and up to 20 more wait in the queue, so it starts running at once or waits (queued, with its place).\n\nThe arguments are the body of POST /api/v1/backtests: model.id (one of the user's models with a manifest), data.instrument.id (<market>:<symbol>: a stock for a model of US trading hours, a crypto pair for one of 24/7) and data.period ([start, end) in UTC epoch seconds), and optionally decision (how the predictions become a signal: threshold 0 by default), execution (fills, stop loss, position size, fees and slippage) and benchmarks (buy and hold of the instrument, or of SPY, QQQ or DIA for a stock). The `setup` get_backtest answers has this shape, so a backtest can be run again with changes.\n\nUnits: execution.stop_loss and position_size are fractions (0.07 is 7 %), fee_bps and slippage_bps basis points (10 is 0.1 %), not the percent of the app's Settings. get_backtest_defaults answers the user's defaults in these units too (`period`, `decision`, `execution`, `benchmark_instrument`): pass them through for every setting the user does not name.\n\nAnswers its ID and status at once; the run takes from seconds to minutes. Then call wait_for_backtest with the ID until it has ended, and get_backtest for the results.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#start_backtest",
       "endpoints": [
         "POST /api/v1/backtests"
       ],
@@ -7706,7 +8108,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Compares backtests side by side, as the app's Compare page does: each of the 12 statistics of each with the best and the worst marked (values that read the same count as equal), their setups and which setup fields differ, and the equity, drawdown and buy and hold of each on one time axis of at most 200 times. Use it to pick the best of several runs; it reads only what each stored, so it is quick. A running or failed backtest is listed with its status and no values.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#compare_backtests",
+      "description": "Compares backtests side by side, as the app's Compare page does: each of the 12 statistics of each with the best and the worst marked (values that read the same count as equal), their setups and which setup fields differ, and the equity, drawdown and buy and hold of each on one time axis of at most 200 times. Use it to pick the best of several runs; it reads only what each stored, so it is quick. A running or failed backtest is listed with its status and no values. Each backtest has its `url`, the page to show the user.\n\nmax_drawdown is 0 or below and a smaller fall is better: -0.05 is better than -0.20, so its best value is the highest one; its `better` says `lower` as in a lower fall, by its size. The marks already account for it.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#compare_backtests",
       "endpoints": [
         "GET /api/v1/compare"
       ],
@@ -7751,7 +8153,8 @@
                 },
                 "instrument": "stock:AAPL"
               },
-              "status": "finished"
+              "status": "finished",
+              "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4"
             },
             {
               "author": {
@@ -7785,7 +8188,8 @@
                 },
                 "instrument": "stock:AAPL"
               },
-              "status": "finished"
+              "status": "finished",
+              "url": "https://app.candlestack.tech/backtests/bt_t9n8v7d6a5"
             }
           ],
           "differs": [
@@ -7855,7 +8259,7 @@
             "description": "One statistic of every backtest, in the order of `backtests`.",
             "properties": {
               "better": {
-                "description": "Which way is better: `higher`, `lower` (a fall by its size, whatever its sign; the fees) or `none` (more trades, time in the market and buy and hold are not better in themselves, so none is marked)",
+                "description": "Which way is better: `higher`, `lower` or `none` (more trades, time in the market and buy and hold are not better in themselves, so none is marked). `lower` is the fees, and the max drawdown by the size of the fall: its values are 0 or below and a smaller fall is better, so -0.05 beats -0.20 and its best is the highest value",
                 "enum": [
                   "higher",
                   "lower",
@@ -7937,7 +8341,7 @@
             "title": "CompareMetric",
             "type": "object"
           },
-          "ComparedBacktest": {
+          "ComparedBacktestOut": {
             "properties": {
               "author": {
                 "$ref": "#/$defs/DocumentAuthor"
@@ -8071,6 +8475,11 @@
               "status": {
                 "$ref": "#/$defs/BacktestStatus",
                 "description": "A running or failed backtest has no values, marks or curves"
+              },
+              "url": {
+                "description": "The backtest's page in the app, to show the user",
+                "title": "Url",
+                "type": "string"
               }
             },
             "required": [
@@ -8085,9 +8494,10 @@
               "candles",
               "equity",
               "drawdown",
-              "buy_and_hold"
+              "buy_and_hold",
+              "url"
             ],
-            "title": "ComparedBacktest",
+            "title": "ComparedBacktestOut",
             "type": "object"
           },
           "DocumentAuthor": {
@@ -8124,11 +8534,11 @@
             "type": "object"
           }
         },
-        "description": "Backtests side by side, in the order asked for.",
+        "description": "Backtests side by side, in the order asked for, each with its page in the app.",
         "properties": {
           "backtests": {
             "items": {
-              "$ref": "#/$defs/ComparedBacktest"
+              "$ref": "#/$defs/ComparedBacktestOut"
             },
             "title": "Backtests",
             "type": "array"
@@ -8170,7 +8580,7 @@
           "differs",
           "times"
         ],
-        "title": "CompareOut",
+        "title": "CompareResult",
         "type": "object"
       },
       "scopes": [
@@ -8185,7 +8595,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Lists the user's backtests as the Backtests page does: search, show the starred, failed or published ones, one model's, sort by a result, 10 a page. Use it to find a backtest's ID by its name, number, instrument or model, or the best ones by a result. Answers the page, how many match, the counts of all, starred, failed and published backtests and the models used. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_backtests",
+      "description": "Lists the user's backtests as the Backtests page does: search, show the starred, failed or published ones, one model's, sort by a result, 10 a page. Use it to find a backtest's ID by its name, number, instrument or model, or the best ones by a result. Answers the page, how many match, the counts of all, starred, failed and published backtests and the models used; each backtest has its `url`, the page to show the user. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_backtests",
       "endpoints": [
         "GET /api/v1/backtests"
       ],
@@ -8231,6 +8641,7 @@
               "starred": true,
               "status": "finished",
               "total_return": 0.246,
+              "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
               "win_rate": 0.512
             }
           ],
@@ -8529,7 +8940,7 @@
                     "type": "null"
                   }
                 ],
-                "description": "Largest fall from a peak, negative",
+                "description": "Largest fall from a peak, 0 or below: the smaller the fall the better, so -0.05 is better than -0.20",
                 "title": "Max Drawdown"
               },
               "model": {
@@ -8625,6 +9036,11 @@
                 "description": "Return of the strategy",
                 "title": "Total Return"
               },
+              "url": {
+                "description": "The backtest's page in the app, to show the user",
+                "title": "Url",
+                "type": "string"
+              },
               "win_rate": {
                 "anyOf": [
                   {
@@ -8658,7 +9074,8 @@
               "num_trades",
               "starred",
               "public",
-              "created_at"
+              "created_at",
+              "url"
             ],
             "title": "BacktestSummary",
             "type": "object"
@@ -9132,7 +9549,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Lists Experiments: the backtests that accounts of the beta published, which every signed-in account can see, with search, filters (author, market, symbol, representation, timeframe), sort and 12 a page. Use it to find what others tried and how it did, then read one with its ID. Answers the page, how many match, the counts and the values each filter offers. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_experiments",
+      "description": "Lists Experiments: the backtests that accounts of the beta published, which every signed-in account can see, with search, filters (author, market, symbol, representation, timeframe), sort and 12 a page. Use it to find what others tried and how it did, then read one with its ID. Answers the page, how many match, the counts and the values each filter offers; each backtest has its `url`, the page to show the user. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_experiments",
       "endpoints": [
         "GET /api/v1/experiments"
       ],
@@ -9183,6 +9600,7 @@
               },
               "sharpe": 0.79,
               "total_return": 0.246,
+              "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
               "win_rate": 0.512
             }
           ],
@@ -9681,6 +10099,11 @@
                 ],
                 "title": "Total Return"
               },
+              "url": {
+                "description": "The backtest's page in the app, to show the user",
+                "title": "Url",
+                "type": "string"
+              },
               "win_rate": {
                 "anyOf": [
                   {
@@ -9709,7 +10132,8 @@
               "max_drawdown",
               "win_rate",
               "num_trades",
-              "published_at"
+              "published_at",
+              "url"
             ],
             "title": "ExperimentSummary",
             "type": "object"
@@ -10075,7 +10499,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "The user's Dashboard in one call: the counts of all, starred, failed and published backtests, the 6 newest that ended, the 5 best finished ones by Sharpe ratio, return, drawdown and win rate, and the 4 best starred ones. Call it for an overview before digging in with list_backtests.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_dashboard",
+      "description": "The user's Dashboard in one call: the counts of all, starred, failed and published backtests, the 6 newest that ended, the 5 best finished ones by Sharpe ratio, return, drawdown (the smallest fall) and win rate, and the 4 best starred ones, each with its `url`, the page to show the user. Call it for an overview before digging in with list_backtests.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_dashboard",
       "endpoints": [
         "GET /api/v1/dashboard"
       ],
@@ -10119,6 +10543,7 @@
                 "starred": true,
                 "status": "finished",
                 "total_return": 0.246,
+                "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
                 "win_rate": 0.512
               }
             ],
@@ -10158,6 +10583,7 @@
                 "starred": true,
                 "status": "finished",
                 "total_return": 0.246,
+                "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
                 "win_rate": 0.512
               }
             ],
@@ -10197,6 +10623,7 @@
                 "starred": true,
                 "status": "finished",
                 "total_return": 0.246,
+                "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
                 "win_rate": 0.512
               }
             ],
@@ -10236,6 +10663,7 @@
                 "starred": true,
                 "status": "finished",
                 "total_return": 0.246,
+                "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
                 "win_rate": 0.512
               }
             ]
@@ -10282,6 +10710,7 @@
               "starred": true,
               "status": "finished",
               "total_return": 0.246,
+              "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
               "win_rate": 0.512
             }
           ],
@@ -10321,6 +10750,7 @@
               "starred": true,
               "status": "finished",
               "total_return": 0.246,
+              "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
               "win_rate": 0.512
             }
           ]
@@ -10521,7 +10951,7 @@
                     "type": "null"
                   }
                 ],
-                "description": "Largest fall from a peak, negative",
+                "description": "Largest fall from a peak, 0 or below: the smaller the fall the better, so -0.05 is better than -0.20",
                 "title": "Max Drawdown"
               },
               "model": {
@@ -10617,6 +11047,11 @@
                 "description": "Return of the strategy",
                 "title": "Total Return"
               },
+              "url": {
+                "description": "The backtest's page in the app, to show the user",
+                "title": "Url",
+                "type": "string"
+              },
               "win_rate": {
                 "anyOf": [
                   {
@@ -10650,13 +11085,14 @@
               "num_trades",
               "starred",
               "public",
-              "created_at"
+              "created_at",
+              "url"
             ],
             "title": "BacktestSummary",
             "type": "object"
           },
           "BestBacktests": {
-            "description": "The 5 best finished backtests by each result, the best first (for `max_drawdown` the\nsmallest fall).",
+            "description": "The 5 best finished backtests by each result, the best first (for `max_drawdown` the\nsmallest fall, the value nearest 0).",
             "properties": {
               "max_drawdown": {
                 "items": {
@@ -12587,7 +13023,7 @@
                 "type": "array"
               },
               "better": {
-                "description": "Which way is better: `lower` for a fall by its size and for the fees",
+                "description": "Which way is better: `lower` for the fees, and for the max drawdown by the size of the fall: its values are 0 or below and a smaller fall is better, so -0.05 beats -0.20 and ranks first",
                 "enum": [
                   "higher",
                   "lower"
@@ -13156,7 +13592,7 @@
                 "type": "array"
               },
               "better": {
-                "description": "Which way is better: `lower` for a fall by its size and for the fees",
+                "description": "Which way is better: `lower` for the fees, and for the max drawdown by the size of the fall: its values are 0 or below and a smaller fall is better, so -0.05 beats -0.20 and ranks first",
                 "enum": [
                   "higher",
                   "lower"

@@ -4,6 +4,7 @@ revocation, connected apps, and the access token at ``/mcp``, with every refusal
 
 import base64
 import hashlib
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import Any
@@ -689,16 +690,22 @@ def test_a_refresh_rotates_and_a_reused_one_ends_the_family(
 
 
 def test_a_used_refresh_token_again_within_the_grace_is_only_refused(
-    browser, app_client, monkeypatch
+    browser, app_client, monkeypatch, caplog
 ) -> None:
     client_id, first = connect(browser, app_client)
     second = app_client.refresh(client_id, first["refresh_token"]).json()
 
     # A retry after a lost answer, or another session of the client with the same token.
     move_clock(monkeypatch, authorization.REFRESH_GRACE - timedelta(seconds=1))
-    retried = app_client.refresh(client_id, first["refresh_token"])
+    with caplog.at_level(logging.WARNING, logger=authorization.__name__):
+        retried = app_client.refresh(client_id, first["refresh_token"])
 
     oauth_error(retried, 400, "invalid_grant")
+    # Logged all the same: a stolen copy used in time looks like a retry.
+    [warning] = [record for record in caplog.records if record.name == authorization.__name__]
+    assert warning.levelname == "WARNING"
+    assert "came again within 60 s" in warning.getMessage()
+    assert first["refresh_token"] not in warning.getMessage()
     assert app_client.mcp(second["access_token"]).status_code == 200
     assert app_client.refresh(client_id, second["refresh_token"]).status_code == 200
 
