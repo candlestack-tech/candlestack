@@ -169,13 +169,16 @@ def test_an_access_token_that_does_not_sign_in_is_an_invalid_token(
     assert response.json()["type"] == PROBLEMS + "invalid-access-token"
 
 
-def _limited_beyond(seen: list[int]):
-    """A ``key_caller`` that records each request's cost and refuses one that counts, as a key
-    over its rate limit does."""
+class Counted:
+    """Stands in for ``accounts.count_request``: records whether each request was light and
+    refuses the requests that do work, as a key over its rate limit does."""
 
-    async def key_caller(_token: str, *, cost: int = 1, **_clients: object) -> Caller:
-        seen.append(cost)
-        if cost > 0:
+    def __init__(self) -> None:
+        self.light: list[bool] = []
+
+    async def __call__(self, _limiter: object, _caller: Caller, *, light: bool = False) -> None:
+        self.light.append(light)
+        if not light:
             raise ProblemError(
                 429,
                 "rate-limited",
@@ -184,21 +187,25 @@ def _limited_beyond(seen: list[int]):
                 headers={"Retry-After": "7"},
                 extensions={"limit": 120, "retry_after_s": 7},
             )
-        return Caller(ADA, frozenset({Scope.read}))
 
-    return key_caller
+
+@pytest.fixture
+def counted(monkeypatch: pytest.MonkeyPatch, keys) -> Counted:
+    fake = Counted()
+    monkeypatch.setattr(http, "count_request", fake)
+    return fake
+
+
+def signed_in(keys) -> dict[str, str]:
+    return {**ACCEPT, "Authorization": f"Bearer {keys.read_key}"}
 
 
 def test_a_tool_call_over_the_rate_limit_is_the_tool_s_error(
-    mcp_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    mcp_client: TestClient, keys, counted: Counted
 ) -> None:
-    seen: list[int] = []
-    monkeypatch.setattr(http, "key_caller", _limited_beyond(seen))
     call = {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "get_me"}}
 
-    response = mcp_client.post(
-        "/mcp", json=call, headers={**ACCEPT, "Authorization": "Bearer cs_x"}
-    )
+    response = mcp_client.post("/mcp", json=call, headers=signed_in(keys))
 
     # An answer the model reads, with the problem and when to try again; not an HTTP 429.
     assert response.status_code == 200
@@ -214,7 +221,21 @@ def test_a_tool_call_over_the_rate_limit_is_the_tool_s_error(
         "limit": 120,
         "retry_after_s": 7,
     }
-    assert seen == [1]
+    assert counted.light == [False]
+    # The key was checked before anything else, and once.
+    assert keys.tokens == [keys.read_key]
+
+
+@pytest.mark.parametrize("call_id", [None, True, 1.5, {"a": 1}])
+def test_a_tool_call_without_an_id_to_answer_stays_a_429(
+    mcp_client: TestClient, keys, counted: Counted, call_id: object
+) -> None:
+    call = {"jsonrpc": "2.0", "id": call_id, "method": "tools/call", "params": {"name": "x"}}
+
+    response = mcp_client.post("/mcp", json=call, headers=signed_in(keys))
+
+    assert response.status_code == 429
+    assert response.json()["retry_after_s"] == 7
 
 
 @pytest.mark.parametrize(
@@ -227,51 +248,86 @@ def test_a_tool_call_over_the_rate_limit_is_the_tool_s_error(
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
     ],
 )
-def test_connecting_and_listing_do_not_count_against_the_rate_limit(
-    mcp_client: TestClient, monkeypatch: pytest.MonkeyPatch, message: dict[str, object]
+def test_connecting_and_listing_count_as_light_requests(
+    mcp_client: TestClient, keys, counted: Counted, message: dict[str, object]
 ) -> None:
-    seen: list[int] = []
-    monkeypatch.setattr(http, "key_caller", _limited_beyond(seen))
-
-    response = mcp_client.post(
-        "/mcp", json=message, headers={**ACCEPT, "Authorization": "Bearer cs_x"}
-    )
+    response = mcp_client.post("/mcp", json=message, headers=signed_in(keys))
 
     assert response.status_code != 429
-    assert seen == [0]
+    assert counted.light == [True]
 
 
 def test_other_requests_over_the_rate_limit_stay_a_429(
-    mcp_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    mcp_client: TestClient, keys, counted: Counted
 ) -> None:
-    seen: list[int] = []
-    monkeypatch.setattr(http, "key_caller", _limited_beyond(seen))
     read = {"jsonrpc": "2.0", "id": 3, "method": "resources/read", "params": {"uri": "x"}}
 
-    response = mcp_client.post(
-        "/mcp", json=read, headers={**ACCEPT, "Authorization": "Bearer cs_x"}
-    )
+    response = mcp_client.post("/mcp", json=read, headers=signed_in(keys))
 
     assert response.status_code == 429
     assert response.headers["retry-after"] == "7"
     assert response.json()["retry_after_s"] == 7
-    assert seen == [1]
+    assert counted.light == [False]
 
 
-def test_the_request_reaches_the_server_whole_after_its_method_was_read(
-    mcp_client: TestClient, keys
+def test_the_key_is_checked_before_the_body_is_read(
+    mcp_client: TestClient, keys, counted: Counted
 ) -> None:
-    listed = {"jsonrpc": "2.0", "id": 4, "method": "tools/list"}
+    response = mcp_client.post(
+        "/mcp",
+        content=b"{}",
+        headers={**ACCEPT, "Authorization": "Bearer cs_nope", "Content-Length": "999999999"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["type"] == PROBLEMS + "invalid-api-key"
+    assert counted.light == []
+
+
+def test_a_body_declared_too_large_is_refused_unread(
+    mcp_client: TestClient, keys, counted: Counted
+) -> None:
+    response = mcp_client.post(
+        "/mcp",
+        content=b"{}",
+        headers={**signed_in(keys), "Content-Length": str(http.BODY_MAX + 1)},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["type"] == PROBLEMS + "request-too-large"
+    assert counted.light == []
+
+
+def test_a_body_without_its_length_is_read_only_up_to_the_limit(
+    mcp_client: TestClient, keys, counted: Counted
+) -> None:
+    def chunks():
+        for _ in range(3):
+            yield b" " * (http.BODY_MAX // 2 + 1)
+
+    response = mcp_client.post("/mcp", content=chunks(), headers=signed_in(keys))
+
+    assert response.status_code == 413
+    assert response.json()["type"] == PROBLEMS + "request-too-large"
+    assert counted.light == []
+
+
+def test_a_body_at_the_limit_reaches_the_server_whole(
+    mcp_client: TestClient, keys, counted: Counted
+) -> None:
+    listed = json.dumps({"jsonrpc": "2.0", "id": 4, "method": "tools/list"}).encode()
+    padded = listed + b" " * (http.BODY_MAX - len(listed))
 
     response = mcp_client.post(
         "/mcp",
-        json=listed,
+        content=padded,
         headers={
-            **ACCEPT,
-            "Authorization": f"Bearer {keys.read_key}",
+            **signed_in(keys),
+            "Content-Type": "application/json",
             "MCP-Protocol-Version": "2025-11-25",
         },
     )
 
     assert response.status_code == 200
     assert "get_me" in [tool["name"] for tool in response.json()["result"]["tools"]]
+    assert counted.light == [True]

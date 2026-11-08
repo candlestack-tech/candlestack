@@ -5,19 +5,19 @@ a tool error with the API's problem (``convention.problem_result``): the ``Probl
 raised, ``validation`` for arguments that do not fit the input schema, ``not-found`` for an
 unknown tool and ``internal-error`` for a crash, which is logged for a developer.
 
-A result's text is its structured content as compact JSON without the null fields
-(``compact_text``): what a model reads costs tokens, and the SDK writes it indented. The
-structured content itself stays whole, nulls included, so it fits the output schema.
+A result's text is its structured content as compact JSON without the null fields of its
+models (``compact_text``): what a model reads costs tokens, and the SDK writes it indented. A
+null in a list or as the value of a map stays. The structured content itself stays whole, nulls
+included, so it fits the output schema.
 """
 
 import logging
-from typing import Any, override
+from typing import Any, get_type_hints, override
 
-import orjson
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.types import CallToolResult, Icon, InputRequiredResult, TextContent
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from candlestack.core import ProblemError
 from candlestack.mcp import account, manage, market, models, run, sweeps
@@ -68,20 +68,11 @@ def _unknown_tool(name: str) -> ProblemError:
     )
 
 
-def _without_nulls(value: Any) -> Any:
-    """`value` without the null fields of its objects, at any depth; a null in a list stays,
-    as its place there means something."""
-    if isinstance(value, dict):
-        return {key: _without_nulls(item) for key, item in value.items() if item is not None}
-    if isinstance(value, list):
-        return [_without_nulls(item) for item in value]
-    return value
-
-
-def compact_text(structured: dict[str, Any]) -> str:
-    """The text of a tool result: its structured content as compact JSON, null fields left
-    out (a model reads a missing field as null)."""
-    return orjson.dumps(_without_nulls(structured)).decode()
+def compact_text(output: type[BaseModel], structured: dict[str, Any]) -> str:
+    """The text of a tool result whose output model is `output`: its structured content as
+    compact JSON without the fields of its models that are null (a model reads a missing field
+    as null). A null in a list or as a map's value stays: its place there means something."""
+    return output.model_validate(structured).model_dump_json(by_alias=True, exclude_none=True)
 
 
 def _internal_error() -> ProblemError:
@@ -106,6 +97,10 @@ class CandleStackMCP(MCPServer):
             version=version,
         )
         self.specs = {spec.name: spec for spec in specs}
+        # Each tool's output model, the return type of its function.
+        self.outputs: dict[str, type[BaseModel]] = {
+            spec.name: get_type_hints(spec.fn)["return"] for spec in specs
+        }
         for spec in specs:
             self.add_tool(
                 spec.fn,
@@ -141,7 +136,7 @@ class CandleStackMCP(MCPServer):
             return problem_result(self._problem(name, error))
         if not isinstance(result, CallToolResult) or result.structured_content is None:
             return result
-        text = compact_text(result.structured_content)
+        text = compact_text(self.outputs[name], result.structured_content)
         return result.model_copy(update={"content": [TextContent(type="text", text=text)]})
 
     @staticmethod

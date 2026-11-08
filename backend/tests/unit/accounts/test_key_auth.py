@@ -12,14 +12,18 @@ from fastapi.testclient import TestClient
 
 from candlestack.accounts import (
     BacktestsUserDep,
+    Caller,
     CallerDep,
     CurrentUserDep,
     ModelsUserDep,
     Scope,
     User,
+    count_request,
 )
 from candlestack.accounts.dependencies import (
     API_KEY_RATE_LIMIT,
+    LIGHT_RATE_LIMIT_FACTOR,
+    RateLimit,
     SessionUserDep,
     get_accounts_service,
     get_api_keys,
@@ -28,7 +32,7 @@ from candlestack.accounts.dependencies import (
 from candlestack.accounts.keys import KeyUser
 from candlestack.accounts.models import ApiKey
 from candlestack.accounts.service import SignedIn
-from candlestack.core import Settings, install_error_handlers, require_same_origin
+from candlestack.core import ProblemError, Settings, install_error_handlers, require_same_origin
 from candlestack.core.ratelimit import get_rate_limiter
 
 PROBLEMS = "https://candlestack.tech/problems/"
@@ -285,3 +289,42 @@ def test_other_authorization_keeps_the_origin_check(client: TestClient, authoriz
     assert response.status_code == 403
     assert response.json()["type"] == PROBLEMS + "cross-origin-request"
     assert "must not send cookies" not in response.json()["detail"]
+
+
+def _limit() -> RateLimit:
+    return RateLimit("accounts:key-rl:key_1", "accounts:key-rl-free:key_1", "API key")
+
+
+@pytest.mark.anyio
+async def test_count_request_counts_against_the_key_s_limit() -> None:
+    limiter = FakeLimiter()
+
+    await count_request(limiter, Caller(ADA, frozenset({Scope.read}), _limit()))  # ty: ignore[invalid-argument-type]
+
+    assert limiter.keys == [f"accounts:key-rl:key_1 {API_KEY_RATE_LIMIT}"]
+
+
+@pytest.mark.anyio
+async def test_a_light_request_counts_against_a_looser_limit_of_its_own() -> None:
+    limiter = FakeLimiter(wait=4.5)
+    caller = Caller(ADA, frozenset({Scope.read}), _limit())
+
+    with pytest.raises(ProblemError) as refused:
+        await count_request(limiter, caller, light=True)  # ty: ignore[invalid-argument-type]
+
+    light_limit = API_KEY_RATE_LIMIT * LIGHT_RATE_LIMIT_FACTOR
+    assert limiter.keys == [f"accounts:key-rl-free:key_1 {light_limit}"]
+    problem = refused.value
+    assert (problem.status, problem.slug) == (429, "rate-limited")
+    assert problem.extensions == {"limit": light_limit, "retry_after_s": 5}
+    assert problem.headers == {"Retry-After": "5"}
+    assert "requests that connect or list" in problem.detail
+
+
+@pytest.mark.anyio
+async def test_the_session_s_requests_are_not_counted() -> None:
+    limiter = FakeLimiter(wait=4.5)
+
+    await count_request(limiter, Caller(ADA), light=False)  # ty: ignore[invalid-argument-type]
+
+    assert limiter.keys == []

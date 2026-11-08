@@ -11,9 +11,11 @@ MCP authorization spec asks: the URL of the protected resource metadata (RFC 972
 its scopes and docs. A request from a browser page of another origin is refused, against DNS
 rebinding.
 
-The rate limit of the key or the connected app counts the requests that do work: a request that
-sets up a session or lists what the server offers (``_FREE``) does not count. A ``tools/call``
-over the limit is answered as the tool's error with the problem ``rate-limited`` and its
+The key is checked first; then the body is read, at most ``BODY_MAX`` bytes (else
+``413 request-too-large``), and the request is counted against the rate limit of the key or the
+connected app by what it asks: a request that sets up a session or lists what the server offers
+(``_LIGHT``) and notifications count against a looser limit of their own. A ``tools/call`` over
+the limit is answered as the tool's error with the problem ``rate-limited`` and its
 ``retry_after_s``, which the model reads, rather than as an HTTP 429, which a client may only
 show as a failed connection.
 
@@ -36,8 +38,15 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 from starlette.types import Message, Receive, Scope, Send
 
+from candlestack.accounts import (
+    Caller,
+    count_request,
+    is_access_token,
+    key_caller,
+    oauth_issuer,
+    token_caller,
+)
 from candlestack.accounts import Scope as KeyScope
-from candlestack.accounts import is_access_token, key_caller, oauth_issuer, token_caller
 from candlestack.core import ProblemError, Settings, bearer_token
 from candlestack.mcp.convention import CALLER_STATE, problem_result
 from candlestack.mcp.docs import MCP_DOCS
@@ -45,9 +54,11 @@ from candlestack.mcp.server import TITLE, build_server
 
 MCP_PATH = "/mcp"
 METADATA_PATH = "/.well-known/oauth-protected-resource" + MCP_PATH
+# The largest body a request may have: the largest a tool takes is a manifest of 1 MiB as JSON.
+BODY_MAX = 2 * 1024 * 1024
 # The methods that set up a session or list what the server offers, which a client sends when
-# it connects: they do not count against the rate limit, nor do notifications.
-_FREE = frozenset(
+# it connects: they count against the looser limit of light requests, as notifications do.
+_LIGHT = frozenset(
     {
         "initialize",
         "server/discover",
@@ -95,9 +106,9 @@ def _token(request: Request, settings: Settings) -> str:
     return token
 
 
-async def _sign_in(request: Request, settings: Settings, token: str, cost: int) -> None:
-    """Puts the caller of the request with `token` on ``request.state``, the request counting
-    `cost` against the rate limit; raises the problem that refuses it."""
+async def _sign_in(request: Request, settings: Settings, token: str) -> Caller:
+    """The caller of the request with `token`, the request not counted against the rate limit
+    yet; raises the problem that refuses it."""
     state = request.app.state
     async with state.db.sessions() as db:
         try:
@@ -108,17 +119,43 @@ async def _sign_in(request: Request, settings: Settings, token: str, cost: int) 
                     settings=settings,
                     db=db,
                     limiter=state.rate_limiter,
-                    cost=cost,
+                    counted=False,
                 )
             else:
                 caller = await key_caller(
-                    token, settings=settings, db=db, limiter=state.rate_limiter, cost=cost
+                    token, settings=settings, db=db, limiter=state.rate_limiter, counted=False
                 )
         except ProblemError as problem:
             if problem.status == 401:
                 problem.headers["WWW-Authenticate"] = _challenge(settings, "invalid_token")
             raise
-    setattr(request.state, CALLER_STATE, caller)
+    return caller
+
+
+def _too_large() -> ProblemError:
+    return ProblemError(
+        413,
+        "request-too-large",
+        "Request too large",
+        f"The request's body is larger than {BODY_MAX // 1024 // 1024} MB, the most the MCP "
+        "server reads.",
+    )
+
+
+async def _body(request: Request) -> bytes:
+    """The request's body, read until ``BODY_MAX``; raises ``413 request-too-large`` when it is
+    larger, by its Content-Length before anything is read."""
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > BODY_MAX:
+        raise _too_large()
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > BODY_MAX:
+            raise _too_large()
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _message(body: bytes) -> dict[str, Any] | None:
@@ -131,13 +168,22 @@ def _message(body: bytes) -> dict[str, Any] | None:
     return message if isinstance(message, dict) else None
 
 
-def _cost(message: dict[str, Any] | None) -> int:
-    """What the request with `message` counts against the rate limit: 0 for a notification and
-    the methods of ``_FREE``, else 1."""
+def _light(message: dict[str, Any] | None) -> bool:
+    """Whether the request with `message` only connects or lists: a notification or one of the
+    methods of ``_LIGHT``."""
     method = None if message is None else message.get("method")
-    if isinstance(method, str) and (method in _FREE or method.startswith("notifications/")):
-        return 0
-    return 1
+    return isinstance(method, str) and (method in _LIGHT or method.startswith("notifications/"))
+
+
+def _call_id(message: dict[str, Any] | None) -> str | int | None:
+    """The JSON-RPC ID of a tools/call `message`, which its answer must carry; None for any
+    other message or an ID that is not a string or an integer."""
+    if message is None or message.get("method") != "tools/call":
+        return None
+    call_id = message.get("id")
+    if isinstance(call_id, str) or (isinstance(call_id, int) and not isinstance(call_id, bool)):
+        return call_id
+    return None
 
 
 def _replayed(body: bytes, receive: Receive) -> Receive:
@@ -154,10 +200,10 @@ def _replayed(body: bytes, receive: Receive) -> Receive:
     return replay
 
 
-def _tool_error(message: dict[str, Any], problem: ProblemError) -> Response:
-    """The answer to the tools/call `message` as the tool's error with `problem`."""
+def _tool_error(call_id: str | int, problem: ProblemError) -> Response:
+    """The answer to the tools/call with the ID `call_id` as the tool's error with `problem`."""
     result = problem_result(problem).model_dump(mode="json", by_alias=True, exclude_none=True)
-    answer = JSONRPCResponse(jsonrpc="2.0", id=message["id"], result=result)
+    answer = JSONRPCResponse(jsonrpc="2.0", id=call_id, result=result)
     return Response(
         answer.model_dump_json(by_alias=True, exclude_unset=True), media_type="application/json"
     )
@@ -170,19 +216,21 @@ class _McpEndpoint:
         request = Request(scope, receive)
         state = request.app.state
         token = _token(request, state.settings)
+        caller = await _sign_in(request, state.settings, token)
         message = None
         if request.method == "POST":
-            body = await request.body()
+            body = await _body(request)
             message = _message(body)
             receive = _replayed(body, receive)
         try:
-            await _sign_in(request, state.settings, token, _cost(message))
+            await count_request(state.rate_limiter, caller, light=_light(message))
         except ProblemError as problem:
-            calls_a_tool = message is not None and message.get("method") == "tools/call"
-            if problem.slug != "rate-limited" or not calls_a_tool or "id" not in message:
+            call_id = _call_id(message)
+            if call_id is None:
                 raise
-            await _tool_error(message, problem)(scope, receive, send)
+            await _tool_error(call_id, problem)(scope, receive, send)
             return
+        setattr(request.state, CALLER_STATE, caller)
         await state.mcp_sessions.handle_request(scope, receive, send)
 
 

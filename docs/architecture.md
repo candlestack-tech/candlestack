@@ -1009,14 +1009,18 @@ call, as the routes' dependencies do), never the API over HTTP.
 - **Sign-in**: an API key in `Authorization: Bearer`, checked by `accounts.key_caller` as on a
   route (the hash, revoked, expired, the beta list, 120 requests a minute, the last use), or an
   OAuth access token (`csa_...`, [OAuth](#oauth)), checked by `accounts.token_caller` the same
-  way, per connected app, and only for this resource. The rate limit counts the requests that
-  do work: `initialize`, `server/discover`, `ping`, the lists (`tools/list`, `resources/list`,
-  `resources/templates/list`, `prompts/list`) and notifications do not count, so a client over
-  the limit still connects. A `tools/call` over the limit is answered `200` as the tool's error
-  (`isError`) with the problem `rate-limited` and its `retry_after_s`, which the model reads;
-  any other request over it stays `429` with `Retry-After`, as on a route. The endpoint reads
-  the request's JSON-RPC method before it signs the request in and hands the body on to the
-  SDK. Without either: `401 not-signed-in` with `WWW-Authenticate: Bearer resource_metadata="<PUBLIC_URL>/.well-known/oauth-protected-resource/mcp"`,
+  way, per connected app, and only for this resource. The key or token is checked first,
+  without counting the request; then the body is read, at most 2 MiB (`413 request-too-large`
+  by its `Content-Length` before anything is read, or once the bytes read pass the limit), and
+  the request is counted by its JSON-RPC method (`accounts.count_request`): `initialize`,
+  `server/discover`, `ping`, the lists (`tools/list`, `resources/list`,
+  `resources/templates/list`, `prompts/list`) and notifications count against a limit of their
+  own ten times looser (`accounts:key-rl-free:<id>`, `accounts:app-rl-free:<id>`), so a client
+  over the limit still connects; the rest against the 120 a minute. A `tools/call` over the
+  limit is answered `200` as the tool's error (`isError`) with the problem `rate-limited` and
+  its `retry_after_s`, which the model reads; any other request over it (and a `tools/call`
+  whose ID is not a string or an integer) stays `429` with `Retry-After`, as on a route. The
+  body is handed on to the SDK as it was read. Without either: `401 not-signed-in` with `WWW-Authenticate: Bearer resource_metadata="<PUBLIC_URL>/.well-known/oauth-protected-resource/mcp"`,
   as the MCP authorization spec asks; a key or token that does not sign in: `401
   invalid-api-key` or `401 invalid-access-token` with `error="invalid_token"` and the same URL.
   The metadata (RFC 9728) names the resource (`<PUBLIC_URL>/mcp`), its authorization server
@@ -1033,16 +1037,17 @@ call, as the routes' dependencies do), never the API over HTTP.
   changes data the scope of what it changes.
 - **Answers**: a tool's `structuredContent` is its output model whole, nulls included, so it
   fits the output schema; its text, which a model reads, is the same as compact JSON without
-  the null fields (`server.compact_text`, once for every tool, in place of the SDK's indented
-  JSON): about 40 % fewer bytes for `get_backtest`, `list_backtests` and `get_sweep`.
+  the null fields of its models (`server.compact_text`, once for every tool, in place of the
+  SDK's indented JSON; a null in a list or as the value of a map stays): about 40 % fewer bytes for `get_backtest`, `list_backtests` and `get_sweep`.
 - **Errors**: a failed tool call is a tool error (`isError`) whose text is the API's problem as
-  JSON (`type`, `title`, `status`, `detail` and the extensions): the `ProblemError` the tool
+  compact JSON (`type`, `title`, `status`, `detail` and the extensions): the `ProblemError` the tool
   raised, `validation` (422, with `errors`, never the values) for arguments that do not fit the
   input schema, `not-found` for an unknown tool, `missing-scope`, and `internal-error` for a
   crash, which is logged with its traceback (a Sentry issue) and tells the model nothing more.
   The tools answer the problems of the routes they stand for; the one problem only a tool
   answers is `confirmation-mismatch` (409: `delete_model` got a `confirm_name` that is not
-  the model's name, so nothing was deleted).
+  the model's name, so nothing was deleted); `/mcp` itself answers `request-too-large` (413) for
+  a body over 2 MiB.
 - **Name and icon**: `serverInfo` names the server `candlestack` (title CandleStack, website
   `https://candlestack.tech`) with the website's logo as icons (`favicon.svg`,
   `apple-touch-icon.png` 180x180), public on every environment, for clients that show them.

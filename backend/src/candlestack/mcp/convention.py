@@ -155,5 +155,5 @@ def problem_body(problem: ProblemError) -> dict[str, Any]:
 
 def problem_result(problem: ProblemError) -> CallToolResult:
     """A tool error whose text is the problem as JSON, so a model reads the type and detail."""
-    text = json.dumps(problem_body(problem), ensure_ascii=False)
+    text = json.dumps(problem_body(problem), ensure_ascii=False, separators=(",", ":"))
     return CallToolResult(content=[TextContent(type="text", text=text)], is_error=True)

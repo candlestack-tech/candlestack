@@ -42,17 +42,27 @@ async def count_to(n: int, ctx: Context) -> Count:
     return Count(count=n + len(tool_call(ctx).scopes) * 0)
 
 
+class Part(BaseModel):
+    name: str
+    size: int | None
+
+
 class Described(BaseModel):
     count: int
     note: str | None
     parts: dict[str, int | None]
     values: list[int | None]
+    part: Part
 
 
 async def describe_count(ctx: Context) -> Described:
     """Describes a count with null fields, for the tests."""
     return Described(
-        count=len(tool_call(ctx).scopes), note=None, parts={"a": None, "b": 2}, values=[1, None]
+        count=len(tool_call(ctx).scopes),
+        note=None,
+        parts={"a": None, "b": 2},
+        values=[1, None],
+        part=Part(name="p", size=None),
     )
 
 
@@ -76,7 +86,9 @@ TEST_TOOLS = (
         title="Describe a count",
         scopes=(Scope.read,),
         annotations=reads(),
-        example=Example({}, Described(count=1, note=None, parts={}, values=[])),
+        example=Example(
+            {}, Described(count=1, note=None, parts={}, values=[], part=Part(name="p", size=1))
+        ),
     ),
     ToolSpec(
         start_count,
@@ -162,13 +174,17 @@ def test_a_result_s_text_is_compact_json_without_the_null_fields(mcp) -> None:
     assert not result.is_error
     [content] = result.content
     assert content.type == "text"
-    # A null in a list keeps its place; a null field is left out of the text only.
-    assert content.text == '{"count":1,"parts":{"b":2},"values":[1,null]}'
+    # A model's null fields are left out of the text only; a null in a list or as the value of
+    # a map stays, as its place there means something.
+    assert content.text == (
+        '{"count":1,"parts":{"a":null,"b":2},"values":[1,null],"part":{"name":"p"}}'
+    )
     assert result.structured_content == {
         "count": 1,
         "note": None,
         "parts": {"a": None, "b": 2},
         "values": [1, None],
+        "part": {"name": "p", "size": None},
     }
 
 
