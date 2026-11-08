@@ -38,6 +38,7 @@ from candlestack.core import (
 from candlestack.data import DataService, build_data_service, data_router, market_data_router
 from candlestack.experiments import BacktestRunner, backtests_router, model_usage
 from candlestack.jobs import JobClient, JobFiles, JobQueue
+from candlestack.mcp import mount_mcp, serving_mcp
 from candlestack.ml import (
     LocalModelStorage,
     ModelChecks,
@@ -95,7 +96,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     those a stopped process left running fail now. The ``model_checks`` run the trial runs of the
     models in the worker; at startup they check the models a stopped process left unchecked. On
     shutdown the runs stop (failed), then the data service's lookups in the background and the
-    checks, before the clients close."""
+    checks, before the clients close. The MCP server answers while the app runs and stops first."""
     settings: Settings = app.state.settings
     model_storage: ModelStorage = app.state.model_storage
     await model_storage.prepare()
@@ -118,6 +119,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 _background(data_service, stats=settings.stats_refresh),
                 _running(keep_incoming_swept(model_storage), "The sweep of incoming model files"),
                 _checking(app.state.model_checks),
+                # Last, so it stops first: the tools use everything above.
+                serving_mcp(app),
             ):
                 try:
                     yield
@@ -223,6 +226,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(models_router)
     app.include_router(preprocessing_router)
     app.include_router(backtests_router)
+    mount_mcp(app)
     if dev_sign_in_allowed(settings.app_env):
         app.include_router(dev_sign_in_router)
     if settings.app_env == SENTRY_CHECK_ENV:

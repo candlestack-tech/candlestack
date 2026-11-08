@@ -73,6 +73,20 @@ uv run --project backend candlestack-bt run --candles candles.parquet \
 
 `uv run` installs httpx and polars for the example from the header of the file.
 
+## The same key in an MCP client
+
+The key also signs in an MCP client, with the same scopes: the MCP server is at
+`https://app.candlestack.tech/mcp` (Streamable HTTP), locally at `http://localhost:8000/mcp`. In
+Claude Code:
+
+```sh
+claude mcp add --transport http candlestack https://app.candlestack.tech/mcp \
+    --header "Authorization: Bearer $CANDLESTACK_API_KEY"
+```
+
+Its tool `get_me` answers who the key signs in as and its scopes. The other clients and every
+tool are on https://candlestack.tech/docs/mcp/.
+
 ## Find an instrument
 
 An instrument id is `<market>:<symbol>`: `crypto:BTCUSDT`, `stock:AAPL`. Search the catalog with

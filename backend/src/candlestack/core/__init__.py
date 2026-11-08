@@ -10,6 +10,7 @@ from candlestack.core.csrf import bearer_token, is_same_origin, require_same_ori
 from candlestack.core.db import DATABASE_ERRORS, Base, Database, DbSessionDep
 from candlestack.core.errors import (
     NO_STORE,
+    PROBLEM_TYPE_BASE,
     Problem,
     ProblemError,
     document_problems,
@@ -34,6 +35,7 @@ from candlestack.core.redis import RedisDep, create_redis
 __all__ = [
     "DATABASE_ERRORS",
     "NO_STORE",
+    "PROBLEM_TYPE_BASE",
     "Base",
     "Database",
     "DbSessionDep",

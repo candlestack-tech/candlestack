@@ -30,7 +30,7 @@ flowchart LR
         tunnel --> cloudflared["cloudflared"]
         cloudflared --> caddy["edge Caddy<br/>routes by hostname"]
         subgraph envbox["one environment: prod or stage"]
-            caddy -->|"/api/*"| backend["backend<br/>FastAPI on granian :8000"]
+            caddy -->|"/api/*, /mcp"| backend["backend<br/>FastAPI on granian :8000"]
             caddy -->|"everything else"| frontend["frontend<br/>static page, Caddy :8080"]
             backend --> redis[("redis<br/>cache only")]
             backend --> postgres[("postgres<br/>users, sessions, settings, models, backtests")]
@@ -100,6 +100,8 @@ flowchart LR
 | `GET /api/v1/experiments` | a page of 12 of the backtests every account published ([Experiments](#experiments)): search `q` (the backtest's name, symbol, model name or author's name), `mine` or `author` (a user ID), `market`, `symbol`, `representation`, `timeframe`, `sort` and `order`, `page`; with the total, the pages, the counts (all published, the user's, the accounts that published) and what the filters offer |
 | `GET /api/v1/compare?ids=<id>,<id>` | 2 to 20 backtests side by side, the user's own and others' published ones, as the Compare page shows them ([Compare](#compare)) |
 | `GET /api/v1/dashboard` | everything the Dashboard shows in one response: the counts, the 6 newest backtests, the 5 best finished ones by Sharpe ratio, return, drawdown and win rate, the 4 best starred ones, and the 4 newest published backtests of anyone with how many are published |
+| `POST /mcp` (and `GET`, `DELETE`) | the MCP server, Streamable HTTP, signed in with an API key only ([MCP](#mcp)); not in the API reference |
+| `GET /.well-known/oauth-protected-resource/mcp` | the MCP server's protected resource metadata (RFC 9728): its address, scopes and docs; not in the API reference |
 | `GET /api/v1/docs` | API reference (Scalar); public on prod |
 | `GET /api/v1/openapi.json` | OpenAPI schema; snapshot committed as [openapi.json](openapi.json) |
 
@@ -828,6 +830,62 @@ an agent gets the app's verdict without downloading and comparing the documents 
   ends at the `buy_and_hold_return` statistic either way. About 20 KB for four backtests over
   their whole axes, against the four whole documents the page loads today.
 
+## MCP
+
+The `mcp` module serves a remote MCP server at `/mcp` inside the app, on the official Python SDK
+(`mcp`), so Claude, ChatGPT, Cursor and any MCP client use CandleStack. Its tools call the same
+services as the routes (the module builds them from `app.state` and a Postgres session per
+call, as the routes' dependencies do), never the API over HTTP.
+
+- **Transport**: Streamable HTTP, stateless, answers as JSON (`json_response`). Every request
+  stands alone, so any process answers it and a deploy breaks no session; the SDK answers both
+  the 2026-07-28 protocol and the initialize handshake of the earlier ones. `main` adds the
+  routes (`mount_mcp`) and runs the SDK's session manager in the lifespan (`serving_mcp`), last,
+  so it stops first. The SDK's Host check is off (the edge sets the host); a request with an
+  `Origin` other than `PUBLIC_URL` is `403 cross-origin-request`, against DNS rebinding.
+- **Sign-in**: an API key in `Authorization: Bearer`, checked by `accounts.key_caller` as on a
+  route (the hash, revoked, expired, the beta list, 120 requests a minute, the last use); every
+  HTTP request counts, `initialize` and `tools/list` included. Without a key: `401
+  not-signed-in` with `WWW-Authenticate: Bearer resource_metadata="<PUBLIC_URL>/.well-known/oauth-protected-resource/mcp"`,
+  as the MCP authorization spec asks; a key that does not sign in: `401 invalid-api-key` with
+  `error="invalid_token"` and the same URL. The metadata (RFC 9728) names the resource
+  (`<PUBLIC_URL>/mcp`), the scopes and the docs and lists no authorization server until OAuth
+  comes (#408). Cookies play no part.
+- **Scopes per tool**: each tool names the scopes a key needs (`read` for the tools that only
+  read); the server checks them before the tool runs and answers `missing-scope` as the
+  routes do.
+- **Tool convention** (`mcp/convention.py`, checked when the server is built): a `verb_noun`
+  name of at most 32 characters, a title, the docstring as the description a model reads (what
+  it does, when to use it, what it answers; the link to its docs page is added), typed
+  arguments and a Pydantic output model (the input and output schemas), the annotations
+  `readOnlyHint`, `destructiveHint` and `idempotentHint` always set (`openWorldHint` false), and
+  an example call for the tool reference. A tool that only reads needs `read` alone, one that
+  changes data the scope of what it changes.
+- **Errors**: a failed tool call is a tool error (`isError`) whose text is the API's problem as
+  JSON (`type`, `title`, `status`, `detail` and the extensions): the `ProblemError` the tool
+  raised, `validation` (422, with `errors`, never the values) for arguments that do not fit the
+  input schema, `not-found` for an unknown tool, `missing-scope`, and `internal-error` for a
+  crash, which is logged with its traceback (a Sentry issue) and tells the model nothing more.
+- **Instructions and docs**: the server's `instructions` say what CandleStack is, how keys and
+  scopes work, how errors read and link `https://candlestack.tech/docs/agents/` and
+  `https://candlestack.tech/docs/mcp/`; the resource `candlestack://docs` (Markdown) lists the
+  docs pages, the tool reference, the manifest and backtest result references with their JSON
+  Schemas, the problem pages and the API reference.
+- **Tools**: `get_me` (scope `read`): the key's user (ID, name, email, created) and the key's
+  scopes. The tools of the other areas come with #399 and #402 to #405.
+- **Parity table** (`mcp/parity.py`): every endpoint of the API reference, by method and path,
+  maps to the tools that do the same, to `Planned` with the task that adds them, or to
+  `WebOnly` with the reason (sign-in, sessions, the keys themselves, deleting the account,
+  sign-in methods, the theme, health, icons, the file download). A unit test fails when an
+  endpoint has no entry, an entry names an endpoint or tool that does not exist, or a planned
+  tool exists already.
+- **Tool reference**: `uv run python -m candlestack.mcp.reference > ../docs/mcp-tools.json`
+  writes each tool as `tools/list` sends it (name, title, description, annotations, input and
+  output schemas) with its scopes, example and endpoints, the instructions and resources, and
+  the web only endpoints with their reasons. The file is committed, a unit test fails when it
+  is stale (like `openapi.json`), and the website builds `candlestack.tech/docs/mcp/tools/` from
+  it (website#76).
+
 ## Modules
 
 A module is a subpackage of `candlestack` under `backend/src/candlestack/`.
@@ -846,6 +904,7 @@ A module is a subpackage of `candlestack` under `backend/src/candlestack/`.
 | `jobs` | now | the job queue between the backend and the worker: the job and its result, the Redis keys, the jobs' files on the shared volume, `JobClient` for the backend ([Worker](#worker)) |
 | `worker` | now | the worker's process (`python -m candlestack.worker`): the loop, the job's process with Keras, the safe load of a model, the built-in candles of a check |
 | `experiments` | now | the backtests: starting and running them (`data`, the worker through `jobs`, `signals`, `engine`, `metrics`), their result documents, the list of the Backtests page, stars, publishing and Experiments, the Dashboard, the models' usage, the seed command |
+| `mcp` | now | the MCP server at `/mcp` ([MCP](#mcp)): sign-in with an API key, the tool convention, the tools, the parity table and the tool reference |
 | `admin` | later | team-only administration (roles, audit) under `/admin` |
 
 Folders for later modules are created when their work starts, not before; `started` marks
@@ -853,14 +912,15 @@ the ones whose folder exists while their code is being written.
 
 ## Import rules
 
-- Dependencies point one way: `experiments` -> `ml` -> `accounts` | `data` | `jobs` -> `core`.
+- Dependencies point one way: `mcp` -> `experiments` -> `ml` -> `accounts` | `data` | `jobs`
+  -> `core`. `mcp` sits on top, as its tools use every module's services.
   `core` imports no other module, and `jobs` none at all. `experiments` runs the backtests:
   it imports `data`, `jobs`, `preprocessing` (a manifest's warm-up) and the backtest modules
   `signals`, `engine` and `metrics` as well.
 - The backtest modules `signals`, `engine` and `metrics`, and `preprocessing`, stand alone:
   they import no other module of the project, not each other, and no server library
   (`fastapi`, `starlette`, `scalar_fastapi`, `granian`, `redis`, `httpx`, `sentry_sdk`,
-  `pydantic_settings`, `sqlalchemy`, `asyncpg`, `alembic`, `authlib`). They are
+  `pydantic_settings`, `sqlalchemy`, `asyncpg`, `alembic`, `authlib`, `mcp`). They are
   plain functions on Polars frames (Pydantic for their settings and the manifest, NumPy for
   the model's input), put together only by the code that runs them: `cli`, the worker and
   `experiments`. The worker runs `preprocessing` without network, so it must not need
@@ -1025,6 +1085,8 @@ to check that an error reaches Sentry. The Sentry settings are recorded in
 | Changes on behalf of the user require the app's own origin (`core.require_same_origin`), the OAuth round trip a state bound to the browser (Redis and a cookie) and PKCE | every host under candlestack.tech is the same site to the browser, so SameSite cookies alone do not stop a page on another of them; the state stops login CSRF; PKCE stops a stolen code |
 | API keys for scripts and agents: `cs_` and 200 random bits, only the SHA-256 stored, shown once, scopes `read` / `backtests` / `models` / `publish`, optional expiry, `Authorization: Bearer` | a script or an agent (the MCP server next) must not copy the browser's session cookie, which can do everything; a key can be limited, revoked alone and recognised by its prefix, a database leak does not leak keys, and the beta list still applies on every request |
 | A route is closed to API keys unless its dependency opens it (`read` on GET routes, a named scope on changes) | a new route is safe by default, and the reference shows each route's scope from the same dependencies |
+| The MCP server inside the app at `/mcp`, on the official SDK, Streamable HTTP, stateless with JSON answers, signed in with the API keys | its tools call the services the routes call, so the web, the API and MCP stay one layer; stateless needs no session store and survives deploys and more processes; the keys already carry scopes, the beta list and a rate limit, and OAuth for claude.ai and ChatGPT comes on top (#408) |
+| Task-shaped tools on one convention, a parity table checked in CI and a tool reference generated from the server | an agent works in tasks, not endpoints; the table keeps MCP equal to the web app or says why not; the docs cannot drift from the tools |
 | Preferences as one JSONB document per section of Settings, read through Pydantic models with defaults | a new setting needs no migration of the rows; the models validate both what is saved and what is read |
 | Account deletion through hooks that other modules register in `main.py` | `accounts` stays at the bottom of the import graph, yet the account's rows in other modules go with it in one transaction; data outside Postgres (model files) is the hook's to keep consistent with a rollback |
 | An upload is checked statically (the zip, its JSON and the HDF5 metadata) in a limited child process, never loaded; only what an allowlist generated from Keras names passes | loading a Keras file can run code from it (a `Lambda` layer is pickled Python, a `function` object any Keras function), and the API process must run no user's code and carry no framework; an allowlist fails closed on what a new Keras release or an attacker adds, where a list of what is known to be bad would not; the parsers of zip and HDF5 meet hostile files, so they run where a crash or a leak costs only a failed check |

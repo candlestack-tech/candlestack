@@ -19,6 +19,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request, Response, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, SecurityScopes
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from candlestack.accounts.cookies import SESSION, Cookies, CookiesDep
 from candlestack.accounts.keys import ApiKeys
@@ -207,6 +208,19 @@ async def _key_caller(token: str, keys: ApiKeys, limiter: RateLimiter) -> Caller
         )
     await keys.mark_used(signed_in.key)
     return Caller(signed_in.user, signed_in.scopes)
+
+
+async def key_caller(
+    token: str, *, settings: Settings, db: AsyncSession, limiter: RateLimiter
+) -> Caller:
+    """The caller of a request with the API key `token`, for what signs requests in outside the
+    routes' dependencies (the MCP server): the same checks, rate limit and last use as a route's,
+    on the session `db`. Scopes are not checked here.
+
+    Raises:
+        ProblemError: 401 ``invalid-api-key`` or 429 ``rate-limited``.
+    """
+    return await _key_caller(token, ApiKeys(settings, AccountStore(db)), limiter)
 
 
 async def authenticate(  # noqa: PLR0913 (the request and what signs it in)
