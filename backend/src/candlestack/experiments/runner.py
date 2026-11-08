@@ -1,12 +1,13 @@
 """The runs of the backtests: each in a task of the API process, outside the request that
 started it, so it outlives the request (docs/architecture.md, "Backtests").
 
-A run loads the candles with the model's warm-up from the data module, has the worker predict
-on them through the job queue (``jobs.JobClient``), aligns the predictions with the candles,
-applies the decision's steps, runs the engine and the statistics (``assembly.run``) and stores
-the result. It records its steps as it goes (``steps.py``), so the backtest's page shows where
-it is. Whatever fails marks the backtest failed with a plain error for the user, and the step
-it was at failed; a bug of ours is logged as an error (a Sentry issue) and the user is told so.
+A run loads the candles with the model's warm-up from the data module (further back when the
+warm-up fell short, ``_with_warm_up``), has the worker predict on them through the job queue
+(``jobs.JobClient``), aligns the predictions with the candles, applies the decision's steps,
+runs the engine and the statistics (``assembly.run``) and stores the result. It records its
+steps as it goes (``steps.py``), so the backtest's page shows where it is. Whatever fails marks
+the backtest failed with a plain error for the user, and the step it was at failed; a bug of
+ours is logged as an error (a Sentry issue) and the user is told so.
 A run cannot hold a database connection while the worker runs: it reads the backtest, lets the
 session go, and writes the result in another.
 
@@ -42,6 +43,8 @@ from candlestack.data import (
     InstrumentId,
     SourceUnavailable,
     Timeframe,
+    TooManyCandles,
+    WarmUpOutOfRange,
 )
 from candlestack.experiments.assembly import (
     NothingToTest,
@@ -63,6 +66,7 @@ from candlestack.experiments.steps import StepRecorder, Steps
 from candlestack.experiments.store import BacktestStore
 from candlestack.jobs import DEFAULT_WAIT, JobClient, JobResult
 from candlestack.ml import model_file
+from candlestack.preprocessing import InvalidManifest, Manifest, build_input, parse_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +81,9 @@ JOB_FAILED = "The model could not run on the candles. Try again later."
 MODEL_GONE = "The model was deleted before the backtest could run it."
 # How often the queues that stood still are moved on, in seconds.
 QUEUE_CHECK_EVERY = 30.0
+# How many times a run loads further back when its warm-up fell short, each time twice as many
+# candles before the period: 403 estimated candles become up to 3224.
+LONGER_WARM_UPS = 3
 
 
 class RunFailed(Exception):
@@ -327,16 +334,14 @@ class BacktestRunner:
         stock candles waits for the source's request budget, minutes if need be; and those of
         the index fund each benchmark holds (``_benchmark_candles``)."""
         data = spec.data
+        instrument, timeframe = InstrumentId.parse(data.instrument.id), Timeframe(data.timeframe)
         await steps.start("candles")
         try:
             async with steps.loading():
                 candles = await self._data.candles(
-                    InstrumentId.parse(data.instrument.id),
-                    Timeframe(data.timeframe),
-                    data.load_start,
-                    data.period.end,
-                    background=True,
+                    instrument, timeframe, data.load_start, data.period.end, background=True
                 )
+                candles = await self._with_warm_up(spec, candles)
         except SourceUnavailable as error:
             raise RunFailed("candles", _source_unavailable(error)) from error
         except DataError as error:
@@ -344,6 +349,41 @@ class BacktestRunner:
         held = await self._benchmark_candles(spec)
         await steps.loaded(candles.frame.height)
         return candles, held
+
+    async def _with_warm_up(self, spec: RunSpec, candles: CandleSet) -> CandleSet:
+        """The candles, loaded further back until the model's input has a sample on the
+        period's first candle, so the engine's rows start there whatever the representation.
+
+        The warm-up of rows that span several candles (Renko, Kagi) is an estimate: where the
+        bricks or lines formed slowly before the period, the first sample falls on a later
+        candle, and the run would start there, its buy and hold from a later close. Each time
+        the run loads twice as many candles before the period (``LONGER_WARM_UPS`` times at
+        most), and stops where the data has no more or the load would pass the maximum: the
+        rows then start at the first prediction, as before.
+        """
+        data = spec.data
+        instrument, timeframe = InstrumentId.parse(data.instrument.id), Timeframe(data.timeframe)
+        try:
+            manifest = parse_manifest(spec.model.manifest)
+        except InvalidManifest:
+            return candles  # the worker refuses it and says why
+        for _ in range(LONGER_WARM_UPS):
+            covered = partial(_covers, candles.marked_frame(), manifest, data.period.start)
+            if await anyio.to_thread.run_sync(covered):
+                break
+            before = candles.frame.filter(pl.col("ts") < data.period.start).height
+            try:
+                start = await self._data.warm_up_start(
+                    instrument, timeframe, data.period.start, data.period.end, 2 * max(before, 1)
+                )
+            except (WarmUpOutOfRange, TooManyCandles):
+                break
+            if start >= candles.start:
+                break
+            candles = await self._data.candles(
+                instrument, timeframe, start, data.period.end, background=True
+            )
+        return candles
 
     async def _benchmark_candles(self, spec: RunSpec) -> dict[str, pl.DataFrame]:
         """The candles of the index fund each benchmark holds, of the period, by the benchmark's
@@ -482,6 +522,20 @@ async def _backtest(spec: RunSpec, candles: pl.DataFrame, predictions: pl.DataFr
         )
     except NothingToTest as error:
         raise RunFailed("no-predictions", str(error)) from error
+
+
+def _covers(candles: pl.DataFrame, manifest: Manifest, start: int) -> bool:
+    """Whether the model's input from ``candles`` has a sample on the first candle at or after
+    ``start``; also True without such a candle, or when the input cannot be built (the worker
+    then says why). A sample at a candle needs no later one, so the candles up to it do."""
+    first = candles.filter(pl.col("ts") >= start).get_column("ts").head(1)
+    if first.is_empty():
+        return True
+    try:
+        made = build_input(candles.filter(pl.col("ts") <= first[0]), manifest)
+    except ValueError:
+        return True
+    return made.ts.len() > 0 and made.ts[-1] == first[0]
 
 
 def _source_unavailable(error: SourceUnavailable) -> str:
