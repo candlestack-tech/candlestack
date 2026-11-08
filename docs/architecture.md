@@ -93,6 +93,9 @@ flowchart LR
 | `PUT /api/v1/uploads/{token}` | the upload through a link: the body is the file, the token the only sign-in (no session, key or origin check); single use, then checked as `POST /api/v1/models`; 201 with the model, `404 upload-link-not-found`, `410 upload-link-gone` (used or expired) |
 | `PATCH /api/v1/models/{model_id}` | renames a model (the extension stays; `409 model-name-taken`) or stars and unstars it |
 | `DELETE /api/v1/models/{model_id}` | deletes a model and its file |
+| `PUT /api/v1/models/{model_id}/manifest` | adds or replaces the model's manifest (the body), kept only when every check passes, else `422 manifest-check-failed` with the problems ([Models](#models)) |
+| `GET /api/v1/models/{model_id}/manifest` | the model's manifest as it was given (`404 no-manifest` without one) |
+| `POST /api/v1/models/{model_id}/manifest/check` | a dry run of the PUT: the same checks on the manifest (the body), nothing kept; 200 with `valid`, the `problems` (each with its `field`, `detail` and `allowed` values), `more_problems` and `unknown_blocks`; a key needs `read` only ([Models](#models)) |
 | `GET /api/v1/preprocessing/catalog` | the blocks a model's manifest can name, by step: id, description, the display group of a feature (`Candle`, `Bands`, `Momentum`, `Trend`, `Volume`, `Brick`, `Line`), warm-up and parameters (type, range, default, `tunable`); public, served by `ml` ([preprocessing.md](preprocessing.md#the-blocks)) |
 | `POST /api/v1/backtests` | starts a backtest of one of the user's models: the body is the setup groups of the result document (`model`, `data`, `decision`, `execution`, `benchmarks`); checked first, then stored `running` and run after the response, or `queued` while another backtest of the user runs (1 runs and up to 20 wait per user, `409 queue-full` beyond); 201 with its result document ([Backtests](#backtests)) |
 | `POST /api/v1/backtests/{backtest_id}/cancel` | cancels the user's queued backtest: it fails as cancelled and never runs; 200 with its result document, `409 backtest-not-queued` for one that runs or has ended ([Backtests](#backtests)) |
@@ -409,9 +412,20 @@ flowchart LR
   the upload's check stored (`check_with_model`). Only a manifest that passed all of them is
   kept, in the JSONB column `models.manifest`, under the lock of the user's models (which a
   deletion takes too, so it never removes the row in between); else the
-  answer is `422 manifest-check-failed` with one sentence for each thing wrong in `problems`
-  (`check`, `detail`), at most 10, `more_problems` counting the rest and `unknown_blocks`
-  naming the blocks the catalog does not have. A large document wrong throughout stays cheap:
+  answer is `422 manifest-check-failed` with one entry for each thing wrong in `problems`, at
+  most 10, `more_problems` counting the rest and `unknown_blocks` naming the blocks the catalog
+  does not have. Each entry is a form a person or an agent fixes the manifest from: `check`,
+  `field` (the path it is about, such as `input.features[2].id`; null for the whole
+  document), `detail` (one sentence) and `allowed` (what fits there, when the check knows it:
+  the blocks of the step for a block field, the fields or parameters of the object for one it
+  does not have, the options of a choice from the JSON Schema, the shape the window or the
+  model file gives; `[]` when nothing fits, as for a parameter of a block without any; null
+  otherwise). The checks give these as `preprocessing.Finding`s and `ml/problems.py` turns
+  them into the problem, for the routes and the MCP tools alike.
+  `POST /api/v1/models/{model_id}/manifest/check` runs the same checks on its body and keeps
+  nothing: 200 with `valid` and the same `problems`, `more_problems` and `unknown_blocks`
+  (an editor or an agent fixes the manifest before the PUT); it changes nothing, so a key
+  needs `read` (`CallerDep` and `Caller.require`, as a POST takes no `read` otherwise). A large document wrong throughout stays cheap:
   the form caps what a manifest lists (256 features, 32 parameters a block, 8 axes, block ids
   of 64 characters), a list stops at its first wrong item (an example full of NaN is one
   error), and more than 100 errors of the form are counted, not read.
@@ -978,35 +992,59 @@ call, as the routes' dependencies do), never the API over HTTP.
   raised, `validation` (422, with `errors`, never the values) for arguments that do not fit the
   input schema, `not-found` for an unknown tool, `missing-scope`, and `internal-error` for a
   crash, which is logged with its traceback (a Sentry issue) and tells the model nothing more.
+  The tools answer the problems of the routes they stand for; the one problem only a tool
+  answers is `confirmation-mismatch` (409: `delete_model` got a `confirm_name` that is not
+  the model's name, so nothing was deleted).
 - **Instructions and docs**: the server's `instructions` say what CandleStack is, how keys and
   scopes work, how errors read and link `https://candlestack.tech/docs/agents/` and
   `https://candlestack.tech/docs/mcp/`; the resource `candlestack://docs` (Markdown) lists the
   docs pages, the tool reference, the manifest and backtest result references with their JSON
   Schemas, the problem pages and the API reference.
-- **Tools**: `get_me` (scope `read`): the key's user (ID, name, email, created) and the key's
-  scopes. `validate_sweep` (scope `read`, as the convention asks of a tool that changes nothing,
-  while the dry run over HTTP needs `backtests` because it is the route that starts a sweep; it
-  still runs each setup's checks against the data source, so a read key spends the same
-  requests as a dry run), `run_sweep` (scope `backtests`)
-  and `get_sweep` (scope `read`): the dry run, the start and the progress and ranking of a
-  sweep, on the service of `POST /api/v1/sweeps` and `GET /api/v1/sweeps/{sweep_id}`
-  (`experiments.build_sweeps`, its errors as problems through `experiments.sweep_problems`),
-  answering what the routes answer ([Sweeps](#sweeps)). The tools of the other areas come
-  with #399 and #402 to #404.
-- **Backtests: list, manage, publish** (`mcp/manage.py`, #405), on `BacktestsService` and
-  `BacktestRuns` with the routes' problems (`experiments.update_problems`,
-  `backtest_problems`): `list_backtests` (`read`; search, show, model, sort, order and page as
-  `GET /backtests`), `rename_backtest` and `star_backtest` (`backtests`; idempotent),
-  `cancel_backtest` (`backtests`; queued ones only, else `backtest-not-queued`; destructive),
-  `list_experiments` (`read`; search, mine, author, market, symbol, representation, timeframe,
-  sort, order and page as `GET /experiments`), `publish_backtest` and `unpublish_backtest`
-  (`publish`; destructive, the description says the backtest becomes visible to every account
-  of the beta and asks the agent to check with the user first) and `get_dashboard` (`read`;
-  the counts, the 6 newest that ended, the 5 best by each result and the 4 best starred). They
-  answer a compact backtest: no equity series, generated name, duration or other fields only
-  the app's cards and charts use, the model by its name and ID; Experiments the same with the
-  author, never the model file. The Dashboard's newest published backtests are left out, as
-  `list_experiments` lists them.
+- **Tools**: one module per area, each with its `TOOLS`, which `server.TOOLS` puts together.
+  - `account`: `get_me` (scope `read`): the key's user (ID, name, email, created) and the
+    key's scopes.
+  - `models` (#403), on the models service and its problems (`ml.problems`):
+    `list_models` (the models in short: ID, name, format, state, star, the manifest's
+    timeframe and session, backtests, best Sharpe; and the storage), `get_model` (one in
+    full, as `GET /api/v1/models` shows it), `get_manifest` (the manifest with its defaults,
+    its example left out unless `include_example`, with `example_samples`) and
+    `validate_manifest` (the dry run of `POST .../manifest/check`), all `read`;
+    `set_manifest` (destructive, as it replaces the manifest; starts the trial run as the
+    route does), `rename_model`, `star_model` and `delete_model` (destructive; it takes
+    `confirm_name`, the model's name exactly, and answers `409 confirmation-mismatch` and
+    deletes nothing otherwise), all `models`. A manifest is a JSON object argument, read by
+    the same checks as a route's body (never by the tool's input schema), so a wrong one
+    answers `manifest-check-failed` with the `field`, `detail` and `allowed` of each problem.
+    The upload: `create_model_upload` (`models`) makes the one-time link of
+    `POST /api/v1/models/uploads` and answers its `id`, `expires_at`, the ready `curl`
+    `command`, the `url`, the app's upload page of the link (`page_url`,
+    `<PUBLIC_URL>/upload/<token>`, #406) and `next_steps` to tell the user: the file goes
+    from the user's disk with curl or through that page, never through a tool.
+    `get_model_upload` (`read`) says how it stands (`waiting`, `checking`, `done` with the
+    `model_id`, `failed` with the `problem` and `error`, `expired`).
+  - `sweeps`: `validate_sweep` (scope `read`, as the convention asks of a tool that changes
+    nothing, while the dry run over HTTP needs `backtests` because it is the route that starts a
+    sweep; it still runs each setup's checks against the data source, so a read key spends the
+    same requests as a dry run), `run_sweep` (scope `backtests`) and `get_sweep` (scope `read`):
+    the dry run, the start and the progress and ranking of a sweep, on the service of
+    `POST /api/v1/sweeps` and `GET /api/v1/sweeps/{sweep_id}` (`experiments.build_sweeps`, its
+    errors as problems through `experiments.sweep_problems`), answering what the routes answer
+    ([Sweeps](#sweeps)).
+  - `manage` (#405): listing, managing and publishing backtests, on `BacktestsService` and
+    `BacktestRuns` with the routes' problems (`experiments.update_problems`,
+    `backtest_problems`): `list_backtests` (`read`; search, show, model, sort, order and page as
+    `GET /backtests`), `rename_backtest` and `star_backtest` (`backtests`; idempotent),
+    `cancel_backtest` (`backtests`; queued ones only, else `backtest-not-queued`; destructive),
+    `list_experiments` (`read`; search, mine, author, market, symbol, representation, timeframe,
+    sort, order and page as `GET /experiments`), `publish_backtest` and `unpublish_backtest`
+    (`publish`; destructive, the description says the backtest becomes visible to every account
+    of the beta and asks the agent to check with the user first) and `get_dashboard` (`read`;
+    the counts, the 6 newest that ended, the 5 best by each result and the 4 best starred). They
+    answer a compact backtest: no equity series, generated name, duration or other fields only
+    the app's cards and charts use, the model by its name and ID; Experiments the same with the
+    author, never the model file. The Dashboard's newest published backtests are left out, as
+    `list_experiments` lists them.
+  - The tools of the other areas come with #399, #402 and #404.
 - **Parity table** (`mcp/parity.py`): every endpoint of the API reference, by method and path,
   maps to the tools that do the same, to `Planned` with the task that adds them, or to
   `WebOnly` with the reason (sign-in, sessions, the keys themselves, deleting the account,

@@ -16,6 +16,7 @@ from sqlalchemy import text
 from candlestack.ml import LocalModelStorage, ModelUsageStats
 from candlestack.ml.schemas import FILE_MAX_BYTES, QUOTA_BYTES
 from candlestack.ml.store import ModelStore
+from candlestack.preprocessing import CATALOG
 
 pytestmark = pytest.mark.integration
 
@@ -45,6 +46,10 @@ RAW_SUMMARY = {
     "input_shape": [25, 5],
     "warm_up": {"candles": 24, "kind": "exact"},
 }
+
+
+# The feature blocks of the catalog, what fits where a feature's block is unknown.
+FEATURE_BLOCKS = [block.id for block in CATALOG.values() if block.step == "feature"]
 
 
 def chunked(content: bytes, size: int = 64 * 1024) -> Iterator[bytes]:
@@ -652,7 +657,12 @@ def test_a_manifest_that_does_not_fit_the_model_is_refused(ada, sql, caplog) -> 
         "status": 422,
         "detail": "The manifest gives [25, 5], the model takes [25, 23].",
         "problems": [
-            {"check": "model", "detail": "The manifest gives [25, 5], the model takes [25, 23]."}
+            {
+                "check": "model",
+                "field": "signature.input.shape",
+                "detail": "The manifest gives [25, 5], the model takes [25, 23].",
+                "allowed": [[25, 23]],
+            }
         ],
         "more_problems": 0,
         "unknown_blocks": [],
@@ -672,14 +682,23 @@ def test_every_check_runs_and_names_the_unknown_blocks(ada) -> None:
     assert problems["problems"] == [
         {
             "check": "catalog",
+            "field": "input.features[4].id",
             "detail": "The catalog has no block pocket-pivot@1 yet, so it cannot run.",
+            "allowed": FEATURE_BLOCKS,
         },
         {
             "check": "names",
+            "field": "input.features[1].name",
             "detail": "The feature name open is used 2 times. Each feature needs a name of its "
             "own.",
+            "allowed": None,
         },
-        {"check": "model", "detail": "The manifest gives [25, 5], the model takes [25, 23]."},
+        {
+            "check": "model",
+            "field": "signature.input.shape",
+            "detail": "The manifest gives [25, 5], the model takes [25, 23].",
+            "allowed": [[25, 23]],
+        },
     ]
     assert problems["unknown_blocks"] == ["pocket-pivot@1"]
 

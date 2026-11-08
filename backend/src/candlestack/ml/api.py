@@ -15,7 +15,8 @@ with ``POST /api/v1/models/uploads`` (the file's name and size), the file goes t
 A model's manifest is its own resource, ``/api/v1/models/{model_id}/manifest``: added or
 replaced with PUT, which keeps it only when every check passed (else 422
 ``manifest-check-failed`` with the problems) and then starts its trial run in the worker
-(``checks.py``), and read back with GET.
+(``checks.py``), and read back with GET. ``POST .../manifest/check`` runs the same checks as a
+dry run and answers the problems, keeping nothing.
 """
 
 import logging
@@ -25,7 +26,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from starlette.requests import ClientDisconnect
 
-from candlestack.accounts import CurrentUserDep, ModelsUserDep
+from candlestack.accounts import API_KEY_SCHEME, CallerDep, CurrentUserDep, ModelsUserDep, Scope
 from candlestack.core import (
     NO_STORE,
     ProblemError,
@@ -42,23 +43,29 @@ from candlestack.ml.errors import (
     ModelCheckFailed,
     ModelNameTaken,
     ModelNotFound,
-    ModelTooLarge,
     NoManifest,
-    StorageFull,
-    TooManyModels,
-    UnsupportedModelFormat,
-    UploadInProgress,
     UploadLinkGone,
     UploadLinkNotFound,
     UploadNotFound,
-    UploadTimeout,
+)
+from candlestack.ml.problems import (
+    LINK_REFUSALS,
+    PROBLEMS_SHOWN,
+    UPLOAD_PROBLEMS,
+    manifest_check_failed,
+    manifest_checked,
+    manifest_too_large,
+    megabytes,
+    model_not_found,
+    no_manifest,
+    rename_taken,
+    upload_not_found,
+    upload_problem,
 )
 from candlestack.ml.schemas import (
-    FILE_MAX_BYTES,
     MANIFEST_MAX_BYTES,
-    MB,
-    MODELS_MAX,
     UPLOAD_LINK_MINUTES,
+    ManifestCheckOut,
     ModelOut,
     ModelsOut,
     ModelUpdate,
@@ -66,7 +73,7 @@ from candlestack.ml.schemas import (
     ModelUploadIn,
     ModelUploadOut,
 )
-from candlestack.ml.service import INTERRUPTED, RECEIVE_TIMEOUT, UploadFailure
+from candlestack.ml.service import INTERRUPTED, UploadFailure
 from candlestack.preprocessing import CatalogOut, Manifest, describe_catalog
 
 logger = logging.getLogger(__name__)
@@ -78,9 +85,6 @@ preprocessing_router = APIRouter(tags=["preprocessing"])
 
 # The catalog is code: it changes only with a release.
 _CATALOG = describe_catalog()
-# The problems of a failed manifest shown at most, so a manifest wrong throughout does not
-# flood the page; the rest are counted.
-PROBLEMS_SHOWN = 10
 
 
 ModelId = Annotated[str, Path(description="Public ID of the model", examples=["mdl_7f3k2m9qx4"])]
@@ -122,131 +126,10 @@ _MANIFEST_BODY = {
 }
 
 
-def _megabytes(size: int) -> str:
-    return f"{size / MB:.1f}".removesuffix(".0") + " MB"
-
-
-def _not_found() -> ProblemError:
-    return ProblemError(404, "not-found", "Not Found", "You have no model with this ID.")
-
-
 def _declared_size(request: Request) -> int | None:
     """The size the client announced (Content-Length); None without a usable one."""
     value = request.headers.get("content-length", "")
     return int(value) if value.isdecimal() else None
-
-
-def _unsupported(_error: Exception) -> ProblemError:
-    return ProblemError(
-        415,
-        "unsupported-model-format",
-        "Unsupported model format",
-        "This file is not supported. CandleStack takes Keras models (.keras) and ONNX models "
-        "(.onnx). Export PyTorch, TensorFlow and scikit-learn models to ONNX. Pickle-based "
-        "files (.pt, .pth, .pkl, .joblib) are never taken, as loading them can run any code.",
-    )
-
-
-def _too_large(_error: Exception) -> ProblemError:
-    return ProblemError(
-        413,
-        "model-too-large",
-        "Model too large",
-        f"The file is larger than {_megabytes(FILE_MAX_BYTES)}, the largest file an upload "
-        "takes. Upload a smaller model.",
-    )
-
-
-def _storage_full(error: Exception) -> ProblemError:
-    assert isinstance(error, StorageFull)
-    return ProblemError(
-        409,
-        "storage-full",
-        "Storage full",
-        f"The file does not fit into your storage: {_megabytes(error.used_bytes)} of "
-        f"{_megabytes(error.quota_bytes)} are taken. Delete models you no longer need and "
-        "upload it again.",
-        headers=NO_STORE,  # it tells what the user's storage holds
-        extensions={"used_bytes": error.used_bytes, "quota_bytes": error.quota_bytes},
-    )
-
-
-def _too_many(_error: Exception) -> ProblemError:
-    return ProblemError(
-        409,
-        "too-many-models",
-        "Too many models",
-        f"You have {MODELS_MAX} models, the most CandleStack keeps for a user. Delete models "
-        "you no longer need and upload it again.",
-        headers=NO_STORE,
-        extensions={"limit": MODELS_MAX},
-    )
-
-
-def _in_progress(_error: Exception) -> ProblemError:
-    return ProblemError(
-        409,
-        "upload-in-progress",
-        "Upload in progress",
-        "Another upload of yours is still in progress. Wait until it finishes and upload this "
-        "file again.",
-    )
-
-
-def _timeout(_error: Exception) -> ProblemError:
-    return ProblemError(
-        408,
-        "upload-timeout",
-        "Upload timed out",
-        f"The file did not arrive within {RECEIVE_TIMEOUT // 60:.0f} minutes. Check the "
-        "connection and upload it again.",
-    )
-
-
-def _check_failed(error: Exception) -> ProblemError:
-    assert isinstance(error, ModelCheckFailed)
-    return ProblemError(
-        422,
-        "model-check-failed",
-        "Model check failed",
-        error.detail,
-        extensions={"check": error.check.value},
-    )
-
-
-def _account_gone(_error: Exception) -> ProblemError:
-    return ProblemError(
-        401,
-        "not-signed-in",
-        "Not signed in",
-        "Your account was deleted while the file was uploading, so it was not kept.",
-    )
-
-
-def _name_taken(error: Exception) -> ProblemError:
-    assert isinstance(error, ModelNameTaken)
-    return ProblemError(
-        409,
-        "model-name-taken",
-        "Model name taken",
-        f"You already have a model named {error.name}. Rename that model or this file and "
-        "upload it again.",
-        headers=NO_STORE,  # it names a model of the user
-    )
-
-
-# The problems of a refused upload, by the service's error.
-_UPLOAD_PROBLEMS: dict[type[Exception], Callable[[Exception], ProblemError]] = {
-    UnsupportedModelFormat: _unsupported,
-    ModelTooLarge: _too_large,
-    StorageFull: _storage_full,
-    TooManyModels: _too_many,
-    UploadInProgress: _in_progress,
-    UploadTimeout: _timeout,
-    ModelCheckFailed: _check_failed,
-    AccountGone: _account_gone,
-    ModelNameTaken: _name_taken,
-}
 
 
 def _larger_than_link(error: Exception) -> ProblemError:
@@ -273,7 +156,7 @@ def _link_account_gone(_error: Exception) -> ProblemError:
 # The problems of an upload through a link that started: those of an upload, the file larger
 # than the link, and the account gone, which answers for the link (there is no session here).
 _LINK_PROBLEMS: dict[type[Exception], Callable[[Exception], ProblemError]] = {
-    **_UPLOAD_PROBLEMS,
+    **UPLOAD_PROBLEMS,
     LargerThanLink: _larger_than_link,
     AccountGone: _link_account_gone,
 }
@@ -298,38 +181,6 @@ def _link_gone(error: UploadLinkGone) -> ProblemError:
     )
     return ProblemError(
         410, "upload-link-gone", "Upload link gone", detail, extensions={"reason": error.reason}
-    )
-
-
-def _upload_problem(user_id: str, error: Exception) -> ProblemError:
-    """The problem of an upload that failed with `error`, one of the service's errors; logged
-    with the user's ID only."""
-    problem = _UPLOAD_PROBLEMS[type(error)](error)
-    check = f" {error.check}" if isinstance(error, ModelCheckFailed) else ""
-    logger.info("An upload of user %s was refused (%s%s)", user_id, problem.slug, check)
-    return problem
-
-
-def _manifest_problem(error: ManifestCheckFailed) -> ProblemError:
-    """The problem of a refused manifest: one sentence for each thing wrong, the first
-    ``PROBLEMS_SHOWN`` of them, and how many more there are."""
-    found = [
-        (problem.check, sentence) for problem in error.problems for sentence in problem.sentences
-    ]
-    shown, more = found[:PROBLEMS_SHOWN], len(found) - PROBLEMS_SHOWN
-    detail = " ".join(sentence for _, sentence in shown)
-    if more > 0:
-        detail += f" And {more} more {'problem' if more == 1 else 'problems'}."
-    return ProblemError(
-        422,
-        "manifest-check-failed",
-        "Manifest check failed",
-        detail,
-        extensions={
-            "problems": [{"check": check, "detail": sentence} for check, sentence in shown],
-            "more_problems": max(more, 0),
-            "unknown_blocks": error.unknown_blocks,
-        },
     )
 
 
@@ -393,8 +244,8 @@ async def upload_model(
     response.headers.update(NO_STORE)
     try:
         return await service.upload(user.id, name, _declared_size(request), request.stream())
-    except tuple(_UPLOAD_PROBLEMS) as error:
-        raise _upload_problem(user.id, error) from None
+    except tuple(UPLOAD_PROBLEMS) as error:
+        raise upload_problem(user.id, error) from None
 
 
 @router.post(
@@ -435,8 +286,8 @@ async def create_model_upload(
     response.headers.update(NO_STORE)
     try:
         return await service.create_upload(user.id, body, settings.public_url)
-    except (UnsupportedModelFormat, ModelTooLarge, StorageFull, TooManyModels) as error:
-        raise _upload_problem(user.id, error) from None
+    except LINK_REFUSALS as error:
+        raise upload_problem(user.id, error) from None
 
 
 @router.get(
@@ -457,9 +308,7 @@ async def get_model_upload(
     try:
         return await service.upload_status(user.id, upload_id)
     except UploadNotFound:
-        raise ProblemError(
-            404, "not-found", "Not Found", "You have no upload link with this ID."
-        ) from None
+        raise upload_not_found() from None
 
 
 @router.put(
@@ -558,15 +407,9 @@ async def update_model(
     try:
         return await service.update(user.id, model_id, body)
     except ModelNotFound:
-        raise _not_found() from None
+        raise model_not_found() from None
     except ModelNameTaken as taken:
-        raise ProblemError(
-            409,
-            "model-name-taken",
-            "Model name taken",
-            f"You already have a model named {taken.name}. Choose another name.",
-            headers=NO_STORE,  # it names a model of the user
-        ) from None
+        raise rename_taken(taken) from None
 
 
 @router.delete(
@@ -580,7 +423,7 @@ async def delete_model(model_id: ModelId, user: ModelsUserDep, service: ModelsSe
     try:
         await service.delete(user.id, model_id)
     except ModelNotFound:
-        raise _not_found() from None
+        raise model_not_found() from None
 
 
 @router.put(
@@ -591,15 +434,19 @@ async def delete_model(model_id: ModelId, user: ModelsUserDep, service: ModelsSe
         **_NOT_FOUND,
         **problem_doc(
             413,
-            f"The manifest is larger than {_megabytes(MANIFEST_MAX_BYTES)} (`manifest-too-large`).",
+            f"The manifest is larger than {megabytes(MANIFEST_MAX_BYTES)} (`manifest-too-large`).",
         ),
         **problem_doc(
             422,
             "A check failed (`manifest-check-failed`): `problems` lists what is wrong, at most "
             f"{PROBLEMS_SHOWN}, each with its `check` (`schema`, `catalog`, `params`, `names`, "
-            "`signature`, `example` or `model`) and a `detail` of one sentence; "
+            "`signature`, `example` or `model`), the `field` it is about (a path such as "
+            "`input.features[2].id`, null for the whole manifest), a `detail` of one sentence "
+            "and the values that fit there in `allowed` (null when the check does not say); "
             "`more_problems` counts the rest and `unknown_blocks` names the blocks the catalog "
-            "does not have. `detail` says the same in words.",
+            "does not have. `detail` says the same in words. "
+            "`POST /api/v1/models/{model_id}/manifest/check` runs the same checks and keeps "
+            "nothing.",
         ),
     },
     dependencies=[Depends(require_same_origin)],
@@ -627,21 +474,56 @@ async def set_manifest(
             user.id, model_id, _declared_size(request), request.stream()
         )
     except ModelNotFound:
-        raise _not_found() from None
+        raise model_not_found() from None
     except ManifestTooLarge:
-        raise ProblemError(
-            413,
-            "manifest-too-large",
-            "Manifest too large",
-            f"The manifest is larger than {_megabytes(MANIFEST_MAX_BYTES)}, the largest one "
-            "CandleStack keeps. Give it a smaller example.",
-        ) from None
+        raise manifest_too_large() from None
     except ManifestCheckFailed as failed:
         failed_checks = ", ".join(dict.fromkeys(problem.check for problem in failed.problems))
         logger.info("A manifest of user %s was refused (%s)", user.id, failed_checks)
-        raise _manifest_problem(failed) from None
+        raise manifest_check_failed(failed) from None
     checks.start(user.id, model.id)
     return model
+
+
+@router.post(
+    "/api/v1/models/{model_id}/manifest/check",
+    responses={
+        **_NOT_SIGNED_IN,
+        **_NOT_FOUND,
+        **problem_doc(
+            413,
+            f"The manifest is larger than {megabytes(MANIFEST_MAX_BYTES)} (`manifest-too-large`).",
+        ),
+    },
+    openapi_extra={**_MANIFEST_BODY, "security": [{API_KEY_SCHEME: [Scope.read.value]}]},
+)
+async def check_manifest(
+    model_id: ModelId,
+    *,
+    request: Request,
+    caller: CallerDep,
+    service: ModelsServiceDep,
+    response: Response,
+) -> ManifestCheckOut:
+    """Checks a manifest for the model as `PUT /api/v1/models/{model_id}/manifest` would, and
+    keeps nothing: a dry run, for an editor or an agent to fix the manifest before it sets it.
+    The body is the manifest. `valid` says whether every check passed; else `problems` lists
+    what is wrong, at most 10, each with the `field` it is about, a `detail` of one sentence
+    and the values that fit there (`allowed`). It changes nothing, so an API key needs only
+    `read`."""
+    caller.require(Scope.read)
+    response.headers.update(NO_STORE)
+    try:
+        await service.check_manifest(
+            caller.user.id, model_id, _declared_size(request), request.stream()
+        )
+    except ModelNotFound:
+        raise model_not_found() from None
+    except ManifestTooLarge:
+        raise manifest_too_large() from None
+    except ManifestCheckFailed as failed:
+        return manifest_checked(failed)
+    return manifest_checked(None)
 
 
 @router.get(
@@ -664,15 +546,9 @@ async def get_manifest(
     try:
         return await service.manifest(user.id, model_id)
     except ModelNotFound:
-        raise _not_found() from None
+        raise model_not_found() from None
     except NoManifest:
-        raise ProblemError(
-            404,
-            "no-manifest",
-            "No manifest",
-            "This model has no manifest yet. Add one to tell CandleStack how to build its input.",
-            headers=NO_STORE,
-        ) from None
+        raise no_manifest() from None
 
 
 @preprocessing_router.get("/api/v1/preprocessing/catalog")

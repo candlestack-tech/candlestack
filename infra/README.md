@@ -18,9 +18,10 @@ are proxied CNAMEs to the tunnel, so moving to another server does not touch DNS
 | prod | https://app.candlestack.tech | a `v*` tag is pushed on a commit of `main` | tech lead (GitHub environment `production`) |
 | stage | https://stage.candlestack.tech | every push to `main` | none |
 
-Every environment is one compose project (`env/compose.yaml`). The edge Caddy sends `/api/*`
-of the environment's hostname to its backend and everything else to its frontend, and
-compresses the responses (zstd or gzip) on the way to Cloudflare.
+Every environment is one compose project (`env/compose.yaml`). The edge Caddy sends `/api/*`,
+`/mcp` and `/.well-known/oauth-protected-resource/*` of the environment's hostname to its
+backend and everything else to its frontend, and compresses the responses (zstd or gzip) on the
+way to Cloudflare.
 
 | Container | Image | Reached as | Memory limit |
 | --- | --- | --- | --- |
@@ -386,7 +387,9 @@ The edge Caddy adds to every response HSTS (a year; no subdomains or preload, si
 microphone and location, and drops the `Via` header. A Content-Security-Policy runs in
 report-only mode: browsers report what it would block to the Sentry project `frontend`
 (environments `prod`, `stage`), and once the reports show nothing the pages need, it
-becomes enforcing. The smoke test checks these headers after every deploy.
+becomes enforcing. The upload page of a one-time link (`/upload/<token>`) gets no policy: a
+report carries the page's address, which holds the link's secret. The smoke test checks these
+headers after every deploy.
 
 Trivy scans the images for vulnerabilities. In CI the backend and worker images (job `e2e`) and
 the frontend and agent images (job `infra`) fail on a HIGH or CRITICAL one that has a fix,
