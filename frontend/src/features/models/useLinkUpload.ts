@@ -101,6 +101,16 @@ function useRefresh(token: string) {
   };
 }
 
+// Closing or reloading the tab mid-upload uses the link up too, so the browser asks first.
+function useAskBeforeLeaving(uploading: boolean) {
+  useEffect(() => {
+    if (!uploading) return;
+    const ask = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', ask);
+    return () => window.removeEventListener('beforeunload', ask);
+  }, [uploading]);
+}
+
 export function useLinkUpload(token: string) {
   const link = useLink(token);
   const usage = useModels().data?.usage;
@@ -136,6 +146,8 @@ export function useLinkUpload(token: string) {
     if (reason) setPhase({ step: 'ready', note: { kind: 'wrong-file', file, expected, reason } });
     else send(file);
   };
+
+  useAskBeforeLeaving(phase.step === 'uploading');
 
   // Cancel: the link was used once the upload started, so it cannot take the file again.
   const cancel = () => {

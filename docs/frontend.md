@@ -179,8 +179,8 @@ names the layout: `useSearch({ from: '/_app/instruments' })`.
   kept) and Contact the team. A clicked button stays busy ("Opening GitHub", a spinner) while
   the browser leaves; Back from the provider offers the buttons again. An open session skips
   the page and goes to `next` or `/dashboard`.
-- `/dashboard`, `/backtests`, `/experiments`, `/models`, `/instruments`, `/instrument/$id` and
-  `/settings` sit behind a guard (`src/routes/accountGuards.ts`): signed out, it redirects to `/signin?next=<the
+- `/dashboard`, `/backtests`, `/experiments`, `/models`, `/upload/$token`, `/instruments`,
+  `/instrument/$id` and `/settings` sit behind a guard (`src/routes/accountGuards.ts`): signed out, it redirects to `/signin?next=<the
   page asked for>`. The app code loads on demand.
 - `next` is only ever a path of this app (`appPath` in `src/routes/signInSearch.ts`): anything
   that leaves the origin (`https://…`, `//…`, `/\…`), `/signin` itself and `/api/…` are dropped,
@@ -361,6 +361,51 @@ delete modals):
   chosen column is drawn in the accent.
 - A model deleted meanwhile (404) closes its Rename or Delete dialog, and its page says it is not
   found.
+
+## Upload page of a link
+
+`/upload/<token>` (#406, `src/pages/UploadPage.tsx`, the parts in
+`src/features/models/UploadLink*.tsx` and `useLinkUpload.ts`) follows the approved design
+(`design/mockups/api-mcp`, the screens `#upload/ready`, `wrong-file`, `uploading`, `checking`,
+`done`, `failed`, `expired`, `used` and `wrong`). An agent that cannot send a file itself asks for
+a one-time link (`POST /api/v1/models/uploads`, which answers its `page_url`), and the user drops
+the file here.
+
+- The app header without the sidebar (`staticData: { sidebar: false }`) and one card in the
+  middle. Signed in only: signed out, the guard sends the visitor to sign in with
+  `next=/upload/<token>` and back here after.
+- The page reads the link with `GET /api/v1/uploads/{token}` (`uploadLinkQueryOptions`): the
+  expected name and size, the status and the expiry, only for the session of the account that
+  asked for it. It asks again every 2 seconds while the link is checking.
+- Ready: the expected file with its size and format, the upload dialog's `DropZone`, the minutes
+  left and what the file takes of the free storage. A file of another size or format is refused
+  in the browser before anything is sent ("Not the file your agent asked for"), so the link stays
+  usable. A different name is fine: the model gets the link's name.
+- Uploading: `PUT /api/v1/uploads/{token}` through XMLHttpRequest (`uploadByLink`), as fetch
+  cannot report the progress of a body. The bar, the sizes sent, Cancel and the same foot as
+  Ready. Closing or reloading the tab asks first (`beforeunload`), since that uses the link up.
+- Checking, Done and Check failed: the three checks with `CheckRow`, the one shared with the
+  model's page. Done shows the new model, Open the model and the storage before and after. A
+  failed check has the API's sentence and Which models work, any other failure (a timeout, the
+  storage full) the problem's box and "Ask your agent for a new link".
+- Expired, Used and Wrong account are short state cards. Wrong account offers Use another
+  account: sign out, then the sign-in page with `next` back to the link (`useSwitchAccount`).
+- The token is the link's secret: the API keeps it out of its logs and Sentry (`redacted_path`,
+  `next` in the query denylist), and the edge sends no CSP report header on `/upload/*`.
+
+Differences from the design:
+
+- **Who asked:** the design says "Asked for by Claude" with the client's logo. The link does not
+  record which key or app made it, so the page says "Asked for 2 min ago" and "your agent" in the
+  copy (also in "Not the file your agent asked for").
+- **Cancel:** the design goes back to Ready. The API uses the link as soon as the upload starts,
+  so Cancel ends on "Upload cancelled", which says to ask for a new link. A cancel after the whole
+  file had gone out shows the model when the API made it anyway.
+- **Another tab:** a link already checking when the page opens shows "Upload in progress in
+  another tab" instead of Uploaded, since its bytes may still be on the way.
+- **Extra states** the design has no screen for: Upload cancelled, "This link does not work" (an
+  unknown token, or a link gone while the page was open) and "Could not load this link" with Try
+  again.
 
 ## Lists of backtests
 

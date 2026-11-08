@@ -34,10 +34,21 @@ export const OpenModel = ({ id }: { id: string }) => (
 const sizeOf = (bytes: number, other: number) =>
   formatSize(bytes) === formatSize(other) ? `${bytes.toLocaleString('en-US')} bytes` : formatSize(bytes);
 
+// What the checks list shows: this page's upload being checked, an upload through the link from
+// another tab (its bytes may still be on the way), all passed, or the check that failed.
+type ChecksState = 'running' | 'elsewhere' | 'passed' | UploadFailure;
+
 // Uploaded, then the two checks of the file (opens as a safe model, has trained weights), as far
 // as they got: `failed` names the check that failed with why.
-function checksOf(state: 'running' | 'passed' | UploadFailure): CheckItem[] {
+function checksOf(state: ChecksState): CheckItem[] {
   const uploaded: CheckItem = { state: 'passed', title: 'Uploaded' };
+  if (state === 'elsewhere') {
+    return [
+      { state: 'running', title: 'Upload in progress in another tab' },
+      { state: 'todo', title: 'Opens as a safe model' },
+      { state: 'todo', title: 'Has trained weights' },
+    ];
+  }
   if (state === 'running' || state === 'passed') {
     return [
       uploaded,
@@ -61,7 +72,7 @@ function checksOf(state: 'running' | 'passed' | UploadFailure): CheckItem[] {
 }
 
 // The checks as far as they got, as a list (.cks).
-export const LinkChecks = ({ state }: { state: 'running' | 'passed' | UploadFailure }) => (
+export const LinkChecks = ({ state }: { state: ChecksState }) => (
   <ul className="flex flex-col gap-2.5 text-[13.5px]">
     {checksOf(state).map((item) => (
       <CheckRow key={item.title} {...item} />
@@ -78,16 +89,34 @@ export function WrongFileNote({ note }: { note: ReadyNote }) {
       ? `${file.name} is not a ${framework ?? 'model'} file.`
       : `${file.name} is ${sizeOf(file.size, expected.size_bytes)}.`;
   return (
-    <ErrorBox title="Not the file the link is for">
+    <ErrorBox title="Not the file your agent asked for">
       {what} Choose {expected.name}, or ask your agent for a new link.
     </ErrorBox>
   );
 }
 
+type MetaProps = { link: ModelUpload; usage: StorageUsage | undefined; now: number };
+
+// The foot of the card while the link waits for its file or takes it: the time left and what the
+// file takes from the free storage.
+export function LinkMeta({ link, usage, now }: MetaProps) {
+  const minutesLeft = Math.max(1, Math.ceil((Date.parse(link.expires_at) - now) / 60_000));
+  const free = usage ? Math.max(0, usage.quota_bytes - usage.used_bytes) : undefined;
+  return (
+    <MetaLine
+      left={
+        <>
+          <ClockIcon />
+          Link works for {minutesLeft} more min
+        </>
+      }
+      right={free === undefined ? undefined : `${formatSize(link.size_bytes)} of your ${formatSize(free)} free`}
+    />
+  );
+}
+
 type ReadyProps = { link: ModelUpload; usage: StorageUsage | undefined; note: ReadyNote | undefined; now: number };
 
-// The link waits for its file: the file it expects, the drop zone, the time left and the storage
-// the file takes.
 // The hidden file input the drop zone opens, offering files of the link's format.
 function FileInput({
   input,
@@ -115,11 +144,11 @@ function FileInput({
   );
 }
 
+// The link waits for its file: the file it expects, the drop zone, the time left and the storage
+// the file takes.
 export function Ready({ link, usage, note, now, onFile }: ReadyProps & { onFile: (file: File) => void }) {
   const input = useRef<HTMLInputElement>(null);
   const framework = linkFramework(link);
-  const minutesLeft = Math.max(1, Math.ceil((Date.parse(link.expires_at) - now) / 60_000));
-  const free = usage ? Math.max(0, usage.quota_bytes - usage.used_bytes) : undefined;
   return (
     <>
       <FileInput input={input} link={link} onFile={onFile} />
@@ -133,15 +162,7 @@ export function Ready({ link, usage, note, now, onFile }: ReadyProps & { onFile:
         onPick={() => input.current?.click()}
         onDrop={onFile}
       />
-      <MetaLine
-        left={
-          <>
-            <ClockIcon />
-            Link works for {minutesLeft} more min
-          </>
-        }
-        right={free === undefined ? undefined : `${formatSize(link.size_bytes)} of your ${formatSize(free)} free`}
-      />
+      <LinkMeta link={link} usage={usage} now={now} />
     </>
   );
 }

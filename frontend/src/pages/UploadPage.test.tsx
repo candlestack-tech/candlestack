@@ -71,7 +71,7 @@ describe('UploadPage, ready', () => {
     const { sent, choose } = await openPage();
     choose(file('tsmixer-old.keras', 12));
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('Not the file the link is for');
+    expect(alert.textContent).toContain('Not the file your agent asked for');
     expect(alert.textContent).toContain('tsmixer-old.keras is 12.0 MB. Choose my-tsmixer.keras, or ask your agent');
     expect(sent).toHaveLength(0);
     expect(screen.getByRole('button', { name: /Drop my-tsmixer.keras here/ })).toBeTruthy();
@@ -101,6 +101,8 @@ describe('UploadPage, the upload', () => {
     expect(await screen.findByText('14.4 MB of 31.4 MB')).toBeTruthy();
     expect(screen.getByLabelText<HTMLProgressElement>('Upload').value).toBe(45);
     expect(screen.getByText('45 %')).toBeTruthy();
+    expect(screen.getByText('Link works for 13 more min')).toBeTruthy();
+    expect(screen.getByText('31.4 MB of your 73.6 MB free')).toBeTruthy();
 
     request?.progress(item.size, item.size);
     expect(await screen.findByText('Checks take a few seconds')).toBeTruthy();
@@ -132,6 +134,7 @@ describe('UploadPage, the upload', () => {
     );
     expect(screen.getByText('This link is used up')).toBeTruthy();
     expect(screen.getByText('Nothing taken from your storage')).toBeTruthy();
+    expect(screen.getByText(/Fix the file, then ask your agent/)).toBeTruthy();
   });
 
   it('says what else stopped the upload', async () => {
@@ -142,6 +145,7 @@ describe('UploadPage, the upload', () => {
     const alert = screen.getByRole('alert');
     expect(alert.textContent).toContain('Upload timed out');
     expect(alert.textContent).toContain('The file did not arrive within 2 minutes.');
+    expect(screen.getByText('Nothing was added to your account. Ask your agent for a new link.')).toBeTruthy();
   });
 
   it('goes back to the drop zone when the API turned the upload away before using the link', async () => {
@@ -161,6 +165,33 @@ describe('UploadPage, the upload', () => {
     expect(sent[0]?.aborted).toBe(true);
     expect(await screen.findByRole('heading', { level: 1, name: 'Upload cancelled' })).toBeTruthy();
     expect(screen.getByText(/so this one is used up/)).toBeTruthy();
+  });
+
+  it('asks before the tab closes mid-upload, and no longer once it ended', async () => {
+    const { sent, choose } = await openPage();
+    choose(RIGHT_FILE());
+    await screen.findByText('Keep this tab open until the upload ends.');
+    const leave = () => {
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(leave()).toBe(true);
+    sent[0]?.respond(201, NEW);
+    await screen.findByRole('heading', { level: 1, name: 'Model uploaded' });
+    expect(leave()).toBe(false);
+  });
+
+  it('shows the model when a cancel came after the whole file had gone out', async () => {
+    let answer = link();
+    const { sent, choose, user } = await openPage(() => Promise.resolve({ status: 200, body: answer }));
+    const item = RIGHT_FILE();
+    choose(item);
+    sent[0]?.progress(item.size - 1, item.size);
+    answer = link({ status: 'done', model_id: 'mdl_newnewnewn', finished_at: minutes(0) });
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'This link was already used' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Open the model' }).getAttribute('href')).toBe('/models/mdl_newnewnewn');
   });
 
   it('shows the link as it now stands when it was used meanwhile', async () => {
@@ -210,6 +241,16 @@ describe('UploadPage, the link cannot take a file', () => {
   it('shows the checks of an upload running in another tab', async () => {
     await openPage({ status: 200, body: link({ status: 'checking' }) });
     expect(screen.getByText('Checks take a few seconds')).toBeTruthy();
+    expect(screen.getByText(/Checking:/).parentElement?.textContent).toContain('Upload in progress in another tab');
+    expect(screen.queryByText(/^Passed:/)).toBeNull();
+  });
+
+  it('says a link that stopped working while the page was open does not work', async () => {
+    let answer: { status: number; body?: unknown } = { status: 200, body: link() };
+    const { queryClient } = await openPage(() => Promise.resolve(answer));
+    answer = problem(404, 'upload-link-not-found', 'No upload link has this token.');
+    await queryClient.refetchQueries();
+    expect(await screen.findByRole('heading', { level: 1, name: 'This link does not work' })).toBeTruthy();
   });
 
   it('says a link of another account is not for this one, and switches accounts', async () => {

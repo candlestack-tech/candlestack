@@ -20,7 +20,7 @@ import {
   UploadPageFrame,
   UploadProgress,
 } from './UploadLinkParts';
-import { Done, Failed, LinkChecks, OpenModel, Ready } from './UploadLinkSteps';
+import { Done, Failed, LinkChecks, LinkMeta, OpenModel, Ready } from './UploadLinkSteps';
 import { PRIMARY, SECONDARY } from './uploadLinkStyles';
 import type { UploadFailure } from './useUpload';
 
@@ -120,11 +120,12 @@ const from = (link: ModelUpload, now: number) => (
 type UploadingProps = {
   link: ModelUpload;
   phase: Extract<Phase, { step: 'uploading' }>;
+  usage: StorageUsage | undefined;
   now: number;
   onCancel: () => void;
 };
 
-function Uploading({ link, phase, now, onCancel }: UploadingProps) {
+function Uploading({ link, phase, usage, now, onCancel }: UploadingProps) {
   const framework = linkFramework(link);
   return (
     <LinkCard top={from(link, now)} title="Upload your model" intro={INTRO}>
@@ -139,16 +140,19 @@ function Uploading({ link, phase, now, onCancel }: UploadingProps) {
         sentText={`${formatSize(phase.sent)} of ${formatSize(phase.total)}`}
       />
       <CardHint>Keep this tab open until the upload ends.</CardHint>
+      <LinkMeta link={link} usage={usage} now={now} />
     </LinkCard>
   );
 }
 
-function Checking({ link, now }: { link: ModelUpload; now: number }) {
+// This page's upload being checked, or (`elsewhere`) an upload through the link from another tab,
+// which the API marks as checking as soon as it starts.
+function Checking({ link, now, elsewhere = false }: { link: ModelUpload; now: number; elsewhere?: boolean }) {
   const framework = linkFramework(link);
   return (
     <LinkCard top={from(link, now)} title="Upload your model" intro={INTRO}>
       <FileRow name={link.name} framework={framework} line={`${formatSize(link.size_bytes)} · ${framework ?? ''}`} />
-      <LinkChecks state="running" />
+      <LinkChecks state={elsewhere ? 'elsewhere' : 'running'} />
       <MetaLine
         left={
           <>
@@ -167,7 +171,11 @@ function FailedCard({ link, failure, now }: { link: ModelUpload; failure: Upload
     <LinkCard
       top={from(link, now)}
       title={checkFailed ? 'The model did not pass the checks' : 'The upload did not finish'}
-      intro="Nothing was added to your account. Fix the file, then ask your agent for a new link."
+      intro={
+        checkFailed
+          ? 'Nothing was added to your account. Fix the file, then ask your agent for a new link.'
+          : 'Nothing was added to your account. Ask your agent for a new link.'
+      }
     >
       <Failed link={link} failure={failure} />
     </LinkCard>
@@ -218,7 +226,7 @@ function Used({ link, now }: { link: ModelUpload; now: number }) {
 function LinkView({ link, phase, usage, now, onFile, onCancel }: ViewProps) {
   switch (phase.step) {
     case 'uploading':
-      return <Uploading link={link} phase={phase} now={now} onCancel={onCancel} />;
+      return <Uploading link={link} phase={phase} usage={usage} now={now} onCancel={onCancel} />;
     case 'checking':
       return <Checking link={link} now={now} />;
     case 'done':
@@ -234,7 +242,8 @@ function LinkView({ link, phase, usage, now, onFile, onCancel }: ViewProps) {
     case 'failed':
       return <FailedCard link={link} failure={phase.failure} now={now} />;
     case 'cancelled':
-      return <Cancelled />;
+      // Cancelled after the whole file had gone out: the API may have made the model anyway.
+      return link.status === 'done' ? <Used link={link} now={now} /> : <Cancelled />;
     case 'ready':
       return <ByStatus link={link} phase={phase} usage={usage} now={now} onFile={onFile} />;
   }
@@ -256,7 +265,7 @@ function ByStatus({ link, phase, usage, now, onFile }: StatusProps) {
     case 'expired':
       return <Expired />;
     case 'checking':
-      return <Checking link={link} now={now} />;
+      return <Checking link={link} now={now} elsewhere />;
     case 'done':
       return <Used link={link} now={now} />;
     case 'failed':
@@ -267,8 +276,11 @@ function ByStatus({ link, phase, usage, now, onFile }: StatusProps) {
 export function UploadLink({ token }: { token: string }) {
   const { link, usage, phase, choose, cancel } = useLinkUpload(token);
   const now = useNow();
+  // A link that is gone or not this account's: React Query keeps the last answer when asking again
+  // fails, so the error decides over it.
+  const refused = link.error instanceof ApiError && (link.error.status === 403 || link.error.status === 404);
   let view;
-  if (link.data) {
+  if (link.data && !refused) {
     view = <LinkView link={link.data} phase={phase} usage={usage} now={now} onFile={choose} onCancel={cancel} />;
   } else if (link.error) {
     view = <LinkError error={link.error} token={token} onRetry={() => void link.refetch()} />;

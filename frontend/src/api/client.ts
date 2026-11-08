@@ -1,5 +1,6 @@
-// The only place that calls fetch (and XMLHttpRequest, for an upload's progress). Every request to the CandleStack API goes through here, so
-// when the API changes (#104-#109) the fix is in src/api/ and nowhere else.
+// The only place that calls fetch (and XMLHttpRequest, for an upload's progress). Every request
+// to the CandleStack API goes through here, so when the API changes (#104-#109) the fix is in
+// src/api/ and nowhere else.
 
 // Relative on purpose: in prod the page and the API share a host, in dev the Vite proxy
 // forwards /api to https://app.candlestack.tech (vite.config.ts).
