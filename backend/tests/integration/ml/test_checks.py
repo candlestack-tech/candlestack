@@ -212,6 +212,7 @@ def test_a_check_that_failed_on_the_worker_leaves_the_model_unchecked(
 
 def test_without_a_worker_the_model_stays_ready(app: FastAPI, ada, sql, caplog) -> None:
     app.state.model_checks._wait = 0.2
+    app.state.model_checks._queue_wait = 0.2  # no worker takes it
 
     with caplog.at_level(logging.WARNING):
         model = with_manifest(ada)
@@ -273,6 +274,7 @@ def test_the_checks_at_startup_stop_at_the_first_without_a_worker(
     app: FastAPI, client: TestClient, ada, bob, sql, caplog
 ) -> None:
     app.state.model_checks._wait = 0.2
+    app.state.model_checks._queue_wait = 0.2  # no worker takes it
     with caplog.at_level(logging.WARNING):
         with_manifest(ada)
         with_manifest(bob)

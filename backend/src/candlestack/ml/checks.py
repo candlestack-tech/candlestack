@@ -31,7 +31,14 @@ from typing import Any
 from redis.exceptions import RedisError
 
 from candlestack.core import DATABASE_ERRORS, Database
-from candlestack.jobs import DEFAULT_WAIT, JobClient, JobResult, Reason, manifest_sha256
+from candlestack.jobs import (
+    DEFAULT_WAIT,
+    QUEUE_WAIT,
+    JobClient,
+    JobResult,
+    Reason,
+    manifest_sha256,
+)
 from candlestack.ml.schemas import CheckPart
 from candlestack.ml.storage import model_file
 from candlestack.ml.store import ModelStore
@@ -67,9 +74,18 @@ def failed_part(result: JobResult) -> CheckPart | None:
 class ModelChecks:
     """Starts the checks of the models and keeps their tasks until they end."""
 
-    def __init__(self, db: Database, jobs: JobClient, *, wait: float = DEFAULT_WAIT) -> None:
+    def __init__(
+        self,
+        db: Database,
+        jobs: JobClient,
+        *,
+        wait: float = DEFAULT_WAIT,
+        queue_wait: float = QUEUE_WAIT,
+    ) -> None:
         self._db = db
         self._jobs = jobs
+        # How long a check waits for a worker to take it, then for its result.
+        self._queue_wait = queue_wait
         self._wait = wait
         self._tasks: set[asyncio.Task[Any]] = set()
         # The models each user's task has yet to check, in the order they were set (a dict as
@@ -154,6 +170,7 @@ class ModelChecks:
                 sha256=sha256.hex(),
                 manifest=manifest,
                 wait=self._wait,
+                queue_wait=self._queue_wait,
             )
         except (RedisError, OSError) as error:
             logger.warning(
