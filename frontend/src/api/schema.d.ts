@@ -822,7 +822,7 @@ export interface components {
             id: string;
             /**
              * Last Used At
-             * @description When a request last signed in with the key (UTC), to the minute; null: never used
+             * @description When a request last signed in with the key (UTC); written at most once a minute, so it may lag by up to a minute; null: never used
              */
             last_used_at: string | null;
             /**
@@ -904,7 +904,7 @@ export interface components {
             id: string;
             /**
              * Last Used At
-             * @description When a request last signed in with the key (UTC), to the minute; null: never used
+             * @description When a request last signed in with the key (UTC); written at most once a minute, so it may lag by up to a minute; null: never used
              */
             last_used_at: string | null;
             /**

@@ -1,0 +1,176 @@
+{
+  "resources": [
+    {
+      "description": "Links to the docs for agents, the tool reference, the manifest and the backtest result references",
+      "mimeType": "text/markdown",
+      "name": "docs",
+      "title": "CandleStack docs",
+      "uri": "candlestack://docs"
+    }
+  ],
+  "server": {
+    "instructions": "CandleStack is a lab for experiments on financial time series: a user uploads a trading model (Keras or ONNX), describes its input in a manifest and backtests it on market data, crypto from Binance and US stocks from Alpaca, then compares the results and publishes the good ones.\n\nYou act as the user whose API key signed in. The key's scopes decide which tools work: read (everything that only reads), backtests, models and publish. Call get_me first to see who you act for and what the key may do. A tool that changes data says so in its annotations.\n\nA failed tool call answers a problem as JSON: its type (https://candlestack.tech/problems/<slug>) names what went wrong and its detail says what to do.\n\nDocs for agents: https://candlestack.tech/docs/agents/ and for this server: https://candlestack.tech/docs/mcp/. The resource candlestack://docs lists every docs page and reference.",
+    "name": "candlestack",
+    "title": "CandleStack"
+  },
+  "tools": [
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Who you act for: the CandleStack user whose API key signed in, and the key's scopes, which decide the tools you may call. Call it first to check the connection, and when a tool answers the problem missing-scope.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_me",
+      "endpoints": [
+        "GET /api/v1/me"
+      ],
+      "example": {
+        "arguments": {},
+        "result": {
+          "created_at": "2026-10-01T09:30:00Z",
+          "display_name": "Arsen Labovich",
+          "email": "arsen@example.com",
+          "id": "usr_7f3k2m9qx4",
+          "scopes": [
+            "read",
+            "backtests"
+          ]
+        }
+      },
+      "inputSchema": {
+        "properties": {},
+        "title": "get_meArguments",
+        "type": "object"
+      },
+      "name": "get_me",
+      "outputSchema": {
+        "$defs": {
+          "Scope": {
+            "description": "What an API key may do. `read`: every GET; `backtests`: start, rename and star\nbacktests; `models`: upload models, add their manifests, rename, star and delete them;\n`publish`: publish and unpublish backtests. Managing keys, deleting the account, sign-in\nmethods and signing out need the browser session whatever the scopes.",
+            "enum": [
+              "read",
+              "backtests",
+              "models",
+              "publish"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "description": "The user the agent acts for, and what its API key may do.",
+        "properties": {
+          "created_at": {
+            "description": "When the account was created (UTC)",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_name": {
+            "description": "Name shown in the app",
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "description": "From the identity provider the user signs in with",
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "description": "Public user ID, shown in Settings and given to support",
+            "pattern": "^usr_[a-z0-9]{10}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "scopes": {
+            "description": "What the API key may do: read (every tool that only reads), backtests (start, rename, star and cancel backtests), models (upload, manifests, rename, star and delete models), publish (publish and unpublish backtests)",
+            "items": {
+              "$ref": "#/$defs/Scope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "email",
+          "created_at",
+          "scopes"
+        ],
+        "title": "MeResult",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Who am I"
+    }
+  ],
+  "webOnly": [
+    {
+      "endpoint": "GET /api/health",
+      "reason": "Health of the service for monitoring and the status page, not the user's data."
+    },
+    {
+      "endpoint": "GET /api/health/sources",
+      "reason": "Health of the service for monitoring and the status page, not the user's data."
+    },
+    {
+      "endpoint": "GET /api/v1/auth/denied",
+      "reason": "Signing in with GitHub or Google happens in the browser; an agent signs in with a key."
+    },
+    {
+      "endpoint": "GET /api/v1/auth/{provider}/start",
+      "reason": "Signing in with GitHub or Google happens in the browser; an agent signs in with a key."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/sign-out",
+      "reason": "The browser's session only: API keys cannot sign out or end sessions."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/sign-out-everywhere",
+      "reason": "The browser's session only: API keys cannot sign out or end sessions."
+    },
+    {
+      "endpoint": "PATCH /api/v1/me",
+      "reason": "The display name is changed in Settings; API keys cannot change the profile."
+    },
+    {
+      "endpoint": "DELETE /api/v1/me",
+      "reason": "Deleting the account needs the signed-in browser."
+    },
+    {
+      "endpoint": "DELETE /api/v1/me/sign-in-methods/{provider}",
+      "reason": "Sign-in methods are managed in the signed-in browser."
+    },
+    {
+      "endpoint": "GET /api/v1/me/api-keys",
+      "reason": "API keys are managed in the signed-in browser only, so a key cannot make or revoke keys."
+    },
+    {
+      "endpoint": "POST /api/v1/me/api-keys",
+      "reason": "API keys are managed in the signed-in browser only, so a key cannot make or revoke keys."
+    },
+    {
+      "endpoint": "DELETE /api/v1/me/api-keys/{key_id}",
+      "reason": "API keys are managed in the signed-in browser only, so a key cannot make or revoke keys."
+    },
+    {
+      "endpoint": "PATCH /api/v1/me/preferences/appearance",
+      "reason": "The theme of the web app, which means nothing to an agent."
+    },
+    {
+      "endpoint": "GET /api/v1/data/instruments/{instrument_id}/icon",
+      "reason": "An image for the app's lists, which an agent does not need."
+    },
+    {
+      "endpoint": "PUT /api/v1/uploads/{token}",
+      "reason": "The file goes to the one-time link with curl or the upload page, not through a tool."
+    },
+    {
+      "endpoint": "GET /api/v1/backtests/{backtest_id}/download",
+      "reason": "The whole result document as a file to save; an agent reads the same result in pages with get_backtest."
+    }
+  ]
+}

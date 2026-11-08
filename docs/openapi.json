@@ -60,7 +60,7 @@
                 "type": "null"
               }
             ],
-            "description": "When a request last signed in with the key (UTC), to the minute; null: never used",
+            "description": "When a request last signed in with the key (UTC); written at most once a minute, so it may lag by up to a minute; null: never used",
             "title": "Last Used At"
           },
           "name": {
@@ -214,7 +214,7 @@
                 "type": "null"
               }
             ],
-            "description": "When a request last signed in with the key (UTC), to the minute; null: never used",
+            "description": "When a request last signed in with the key (UTC); written at most once a minute, so it may lag by up to a minute; null: never used",
             "title": "Last Used At"
           },
           "name": {

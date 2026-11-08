@@ -10,7 +10,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Response
 
-from candlestack.accounts import BacktestsUserDep, CallerDep, CurrentUserDep, Scope
+from candlestack.accounts import (
+    API_KEY_SCHEME,
+    BacktestsUserDep,
+    CallerDep,
+    CurrentUserDep,
+    Scope,
+)
 from candlestack.core import NO_STORE, ProblemError, problem_doc, require_same_origin
 from candlestack.data import data_problems
 from candlestack.experiments.compare import (
@@ -137,7 +143,10 @@ async def list_backtests(
     dependencies=[Depends(require_same_origin)],
     # An API key needs `publish` to publish or unpublish, `backtests` for the rest.
     openapi_extra={
-        "security": [{"apiKey": [Scope.backtests.value]}, {"apiKey": [Scope.publish.value]}]
+        "security": [
+            {API_KEY_SCHEME: [Scope.backtests.value]},
+            {API_KEY_SCHEME: [Scope.publish.value]},
+        ]
     },
 )
 async def update_backtest(

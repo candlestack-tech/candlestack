@@ -290,8 +290,8 @@ class ApiKeyOut(BaseModel):
         description="When the key stops working (UTC); null: it works until revoked"
     )
     last_used_at: datetime | None = Field(
-        description="When a request last signed in with the key (UTC), to the minute; null: "
-        "never used"
+        description="When a request last signed in with the key (UTC); written at most once a "
+        "minute, so it may lag by up to a minute; null: never used"
     )
 
 

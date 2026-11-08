@@ -15,6 +15,7 @@ dependencies = [
     "granian>=2.8.3",
     "h5py>=3.16.0",
     "httpx>=0.28.1",
+    "mcp>=2.3.0",
     "numpy>=2.5.4",
     "onnx>=1.23.2",
     "orjson>=3.12.0",
@@ -187,9 +188,10 @@ root_package = "candlestack"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-name = "Modules depend downwards only: experiments -> ml -> accounts, data and jobs -> core"
+name = "Modules depend downwards only: mcp -> experiments -> ml -> accounts, data and jobs -> core"
 type = "layers"
 layers = [
+    "candlestack.mcp",
     "candlestack.experiments",
     "candlestack.ml",
     "candlestack.accounts | candlestack.data | candlestack.jobs",
@@ -251,6 +253,12 @@ protected_modules = ["candlestack.preprocessing.*"]
 allowed_importers = ["candlestack.preprocessing"]
 
 [[tool.importlinter.contracts]]
+name = "Other modules import mcp only through its package root"
+type = "protected"
+protected_modules = ["candlestack.mcp.*"]
+allowed_importers = ["candlestack.mcp"]
+
+[[tool.importlinter.contracts]]
 name = "Other modules import jobs only through its package root"
 type = "protected"
 protected_modules = ["candlestack.jobs.*"]
@@ -261,8 +269,8 @@ name = "Only core uses the Sentry SDK"
 type = "forbidden"
 source_modules = [
     "candlestack.accounts", "candlestack.cli", "candlestack.data", "candlestack.experiments",
-    "candlestack.jobs", "candlestack.main", "candlestack.ml", "candlestack.openapi",
-    "candlestack.worker",
+    "candlestack.jobs", "candlestack.main", "candlestack.mcp", "candlestack.ml",
+    "candlestack.openapi", "candlestack.worker",
 ]
 forbidden_modules = ["sentry_sdk"]
 # They reach Sentry through core (logging, setup_sentry), never by importing it themselves.
@@ -281,9 +289,10 @@ source_modules = [
 ]
 forbidden_modules = [
     "candlestack.accounts", "candlestack.core", "candlestack.data", "candlestack.cli",
-    "candlestack.experiments", "candlestack.jobs", "candlestack.main", "candlestack.ml",
-    "candlestack.openapi", "candlestack.worker", "fastapi", "starlette", "scalar_fastapi", "granian", "redis",
-    "httpx", "sentry_sdk", "pydantic_settings", "sqlalchemy", "asyncpg", "alembic", "authlib",
+    "candlestack.experiments", "candlestack.jobs", "candlestack.main", "candlestack.mcp",
+    "candlestack.ml", "candlestack.openapi", "candlestack.worker", "fastapi", "starlette",
+    "scalar_fastapi", "granian", "redis", "httpx", "sentry_sdk", "pydantic_settings",
+    "sqlalchemy", "asyncpg", "alembic", "authlib", "mcp",
 ]
 
 [[tool.importlinter.contracts]]
@@ -301,8 +310,8 @@ name = "Nothing imports the CLI"
 type = "forbidden"
 source_modules = [
     "candlestack.accounts", "candlestack.core", "candlestack.data", "candlestack.experiments",
-    "candlestack.jobs", "candlestack.main", "candlestack.ml", "candlestack.openapi",
-    "candlestack.preprocessing", "candlestack.worker",
+    "candlestack.jobs", "candlestack.main", "candlestack.mcp", "candlestack.ml",
+    "candlestack.openapi", "candlestack.preprocessing", "candlestack.worker",
 ]
 forbidden_modules = ["candlestack.cli"]
 
@@ -315,8 +324,8 @@ type = "forbidden"
 source_modules = [
     "candlestack.accounts", "candlestack.cli", "candlestack.core", "candlestack.data",
     "candlestack.engine", "candlestack.experiments", "candlestack.jobs", "candlestack.main",
-    "candlestack.metrics", "candlestack.ml", "candlestack.openapi", "candlestack.preprocessing",
-    "candlestack.signals",
+    "candlestack.mcp", "candlestack.metrics", "candlestack.ml", "candlestack.openapi",
+    "candlestack.preprocessing", "candlestack.signals",
 ]
 forbidden_modules = ["candlestack.worker"]
 
@@ -393,6 +402,21 @@ layers = [
     "schemas",
 ]
 
+# Inside mcp, the same: the tool reference (a command), the HTTP endpoint, the server, the tools
+# (one module per area), then the convention they follow, the docs it links and the parity
+# table, which names tools and endpoints but imports neither.
+[[tool.importlinter.contracts]]
+name = "Inside mcp: reference and HTTP -> server -> tools -> convention -> docs and parity"
+type = "layers"
+containers = ["candlestack.mcp"]
+layers = [
+    "reference | http",
+    "server",
+    "account",
+    "convention",
+    "docs | parity",
+]
+
 # The API checks an uploaded model by reading its file, never by loading it: a load could run
 # code from the file, and the API image has no Keras, TensorFlow or onnxruntime (the worker
 # has); it reads an ONNX file with onnx, which runs nothing.
@@ -403,8 +427,8 @@ layers = [
 name = "The API never imports a deep learning framework"
 type = "forbidden"
 source_modules = [
-    "candlestack.experiments", "candlestack.jobs", "candlestack.ml", "candlestack.main",
-    "candlestack.preprocessing",
+    "candlestack.experiments", "candlestack.jobs", "candlestack.main", "candlestack.mcp",
+    "candlestack.ml", "candlestack.preprocessing",
 ]
 forbidden_modules = ["keras", "tensorflow", "torch", "jax", "onnxruntime"]
 

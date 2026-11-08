@@ -13,24 +13,37 @@ A module that keeps data of a user deletes it with the account through an
 ``AccountDeletionHook``, which ``candlestack.main`` puts on ``app.state.account_deletion_hooks``:
 its rows in the deletion's transaction, and what lies outside Postgres in the ``AfterDeletion``
 it returns, once the deletion is committed.
+
+What signs requests in outside FastAPI's routes (the MCP server) uses ``key_caller`` for the
+API key and ``get_accounts_service`` for the service the routes use.
 """
 
 from candlestack.accounts.api import dev_router as dev_sign_in_router
 from candlestack.accounts.api import router as accounts_router
 from candlestack.accounts.dependencies import (
+    API_KEY_SCHEME,
     BacktestsUserDep,
     Caller,
     CallerDep,
     CurrentUserDep,
     ModelsUserDep,
+    get_accounts_service,
+    key_caller,
 )
 from candlestack.accounts.models import User
 from candlestack.accounts.reference import document_api_keys
 from candlestack.accounts.schemas import DeniedSignInOut, MeOut, Provider, Scope
-from candlestack.accounts.service import AccountDeletionHook, AfterDeletion, dev_sign_in_allowed
+from candlestack.accounts.service import (
+    AccountDeletionHook,
+    AccountsService,
+    AfterDeletion,
+    dev_sign_in_allowed,
+)
 
 __all__ = [
+    "API_KEY_SCHEME",
     "AccountDeletionHook",
+    "AccountsService",
     "AfterDeletion",
     "BacktestsUserDep",
     "Caller",
@@ -46,4 +59,6 @@ __all__ = [
     "dev_sign_in_allowed",
     "dev_sign_in_router",
     "document_api_keys",
+    "get_accounts_service",
+    "key_caller",
 ]
