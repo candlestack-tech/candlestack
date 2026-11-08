@@ -587,7 +587,10 @@ checked at the next start.
   runner's versions and the timings of the steps in milliseconds), `stats` (JSONB: the 12
   statistics, `max_drawdown` negative) and `predictions` (bytea: `ts` and `prediction` as zstd
   Parquet, about 140 KB for 10 years of 30-minute stock candles; in Postgres, so they are in its
-  backups and go with the account's cascade, and no other volume is needed), and `steps`
+  backups and go with the account's cascade, and no other volume is needed), `curves` (bytea:
+  `ts`, `close`, `equity` and `drawdown` of the light series as zstd Parquet, at most about
+  240 KB at 10,000 rows, about 90 KB for 10 years per day; what [Compare](#compare) draws
+  without the candles, null for a backtest that finished before it was stored), and `steps`
   (JSONB: the steps of the run, below). The seed command's backtests have none of them, and no
   result document.
 - **Names**: every backtest gets a generated name when it is created (`generated_name`,
@@ -798,12 +801,14 @@ The backtests users published, which every signed-in account (the beta list's) c
 an agent gets the app's verdict without downloading and comparing the documents itself.
 
 - **Access** is that of `GET /api/v1/backtests/{backtest_id}`: the user's own, whatever their
-  status, and others' while published. It builds each result document in the light view, in
-  the order asked for, and reads it; an ID the user cannot see is `404 not-found` and test data
-  `409 no-document`, each with `id` naming that backtest. Each document is a rebuild of its
-  run (the engine and the candles), one after another, so 20 backtests make a slow request: the
-  per-key rate limit (#394) should weigh it. Fewer than 2 or more than 20 IDs, an
-  empty one or one twice is `422 validation`.
+  status, and others' while published, in the order asked for; an ID the user cannot see is
+  `404 not-found` and test data `409 no-document`, each with `id` naming that backtest. Fewer
+  than 2 or more than 20 IDs, an empty one or one twice is `422 validation`.
+- **Only what is stored** (`BacktestRuns.stored`): the setup (`spec`), the statistics (`stats`)
+  and the curves (`curves`) each backtest stored when it ran, never the candles, so it makes no
+  request to a data source. Rebuilding the documents did: on stage three backtests spent
+  Alpaca's 180 requests a minute and the answer was `503 source-unavailable` (#413). An
+  integration test swaps the data module for one that fails on any use.
 - **Statistics** (`metrics`): the 12 of `results.stats` in the Compare table's order, each with
   `better` (`higher`, `lower` or `none`), the value of each backtest and its mark, `best`,
   `worst` or null. The rules are the page's (`frontend/src/features/backtests/compare/rows.ts`):
@@ -823,8 +828,14 @@ an agent gets the app's verdict without downloading and comparing the documents 
   charts read a line (`chartLines.ts`, `valueAt`). The light document of a backtest of more than
   10,000 candles has a point per UTC day (the day's last, the lowest drawdown), so its lines
   begin at the end of its first day; buy and hold is measured from the price held from, so it
-  ends at the `buy_and_hold_return` statistic either way. About 20 KB for four backtests over
-  their whole axes, against the four whole documents the page loads today.
+  ends at the `buy_and_hold_return` statistic either way. The run stores those columns of its
+  light series (`ts`, `close`, `equity`, `drawdown`) as zstd Parquet in `curves`, so the answer
+  is the one the documents give (unless a source adjusted the candles since). A backtest that
+  finished before `curves` was stored is drawn from its short equity series (at most 60 points
+  from its first row to its last, the drawdown of those points, buy and hold only when its
+  benchmark held its own instrument): its candles are not stored, so no migration can work the
+  curves out. About 20 KB for four backtests over their whole axes, against the four whole
+  documents the page loads today.
 
 ## Modules
 
