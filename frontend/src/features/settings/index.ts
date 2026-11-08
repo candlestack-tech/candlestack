@@ -6,3 +6,5 @@ export { BenchmarkSelect } from './BenchmarkSelect';
 export { DirectionCards, PeriodInput, UnitInput, ValueSlider } from './defaultsControls';
 export { isDay, percent } from './defaultsForm';
 export { Choice } from './controls';
+export { SCOPES } from './apiKeyText';
+export { ScopeBox } from './keyFields';

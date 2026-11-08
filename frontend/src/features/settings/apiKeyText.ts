@@ -38,9 +38,9 @@ function daysUntil(date: Date, now: number, timeZone: string): number {
 // does not count toward the limit.
 export const isExpired = (key: ApiKey, now: number) => key.expires_at !== null && Date.parse(key.expires_at) <= now;
 
-// When a request last signed in with the key: "12 min ago" within the hour, "Today 02:00" and
-// "Yesterday 21:40", then the date; null if it never did.
-export function lastUsedText(key: ApiKey, style: DateStyle, now: number): string | null {
+// When a request last signed in with the key (or a connected app): "12 min ago" within the hour,
+// "Today 02:00" and "Yesterday 21:40", then the date; null if it never did.
+export function lastUsedText(key: Pick<ApiKey, 'last_used_at'>, style: DateStyle, now: number): string | null {
   if (key.last_used_at === null) return null;
   const date = new Date(key.last_used_at);
   const minutes = Math.floor((now - date.getTime()) / 60_000);

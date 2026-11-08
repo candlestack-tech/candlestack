@@ -102,6 +102,15 @@ export {
   type ModelUpload,
   type StorageUsage,
 } from './models';
+export {
+  authorizationRequestQueryOptions,
+  connectedAppsQueryOptions,
+  decideAuthorizationRequest,
+  disconnectApp,
+  type AppClient,
+  type AuthorizationRequest,
+  type ConnectedApp,
+} from './oauth';
 export { queryClient } from './queryClient';
 export {
   hasNextPage,

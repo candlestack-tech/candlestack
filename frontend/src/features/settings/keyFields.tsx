@@ -58,16 +58,39 @@ export function NameField({ value, onChange }: { value: string; onChange: (value
   );
 }
 
-type ScopeProps = { scope: Scope; label: string; description: string; on: boolean; onToggle: () => void };
+type ScopeProps = {
+  scope: Scope;
+  label: string;
+  description: string;
+  on: boolean;
+  onToggle: () => void;
+  // The consent page: what the scope lets the app do, alone, in place of its name and API name.
+  plain?: boolean;
+};
+
+// .box: the 18 px box, filled with the accent and its check when on.
+function Tick({ on, faded }: { on: boolean; faded: boolean }) {
+  return (
+    <span
+      className={cn(
+        'mt-px grid size-[18px] place-items-center rounded-[5px] border-[1.5px] text-primary-foreground peer-focus-visible:ring-[3px] peer-focus-visible:ring-ring/50',
+        on ? 'border-primary bg-primary' : 'border-[color-mix(in_srgb,var(--muted)_60%,var(--rule))]',
+        faded && 'opacity-55',
+      )}
+    >
+      {on && <Check aria-hidden="true" strokeWidth={3} className="size-3" />}
+    </span>
+  );
+}
 
 // .sc: a box, the scope in plain words with its API name, what it lets the key do. Read is always
 // on (every other scope needs it), its box faded and "Always" at the right.
-function ScopeBox({ scope, label, description, on, onToggle }: ScopeProps) {
+export function ScopeBox({ scope, label, description, on, onToggle, plain = false }: ScopeProps) {
   const fixed = scope === 'read';
   return (
     <label
       className={cn(
-        'grid grid-cols-[18px_minmax(0,1fr)_auto] items-start gap-2.5 bg-background px-3 py-2.5 transition-colors [&+&]:border-t',
+        'grid grid-cols-[18px_minmax(0,1fr)_auto] items-start gap-2.5 bg-background px-3 py-2.5 text-left transition-colors [&+&]:border-t',
         fixed ? 'cursor-default' : 'cursor-pointer hover:bg-muted',
       )}
     >
@@ -75,29 +98,25 @@ function ScopeBox({ scope, label, description, on, onToggle }: ScopeProps) {
         type="checkbox"
         checked={on}
         disabled={fixed}
-        aria-label={label}
-        aria-describedby={`scope-${scope}`}
+        aria-label={plain ? description : label}
+        aria-describedby={plain ? undefined : `scope-${scope}`}
         onChange={onToggle}
         className="peer sr-only"
       />
-      <span
-        className={cn(
-          'mt-px grid size-[18px] place-items-center rounded-[5px] border-[1.5px] text-primary-foreground peer-focus-visible:ring-[3px] peer-focus-visible:ring-ring/50',
-          on ? 'border-primary bg-primary' : 'border-[color-mix(in_srgb,var(--muted)_60%,var(--rule))]',
-          fixed && 'opacity-55',
-        )}
-      >
-        {on && <Check aria-hidden="true" strokeWidth={3} className="size-3" />}
-      </span>
-      <span className="flex min-w-0 flex-col gap-px">
-        <b className="inline-flex items-baseline gap-2 text-[13.5px] font-medium">
-          {label}
-          <code className="font-mono text-[11.5px] font-normal text-muted-foreground">{scope}</code>
-        </b>
-        <span id={`scope-${scope}`} className="text-[12.5px] text-muted-foreground">
-          {description}
+      <Tick on={on} faded={fixed} />
+      {plain ? (
+        <b className="min-w-0 text-[13.5px] font-medium">{description}</b>
+      ) : (
+        <span className="flex min-w-0 flex-col gap-px">
+          <b className="inline-flex items-baseline gap-2 text-[13.5px] font-medium">
+            {label}
+            <code className="font-mono text-[11.5px] font-normal text-muted-foreground">{scope}</code>
+          </b>
+          <span id={`scope-${scope}`} className="text-[12.5px] text-muted-foreground">
+            {description}
+          </span>
         </span>
-      </span>
+      )}
       <span className="pt-px text-[11.5px] text-muted-foreground">{fixed ? 'Always' : ''}</span>
     </label>
   );
