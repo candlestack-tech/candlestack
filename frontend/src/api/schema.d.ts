@@ -2142,7 +2142,7 @@ export interface components {
         CheckedWarmUp: {
             /**
              * Candles
-             * @description Candles the model needs before the period, loaded with it
+             * @description Candles the model needs before the period, loaded with it; where an `estimate` falls short, the run loads twice as many, up to three times
              * @example 24
              */
             candles: number;
@@ -4569,7 +4569,7 @@ export interface components {
         WarmUpReport: {
             /**
              * Candles
-             * @description Candles loaded before the period for the warm-up
+             * @description Candles the model needs before the period (its warm-up), loaded with it; where an `estimate` fell short the run loaded more, from `loaded.start`
              */
             candles: number;
             /**

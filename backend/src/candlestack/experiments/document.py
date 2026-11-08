@@ -393,7 +393,10 @@ class Loaded(BaseModel):
 
 
 class WarmUpReport(BaseModel):
-    candles: int = Field(description="Candles loaded before the period for the warm-up")
+    candles: int = Field(
+        description="Candles the model needs before the period (its warm-up), loaded with it; "
+        "where an `estimate` fell short the run loaded more, from `loaded.start`"
+    )
     kind: Literal["exact", "estimate"]
     dropped: int | None = Field(
         description="The candles the model's input dropped at the start; null until it ran"
@@ -567,7 +570,9 @@ class CheckedModel(BaseModel):
 
 class CheckedWarmUp(BaseModel):
     candles: int = Field(
-        description="Candles the model needs before the period, loaded with it", examples=[24]
+        description="Candles the model needs before the period, loaded with it; where an "
+        "`estimate` falls short, the run loads twice as many, up to three times",
+        examples=[24],
     )
     kind: Literal["exact", "estimate"] = Field(
         description="`estimate` for a representation whose need depends on the prices (Renko, Kagi)"

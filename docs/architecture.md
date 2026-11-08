@@ -789,7 +789,12 @@ checked at the next start.
 - **The run** (`experiments/runner.py`, `BacktestRunner` on `app.state.backtest_runner`) is a
   task of the API process, so it outlives the request: the candles with the warm-up from the
   data module (and the period's candles of the fund a benchmark holds, which only the document
-  uses: loaded once, so a fund that cannot be loaded fails the run), a `predict` job through
+  uses: loaded once, so a fund that cannot be loaded fails the run), loaded further back while
+  the model's input has no sample on the period's first candle (an estimated warm-up of Renko
+  or Kagi can fall short, and the rows would then start on a later candle, buy and hold from a
+  later close: `_with_warm_up` loads twice as many candles before the period, three times at
+  most, as far as the data and `CANDLES_MAX` allow,
+  [preprocessing.md](preprocessing.md#the-blocks)), a `predict` job through
   `JobClient` (the model's file, its SHA-256 and the copy of its manifest; the candles go
   through the jobs' volume), the predictions of the period
   stored, `align` (not strict: a candle without a new prediction repeats the last one, as rows

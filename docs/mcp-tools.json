@@ -4885,7 +4885,7 @@
           "CheckedWarmUp": {
             "properties": {
               "candles": {
-                "description": "Candles the model needs before the period, loaded with it",
+                "description": "Candles the model needs before the period, loaded with it; where an `estimate` falls short, the run loads twice as many, up to three times",
                 "examples": [
                   24
                 ],
