@@ -167,6 +167,10 @@ class ConnectedApp(Base):
     )
     # The values of ``schemas.Scope``, in their order.
     scopes: Mapped[list[str]] = mapped_column(ARRAY(String(16)))
+    # The redirect URI its last authorization returned to, whose host Settings shows: an app may
+    # register several. Null for an app connected before it was kept. Room for a loopback URI
+    # that came back with a longer port than registered (":65535", RFC 8252).
+    redirect_uri: Mapped[str | None] = mapped_column(String(CLIENT_URI_LENGTH + 6))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

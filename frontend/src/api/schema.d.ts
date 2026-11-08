@@ -118,8 +118,9 @@ export interface paths {
         };
         /**
          * Start Sign In
-         * @description Redirects to the provider's sign-in page, or to `/signin?error=failed` when sign-in
-         *     with it is not available or this address made too many sign-in requests in a minute. A
+         * @description Redirects to the provider's sign-in page, or to `/signin?error=failed` (with `next`
+         *     when it is not the default) when sign-in with it is not available or this address made
+         *     too many sign-in requests in a minute. A
          *     provider's account that never signed in joins the CandleStack user with its email, so the
          *     email links a user's GitHub and Google; it signs in to a new user when no user has it.
          *

@@ -42,7 +42,7 @@ describe('the upload, step 2: the manifest', () => {
   it('asks for the manifest with a link to its format: a model needs one to be added', async () => {
     const { dialog } = await uploaded();
     expect(dialog.getByRole('link', { name: 'About the manifest format' }).getAttribute('href')).toBe(
-      'https://candlestack.tech/docs/manifest',
+      'https://candlestack.tech/docs/manifest/',
     );
     expect(dialog.getByRole('button', { name: /Drop manifest\.json here/ })).toBeDefined();
     expect(dialog.getByLabelText<HTMLInputElement>('Manifest file').accept).toBe('.json,application/json');

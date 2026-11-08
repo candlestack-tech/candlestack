@@ -7,11 +7,9 @@ MCP_DOCS = f"{DOCS}/mcp/"
 TOOLS_DOCS = f"{MCP_DOCS}tools/"
 PROBLEMS = "https://candlestack.tech/problems/"
 API_REFERENCE = "https://app.candlestack.tech/api/v1/docs"
-# The manifest and the result document are described in the repository until the website has
-# their pages (candlestack-tech/website#63, #64): its pages then replace these two.
-_REPOSITORY_DOCS = "https://github.com/candlestack-tech/candlestack/blob/main/docs"
-MANIFEST_DOCS = f"{_REPOSITORY_DOCS}/preprocessing.md#the-manifest"
-RESULT_DOCS = f"{_REPOSITORY_DOCS}/engine.md#the-result-document"
+# The website's pages of the manifest and the result document (candlestack-tech/website#63, #64).
+MANIFEST_DOCS = f"{DOCS}/manifest/"
+RESULT_DOCS = f"{DOCS}/backtest-json/"
 # The JSON Schemas committed in the repository, raw, so an agent can read them as they are.
 _SCHEMAS = "https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs"
 MANIFEST_SCHEMA = f"{_SCHEMAS}/manifest.schema.json"

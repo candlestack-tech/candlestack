@@ -24,7 +24,7 @@ import { SignInPage } from '@/pages/SignInPage';
 import { requireSignedIn, skipSignInWhenSignedIn } from '@/routes/accountGuards';
 import { validateBacktestsSearch } from '@/routes/backtestsSearch';
 import { validateBuilderSearch } from '@/routes/builderSearch';
-import { isConsentPath, validateConsentSearch } from '@/routes/consentSearch';
+import { consentRequestOf, isConsentPath, validateConsentSearch } from '@/routes/consentSearch';
 import { validateExperimentsSearch } from '@/routes/experimentsSearch';
 import { validateInstrumentSearch } from '@/routes/instrumentSearch';
 import { validateInstrumentsSearch } from '@/routes/instrumentsSearch';
@@ -74,8 +74,9 @@ const homeRoute = createRoute({
 });
 
 // /signin?next=/backtests&error=denied. An open session skips it. After a denied sign-in the
-// loader fetches who was turned away; when that fails, the page shows its buttons instead. On its
-// way to the consent page it hands over to that page, which signs in itself and names the app.
+// loader fetches who was turned away, and the app when the sign-in started on its consent page;
+// when that fails, the page shows its buttons instead. On its way to the consent page it hands
+// over to that page, which signs in itself and names the app.
 const signInRoute = createRoute({
   getParentRoute: () => publicRoute,
   path: '/signin',
@@ -85,9 +86,15 @@ const signInRoute = createRoute({
       throw redirect({ href: search.next, replace: true });
     return skipSignInWhenSignedIn({ queryClient: context.queryClient, search });
   },
-  loaderDeps: ({ search }) => ({ error: search.error }),
-  loader: ({ context, deps }) =>
-    deps.error === 'denied' ? context.queryClient.prefetchQuery(deniedSignInQueryOptions()) : undefined,
+  loaderDeps: ({ search }) => ({ error: search.error, next: search.next }),
+  loader: ({ context, deps }) => {
+    if (deps.error !== 'denied') return undefined;
+    const request = consentRequestOf(deps.next);
+    return Promise.all([
+      context.queryClient.prefetchQuery(deniedSignInQueryOptions()),
+      request === undefined ? undefined : context.queryClient.prefetchQuery(authorizationRequestQueryOptions(request)),
+    ]);
+  },
   component: SignInPage,
 });
 

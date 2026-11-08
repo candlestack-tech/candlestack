@@ -146,6 +146,51 @@ def test_an_account_not_on_the_beta_list(browser, other_browser, providers, sql)
     assert other_browser.get("/api/v1/auth/denied").status_code == 404
 
 
+CONSENT = "/oauth/consent?request=req_abc"
+CONSENT_QUERY = "next=/oauth/consent%3Frequest%3Dreq_abc"
+
+
+def test_turned_away_from_an_app_s_consent_page_the_browser_keeps_next(browser, providers) -> None:
+    providers.github_account(email="grace@example.com")
+
+    callback = browser.sign_in("github", next_path=CONSENT)
+
+    assert callback.headers["location"] == f"/signin?error=denied&{CONSENT_QUERY}"
+    assert browser.get("/api/v1/auth/denied").json()["email"] == "grace@example.com"
+
+
+def test_a_failed_sign_in_keeps_next(browser, providers) -> None:
+    start = browser.start("google", CONSENT)
+    cancelled = browser.callback("google", error="access_denied", state=browser.state_of(start))
+    start = browser.start("github", CONSENT)
+    providers.challenge = "another"  # the token request fails the PKCE check
+    refused = browser.callback("github", code="the-code", state=browser.state_of(start))
+
+    assert cancelled.headers["location"] == f"/signin?error=failed&{CONSENT_QUERY}"
+    assert refused.headers["location"] == f"/signin?error=failed&{CONSENT_QUERY}"
+
+
+@pytest.mark.parametrize(
+    "next_path", ["https://evil.example/", "//evil.example/", "/api/v1/me", "/dashboard"]
+)
+def test_a_turned_away_sign_in_keeps_only_a_next_of_the_app(
+    browser, providers, next_path: str
+) -> None:
+    providers.github_account(email="grace@example.com")
+
+    callback = browser.sign_in("github", next_path=next_path)
+
+    assert callback.headers["location"] == "/signin?error=denied"
+
+
+def test_a_sign_in_whose_state_is_unknown_has_no_next(browser) -> None:
+    start = browser.start("github", CONSENT)
+
+    callback = browser.callback("github", code="the-code", state=browser.state_of(start) + "x")
+
+    assert callback.headers["location"] == "/signin?error=failed"
+
+
 def test_a_sign_in_cancelled_at_the_provider(browser, caplog) -> None:
     start = browser.start("github")
     state = browser.state_of(start)

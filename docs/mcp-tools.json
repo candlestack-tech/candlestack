@@ -1009,7 +1009,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Every block a model's manifest can name, by step: the representation (which rows the model sees), the features (its columns, in order), their normalization and the window (rows to samples), each with its versioned ID, what it does, its warm-up and its parameters with types, ranges and defaults. Use it to write or check a manifest, or to explain what a model's input is made of. The manifest format: https://github.com/candlestack-tech/candlestack/blob/main/docs/preprocessing.md#the-manifest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#preprocessing_catalog",
+      "description": "Every block a model's manifest can name, by step: the representation (which rows the model sees), the features (its columns, in order), their normalization and the window (rows to samples), each with its versioned ID, what it does, its warm-up and its parameters with types, ranges and defaults. Use it to write or check a manifest, or to explain what a model's input is made of. The manifest format: https://candlestack.tech/docs/manifest/.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#preprocessing_catalog",
       "endpoints": [
         "GET /api/v1/preprocessing/catalog"
       ],
@@ -3357,7 +3357,7 @@
         "properties": {
           "manifest": {
             "additionalProperties": true,
-            "description": "The manifest as a JSON object, version 1: `version`, `input` (timeframe, session, representation, features with their normalization, window), `signature` (input and output shapes) and optionally `example` and `about`. Guide: https://github.com/candlestack-tech/candlestack/blob/main/docs/preprocessing.md#the-manifest; JSON Schema: https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/manifest.schema.json. At most 1 MB as JSON.",
+            "description": "The manifest as a JSON object, version 1: `version`, `input` (timeframe, session, representation, features with their normalization, window), `signature` (input and output shapes) and optionally `example` and `about`. Guide: https://candlestack.tech/docs/manifest/; JSON Schema: https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/manifest.schema.json. At most 1 MB as JSON.",
             "title": "Manifest",
             "type": "object"
           },
@@ -3610,7 +3610,7 @@
         "properties": {
           "manifest": {
             "additionalProperties": true,
-            "description": "The manifest as a JSON object, version 1: `version`, `input` (timeframe, session, representation, features with their normalization, window), `signature` (input and output shapes) and optionally `example` and `about`. Guide: https://github.com/candlestack-tech/candlestack/blob/main/docs/preprocessing.md#the-manifest; JSON Schema: https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/manifest.schema.json. At most 1 MB as JSON.",
+            "description": "The manifest as a JSON object, version 1: `version`, `input` (timeframe, session, representation, features with their normalization, window), `signature` (input and output shapes) and optionally `example` and `about`. Guide: https://candlestack.tech/docs/manifest/; JSON Schema: https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/manifest.schema.json. At most 1 MB as JSON.",
             "title": "Manifest",
             "type": "object"
           },
