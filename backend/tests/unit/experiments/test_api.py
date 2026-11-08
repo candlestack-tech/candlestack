@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from candlestack.accounts import User
-from candlestack.accounts.dependencies import current_user
+from candlestack.accounts.dependencies import Caller, authenticate, current_user
 from candlestack.experiments import model_usage
 
 PROBLEMS = "https://candlestack.tech/problems/"
@@ -25,6 +25,7 @@ USER = User(
 @pytest.fixture
 def signed_in(app: FastAPI) -> FastAPI:
     app.dependency_overrides[current_user] = lambda: USER
+    app.dependency_overrides[authenticate] = lambda: Caller(USER)  # the routes that take CallerDep
     return app
 
 
