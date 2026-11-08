@@ -3264,7 +3264,7 @@
           "email": {
             "description": "The account's email",
             "examples": [
-              "arsen@example.com"
+              "ada@example.com"
             ],
             "title": "Email",
             "type": "string"
@@ -4984,7 +4984,7 @@
           "display_name": {
             "description": "Name shown in the app",
             "examples": [
-              "Arsen Labovich"
+              "Ada Lovelace"
             ],
             "title": "Display Name",
             "type": "string"
@@ -4992,7 +4992,7 @@
           "email": {
             "description": "From the identity provider, read-only",
             "examples": [
-              "arsen@example.com"
+              "ada@example.com"
             ],
             "title": "Email",
             "type": "string"
@@ -5046,7 +5046,7 @@
           "display_name": {
             "description": "Name shown in the app; surrounding whitespace is dropped",
             "examples": [
-              "Arsen Labovich"
+              "Ada Lovelace"
             ],
             "maxLength": 80,
             "minLength": 1,
@@ -6414,7 +6414,7 @@
           "email": {
             "description": "The account's email at the provider, as of its last sign-in or connect",
             "examples": [
-              "arsen@example.com"
+              "ada@example.com"
             ],
             "title": "Email",
             "type": "string"
@@ -6430,7 +6430,7 @@
             ],
             "description": "The account's GitHub username; null for Google",
             "examples": [
-              "arsen"
+              "ada"
             ],
             "title": "Login"
           },
