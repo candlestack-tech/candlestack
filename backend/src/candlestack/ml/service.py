@@ -265,10 +265,10 @@ _HOME_PREFIXES = {"~/": "~/", "$HOME/": '"$HOME"/'}
 
 def upload_curl(path: str) -> str:
     """The upload command up to the link's URL, which follows it after a space: curl sending
-    the file at `path`, for a POSIX shell or PowerShell. The path is quoted, but a leading `~/`
-    or `$HOME/` is left for the shell to expand. `--fail-with-body` prints the problem when the
-    upload is refused. The URL is not an argument: no local variable holds it (Sentry filters
-    only the token's by its name)."""
+    the file at `path`, for a POSIX shell (not PowerShell or cmd.exe). The path is quoted, but a
+    leading `~/` or `$HOME/` is left for the shell to expand. `--fail-with-body` prints the
+    problem when the upload is refused. The URL is not an argument: no local variable holds it
+    (Sentry filters only the token's by its name)."""
     for prefix, kept in _HOME_PREFIXES.items():
         if path.startswith(prefix) and len(path) > len(prefix):
             return f"curl --fail-with-body -T {kept}{shlex.quote(path.removeprefix(prefix))}"

@@ -410,8 +410,9 @@ class UploadLink(BaseModel):
     expires_at: datetime = Field(description="Until when the link takes its file (UTC)")
     command: str = Field(
         description="The curl command that uploads the file from the user's computer; it "
-        "prints the problem when the upload is refused. It is for a POSIX shell (bash, zsh) "
-        "or PowerShell, not cmd.exe. The file's local path follows `-T`: the path given as "
+        "prints the problem when the upload is refused. It is for a POSIX shell (bash, zsh: "
+        "macOS, Linux, WSL, Git Bash), not cmd.exe or PowerShell. The file's local path "
+        "follows `-T`: the path given as "
         f"`file_name`, or `{_PLACEHOLDER}<name>` for a bare name, to replace with where the "
         "file is"
     )
