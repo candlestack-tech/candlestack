@@ -1,4 +1,5 @@
-import { Check } from 'lucide-react';
+import { Link } from '@tanstack/react-router';
+import { Check, Clock } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
@@ -6,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { STEPS } from './form';
 
 // The builder's own parts (mockups/app, .b-*): the steps along the top, the rows of a step, the
-// number with − and +, and a problem in a red box.
+// number with − and +, a problem in a red box and a backtest that waits in the queue.
 
 // A label in 132 px, then its controls (.b-r); on a phone the label goes above them.
 export function BuilderRow({ label, children, top = false }: { label: string; children: ReactNode; top?: boolean }) {
@@ -32,6 +33,30 @@ export function StepError({ children }: { children: ReactNode }) {
     >
       {children}
     </p>
+  );
+}
+
+// A backtest Run put in the queue: its page, its name and how many are ahead of it.
+export type QueuedBacktest = { id: string; name: string; ahead: number };
+
+// That the backtest waits in the queue (in the accent's soft tint, as the Publish dialog's note):
+// "Queued, 2 ahead", and a link to its page.
+export function QueuedNote({ queued }: { queued: QueuedBacktest }) {
+  return (
+    <output className="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg bg-accent-soft px-3 py-2.5 text-[13px]">
+      <Clock aria-hidden="true" className="size-4 flex-none text-primary" />
+      <b className="font-semibold">Queued, {queued.ahead} ahead</b>
+      <span className="min-w-0 [overflow-wrap:anywhere]">
+        {queued.name} starts on its own. You can run another one.
+      </span>
+      <Link
+        to="/backtests/$backtestId"
+        params={{ backtestId: queued.id }}
+        className="ml-auto text-primary underline-offset-2 outline-none hover:underline focus-visible:underline"
+      >
+        Open it
+      </Link>
+    </output>
   );
 }
 

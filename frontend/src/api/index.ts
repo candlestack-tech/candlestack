@@ -16,6 +16,7 @@ export {
 export {
   getBacktestFile,
   backtestQueryOptions,
+  cancelBacktest,
   backtestsQueryOptions,
   dashboardQueryOptions,
   isUnderway,

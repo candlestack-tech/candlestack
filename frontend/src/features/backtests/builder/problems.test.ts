@@ -57,10 +57,14 @@ describe("the API's problems in the builder", () => {
   });
 
   it('stay on the Run step when the backtest cannot start now', () => {
-    expect(problem(409, 'queue-full')).toEqual({
+    expect(problem(409, 'queue-full', { limit: 20 })).toEqual({
       step: 4,
-      message: 'Your queue is full. Run this one when a waiting backtest has started.',
+      message:
+        'Queue full. 20 backtests are waiting already. Run this one when one of them has started, or cancel one.',
     });
+    expect(problem(409, 'queue-full').message).toBe(
+      'Queue full. Run this one when a waiting backtest has started, or cancel one.',
+    );
     expect(problem(503, 'backtests-unavailable').message).toBe('Backtests cannot run right now. Try again later.');
     expect(problem(503, 'source-unavailable').message).toBe(
       'The market data cannot be loaded right now. Try again later.',

@@ -9,7 +9,16 @@ import { formatRecentTime } from '@/lib/dates';
 import { formatPercent, MISSING } from '@/lib/results';
 import { cn } from '@/lib/utils';
 
-import { hasResults, instrumentId, instrumentList, instrumentsShown, returnClass, symbolsOf } from './format';
+import {
+  aheadOf,
+  aheadText,
+  hasResults,
+  instrumentId,
+  instrumentList,
+  instrumentsShown,
+  returnClass,
+  symbolsOf,
+} from './format';
 import { NameTooltip } from './NameTooltip';
 import { useNameTooltip } from './useNameTooltip';
 
@@ -152,11 +161,21 @@ const BADGES: Record<BacktestStatus, { text: string; tone: string }> = {
 };
 
 // How far a backtest got (.badge.ok, .badge.run, .badge.bad): Queued in grey, Finished in green,
-// Running in the accent, Failed in red; `detail` after a dot ("Running · 1 min 5 s").
-export function StatusBadge({ status, detail }: { status: BacktestStatus; detail?: string }) {
+// Running in the accent, Failed in red; `detail` after a dot ("Running · 1 min 5 s", "Queued · 2
+// ahead"), `title` on hover.
+export function StatusBadge({
+  status,
+  detail,
+  title,
+}: {
+  status: BacktestStatus;
+  detail?: string | undefined;
+  title?: string | undefined;
+}) {
   const { text, tone } = BADGES[status];
   return (
     <span
+      title={title}
       className={cn(
         'inline-block rounded-[4px] border px-1.5 py-px font-mono text-[11px]/4 font-medium whitespace-nowrap',
         tone,
@@ -205,10 +224,18 @@ export function ModelName({ name, framework, wrap = false }: { name: string; fra
   );
 }
 
-// A backtest's return, or its badge (Failed, Running) when it has none.
+// The badge of a backtest in a list: a queued one with its place in the queue, "Queued · 2" (the
+// Return column has no room for more), what it means in the title.
+function ListBadge({ backtest }: { backtest: Backtest }) {
+  const ahead = aheadOf(backtest);
+  if (ahead === null) return <StatusBadge status={backtest.status} />;
+  return <StatusBadge status="queued" detail={String(ahead)} title={aheadText(ahead)} />;
+}
+
+// A backtest's return, or its badge (Queued, Running, Failed) when it has none.
 export function BacktestReturn({ backtest }: { backtest: Backtest }) {
   const value = hasResults(backtest) ? backtest.total_return : null;
-  return value === null ? <StatusBadge status={backtest.status} /> : <ReturnValue value={value} />;
+  return value === null ? <ListBadge backtest={backtest} /> : <ReturnValue value={value} />;
 }
 
 // When it ran, on the viewer's clock in the user's formats: "Today 16:05".

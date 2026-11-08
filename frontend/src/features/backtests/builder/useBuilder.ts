@@ -23,6 +23,7 @@ import {
   type ChosenInstrument,
   type DateWriter,
 } from './form';
+import type { QueuedBacktest } from './parts';
 import { problemOf, type BuilderProblem } from './problems';
 import { pickerQuery } from './query';
 
@@ -38,14 +39,16 @@ function chosenModel(models: readonly Model[] | undefined, id: string | undefine
   return runnable.find((model) => model.id === id) ?? runnable[0];
 }
 
-// The choices, starting from the account's Backtest defaults, and what the API said about them;
-// any change clears that, as the user is fixing it. The model and the instrument fall back to the
-// first that fits: the first model that can run, the most traded instrument of its market. The
-// benchmark falls back to buy and hold where the market does not have it, and stays there.
+// The choices, starting from the account's Backtest defaults, and what the API said about them
+// (a refusal, or the backtest it queued); any change clears that, as the user is fixing it or
+// setting up the next one. The model and the instrument fall back to the first that fits: the
+// first model that can run, the most traded instrument of its market. The benchmark falls back to
+// buy and hold where the market does not have it, and stays there.
 function useChoices(modelId: string | undefined) {
   const defaults = useSuspenseQuery(preferencesQueryOptions()).data.backtest_defaults;
   const [stored, setStored] = useState<BuilderForm>(() => formOf(defaults, modelId));
   const [problem, setProblem] = useState<BuilderProblem | null>(null);
+  const [queued, setQueued] = useState<QueuedBacktest | null>(null);
   const models = useModels().data?.models;
   const marketFor = (id: string | undefined) => {
     const found = chosenModel(models, id);
@@ -60,9 +63,10 @@ function useChoices(modelId: string | undefined) {
   const replace = (next: BuilderForm) => {
     setStored(withMarket(next, marketFor(next.modelId)));
     setProblem(null);
+    setQueued(null);
   };
   const change = (part: Partial<BuilderForm>) => replace({ ...form, ...part });
-  return { form, replace, change, problem, setProblem, model, market, instrument };
+  return { form, replace, change, problem, setProblem, queued, setQueued, model, market, instrument };
 }
 
 // Which step is open and how far the user got. A step opens once the user got there and every
@@ -85,8 +89,15 @@ function useSteps(ready: readonly boolean[]) {
   };
 }
 
-// Run: starts the backtest and opens its page; a refusal goes back to the step it is about.
-function useRun(onProblem: (problem: BuilderProblem) => void, context: () => Parameters<typeof problemOf>[1]) {
+type RunHandlers = {
+  onProblem: (problem: BuilderProblem) => void;
+  onQueued: (queued: QueuedBacktest) => void;
+};
+
+// Run: starts the backtest and opens its page. One that waits in the queue stays here, saying so
+// with a link to its page, so the next one can be set up; a refusal goes back to the step it is
+// about.
+function useRun({ onProblem, onQueued }: RunHandlers, context: () => Parameters<typeof problemOf>[1]) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const refresh = (key: readonly unknown[]) => void queryClient.invalidateQueries({ queryKey: key });
@@ -95,9 +106,11 @@ function useRun(onProblem: (problem: BuilderProblem) => void, context: () => Par
     onSuccess: (document) => {
       for (const key of [['account', 'backtests'], ['account', 'dashboard'], modelsQueryOptions().queryKey])
         refresh(key);
-      // The answer is the running backtest's document: its page shows it at once and polls it.
-      queryClient.setQueryData(backtestQueryOptions(document.backtest.id).queryKey, document);
-      void navigate({ to: '/backtests/$backtestId', params: { backtestId: document.backtest.id } });
+      // The answer is the new backtest's document: its page shows it at once and polls it.
+      const { id, name, status, queue_position: ahead } = document.backtest;
+      queryClient.setQueryData(backtestQueryOptions(id).queryKey, document);
+      if (status === 'queued') onQueued({ id, name, ahead: ahead ?? 1 });
+      else void navigate({ to: '/backtests/$backtestId', params: { backtestId: id } });
     },
     onError: (error) => {
       const problem = problemOf(error, context());
@@ -136,15 +149,19 @@ export function useBuilder(modelId: string | undefined) {
   const { period, decision, execution, ready } = checksOf(choices, today, write);
   const steps = useSteps(ready);
   const run = useRun(
-    (found) => {
-      choices.setProblem(found);
-      steps.setStep(found.step);
+    {
+      onProblem: (found) => {
+        choices.setProblem(found);
+        steps.setStep(found.step);
+      },
+      onQueued: choices.setQueued,
     },
     () => ({ symbol: instrument?.symbol ?? 'The instrument', write }),
   );
   const start = () => {
     if (!model || !instrument || !ready.every(Boolean) || run.isPending) return;
     choices.setProblem(null);
+    choices.setQueued(null);
     run.mutate(backtestOf(form, model, instrument, Date.now() / 1000));
   };
   // What a step shows in red: what the API said about it, else what stops it.

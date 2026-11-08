@@ -7,10 +7,13 @@ import { queuedDocument, runningDocument } from '@/test/runs';
 import {
   backtestQueryOptions,
   backtestsQueryOptions,
+  cancelBacktest,
   dashboardQueryOptions,
   getBacktestFile,
   updateBacktest,
   type BacktestDocument,
+  type BacktestsPage,
+  type Dashboard,
 } from './backtests';
 
 afterEach(() => {
@@ -49,6 +52,33 @@ describe('backtestsQueryOptions', () => {
   });
 });
 
+describe('the lists while a backtest waits or runs', () => {
+  const queued = backtest({ status: 'queued', queue_position: 2, total_return: null });
+  const running = backtest({ status: 'running', total_return: null });
+  const query = (data: unknown) => ({ state: { data } }) as never;
+
+  it('ask for the Backtests page again every 5 s, so the place in the queue keeps up', () => {
+    const { refetchInterval } = backtestsQueryOptions({});
+    if (typeof refetchInterval !== 'function') throw new Error('Not a function');
+    const page = (backtests: BacktestsPage['backtests']) => query({ backtests });
+    expect(refetchInterval(page([backtest(), queued]))).toBe(5000);
+    expect(refetchInterval(page([running]))).toBe(5000);
+    expect(refetchInterval(page([backtest(), backtest({ status: 'failed' })]))).toBe(false);
+    expect(refetchInterval(query(undefined))).toBe(false);
+  });
+
+  it('ask for the dashboard again while one of its widgets shows such a backtest', () => {
+    const { refetchInterval } = dashboardQueryOptions();
+    if (typeof refetchInterval !== 'function') throw new Error('Not a function');
+    const dashboard = (last: Dashboard['last'], starred: Dashboard['last']) =>
+      query({ last, starred: { backtests: starred, total: starred.length } });
+    expect(refetchInterval(dashboard([], [queued]))).toBe(5000);
+    expect(refetchInterval(dashboard([running], []))).toBe(5000);
+    expect(refetchInterval(dashboard([backtest()], [backtest()]))).toBe(false);
+    expect(refetchInterval(query(undefined))).toBe(false);
+  });
+});
+
 describe('dashboardQueryOptions', () => {
   it('reads the dashboard under the account', async () => {
     stubApi(dashboardAnswer({ last: [backtest()] }));
@@ -56,6 +86,26 @@ describe('dashboardQueryOptions', () => {
     expect(options.queryKey).toEqual(['account', 'dashboard']);
     const data = await new QueryClient().fetchQuery(options);
     expect(data.last).toEqual([backtest()]);
+  });
+});
+
+describe('cancelBacktest', () => {
+  it('posts to its cancel path without a body and gives the document back', async () => {
+    const cancelled = backtestDocument();
+    const fetch = stubApi({ 'POST /api/v1/backtests/bt_7f3k2m9qx4/cancel': { status: 200, body: cancelled } });
+    await expect(cancelBacktest('bt_7f3k2m9qx4')).resolves.toEqual(cancelled);
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' });
+    expect(fetch.mock.calls[0]?.[1]?.body).toBeUndefined();
+  });
+
+  it('passes on a backtest that began to run as backtest-not-queued', async () => {
+    stubApi({
+      'POST /api/v1/backtests/bt_7f3k2m9qx4/cancel': problem(409, 'backtest-not-queued', 'It runs already.'),
+    });
+    await expect(cancelBacktest('bt_7f3k2m9qx4')).rejects.toMatchObject({
+      status: 409,
+      problem: 'backtest-not-queued',
+    });
   });
 });
 
