@@ -40,7 +40,7 @@ _WRAPPING_IPV4 = (
     ipaddress.ip_network("64:ff9b:1::/48"),
     ipaddress.ip_network("::/96"),
 )
-_GRANT_TYPES = frozenset({"authorization_code", "refresh_token"})
+_GRANT_TYPES_ORDER = ("authorization_code", "refresh_token")
 
 # Resolves a host and port to the IP addresses it names; replaced by the tests.
 Resolver = Callable[[str, int], Awaitable[list[str]]]
@@ -119,15 +119,14 @@ def check_metadata(metadata: ClientMetadataIn) -> None:
         problem = redirect_uri_problem(uri)
         if problem is not None:
             raise OAuthError("invalid_redirect_uri", problem)
-    if "authorization_code" not in metadata.grant_types or not _GRANT_TYPES.issuperset(
-        metadata.grant_types
-    ):
-        raise OAuthError(
-            "invalid_client_metadata",
-            "grant_types must name authorization_code, and refresh_token at most besides",
-        )
-    if metadata.response_types != ["code"]:
-        raise OAuthError("invalid_client_metadata", 'response_types must be ["code"]')
+    # A client may name grant and response types this server does not offer (Claude's metadata
+    # document does): it gets only the ones it offers, as long as the code flow is among them.
+    if "authorization_code" not in metadata.grant_types:
+        raise OAuthError("invalid_client_metadata", "grant_types must name authorization_code")
+    if "code" not in metadata.response_types:
+        raise OAuthError("invalid_client_metadata", "response_types must name code")
+    metadata.grant_types = [kind for kind in _GRANT_TYPES_ORDER if kind in metadata.grant_types]
+    metadata.response_types = ["code"]
     for name in ("client_uri", "logo_uri"):
         value = getattr(metadata, name)
         if value is not None and not _https_url(value):

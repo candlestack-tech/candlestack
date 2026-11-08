@@ -474,9 +474,12 @@ class ClientMetadataIn(BaseModel):
     )
     grant_types: list[str] = Field(
         default=["authorization_code", "refresh_token"],
-        description="`authorization_code` and `refresh_token` only",
+        description="Must name `authorization_code`; the server keeps it and `refresh_token`, and "
+        "ignores the types it does not offer",
     )
-    response_types: list[str] = Field(default=["code"], description="`code` only")
+    response_types: list[str] = Field(
+        default=["code"], description="Must name `code`; the server keeps only `code`"
+    )
 
 
 class ClientRegistrationOut(BaseModel):

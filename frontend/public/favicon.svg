@@ -1,14 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="CandleStack">
-  <style>
-    .a { fill: #0f766e; }
-    .b { fill: #fafaf9; }
-    @media (prefers-color-scheme: dark) {
-      .a { fill: #3cc7a6; }
-      .b { fill: #0d0f11; }
-    }
-  </style>
-  <rect class="a" width="32" height="32" rx="7"/>
-  <g class="b">
+  <rect fill="#3cc7a6" width="32" height="32" rx="7"/>
+  <g fill="#0d0f11">
     <rect x="10" y="12" width="2" height="14"/>
     <rect x="8" y="16" width="6" height="8"/>
     <rect x="20" y="6" width="2" height="18"/>
