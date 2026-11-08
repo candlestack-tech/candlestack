@@ -32,13 +32,14 @@ def compare(user: Any, *ids: str) -> Any:
 
 def test_the_users_own_and_others_published_backtests_side_by_side(ada, bob, worker) -> None:
     bob.sql("UPDATE users SET display_name = 'Bob Stone' WHERE id = :id", id=bob.id)
-    own = ada.start(body(ada.runnable_model())).json()["backtest"]["id"]
+    model_id = ada.runnable_model()
+    own = ada.start(body(model_id)).json()["backtest"]["id"]
     own_document = ada.ended(own)
     theirs = bob.start(body(bob.runnable_model(), limit=0.3)).json()["backtest"]["id"]
     their_document = bob.ended(theirs)
     bob.publish(theirs)
     worker.failure = ("load", "Keras could not load the model file.")
-    failed = ada.start(body(ada.runnable_model())).json()["backtest"]["id"]
+    failed = ada.start(body(model_id)).json()["backtest"]["id"]
     ada.ended(failed)
 
     response = compare(ada, theirs, own, failed)
@@ -79,10 +80,11 @@ def test_the_users_own_and_others_published_backtests_side_by_side(ada, bob, wor
 
 
 def test_a_running_backtest_is_listed_without_values(ada, worker) -> None:
-    finished = ada.start(body(ada.runnable_model())).json()["backtest"]["id"]
+    model_id = ada.runnable_model()
+    finished = ada.start(body(model_id)).json()["backtest"]["id"]
     ada.ended(finished)
     worker.gate.clear()  # the next one waits for the worker: it keeps running
-    running = ada.start(body(ada.runnable_model())).json()["backtest"]["id"]
+    running = ada.start(body(model_id)).json()["backtest"]["id"]
 
     shown = compare(ada, finished, running).json()
 
