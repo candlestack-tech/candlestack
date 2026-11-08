@@ -1218,7 +1218,8 @@ backend like the rest of the API; the metadata (RFC 8414) is served at
   after its use deletes the whole family, as a copy is in someone else's hands. Within those 60
   seconds it is only refused (`invalid_grant`): that is a retry after a lost answer, or two
   sessions of one client sharing the token, and ending the family would sign the user out
-  everywhere. A refresh may narrow the scopes, never widen them (`invalid_scope`); one without
+  everywhere; it is logged as a warning, since a stolen copy used in time looks the same. A
+  refresh may narrow the scopes, never widen them (`invalid_scope`); one without
   `scope` keeps the scopes of the token it uses, so after a narrowing it stays narrow (not the
   scopes first granted, which RFC 6749 section 6 allows). Every use checks the beta list and the client the token belongs to;
   expired tokens of an app go when it gets new ones. `POST /api/v1/oauth/revoke` (RFC 7009)
