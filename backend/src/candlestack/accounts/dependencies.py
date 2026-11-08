@@ -148,24 +148,40 @@ async def browser_session(
 
 @dataclass(frozen=True, slots=True)
 class Caller:
-    """Who sent a request: the user, and the scopes of the API key it came with; ``scopes`` is
-    None for the browser session, which may do everything."""
+    """Who sent a request: the user, and the scopes of the API key or OAuth access token it
+    came with; ``scopes`` is None for the browser session, which may do everything. ``app`` is
+    True for an access token of a connected app."""
 
     user: User
     scopes: frozenset[Scope] | None = None
+    app: bool = False
 
     def require(self, *scopes: Scope) -> None:
-        """403 ``missing-scope``, naming the first scope the key lacks; the session passes."""
+        """403 ``missing-scope``, naming the first scope the key or app lacks; the session
+        passes."""
         for scope in scopes:
             if self.scopes is not None and scope not in self.scopes:
                 raise ProblemError(
                     403,
                     "missing-scope",
                     "Missing scope",
-                    f"This API key does not have the scope {scope.value}, which this request "
-                    "needs. Create a key with it in Settings, API and MCP.",
+                    self._missing(scope),
                     extensions={"scope": scope.value},
                 )
+
+    def _missing(self, scope: Scope) -> str:
+        """What a caller without `scope` can do about it: a connected app is connected again,
+        a key is replaced."""
+        if self.app:
+            return (
+                f"This connected app was not allowed the scope {scope.value}, which this "
+                "request needs. Disconnect it in Settings, API and MCP and connect it again, "
+                "allowing that scope."
+            )
+        return (
+            f"This API key does not have the scope {scope.value}, which this request needs. "
+            "Create a key with it in Settings, API and MCP."
+        )
 
 
 def _session_required(settings: Settings) -> ProblemError:
@@ -271,7 +287,7 @@ async def token_caller(
     if wait > 0:
         raise _rate_limited(wait, "connected app")
     await tokens.mark_used(signed_in.app)
-    return Caller(signed_in.user, signed_in.scopes)
+    return Caller(signed_in.user, signed_in.scopes, app=True)
 
 
 async def authenticate(  # noqa: PLR0913 (the request and what signs it in)

@@ -71,8 +71,8 @@ flowchart LR
 | `GET /api/v1/data/instruments`, `/instruments/{instrument_id}`, `/instruments/{instrument_id}/candles` | the instrument list, an instrument and its candles, for signed-in accounts only (401 `not-signed-in` otherwise), see [data.md](data.md) |
 | `GET /api/v1/data/instruments/{instrument_id}/icon` | the instrument's logo, or a fallback image; public ([data.md](data.md#icons)) |
 | `GET /api/v1/data/top-instruments` | the five most traded instruments for the home page, cached 60 s; public: these few rows only, not the list ([data.md](data.md#top-instruments)) |
-| `GET /api/v1/auth/{provider}/start?next=<path>` | sign-in with `github` or `google`: redirects to the provider, or to `/signin?error=failed` (provider not configured, too many sign-ins from the address); with `intent=connect` it adds a sign-in method to the signed-in user instead ([Accounts](#accounts)) |
-| `GET /api/v1/auth/{provider}/callback` | where the provider returns; sets the session cookie and redirects to `next` (default `/dashboard`), or to `/signin?error=denied` (not on the beta list) or `/signin?error=failed`; a connect returns to Settings instead; not in the API reference |
+| `GET /api/v1/auth/{provider}/start?next=<path>` | sign-in with `github` or `google`: redirects to the provider, or to `/signin?error=failed` (provider not configured, too many sign-ins from the address; with `next` when it is not the default); with `intent=connect` it adds a sign-in method to the signed-in user instead ([Accounts](#accounts)) |
+| `GET /api/v1/auth/{provider}/callback` | where the provider returns; sets the session cookie and redirects to `next` (default `/dashboard`), or to `/signin?error=denied` (not on the beta list) or `/signin?error=failed`, both with `next` when it was known and is not the default; a connect returns to Settings instead; not in the API reference |
 | `GET /api/v1/auth/denied` | the account this browser was just turned away with (email, provider), for the sign-in page |
 | `POST /api/v1/auth/sign-out` | ends this browser's session |
 | `POST /api/v1/auth/dev` | signs in as a fixed dev user; only `APP_ENV` `local` and `test`, not in the API reference |
@@ -136,8 +136,10 @@ flowchart LR
   [data.md](data.md#errors). The accounts module adds `not-signed-in` (401: no session or API key, or the
   session ended), `invalid-api-key` (401: the key is unknown, revoked or expired, or its
   account left the beta list), `cross-origin-request` (403: a change that does not come from
-  the app's own pages), `missing-scope` (403: the key lacks a scope the route needs,
-  `scope` names it), `session-required` (403: keys cannot do this),
+  the app's own pages), `missing-scope` (403: the key or the connected app lacks a scope the
+  route needs, `scope` names it; the detail tells a key's owner to create a key with it, and
+  the user of a connected app to disconnect it and connect it again allowing it),
+  `session-required` (403: keys cannot do this),
   `too-many-api-keys` (409: 10 keys that are neither revoked nor expired, with `limit`)
   and `last-sign-in-method` (409: removing the account's only sign-in method), for the OAuth
   sign-in of MCP clients `invalid-access-token` (401 at `/mcp`: the token is unknown, expired,
@@ -201,7 +203,11 @@ flowchart LR
   account signs in to the user it was added to; one that never signed in joins the user with
   its email, so the email links a user's GitHub and Google into one account, else it makes a
   new user. A user who already signs in with another account of that provider (connected in
-  Settings with another email) gets `/signin?error=failed` instead of a second one.
+  Settings with another email) gets `/signin?error=failed` instead of a second one. A sign-in
+  turned away or failed once its pending state was found returns to the sign-in page with the
+  `next` it started with (validated again: a path of the app only, never `/api`, another site
+  or the default `/dashboard`), so someone off the beta list who signs in from an app's consent
+  page lands back with it and the page can name the app.
 - **Sign-in methods**: `GET /api/v1/auth/{provider}/start?intent=connect&next=<path>`, the
   Connect link of Settings, starts the same round trip for the signed-in user (without a
   session it redirects to `/signin?next=/settings/sign-in`). Being a navigation, it carries no
@@ -1041,10 +1047,10 @@ call, as the routes' dependencies do), never the API over HTTP.
   `https://candlestack.tech/docs/mcp/`; the resource `candlestack://docs` (Markdown) lists the
   docs pages, the tool reference, the manifest and backtest result references with their JSON
   Schemas, the problem pages and the API reference. The manifest and the result document link
-  their sections of `docs/preprocessing.md` and `docs/engine.md` on GitHub until the website has
-  their pages (website#63, #64); a unit test fails when the instructions, the resource, a tool's
-  description or a description in its schemas links a page that is not in its list of known
-  pages.
+  the website's pages `https://candlestack.tech/docs/manifest/` and
+  `https://candlestack.tech/docs/backtest-json/` (website#63, #64); a unit test fails when the
+  instructions, the resource, a tool's description or a description in its schemas links a
+  page that is not in its list of known pages.
 - **Tools**: one module per area, each with its `TOOLS`, which `server.TOOLS` puts together.
   - `account`: `get_me` (scope `read`): the key's user (ID, name, email, created) and the
     key's scopes.
@@ -1211,7 +1217,10 @@ backend like the rest of the API; the metadata (RFC 8414) is served at
   the request. `POST` with the session and the app's own origin decides it once: `allow` grants
   the chosen scopes, each one the app asked for (else `422 scope-not-requested`), read always,
   and only for an account on the beta list; `deny` answers `error=access_denied`. The answer's
-  `redirect_to` is where the page sends the browser. The logo is an address the app chose:
+  `redirect_to` is where the page sends the browser: always the redirect URI the authorize
+  request named, which the app had registered and must still have when the user decides
+  (else `404 authorization-request-not-found`: a metadata document refreshed meanwhile may
+  have dropped it). The logo is an address the app chose:
   loading it tells that host the page was shown, and the CSP's `img-src 'self' data:` blocks it
   once enforced (the consent page, #409, decides how to show it).
 - **Code**: random, 5 minutes, used once, kept in Redis with the client, redirect URI, PKCE
@@ -1242,7 +1251,11 @@ backend like the rest of the API; the metadata (RFC 8414) is served at
   installs, so connecting Claude Code on a second machine must not disconnect the first. The
   app's `scopes` are those of the new consent and of the authorizations that still work (a live
   refresh token), set on each authorization; a refresh that narrows a family's scopes does not
-  change them. Its requests at `/mcp` share 120 a minute. `GET` and `DELETE
+  change them. Its `redirect_uri` is the one its last authorization returned to, set on each
+  authorization: Settings names the app by that host (`redirect_host`), not by the first URI the
+  app registered, so an app that registers `https://claude.ai/cb` and `https://evil.example/cb`
+  and returns to the second shows `evil.example`; an app connected before the column existed
+  falls back to its first registered URI. Its requests at `/mcp` share 120 a minute. `GET` and `DELETE
   /api/v1/me/connected-apps` list and disconnect apps with the browser session only; deleting
   the app deletes its tokens.
 - Clients authenticate at the token and revocation endpoints the way they registered: a public

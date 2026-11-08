@@ -449,7 +449,7 @@ class AuthorizationServer:
 
         Raises:
             NoSuchAuthorizationRequest: It was decided, expired or never was, or it started in
-                another browser.
+                another browser, or its app no longer registers its redirect URI.
         """
         pending = await self._pending.request(request_id)
         if (
@@ -459,7 +459,9 @@ class AuthorizationServer:
         ):
             raise NoSuchAuthorizationRequest
         client = await self._store.client(pending.client_id)
-        if client is None:
+        # The browser goes back only to a redirect URI the app still registers: a metadata
+        # document refreshed since the authorize step may have dropped it.
+        if client is None or not redirect_uri_matches(client.redirect_uris, pending.redirect_uri):
             raise NoSuchAuthorizationRequest
         return pending, client
 
@@ -593,7 +595,7 @@ class AuthorizationServer:
         if user is None or not admitted(self._settings, user.email):
             raise _invalid_grant("The account is not on the beta list.")
         now = _now()
-        app = await self._connect(user, client, code.scopes, now)
+        app = await self._connect(user, client, code, now)
         tokens = self._issue(app, family, code.scopes, code.resource, now)
         await self._store.commit()
         if await self._pending.code_reused(value):
@@ -636,15 +638,15 @@ class AuthorizationServer:
             logger.warning("An authorization code was used twice: the tokens it gave are revoked")
 
     async def _connect(
-        self, user: User, client: RegisteredClient, scopes: list[Scope], now: datetime
+        self, user: User, client: RegisteredClient, code: PendingCode, now: datetime
     ) -> ConnectedApp:
-        """The user's connected app of the client, with the scopes of the new consent and of
-        its earlier authorizations that still work. Those keep their tokens: a client ID can be
-        shared by many installs of one app (a metadata document), and connecting one must not
-        disconnect the others."""
+        """The user's connected app of the client, with the scopes of the new consent (its
+        `code`) and of its earlier authorizations that still work, and the redirect URI the
+        consent returned to. Those keep their tokens: a client ID can be shared by many installs
+        of one app (a metadata document), and connecting one must not disconnect the others."""
         await self._store.lock_user(user.id)
         app = await self._store.app(user.id, client.client_id)
-        granted = {scope.value for scope in scopes}
+        granted = {scope.value for scope in code.scopes}
         if app is None:
             app = ConnectedApp(
                 id=new_connected_app_id(),
@@ -657,6 +659,7 @@ class AuthorizationServer:
         else:
             granted |= await self._store.granted_scopes(app.id, now)
         app.scopes = [scope.value for scope in _ordered(list(granted))]
+        app.redirect_uri = code.redirect_uri
         await self._store.flush()  # the tokens refer to it
         return app
 
@@ -758,7 +761,9 @@ class AuthorizationServer:
             items=[
                 ConnectedAppOut(
                     id=app.id,
-                    client=_client_out(client, client.redirect_uris[0]),
+                    # The host the user saw on the consent page and the browser returned to,
+                    # not just any URI the app registered.
+                    client=_client_out(client, app.redirect_uri or client.redirect_uris[0]),
                     scopes=_ordered(app.scopes),
                     connected_at=app.created_at,
                     last_used_at=app.last_used_at,

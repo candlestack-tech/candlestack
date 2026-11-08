@@ -167,6 +167,9 @@ class ConnectedApp(Base):
     )
     # The values of ``schemas.Scope``, in their order.
     scopes: Mapped[list[str]] = mapped_column(ARRAY(String(16)))
+    # The redirect URI its last authorization returned to, whose host Settings shows: an app may
+    # register several. Null for an app connected before it was kept.
+    redirect_uri: Mapped[str | None] = mapped_column(String(CLIENT_URI_LENGTH))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

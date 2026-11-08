@@ -163,7 +163,8 @@ Sign-in is GitHub or Google only (#208), designed in the design repository: the 
   sets it to `null`).
 - Signing in is a full page navigation to `/api/v1/auth/{github|google}/start?next=<path>`. The
   API sends the browser to the provider, and from there back to `next` (default `/dashboard`),
-  to `/signin?error=denied` or to `/signin?error=failed`.
+  to `/signin?error=denied` or to `/signin?error=failed`, both with `next` when the sign-in had
+  one other than the default.
 - `GET /api/v1/auth/denied` names the account the beta list just turned away.
 - `POST /api/v1/auth/sign-out` ends the session. The avatar menu's Sign out then sets the user
   to `null` and goes to the home page; a 401 (the session had already ended) counts the same.
@@ -306,8 +307,9 @@ The two sections with the account's preferences load them in the route's loader
   its scopes, last use and when it connected, and Disconnect, which asks first
   (`DELETE /api/v1/me/connected-apps/{id}`; a 404 counts as gone). Without apps a dashed box says
   how to connect one. The app's tile (`src/components/AppTile.tsx`) draws the mark of a known app
-  by the host it returns to (claude.ai, chatgpt.com: the API checks that host against the
-  registered redirect URIs, so a name cannot borrow it), else the `logo_uri` the app gave (sent
+  by the host it returns to (claude.ai, chatgpt.com: the API answers the host the browser really
+  returned to at the consent, one of the redirect URIs the app registered, so neither a name nor
+  a second registered URI can borrow it), else the `logo_uri` the app gave (sent
   without a referrer), else its initial; a logo that does not load falls back to the initial.
 - Account: Sign out everywhere (`POST /api/v1/auth/sign-out-everywhere`) and Delete account
   (`DELETE /api/v1/me`, after the app's dialog). Both then forget the user and their data and go
@@ -547,7 +549,7 @@ so its back link returns there (else "← Backtests").
   link while it exists),
   the period's first and last UTC day, when it ran and how long. A finished one has
   `[Download JSON | ?]` (the download is `GET /api/v1/backtests/{id}/download`, which the browser
-  saves as `candlestack-backtest-<N>.json`; `?` opens https://candlestack.tech/docs/backtest-json)
+  saves as `candlestack-backtest-<N>.json`; `?` opens https://candlestack.tech/docs/backtest-json/)
   and Add to compare. Rename (any status) names it with `PATCH /api/v1/backtests/{id}`: the name
   replaces the title, with the number beside it, and shows under the number in the lists.
 - Queued (#400): the badge says how many are ahead ("Queued · 2 ahead", the running one and

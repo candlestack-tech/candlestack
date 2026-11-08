@@ -20,6 +20,7 @@ from candlestack.accounts import (
 )
 from candlestack.accounts.dependencies import (
     API_KEY_RATE_LIMIT,
+    Caller,
     SessionUserDep,
     get_accounts_service,
     get_api_keys,
@@ -28,7 +29,12 @@ from candlestack.accounts.dependencies import (
 from candlestack.accounts.keys import KeyUser
 from candlestack.accounts.models import ApiKey
 from candlestack.accounts.service import SignedIn
-from candlestack.core import Settings, install_error_handlers, require_same_origin
+from candlestack.core import (
+    ProblemError,
+    Settings,
+    install_error_handlers,
+    require_same_origin,
+)
 from candlestack.core.ratelimit import get_rate_limiter
 
 PROBLEMS = "https://candlestack.tech/problems/"
@@ -206,6 +212,36 @@ def test_a_key_without_read(client: TestClient) -> None:
     assert response.status_code == 403
     assert response.json()["type"] == PROBLEMS + "missing-scope"
     assert response.json()["scope"] == "read"
+
+
+def test_a_key_without_a_scope_is_told_to_create_a_key_with_it() -> None:
+    with pytest.raises(ProblemError) as refused:
+        Caller(ADA, frozenset({Scope.read})).require(Scope.read, Scope.models)
+
+    assert refused.value.status == 403
+    assert refused.value.slug == "missing-scope"
+    assert refused.value.extensions == {"scope": "models"}
+    assert refused.value.detail == (
+        "This API key does not have the scope models, which this request needs. Create a key "
+        "with it in Settings, API and MCP."
+    )
+
+
+def test_a_connected_app_without_a_scope_is_told_to_connect_again() -> None:
+    with pytest.raises(ProblemError) as refused:
+        Caller(ADA, frozenset({Scope.read}), app=True).require(Scope.read, Scope.models)
+
+    assert refused.value.status == 403
+    assert refused.value.slug == "missing-scope"
+    assert refused.value.extensions == {"scope": "models"}
+    assert refused.value.detail == (
+        "This connected app was not allowed the scope models, which this request needs. "
+        "Disconnect it in Settings, API and MCP and connect it again, allowing that scope."
+    )
+
+
+def test_the_session_has_every_scope() -> None:
+    Caller(ADA).require(*Scope)
 
 
 def test_a_key_cannot_change_what_declares_no_scope(client: TestClient) -> None:
