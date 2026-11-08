@@ -18,7 +18,7 @@ from mcp.server.mcpserver import Context
 from pydantic import BaseModel, Field
 
 from candlestack import experiments
-from candlestack.accounts import Scope
+from candlestack.accounts import HEAVY, Scope
 from candlestack.experiments import (
     COMPARE_MAX,
     BacktestCheck,
@@ -805,6 +805,7 @@ TOOLS = (
         scopes=(Scope.backtests,),
         annotations=changes(destructive=False, idempotent=False),
         example=Example(arguments=_SETUP_ARGUMENTS, result=_QUEUED),
+        cost=HEAVY,
     ),
     ToolSpec(
         wait_for_backtest,
@@ -829,6 +830,7 @@ TOOLS = (
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(arguments={"backtest_id": _ID}, result=_RESULT),
+        cost=HEAVY,
     ),
     ToolSpec(
         compare_backtests,
@@ -837,5 +839,6 @@ TOOLS = (
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(arguments={"ids": [_ID, "bt_t9n8v7d6a5"]}, result=_COMPARE),
+        cost=HEAVY,
     ),
 )

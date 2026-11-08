@@ -560,6 +560,13 @@ so its back link returns there (else "← Backtests").
   dialog shows the API's sentence (`409 backtest-not-queued`) and the page is asked for again.
   The dialog cannot be closed while the request runs. Where the 2 s poll finds it running while
   the dialog is open, the dialog says it has left the queue and Cancel backtest turns off.
+- Delete (the user's own, any status, last in the header, `DeleteBacktest.tsx`): an outline button
+  with a bin that asks first (Delete Bright Vega?, a sentence by status, that a published one also
+  leaves Experiments, and "This cannot be undone.", Cancel or Delete) and sends
+  `DELETE /api/v1/backtests/{id}`. Then the backtest leaves Compare, the lists, the dashboard,
+  Experiments and the models are asked for again, the page goes to Backtests and the backtest's
+  cache is dropped; a 404 (deleted in another tab) counts as deleted, any other error shows its
+  detail in the dialog, which cannot be closed while the request runs.
 - Finished: the six first results in a strip (`src/components/FactsStrip.tsx`, the model page's
   too), then the charts and the trades beside every metric of the engine and the setup (one column
   up to 980 px). Running: a moving bar and the setup. Failed: the error and the setup. A 404 says

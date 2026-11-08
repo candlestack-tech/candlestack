@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 from mcp.server.mcpserver import Context
 
-from candlestack.accounts import Scope
+from candlestack.accounts import HEAVY, Scope
 from candlestack.experiments import (
     BacktestIn,
     SweepIn,
@@ -185,6 +185,7 @@ TOOLS = (
         example=Example(
             arguments={"base": _BASE, "vary": _VARY, "metric": "sharpe"}, result=_STARTED
         ),
+        cost=HEAVY,
     ),
     ToolSpec(
         get_sweep,

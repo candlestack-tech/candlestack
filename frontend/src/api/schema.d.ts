@@ -194,6 +194,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backtests/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete Backtests
+         * @description Deletes the user's backtests for good, as `DELETE /api/v1/backtests/{backtest_id}` does
+         *     one: up to 100 by their `ids`, or every backtest of a sweep with `sweep_id`, which deletes
+         *     the sweep too. IDs the user has no backtest with are listed in `not_found` and change
+         *     nothing, so sending the same request again is safe.
+         */
+        post: operations["delete_backtests_api_v1_backtests_delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backtests/{backtest_id}": {
         parameters: {
             query?: never;
@@ -211,7 +234,14 @@ export interface paths {
         get: operations["get_backtest_api_v1_backtests__backtest_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Backtest
+         * @description Deletes the user's backtest for good, with everything its run stored. A queued one
+         *     leaves the queue, a running one is stopped first. A published one leaves Experiments, and
+         *     its page answers 404 to everyone. Its sweep no longer lists it, and a sweep without any
+         *     backtest left is deleted too.
+         */
+        delete: operations["delete_backtest_api_v1_backtests__backtest_id__delete"];
         options?: never;
         head?: never;
         /**
@@ -1959,6 +1989,50 @@ export interface components {
              * @description Star or unstar the backtest
              */
             starred?: boolean | null;
+        };
+        /**
+         * BacktestsDeleteIn
+         * @description The backtests to delete: `ids` or `sweep_id`, one of the two.
+         */
+        BacktestsDeleteIn: {
+            /**
+             * Ids
+             * @description 1 to 100 IDs of the user's backtests
+             */
+            ids?: string[] | null;
+            /**
+             * Sweep Id
+             * @description Every backtest of this sweep of the user, and the sweep
+             * @example sw_7f3k2m9qx4
+             */
+            sweep_id?: string | null;
+        };
+        /**
+         * BacktestsDeleted
+         * @description What was deleted.
+         */
+        BacktestsDeleted: {
+            /**
+             * Count
+             * @description How many were deleted
+             * @example 2
+             */
+            count: number;
+            /**
+             * Deleted
+             * @description The IDs of the backtests deleted, in the order given (a sweep's in its order)
+             * @example [
+             *       "bt_7f3k2m9qx4",
+             *       "bt_t9n8v7d6a5"
+             *     ]
+             */
+            deleted: string[];
+            /**
+             * Not Found
+             * @description IDs of `ids` the user has no backtest with (deleted already, or another account's): nothing was deleted for them
+             * @example []
+             */
+            not_found: string[];
         };
         /** BacktestsPage */
         BacktestsPage: {
@@ -5284,7 +5358,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5344,7 +5418,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The model has no manifest (`model-needs-setup`), or the user has 20 backtests waiting already (`queue-full`, with `limit`). */
+            /** @description The model has no manifest (`model-needs-setup`), the user has 20 backtests waiting already (`queue-full`, with `limit`), or as many backtests as an account keeps (`backtest-limit`, with `limit` and `count`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5362,7 +5436,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5440,7 +5514,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The model has no manifest (`model-needs-setup`), or the user has 20 backtests waiting already (`queue-full`, with `limit`). */
+            /** @description The model has no manifest (`model-needs-setup`), the user has 20 backtests waiting already (`queue-full`, with `limit`), or as many backtests as an account keeps (`backtest-limit`, with `limit` and `count`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5458,7 +5532,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5478,6 +5552,75 @@ export interface operations {
             };
             /** @description A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`). */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_backtests_api_v1_backtests_delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestsDeleteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestsDeleted"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no sweep with `sweep_id` (`not-found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Neither or both of `ids` and `sweep_id`, or more than 100 IDs (`validation`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5553,7 +5696,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5573,6 +5716,72 @@ export interface operations {
             };
             /** @description A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`). */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_backtest_api_v1_backtests__backtest_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Public ID of the backtest */
+                backtest_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no backtest with this ID (`not-found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5652,7 +5861,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5729,7 +5938,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5806,7 +6015,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5901,7 +6110,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5948,7 +6157,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6017,7 +6226,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6103,7 +6312,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6197,7 +6406,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6374,7 +6583,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6421,7 +6630,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6805,7 +7014,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6916,7 +7125,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7028,7 +7237,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7128,7 +7337,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7215,7 +7424,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7283,7 +7492,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7349,7 +7558,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7430,7 +7639,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7498,7 +7707,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7580,7 +7789,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7662,7 +7871,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -8123,7 +8332,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description A model has no manifest (`model-needs-setup`, with `setup`), or the user's queue has room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count` and `room`). */
+            /** @description A model has no manifest (`model-needs-setup`, with `setup`), the user's queue has room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count` and `room`), or the account cannot keep that many more backtests (`backtest-limit`, with `limit`, `count` and `adding`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8141,7 +8350,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -8230,7 +8439,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;

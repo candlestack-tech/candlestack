@@ -114,3 +114,23 @@ class SetupFailed(Exception):
         super().__init__(index, error)
         self.index = index
         self.error = error
+
+
+class BacktestLimitReached(Exception):
+    """The user has ``count`` backtests, and ``adding`` more would pass the most an account
+    keeps (``limit``)."""
+
+    def __init__(self, limit: int, count: int, adding: int = 1) -> None:
+        super().__init__(limit, count, adding)
+        self.limit = limit
+        self.count = count
+        self.adding = adding
+
+
+class CountMismatch(Exception):
+    """The confirmation of a delete names another number of backtests than ``count``, how
+    many match."""
+
+    def __init__(self, count: int) -> None:
+        super().__init__(count)
+        self.count = count

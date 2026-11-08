@@ -17,7 +17,9 @@ it returns, once the deletion is committed.
 
 What signs requests in outside FastAPI's routes (the MCP server) uses ``key_caller`` for the
 API key, ``token_caller`` for an OAuth access token (``is_access_token``) and
-``get_accounts_service`` for the service the routes use. The OAuth authorization server
+``get_accounts_service`` for the service the routes use. A route that costs a key more than a
+plain request is marked ``@heavy``; an MCP tool pays its cost with ``charge_rate`` on the
+caller's ``budget`` (``limits``). The OAuth authorization server
 (``oauth_router``) signs MCP clients in; its issuer is ``oauth_issuer``.
 """
 
@@ -38,6 +40,8 @@ from candlestack.accounts.dependencies import (
     key_caller,
     token_caller,
 )
+from candlestack.accounts.limits import HEAVY, heavy
+from candlestack.accounts.limits import charge as charge_rate
 from candlestack.accounts.models import User
 from candlestack.accounts.oauth_api import router as oauth_router
 from candlestack.accounts.reference import document_api_keys
@@ -67,6 +71,7 @@ def is_access_token(token: str) -> bool:
 
 __all__ = [
     "API_KEY_SCHEME",
+    "HEAVY",
     "AccountDeletionHook",
     "AccountsService",
     "AfterDeletion",
@@ -88,10 +93,12 @@ __all__ = [
     "TimeZone",
     "User",
     "accounts_router",
+    "charge_rate",
     "dev_sign_in_allowed",
     "dev_sign_in_router",
     "document_api_keys",
     "get_accounts_service",
+    "heavy",
     "is_access_token",
     "key_caller",
     "oauth_issuer",

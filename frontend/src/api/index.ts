@@ -29,6 +29,7 @@ export {
   backtestsQueryOptions,
   compareQueryOptions,
   dashboardQueryOptions,
+  deleteBacktest,
   isUnderway,
   startBacktest,
   updateBacktest,

@@ -1,6 +1,6 @@
 import { keepPreviousData, queryOptions } from '@tanstack/react-query';
 
-import { get, getBlob, patch, postFor, postJson } from './client';
+import { del, get, getBlob, patch, postFor, postJson } from './client';
 import type { components } from './schema';
 
 // A backtest as the API sends it. Returns and rates are fractions (0.246 is 24.6 %); the results
@@ -97,6 +97,13 @@ export function dashboardQueryOptions() {
 // PATCH /api/v1/backtests/{id}: stars, unstars or renames the backtest.
 export function updateBacktest(id: string, update: components['schemas']['BacktestUpdate']): Promise<Backtest> {
   return patch<Backtest>(backtestPath(id), update);
+}
+
+// DELETE /api/v1/backtests/{id}: deletes the user's backtest, whatever its status. A queued one
+// leaves the queue, a running one is stopped first, a published one leaves Experiments. One the
+// user does not have (deleted already, say) is 404 `not-found`.
+export function deleteBacktest(id: string): Promise<void> {
+  return del(backtestPath(id));
 }
 
 // While a backtest waits or runs, its page asks again this often until it finished or failed.

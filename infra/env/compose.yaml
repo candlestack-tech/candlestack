@@ -11,9 +11,9 @@
 # <ENV_NAME>-backend:8000 (/api/*) and <ENV_NAME>-frontend:8080 (everything else). Redis and
 # Postgres are on the environment's own network only. Postgres keeps its data in the volume
 # <ENV_NAME>_postgres; the migrate service brings it to the backend image's migrations before
-# the backend starts, and the backup service dumps it every night into <ENV_NAME>_backups. The
+# the backend starts, and the backup service dumps it every week into <ENV_NAME>_backups. The
 # backend keeps the uploaded model files in the volume <ENV_NAME>_models, which the
-# models-backup service archives every night into <ENV_NAME>_model_backups (infra/README.md,
+# models-backup service archives every week into <ENV_NAME>_model_backups (infra/README.md,
 # "Backups").
 # The worker that runs the models and its job queue are in the profile "worker", in prod and
 # stage. The deploy sets COMPOSE_PROFILES=worker and WORKER_IMAGE=<image@digest>, and they join the
@@ -152,8 +152,9 @@ services:
     networks:
       - default
 
-  # A pg_dump of the database every night at 00:00 UTC into the volume <ENV_NAME>_backups, the
-  # last 7 days kept (infra/README.md, "Backups"). Root in the container, which owns the backup
+  # A pg_dump of the database every Sunday at 00:00 UTC into the volume <ENV_NAME>_backups, only
+  # the newest kept: each run deletes the dumps older than 1 day in every folder, which is the
+  # previous week's (infra/README.md, "Backups"). Root in the container, which owns the backup
   # volume, but without any capability.
   backup:
     image: prodrigestivill/postgres-backup-local:18-alpine@sha256:5519b121b9f3058dc6f116927f8131a6f67951542dbf2cdacfd193f42daaa7a3
@@ -163,8 +164,8 @@ services:
       POSTGRES_DB: candlestack
       POSTGRES_USER: candlestack
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
-      SCHEDULE: "@daily"
-      BACKUP_KEEP_DAYS: "7"
+      SCHEDULE: "@weekly"
+      BACKUP_KEEP_DAYS: "1"
       BACKUP_KEEP_WEEKS: "0"
       BACKUP_KEEP_MONTHS: "0"
     mem_limit: 32m
@@ -186,8 +187,9 @@ services:
     networks:
       - default
 
-  # A tar.gz of the uploaded model files every night at 00:30 UTC into the volume
-  # <ENV_NAME>_model_backups, the last 7 days kept (infra/README.md, "Backups"). The models
+  # A tar.gz of the uploaded model files every Sunday at 00:30 UTC into the volume
+  # <ENV_NAME>_model_backups, only the newest kept: each run prunes the archives older than 1 day,
+  # which is the previous week's (infra/README.md, "Backups"). The models
   # volume is mounted read-only. The archive is built in /tmp (fixed by the image) before it is
   # copied: a volume there, as a tmpfs would hold every model file in memory. Root in the
   # container, which owns its volumes and reads the app's world-readable files, without any
@@ -196,10 +198,10 @@ services:
     image: offen/docker-volume-backup:v2.50.1@sha256:06fccb4c6ff79c4d5e4a839ace17c174da82a9327f43594f8a2c6a15f43bc660
     restart: unless-stopped
     environment:
-      BACKUP_CRON_EXPRESSION: "30 0 * * *"
+      BACKUP_CRON_EXPRESSION: "30 0 * * 0"
       BACKUP_FILENAME: models-%Y-%m-%dT%H-%M-%S.{{ .Extension }}
       BACKUP_PRUNING_PREFIX: models-
-      BACKUP_RETENTION_DAYS: "7"
+      BACKUP_RETENTION_DAYS: "1"
       # Uploads in progress: never whole, and removed when the backend starts.
       BACKUP_EXCLUDE_REGEXP: '/\.incoming/'
     # Enough to archive 300 MB of files (measured).

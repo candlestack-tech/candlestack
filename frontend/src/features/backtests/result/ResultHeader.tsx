@@ -20,6 +20,7 @@ import { documentDescription, documentReads } from '../names';
 import { RenameBacktest } from '../RenameBacktest';
 import { BacktestTitle, StatusBadge } from '../parts';
 import { CancelQueued } from './CancelQueued';
+import { DeleteBacktest } from './DeleteBacktest';
 import { durationText, periodText } from './format';
 import { PublicPill, PublishActions } from './PublishActions';
 
@@ -185,7 +186,7 @@ function ModelName({ model }: { model: BacktestDocument['model'] }) {
   );
 }
 
-// The buttons: the user's own has Rename and Publish too; another account's only looks
+// The buttons: the user's own has Rename, Publish and Delete too; another account's only looks
 // (public-experiments, pageBt).
 function Actions({ doc }: { doc: BacktestDocument }) {
   const { backtest } = doc;
@@ -207,6 +208,7 @@ function Actions({ doc }: { doc: BacktestDocument }) {
           author: others ? backtest.author.name : undefined,
         }}
       />
+      {!others && <DeleteBacktest backtest={backtest} />}
     </div>
   );
 }

@@ -1734,6 +1734,98 @@
         "title": "BacktestUpdate",
         "type": "object"
       },
+      "BacktestsDeleteIn": {
+        "additionalProperties": false,
+        "description": "The backtests to delete: `ids` or `sweep_id`, one of the two.",
+        "properties": {
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "examples": [
+                    "bt_7f3k2m9qx4"
+                  ],
+                  "maxLength": 32,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1 to 100 IDs of the user's backtests",
+            "title": "Ids"
+          },
+          "sweep_id": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every backtest of this sweep of the user, and the sweep",
+            "examples": [
+              "sw_7f3k2m9qx4"
+            ],
+            "title": "Sweep Id"
+          }
+        },
+        "title": "BacktestsDeleteIn",
+        "type": "object"
+      },
+      "BacktestsDeleted": {
+        "description": "What was deleted.",
+        "properties": {
+          "count": {
+            "description": "How many were deleted",
+            "examples": [
+              2
+            ],
+            "title": "Count",
+            "type": "integer"
+          },
+          "deleted": {
+            "description": "The IDs of the backtests deleted, in the order given (a sweep's in its order)",
+            "examples": [
+              [
+                "bt_7f3k2m9qx4",
+                "bt_t9n8v7d6a5"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Deleted",
+            "type": "array"
+          },
+          "not_found": {
+            "description": "IDs of `ids` the user has no backtest with (deleted already, or another account's): nothing was deleted for them",
+            "examples": [
+              []
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Not Found",
+            "type": "array"
+          }
+        },
+        "required": [
+          "deleted",
+          "count",
+          "not_found"
+        ],
+        "title": "BacktestsDeleted",
+        "type": "object"
+      },
       "BacktestsPage": {
         "properties": {
           "backtests": {
@@ -8248,7 +8340,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -8325,7 +8417,7 @@
                 }
               }
             },
-            "description": "The model has no manifest (`model-needs-setup`), or the user has 20 backtests waiting already (`queue-full`, with `limit`)."
+            "description": "The model has no manifest (`model-needs-setup`), the user has 20 backtests waiting already (`queue-full`, with `limit`), or as many backtests as an account keeps (`backtest-limit`, with `limit` and `count`)."
           },
           "422": {
             "content": {
@@ -8345,7 +8437,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -8444,7 +8536,7 @@
                 }
               }
             },
-            "description": "The model has no manifest (`model-needs-setup`), or the user has 20 backtests waiting already (`queue-full`, with `limit`)."
+            "description": "The model has no manifest (`model-needs-setup`), the user has 20 backtests waiting already (`queue-full`, with `limit`), or as many backtests as an account keeps (`backtest-limit`, with `limit` and `count`)."
           },
           "422": {
             "content": {
@@ -8464,7 +8556,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -8500,7 +8592,182 @@
         ]
       }
     },
+    "/api/v1/backtests/delete": {
+      "post": {
+        "description": "Deletes the user's backtests for good, as `DELETE /api/v1/backtests/{backtest_id}` does\none: up to 100 by their `ids`, or every backtest of a sweep with `sweep_id`, which deletes\nthe sweep too. IDs the user has no backtest with are listed in `not_found` and change\nnothing, so sending the same request again is safe.",
+        "operationId": "delete_backtests_api_v1_backtests_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestsDeleteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestsDeleted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The user has no sweep with `sweep_id` (`not-found`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Neither or both of `ids` and `sweep_id`, or more than 100 IDs (`validation`)."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "backtests"
+            ]
+          }
+        ],
+        "summary": "Delete Backtests",
+        "tags": [
+          "backtests"
+        ]
+      }
+    },
     "/api/v1/backtests/{backtest_id}": {
+      "delete": {
+        "description": "Deletes the user's backtest for good, with everything its run stored. A queued one\nleaves the queue, a running one is stopped first. A published one leaves Experiments, and\nits page answers 404 to everyone. Its sweep no longer lists it, and a sweep without any\nbacktest left is deleted too.",
+        "operationId": "delete_backtest_api_v1_backtests__backtest_id__delete",
+        "parameters": [
+          {
+            "description": "Public ID of the backtest",
+            "in": "path",
+            "name": "backtest_id",
+            "required": true,
+            "schema": {
+              "description": "Public ID of the backtest",
+              "examples": [
+                "bt_7f3k2m9qx4"
+              ],
+              "title": "Backtest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The user has no backtest with this ID (`not-found`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "backtests"
+            ]
+          }
+        ],
+        "summary": "Delete Backtest",
+        "tags": [
+          "backtests"
+        ]
+      },
       "get": {
         "description": "The result document of the user's backtest, whatever its status (`results` is null until\nit finished), or of another account's while it is published (`backtest.author`, read only,\n`model.id` null), in the light view: a series of more than 10,000 rows has one point per\nUTC day, and only the newest 10,000 trades are in it (`trades.complete` false).",
         "operationId": "get_backtest_api_v1_backtests__backtest_id__get",
@@ -8589,7 +8856,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -8722,7 +8989,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -8832,7 +9099,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -8937,7 +9204,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -9063,7 +9330,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -9122,7 +9389,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -9290,7 +9557,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -9405,7 +9672,7 @@
                 }
               }
             },
-            "description": "More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -9618,7 +9885,7 @@
                 }
               }
             },
-            "description": "More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -9987,7 +10254,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -10079,7 +10346,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -10494,7 +10761,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -10635,7 +10902,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -10769,7 +11036,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -10906,7 +11173,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -11015,7 +11282,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -11110,7 +11377,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -11198,7 +11465,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -11311,7 +11578,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -11406,7 +11673,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -11520,7 +11787,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -11636,7 +11903,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -12388,7 +12655,7 @@
                 }
               }
             },
-            "description": "A model has no manifest (`model-needs-setup`, with `setup`), or the user's queue has room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count` and `room`)."
+            "description": "A model has no manifest (`model-needs-setup`, with `setup`), the user's queue has room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count` and `room`), or the account cannot keep that many more backtests (`backtest-limit`, with `limit`, `count` and `adding`)."
           },
           "422": {
             "content": {
@@ -12408,7 +12675,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -12541,7 +12808,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [

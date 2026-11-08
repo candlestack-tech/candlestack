@@ -1,6 +1,7 @@
 """The MCP server: its instructions, the ``docs`` resource and the tools, on the official SDK.
 
-``CandleStackMCP`` checks the API key's scopes before a tool runs and answers every failure as
+``CandleStackMCP`` checks the API key's scopes before a tool runs, charges the rate limits what
+a heavy tool costs beyond the request's 1 (``ToolSpec.cost``), and answers every failure as
 a tool error with the API's problem (``convention.problem_result``): the ``ProblemError`` a tool
 raised, ``validation`` for arguments that do not fit the input schema, ``not-found`` for an
 unknown tool and ``internal-error`` for a crash, which is logged for a developer.
@@ -14,8 +15,9 @@ from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.types import CallToolResult, Icon, InputRequiredResult
 from pydantic import ValidationError
 
+from candlestack.accounts import charge_rate
 from candlestack.core import ProblemError
-from candlestack.mcp import account, manage, market, models, run, sweeps
+from candlestack.mcp import account, deletes, manage, market, models, run, sweeps
 from candlestack.mcp.convention import ToolSpec, problem_result, tool_call
 from candlestack.mcp.docs import DOCS_TEXT, DOCS_URI, INSTRUCTIONS
 
@@ -37,6 +39,7 @@ TOOLS: tuple[ToolSpec, ...] = (
     *models.TOOLS,
     *run.TOOLS,
     *manage.TOOLS,
+    *deletes.TOOLS,
     *sweeps.TOOLS,
 )
 
@@ -112,7 +115,9 @@ class CandleStackMCP(MCPServer):
             return problem_result(_unknown_tool(name))
         try:
             if context is not None:
-                tool_call(context).caller.require(*spec.scopes)
+                call = tool_call(context)
+                call.caller.require(*spec.scopes)
+                await charge_rate(call.state.rate_limiter, call.caller.budget, spec.cost)
             return await super().call_tool(name, arguments, context)
         except ProblemError as problem:
             return problem_result(problem)

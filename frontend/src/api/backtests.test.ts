@@ -9,6 +9,7 @@ import {
   backtestsQueryOptions,
   cancelBacktest,
   dashboardQueryOptions,
+  deleteBacktest,
   getBacktestFile,
   updateBacktest,
   type BacktestDocument,
@@ -106,6 +107,22 @@ describe('cancelBacktest', () => {
       status: 409,
       problem: 'backtest-not-queued',
     });
+  });
+});
+
+describe('deleteBacktest', () => {
+  it('deletes the backtest', async () => {
+    const fetch = stubApi({ 'DELETE /api/v1/backtests/bt_7f3k2m9qx4': { status: 204 } });
+    await expect(deleteBacktest('bt_7f3k2m9qx4')).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/backtests/bt_7f3k2m9qx4',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+
+  it('passes a backtest that is gone on as not-found', async () => {
+    stubApi({ 'DELETE /api/v1/backtests/bt_7f3k2m9qx4': problem(404, 'not-found', 'No such backtest.') });
+    await expect(deleteBacktest('bt_7f3k2m9qx4')).rejects.toMatchObject({ status: 404, problem: 'not-found' });
   });
 });
 

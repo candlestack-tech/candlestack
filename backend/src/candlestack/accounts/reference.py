@@ -10,6 +10,7 @@ problems, and every route of the signed-in user that keys may not call says so i
 from typing import Any
 
 from candlestack.accounts.dependencies import API_KEY_RATE_LIMIT, API_KEY_SCHEME
+from candlestack.accounts.limits import HEAVY, USER_RATE_LIMIT
 from candlestack.accounts.schemas import Scope
 
 _PROBLEM = {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}
@@ -17,8 +18,9 @@ _KEY_PROBLEMS = {
     "401": "With an API key: the key is unknown, revoked or expired, or its account is no "
     "longer on the beta list (`invalid-api-key`).",
     "403": "The API key does not have a scope this needs (`missing-scope`; `scope` names it).",
-    "429": f"More than {API_KEY_RATE_LIMIT} requests in one minute with this API key "
-    "(`rate-limited`).",
+    "429": f"More than {API_KEY_RATE_LIMIT} requests in one minute with this API key, or "
+    f"{USER_RATE_LIMIT} across all the account's keys and connected apps, where a heavy request "
+    f"counts as {HEAVY} (`rate-limited`).",
 }
 _SESSION_REQUIRED = "API keys cannot do this, only the signed-in browser (`session-required`)."
 

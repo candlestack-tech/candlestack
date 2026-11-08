@@ -11,12 +11,14 @@ from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from candlestack.accounts import (
+    HEAVY,
     BacktestsUserDep,
     CallerDep,
     CurrentUserDep,
     ModelsUserDep,
     Scope,
     User,
+    heavy,
 )
 from candlestack.accounts.dependencies import (
     API_KEY_RATE_LIMIT,
@@ -26,6 +28,7 @@ from candlestack.accounts.dependencies import (
     reject_api_keys,
 )
 from candlestack.accounts.keys import KeyUser
+from candlestack.accounts.limits import USER_RATE_LIMIT
 from candlestack.accounts.models import ApiKey
 from candlestack.accounts.service import SignedIn
 from candlestack.core import Settings, install_error_handlers, require_same_origin
@@ -79,10 +82,14 @@ class FakeAccounts:
 class FakeLimiter:
     wait: float = 0.0
     keys: list[str] = field(default_factory=list)
+    costs: list[int] = field(default_factory=list)
+    # Only the counters that start with this are over their limit; all when None.
+    over: str | None = None
 
     async def hit(self, key: str, limit: int, cost: int = 1, window: int = 60) -> float:
         self.keys.append(f"{key} {limit}")
-        return self.wait
+        self.costs.append(cost)
+        return self.wait if self.over is None or key.startswith(self.over) else 0.0
 
 
 @pytest.fixture
@@ -101,6 +108,12 @@ CHANGES = [Depends(require_same_origin)]
 
 @router.get("/read")
 async def read(user: CurrentUserDep) -> str:
+    return user.id
+
+
+@router.get("/heavy")
+@heavy
+async def heavy_read(user: CurrentUserDep) -> str:
     return user.id
 
 
@@ -176,7 +189,11 @@ def test_a_key_with_read_reads(client: TestClient, keys: FakeKeys, limiter: Fake
     assert response.status_code == 200
     assert response.json() == ADA.id
     assert keys.used == ["key_readaaaaaa"]
-    assert limiter.keys == [f"accounts:key-rl:key_readaaaaaa {API_KEY_RATE_LIMIT}"]
+    assert limiter.keys == [
+        f"accounts:key-rl:key_readaaaaaa {API_KEY_RATE_LIMIT}",
+        f"accounts:user-rl:{ADA.id} {USER_RATE_LIMIT}",
+    ]
+    assert limiter.costs == [1, 1]
 
 
 def test_the_bearer_scheme_is_case_insensitive(client: TestClient) -> None:
@@ -252,6 +269,43 @@ def test_the_rate_limit_per_key(client: TestClient, keys: FakeKeys, limiter: Fak
     assert response.json()["limit"] == API_KEY_RATE_LIMIT
     assert response.headers["retry-after"] == "13"
     assert keys.used == []
+
+
+def test_the_rate_limit_per_account(
+    client: TestClient, keys: FakeKeys, limiter: FakeLimiter
+) -> None:
+    limiter.wait = 30.5
+    limiter.over = "accounts:user-rl:"
+
+    response = client.get("/read", headers=bearer(READ_KEY))
+
+    assert response.status_code == 429
+    assert response.json()["type"] == PROBLEMS + "rate-limited"
+    assert response.json()["limit"] == USER_RATE_LIMIT
+    assert "across all its API keys and connected apps" in response.json()["detail"]
+    assert response.headers["retry-after"] == "31"
+    assert keys.used == []
+
+
+def test_a_spent_key_does_not_count_against_the_account(
+    client: TestClient, limiter: FakeLimiter
+) -> None:
+    limiter.wait = 1.0
+
+    assert client.get("/read", headers=bearer(READ_KEY)).status_code == 429
+    assert limiter.keys == [f"accounts:key-rl:key_readaaaaaa {API_KEY_RATE_LIMIT}"]
+
+
+def test_a_heavy_route_costs_more(client: TestClient, limiter: FakeLimiter) -> None:
+    assert client.get("/heavy", headers=bearer(READ_KEY)).status_code == 200
+    assert limiter.costs == [HEAVY, HEAVY]
+
+
+def test_the_session_has_no_rate_limit(client: TestClient, limiter: FakeLimiter) -> None:
+    limiter.wait = 10.0
+
+    assert client.get("/heavy", headers=SESSION).status_code == 200
+    assert limiter.keys == []
 
 
 def test_a_key_signs_in_once_per_request(client: TestClient, keys: FakeKeys) -> None:

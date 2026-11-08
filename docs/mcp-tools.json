@@ -11226,6 +11226,139 @@
     },
     {
       "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Deletes the user's backtests for good, with their results: up to 100 by their ids, or every backtest of a sweep with sweep_id, which deletes the sweep too. A queued one leaves the queue, a running one is stopped, a published one leaves Experiments and its page is gone. It cannot be undone, so ask the user first and give how many backtests you delete in confirm_count: when another number matches (some were deleted already, or the sweep has more), it answers the problem confirmation-mismatch with the real `count` and deletes nothing. IDs the user has no backtest with are listed in `not_found`.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#delete_backtests",
+      "endpoints": [
+        "DELETE /api/v1/backtests/{backtest_id}",
+        "POST /api/v1/backtests/delete"
+      ],
+      "example": {
+        "arguments": {
+          "confirm_count": 2,
+          "ids": [
+            "bt_7f3k2m9qx4",
+            "bt_t9n8v7d6a5"
+          ]
+        },
+        "result": {
+          "count": 2,
+          "deleted": [
+            "bt_7f3k2m9qx4",
+            "bt_t9n8v7d6a5"
+          ],
+          "not_found": []
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm_count": {
+            "description": "How many backtests this deletes, as the user agreed: the IDs given, or the sweep's `count` from get_sweep",
+            "minimum": 1,
+            "title": "Confirm Count",
+            "type": "integer"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "examples": [
+                    "bt_7f3k2m9qx4"
+                  ],
+                  "maxLength": 32,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "1 to 100 IDs of the user's backtests, from list_backtests",
+            "title": "Ids"
+          },
+          "sweep_id": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Every backtest of this sweep and the sweep itself, instead of ids",
+            "title": "Sweep Id"
+          }
+        },
+        "required": [
+          "confirm_count"
+        ],
+        "title": "delete_backtestsArguments",
+        "type": "object"
+      },
+      "name": "delete_backtests",
+      "outputSchema": {
+        "description": "What was deleted.",
+        "properties": {
+          "count": {
+            "description": "How many were deleted",
+            "examples": [
+              2
+            ],
+            "title": "Count",
+            "type": "integer"
+          },
+          "deleted": {
+            "description": "The IDs of the backtests deleted, in the order given (a sweep's in its order)",
+            "examples": [
+              [
+                "bt_7f3k2m9qx4",
+                "bt_t9n8v7d6a5"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Deleted",
+            "type": "array"
+          },
+          "not_found": {
+            "description": "IDs of `ids` the user has no backtest with (deleted already, or another account's): nothing was deleted for them",
+            "examples": [
+              []
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Not Found",
+            "type": "array"
+          }
+        },
+        "required": [
+          "deleted",
+          "count",
+          "not_found"
+        ],
+        "title": "BacktestsDeleted",
+        "type": "object"
+      },
+      "scopes": [
+        "backtests"
+      ],
+      "title": "Delete backtests"
+    },
+    {
+      "annotations": {
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,

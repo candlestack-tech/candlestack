@@ -109,6 +109,9 @@ class Settings(BaseSettings):
     job_time_limit: float = Field(default=120, gt=0, le=3600)
 
     candles_max: int = Field(default=50_000, gt=0)
+    # The most backtests an account keeps, failed ones counted: a start or a sweep beyond it
+    # is refused until the user deletes old ones.
+    backtest_limit: int = Field(default=2000, gt=0)
     client_rate_limit: int = Field(default=60, ge=0)
     alpaca_rate_limit: int = Field(
         default_factory=lambda data: default_alpaca_rate_limit(data.get("app_env", "local")),

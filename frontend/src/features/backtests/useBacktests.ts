@@ -1,10 +1,12 @@
-import { useMutation, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query';
 
 import {
+  ApiError,
   backtestQueryOptions,
   backtestsQueryOptions,
   cancelBacktest,
   dashboardQueryOptions,
+  deleteBacktest,
   updateBacktest,
   type Backtest,
   type BacktestsPage,
@@ -12,13 +14,14 @@ import {
   type Dashboard,
 } from '@/api';
 
-import { nameInCompare } from './compare/selection';
+import { nameInCompare, removeFromCompare } from './compare/selection';
 
 // Every page of the list, whatever its search and filters, the dashboard, and every page and the
 // cards of Experiments.
 const LISTS: QueryKey = ['account', 'backtests'];
 const DASHBOARD = dashboardQueryOptions().queryKey;
 const EXPERIMENTS: QueryKey = ['account', 'experiments'];
+const MODELS: QueryKey = ['account', 'models'];
 
 // A page of the user's backtests for what the Backtests page shows.
 export function useBacktestsPage(params: BacktestsParams) {
@@ -128,6 +131,33 @@ export function useCancelBacktest(id: string) {
     },
     onError: () => queryClient.invalidateQueries({ queryKey: key }),
   });
+}
+
+// A backtest that is gone already (deleted in another tab, say): the API answers 404 not-found.
+const isGone = (error: unknown) => error instanceof ApiError && error.status === 404;
+
+// Deletes the user's backtest; one that is gone already counts as deleted. It leaves the
+// comparison at once, and the lists, the dashboard, Experiments and the models (their backtest
+// count and best Sharpe) are asked for again. Its own document stays until its page has gone
+// (forgetBacktest), so the page does not ask for it again meanwhile.
+export function useDeleteBacktest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      deleteBacktest(id).catch((error: unknown) => {
+        if (!isGone(error)) throw error;
+      }),
+    onSuccess: (_answer, id) => {
+      removeFromCompare(id);
+      for (const queryKey of [LISTS, DASHBOARD, EXPERIMENTS, MODELS]) void queryClient.invalidateQueries({ queryKey });
+    },
+  });
+}
+
+// Drops a deleted backtest's document, so going back to its page asks the API, which says it is
+// not found.
+export function forgetBacktest(queryClient: QueryClient, id: string) {
+  queryClient.removeQueries({ queryKey: backtestQueryOptions(id).queryKey });
 }
 
 export function useStarBacktest() {

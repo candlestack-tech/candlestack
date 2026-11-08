@@ -4,22 +4,27 @@ problem. The tools on Postgres are integration tests (tests/integration/mcp/).""
 
 import json
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from mcp import Client
 from mcp.server.mcpserver import Context
 from mcp.types import CallToolResult, TextResourceContents
 from pydantic import BaseModel
 
-from candlestack.accounts import Scope
+from candlestack.accounts import HEAVY, Caller, Scope, User
+from candlestack.accounts.limits import USER_RATE_LIMIT, Budget
 from candlestack.core import ProblemError
+from candlestack.mcp import http
 from candlestack.mcp.convention import Example, ToolSpec, changes, reads, tool_call
 from candlestack.mcp.docs import AGENTS_DOCS, DOCS_URI, MANIFEST_DOCS, MCP_DOCS, RESULT_DOCS
 from candlestack.mcp.server import CandleStackMCP
 
 PROBLEMS = "https://candlestack.tech/problems/"
+ADA = User(id="usr_adaaaaaaaa", display_name="Ada", email="ada@example.com")
 
 
 def problem(result: CallToolResult) -> dict[str, Any]:
@@ -47,7 +52,21 @@ async def start_count(ctx: Context) -> Count:
     return Count(count=len(tool_call(ctx).scopes))
 
 
+async def count_heavily(ctx: Context) -> Count:
+    """Counts what costs much, for the tests."""
+    return Count(count=len(tool_call(ctx).scopes))
+
+
 TEST_TOOLS = (
+    ToolSpec(
+        count_heavily,
+        name="count_heavily",
+        title="Count heavily",
+        scopes=(Scope.read,),
+        annotations=reads(),
+        example=Example({}, Count(count=1)),
+        cost=HEAVY,
+    ),
     ToolSpec(
         count_to,
         name="count_to",
@@ -196,3 +215,59 @@ def test_a_read_tool_needs_read(mcp, keys) -> None:
     body = problem(call)
 
     assert body["scope"] == "read"
+
+
+# --- What a tool costs of the rate limits -----------------------------------------------------
+
+BUDGET = Budget("accounts:key-rl:key_readaaaaaa", 120, "API key", "usr_adaaaaaaaa")
+
+
+@dataclass
+class FakeLimiter:
+    hits: list[tuple[str, int]] = field(default_factory=list)
+    # The counters over their limit, by their prefix.
+    over: str | None = None
+
+    async def hit(self, key: str, limit: int, cost: int = 1, window: int = 60) -> float:
+        self.hits.append((key, cost))
+        return 7.0 if self.over is not None and key.startswith(self.over) else 0.0
+
+
+@pytest.fixture
+def limiter(app: FastAPI, mcp_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> FakeLimiter:
+    """Keys that sign in with ``BUDGET``, counted by a fake limiter (the sign-in itself is
+    faked, so only what the tools charge is counted)."""
+
+    async def sign_in(token: str, **_clients: Any) -> Caller:
+        return Caller(ADA, frozenset({Scope.read}), BUDGET)
+
+    monkeypatch.setattr(http, "key_caller", sign_in)
+    fake = FakeLimiter()
+    app.state.rate_limiter = fake
+    return fake
+
+
+def test_a_heavy_tool_pays_its_cost_beyond_the_request(mcp, limiter: FakeLimiter) -> None:
+    result = mcp(lambda session: session.call_tool("count_heavily", {}))
+
+    assert not result.is_error
+    assert limiter.hits == [
+        (BUDGET.counter, HEAVY - 1),
+        ("accounts:user-rl:usr_adaaaaaaaa", HEAVY - 1),
+    ]
+
+
+def test_a_plain_tool_costs_only_its_request(mcp, limiter: FakeLimiter) -> None:
+    assert not mcp(lambda session: session.call_tool("count_to", {"n": 1})).is_error
+    assert limiter.hits == []
+
+
+def test_a_heavy_tool_past_the_account_s_budget_does_not_run(mcp, limiter: FakeLimiter) -> None:
+    limiter.over = "accounts:user-rl:"
+
+    body = problem(mcp(lambda session: session.call_tool("count_heavily", {})))
+
+    assert body["type"] == PROBLEMS + "rate-limited"
+    assert body["status"] == 429
+    assert body["limit"] == USER_RATE_LIMIT
+    assert "Retry in 7 seconds" in body["detail"]

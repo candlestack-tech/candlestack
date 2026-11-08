@@ -65,7 +65,7 @@ const buttons = () =>
 describe('publishing a backtest', () => {
   it('offers Publish between Download JSON and Add to compare', async () => {
     await open(ID, { [`GET /api/v1/backtests/${ID}`]: { status: 200, body: backtestDocument() } });
-    expect(buttons()).toEqual(['Rename', 'Download JSON', 'Publish', 'Add to compare']);
+    expect(buttons()).toEqual(['Rename', 'Download JSON', 'Publish', 'Add to compare', 'Delete']);
     expect(screen.queryByText('Public')).toBeNull();
   });
 
@@ -117,7 +117,7 @@ describe('publishing a backtest', () => {
       'Everyone on the CandleStack beta can see it',
     );
     expect(screen.getByText('In Experiments since today 16:41')).toBeDefined();
-    expect(buttons()).toEqual(['Rename', 'Download JSON', 'Copy link', 'Unpublish', 'Add to compare']);
+    expect(buttons()).toEqual(['Rename', 'Download JSON', 'Copy link', 'Unpublish', 'Add to compare', 'Delete']);
   });
 
   it('says why the API refused, and stays open', async () => {

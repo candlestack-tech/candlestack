@@ -81,7 +81,7 @@ them. After the resize to 4 GB (2026-10-25, the worker not deployed yet), the VM
 | `frontend` | `32m` | small: Caddy serving static files |
 | `redis` | `288m` (`maxmemory` 256 MB) | grows with the cache, up to `maxmemory` |
 | `postgres` | `128m` | about 30 MB with the backend's pool connected |
-| `backup`, `models-backup` | `32m` each | about 2 MB between their nightly runs; the models archive took under 32 MB for 300 MB of files |
+| `backup`, `models-backup` | `32m` each | about 2 MB between their weekly runs; the models archive took under 32 MB for 300 MB of files |
 | `migrate` | `160m` | runs only during a deploy |
 | `worker` | `1g`, no swap | about 85 MB idle (the loop); a job adds a process with Keras and JAX (below) |
 | `queue` | `32m` (`maxmemory` 16 MB) | a few MB idle, a few kilobytes per job |
@@ -189,38 +189,45 @@ Once the worker runs, watch the balance (`CPUCreditBalance` in CloudWatch).
 
 ### Backups
 
-The `backup` service runs `pg_dump` every night at 00:00 UTC into the volume `<env>_backups`,
-as `last/candlestack-<date>-<time>.sql.gz` with a link `last/candlestack-latest.sql.gz`, and
-keeps the dumps of the last 7 days (`daily/candlestack-<date>.sql.gz`). The backups live on the
-VM's disk: they cover a broken migration or deleted data, not the loss of the VM. To take one
-now (SSM shell on the VM): `sudo docker exec prod-backup-1 /backup.sh`.
+The `backup` service runs `pg_dump` every Sunday at 00:00 UTC (`SCHEDULE` `@weekly`) into the
+volume `<env>_backups`, as `last/candlestack-<date>-<time>.sql.gz` with a link
+`last/candlestack-latest.sql.gz`, and hard links of the same file in `daily/`, `weekly/` and
+`monthly/`. It keeps only the newest dump: after each dump the image deletes, in each folder,
+the files older than its setting (`BACKUP_KEEP_DAYS` 1 for `daily/`, `BACKUP_KEEP_WEEKS` and
+`BACKUP_KEEP_MONTHS` 0, which the image turns into 1 day, for `weekly/` and `monthly/`, the
+default 1440 minutes for `last/`), which is the previous week's dump. Between two Sundays one
+dump is there, up to a week old. The backups live on the VM's disk: they cover a broken
+migration or deleted data, not the loss of the VM. To take one now (SSM shell on the VM):
+`sudo docker exec prod-backup-1 /backup.sh`; it deletes nothing younger than a day, so the
+newest weekly dump stays next to it until the next Sunday.
 
-To restore one, e.g. prod from a given night (stage: `stage-` instead of `prod-`):
+To restore the dump, e.g. prod (stage: `stage-` instead of `prod-`):
 
 ```sh
 sudo docker stop prod-backend-1
 sudo docker exec prod-postgres-1 dropdb --username candlestack candlestack
 sudo docker exec prod-postgres-1 createdb --username candlestack candlestack
-sudo docker exec prod-backup-1 cat /backups/daily/candlestack-<yyyymmdd>.sql.gz | gunzip |
+sudo docker exec prod-backup-1 cat /backups/last/candlestack-latest.sql.gz | gunzip |
   sudo docker exec -i prod-postgres-1 psql -v ON_ERROR_STOP=1 --username candlestack --dbname candlestack
 sudo docker start prod-backend-1
 ```
 
 `sudo docker exec prod-backup-1 ls /backups/daily` lists the dumps. A dump has the schema of
-its night: after restoring one older than the last migration, the next deploy migrates it
+its day: after restoring one older than the last migration, the next deploy migrates it
 again.
 
 The `models-backup` service archives the files of the uploaded models (the volume
-`<env>_models`, mounted read-only, without the uploads in progress) every night at 00:30 UTC
-into the volume `<env>_model_backups`, as `models-<date>T<time>.tar.gz`, and keeps the
-archives of the last 7 days. It runs half an hour after the database dump, so a dump and the
-archive of the same night belong together: restore both from one night, or a model's row may
+`<env>_models`, mounted read-only, without the uploads in progress) every Sunday at 00:30 UTC
+(`BACKUP_CRON_EXPRESSION` `30 0 * * 0`) into the volume `<env>_model_backups`, as
+`models-<date>T<time>.tar.gz`, and keeps only the newest: after each archive it prunes those
+older than `BACKUP_RETENTION_DAYS` (1), which is the previous week's (0 would prune the new one
+too). It runs half an hour after the database dump, so the dump and the archive of the same
+Sunday belong together: restore both, or a model's row may
 point to no file (its file is gone) or a file to no row (an orphan, which does no harm). To
 take an archive now: `sudo docker exec prod-models-backup-1 backup`; to list them:
 `sudo docker exec prod-models-backup-1 ls /archive`.
 
-To restore the files of a given night (after the database of the same night, the backend
-still stopped), with the Postgres image the environment already runs (pinned by digest, it has
+To restore the files (after the database of the same Sunday, the backend still stopped), with the Postgres image the environment already runs (pinned by digest, it has
 a shell and tar):
 
 ```sh
@@ -233,11 +240,11 @@ sudo docker run --rm --entrypoint sh -v prod_models:/data/models \
 sudo docker start prod-backend-1
 ```
 
-Disk: the archives of 7 nights take up to 7 times the models volume (model files hardly
-compress), and while an archive is built, `<env>_model_backups_work` holds one more copy. With
-the quota of 100 MB per user, 20 users with full storage need 2 GB for the files, 14 GB for the
-archives and 2 GB while one is built, per environment: check `df -h /var/lib/docker` before
-admitting more users.
+Disk: the archive takes up to the size of the models volume (model files hardly compress), and
+while the next is built, `<env>_model_backups_work` holds one more copy and the old archive
+stays until the new one is written. With the quota of 100 MB per user, 20 users with full
+storage need 2 GB for the files, 2 GB for the archive and 4 GB while the next is built, per
+environment: check `df -h /var/lib/docker` before admitting more users.
 
 The Docker networks:
 
@@ -476,7 +483,7 @@ The other commands are `edge` and `agent <image@digest>` (stage key); the header
 | `vm/deploy_authorized_keys` | Public deploy keys with their scopes |
 | `cloudflared/config.yml` | Tunnel ingress: SSH for deployments, everything else to the edge |
 | `edge/` | Caddy that routes each hostname to its environment |
-| `env/compose.yaml` | One environment (prod or stage): backend, frontend, Redis, Postgres with its migration and nightly backup, the nightly backup of the model files; the worker and its queue in the profile `worker` |
+| `env/compose.yaml` | One environment (prod or stage): backend, frontend, Redis, Postgres with its migration and weekly backup, the weekly backup of the model files; the worker and its queue in the profile `worker` |
 | `agent/` | Server agent for ops: host metrics and containers as JSON, read-only Docker proxy |
 | `github/` | Snapshot of the organization's GitHub settings: rulesets, environments, Actions policy, security, project |
 | `cloudflare/` | Snapshot of the Cloudflare settings: zone, DNS, Access, tunnel, Workers |

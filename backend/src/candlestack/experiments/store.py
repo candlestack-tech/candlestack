@@ -169,6 +169,14 @@ class Namesake(NamedTuple):
     generated: bool
 
 
+class Doomed(NamedTuple):
+    """A backtest about to be deleted (``BacktestStore.to_delete``)."""
+
+    id: str
+    status: str
+    sweep_id: str | None
+
+
 class UserModel(NamedTuple):
     id: str
     name: str
@@ -671,6 +679,34 @@ class BacktestStore:
         backtest.status = BacktestStatus.failed.value
         backtest.error = error
         backtest.finished_at = now
+
+    # --- What deleting backtests needs -----------------------------------------------------------
+
+    async def to_delete(
+        self, user_id: str, *, ids: Sequence[str] = (), sweep_id: str | None = None
+    ) -> list[Doomed]:
+        """The user's backtests with one of the IDs, or of the sweep, locked until the
+        transaction ends (a run that is finishing stores its results first), by number."""
+        query = select(Backtest.id, Backtest.status, Backtest.sweep_id).where(
+            Backtest.user_id == user_id
+        )
+        if sweep_id is not None:
+            query = query.where(Backtest.sweep_id == sweep_id)
+        else:
+            query = query.where(Backtest.id.in_(ids))
+        rows = await self._db.execute(query.order_by(Backtest.number).with_for_update())
+        return [Doomed(*row) for row in rows]
+
+    async def delete(self, backtest_ids: Sequence[str]) -> None:
+        """Deletes the backtests with what their runs stored: one row each holds it all."""
+        await self._db.execute(delete(Backtest).where(Backtest.id.in_(backtest_ids)))
+
+    async def delete_empty_sweeps(self, user_id: str, sweep_ids: Sequence[str]) -> None:
+        """Deletes the user's sweeps of the IDs that have no backtest left."""
+        left = select(literal(1)).where(Backtest.sweep_id == Sweep.id)
+        await self._db.execute(
+            delete(Sweep).where(Sweep.user_id == user_id, Sweep.id.in_(sweep_ids), ~exists(left))
+        )
 
     async def run_model(self, user_id: str, model_id: str) -> Model | None:
         """The user's model with the ID and its manifest; None also when it is another user's."""
