@@ -19,14 +19,22 @@
 (csp) {
 	header Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'sha256-TMpzvBCzUJwxk3v67mtpZ2Nd9gAnGXie/5t1jgBCQcU='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; report-uri https://o4512154553942016.ingest.de.sentry.io/api/4512157493362768/security/?sentry_key=889214b3abf0734910f9a3103dda8242&sentry_environment={args[0]}; report-to csp"
 	header Reporting-Endpoints `csp="https://o4512154553942016.ingest.de.sentry.io/api/4512157493362768/security/?sentry_key=889214b3abf0734910f9a3103dda8242&sentry_environment={args[0]}"`
+	# Not on the upload page of a one-time link: a report carries the page's whole address, and
+	# its path is the link's secret. Deleting a header is deferred, so it outlasts the lines above.
+	header /upload/* {
+		-Content-Security-Policy-Report-Only
+		-Reporting-Endpoints
+	}
 }
 
-# One environment: /api/* to its backend, everything else to its frontend.
+# One environment: the API, the MCP server (/mcp) and its OAuth metadata to its backend,
+# everything else to its frontend.
 # Usage: import env <env name> <Sentry environment of its CSP reports>
 (env) {
 	import compress
 	import csp {args[1]}
-	handle /api/* {
+	@backend path /api/* /mcp /.well-known/oauth-protected-resource/*
+	handle @backend {
 		reverse_proxy {args[0]}-backend:8000
 	}
 	handle {
