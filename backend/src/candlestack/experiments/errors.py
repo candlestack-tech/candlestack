@@ -65,3 +65,13 @@ class NameTaken(Exception):
 class NoDocument(Exception):
     """The backtest was not made in the app (the seed command's test data): it has no result
     document."""
+
+
+class NotComparable(Exception):
+    """A backtest of a comparison: neither the user's nor published (``found`` False), or the
+    seed command's test data without a result document (``found`` True)."""
+
+    def __init__(self, backtest_id: str, *, found: bool) -> None:
+        super().__init__(backtest_id, found)
+        self.backtest_id = backtest_id
+        self.found = found

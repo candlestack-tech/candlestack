@@ -39,6 +39,7 @@ def signed_in(app: FastAPI) -> FastAPI:
         ("POST", "/api/v1/backtests"),
         ("GET", "/api/v1/backtests/bt_7f3k2m9qx4"),
         ("GET", "/api/v1/backtests/bt_7f3k2m9qx4/download"),
+        ("GET", "/api/v1/compare?ids=bt_7f3k2m9qx4,bt_t9n8v7d6a5"),
     ],
 )
 def test_the_backtests_need_a_session(client: TestClient, method: str, path: str) -> None:
