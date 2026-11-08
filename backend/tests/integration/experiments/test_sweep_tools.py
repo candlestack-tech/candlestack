@@ -183,11 +183,11 @@ def test_a_wait_for_a_sweep_reports_how_many_ended(ada, key, mcp, worker) -> Non
     model_id = ada.runnable_model()
     secret = key("read", "backtests")
     sweep = mcp(tool("run_sweep", base=base(model_id), vary={"rules": RULES}), secret)
-    progress: list[tuple[float, float | None, str | None]] = []
+    reported: list[tuple[float, float | None, str | None]] = []
 
     async def wait(session: Client) -> Any:
-        async def report(value: float, total: float | None, message: str | None) -> None:
-            progress.append((value, total, message))
+        async def report(progress: float, total: float | None, message: str | None) -> None:
+            reported.append((progress, total, message))
 
         arguments = {"sweep_id": sweep.structured_content["id"]}
         return await session.call_tool("wait_for_sweep", arguments, progress_callback=report)
@@ -196,9 +196,9 @@ def test_a_wait_for_a_sweep_reports_how_many_ended(ada, key, mcp, worker) -> Non
 
     assert done.structured_content["done"] is True
     # Each notification is higher than the last; the last says every backtest ended.
-    values = [value for value, _, _ in progress]
+    values = [value for value, _, _ in reported]
     assert values == sorted(set(values))
-    assert progress[-1] == (2, 2, "2 of 2 ended: 2 finished, 0 failed, 0 running, 0 queued")
+    assert reported[-1] == (2, 2, "2 of 2 ended: 2 finished, 0 failed, 0 running, 0 queued")
 
 
 @pytest.mark.usefixtures("market")

@@ -164,11 +164,11 @@ def test_an_agent_checks_starts_waits_for_and_reads_a_backtest(ada, mcp, sql) ->
 def test_a_wait_reports_the_run_s_progress(ada, app, client) -> None:
     model_id = ada.runnable_model()
     secret = key(ada, "read", "backtests")
-    progress: list[tuple[float, float | None, str | None]] = []
+    reported: list[tuple[float, float | None, str | None]] = []
 
     async def start_and_wait(session: Client) -> Any:
-        async def report(value: float, total: float | None, message: str | None) -> None:
-            progress.append((value, total, message))
+        async def report(progress: float, total: float | None, message: str | None) -> None:
+            reported.append((progress, total, message))
 
         started = await session.call_tool("start_backtest", setup(model_id))
         arguments = {"backtest_id": started.structured_content["id"]}
@@ -187,11 +187,11 @@ def test_a_wait_reports_the_run_s_progress(ada, app, client) -> None:
 
     assert waited["status"] == "finished"
     # From where the run stood when the wait began, each notification higher, to its end.
-    values = [value for value, _, _ in progress]
+    values = [value for value, _, _ in reported]
     assert values == sorted(set(values))
     assert values[0] < 100
     name = f"{waited['name']} (#{waited['number']})"
-    assert progress[-1] == (100.0, 100.0, f"{name}: finished")
+    assert reported[-1] == (100.0, 100.0, f"{name}: finished")
 
 
 @pytest.mark.usefixtures("real_worker")

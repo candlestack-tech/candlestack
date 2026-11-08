@@ -432,10 +432,10 @@ def test_wait_for_backtest_answers_the_first_still_going_at_its_timeout(mcp, run
     assert (answer["id"], answer["status"], answer["eta_s"]) == ("bt_bbbbbbbbbb", "running", 30.0)
 
 
-def wait_with_progress(arguments: dict[str, Any], progress: list[tuple[float, Any, Any]]):
+def wait_with_progress(arguments: dict[str, Any], reported: list[tuple[float, Any, Any]]):
     async def send(session: Client):
-        async def report(value: float, total: float | None, message: str | None) -> None:
-            progress.append((value, total, message))
+        async def report(progress: float, total: float | None, message: str | None) -> None:
+            reported.append((progress, total, message))
 
         return await session.call_tool("wait_for_backtest", arguments, progress_callback=report)
 
@@ -445,14 +445,14 @@ def wait_with_progress(arguments: dict[str, Any], progress: list[tuple[float, An
 @pytest.mark.parametrize("mode", ["auto", "legacy"])
 def test_a_wait_reports_its_progress_to_a_client_that_asks(mcp, runs, mode: str) -> None:
     runs.sequence["bt_7f3k2m9qx4"] = ["queued", "queued", "running", "finished"]
-    progress: list[tuple[float, Any, Any]] = []
+    reported: list[tuple[float, Any, Any]] = []
 
-    result = mcp(wait_with_progress({"backtest_id": "bt_7f3k2m9qx4"}, progress), mode=mode)
+    result = mcp(wait_with_progress({"backtest_id": "bt_7f3k2m9qx4"}, reported), mode=mode)
 
     assert result.structured_content["status"] == "finished"
     # Queued second in line, running before its first step, finished; the second read of the
     # queue said nothing new, so no notification repeats it.
-    assert progress == [
+    assert reported == [
         (6.7, 100.0, "Silent Orion (#12): queued, number 2 in the queue"),
         (20.0, 100.0, "Silent Orion (#12): running"),
         (100.0, 100.0, "Silent Orion (#12): finished"),
@@ -462,11 +462,11 @@ def test_a_wait_reports_its_progress_to_a_client_that_asks(mcp, runs, mode: str)
 def test_a_wait_for_several_reports_their_mean(mcp, runs) -> None:
     runs.sequence["bt_aaaaaaaaaa"] = ["running", "finished"]
     runs.sequence["bt_bbbbbbbbbb"] = ["running", "running", "finished"]
-    progress: list[tuple[float, Any, Any]] = []
+    reported: list[tuple[float, Any, Any]] = []
 
-    mcp(wait_with_progress({"ids": ["bt_aaaaaaaaaa", "bt_bbbbbbbbbb"]}, progress))
+    mcp(wait_with_progress({"ids": ["bt_aaaaaaaaaa", "bt_bbbbbbbbbb"]}, reported))
 
-    assert [(value, message) for value, _, message in progress] == [
+    assert [(value, message) for value, _, message in reported] == [
         (20.0, "0 of 2 ended; Silent Orion (#12): running"),
         (60.0, "1 of 2 ended; Silent Orion (#12): running"),
         (100.0, "2 of 2 ended; Silent Orion (#12): finished"),
