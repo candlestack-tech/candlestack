@@ -51,8 +51,8 @@ class NoSuchApiKey(Exception):
 
 class OAuthError(Exception):
     """An OAuth error the token, registration and revocation endpoints answer as JSON
-    (``{"error", "error_description"}``, RFC 6749 section 5.2), or the authorize step sends back
-    to the client's redirect URI. ``description`` never holds a secret or personal data."""
+    (``{"error", "error_description"}``, RFC 6749 section 5.2). ``description`` never holds a
+    secret or personal data."""
 
     def __init__(self, error: str, description: str, *, status: int = 400) -> None:
         super().__init__(description)
@@ -62,13 +62,16 @@ class OAuthError(Exception):
 
 
 class AuthorizeRefused(Exception):
-    """The authorize request names no client the server knows, or a redirect URI the client
-    did not register: it must not go back to that URI (RFC 6749 section 4.1.2.1), so the
-    browser gets a problem instead. ``reason`` tells the user what is wrong."""
+    """The authorize request names no client the server knows or a redirect URI the client did
+    not register (RFC 6749 section 4.1.2.1), or it is not valid. The browser gets a problem
+    instead of going back to the client: before the user acted, nothing proves the redirect URI
+    is not an attacker's (RFC 9700 section 4.11.2). ``reason`` tells the user what is wrong,
+    ``error`` is the OAuth error code."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, *, error: str = "invalid_request") -> None:
         super().__init__(reason)
         self.reason = reason
+        self.error = error
 
 
 class NoSuchAuthorizationRequest(Exception):

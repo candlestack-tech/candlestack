@@ -839,11 +839,13 @@ export interface paths {
          * Authorize
          * @description The authorization endpoint (OAuth 2.1, authorization code with PKCE S256): an MCP
          *     client sends the browser here. Redirects to the consent page `/oauth/consent?request=<id>`,
-         *     through `/signin?next=...` when the browser is not signed in, or back to the client's
-         *     `redirect_uri` with `error` (`unsupported_response_type`, `invalid_request` without an S256
-         *     `code_challenge`, `invalid_target` for another `resource`), `state` and `iss`. `scope` names
-         *     any of read, backtests, models and publish (all of them when it names none); the user picks
-         *     on the consent page.
+         *     through `/signin?next=...` when the browser is not signed in, and sets a cookie that ties
+         *     the request to this browser for 10 minutes. A request that is not valid is a 400 problem
+         *     whose `error` is the OAuth error (`unsupported_response_type`, `invalid_request` without an
+         *     S256 `code_challenge` or with a `state` over 1024 characters, `invalid_target` for another
+         *     `resource`); nothing goes back to the client before the user decided. `scope` names any of
+         *     read, backtests, models and publish (all of them when it names none); the user picks on the
+         *     consent page.
          */
         get: operations["authorize_api_v1_oauth_authorize_get"];
         put?: never;
@@ -888,15 +890,17 @@ export interface paths {
          * Authorization Request
          * @description An app's request for access, for the consent page: the app as it names itself, the host
          *     it returns to and the scopes it asks for in plain words. Needs no session, so the page can
-         *     name the app before the user signs in; the ID is the secret.
+         *     name the app before the user signs in, but only the browser the request started in sees it
+         *     (the cookie the authorize step set).
          */
         get: operations["authorization_request_api_v1_oauth_requests__request_id__get"];
         put?: never;
         /**
          * Decide
-         * @description The user's decision on an app's request, once: `allow` with the scopes to grant (read
-         *     always), or `deny`. Answers where the browser goes back to the app: its redirect URI with a
-         *     `code` (5 minutes, used once) or `error=access_denied`, with `state` and `iss`.
+         * @description The user's decision on an app's request, once, from the browser the request started in:
+         *     `allow` with the scopes to grant (read always), or `deny`. Answers where the browser goes
+         *     back to the app: its redirect URI with a `code` (5 minutes, used once) or
+         *     `error=access_denied`, with `state` and `iss`.
          */
         post: operations["decide_api_v1_oauth_requests__request_id__post"];
         delete?: never;
@@ -2331,8 +2335,14 @@ export interface components {
              */
             client_uri: string | null;
             /**
+             * Document Host
+             * @description For an app whose client ID is the URL of its client ID metadata document: that URL's host, which vouches for the name; null for an app that registered itself
+             * @example claude.ai
+             */
+            document_host: string | null;
+            /**
              * Logo Uri
-             * @description The app's logo, if it gave one
+             * @description The app's logo, if it gave one: an address the app chose, not checked
              */
             logo_uri: string | null;
             /**
@@ -2542,7 +2552,7 @@ export interface components {
             last_used_at: string | null;
             /**
              * Scopes
-             * @description What the app may do, as of the user's last consent
+             * @description What the app may do: the scopes of the last consent and of the app's earlier authorizations that still worked then
              * @example [
              *       "read",
              *       "backtests"
@@ -7638,7 +7648,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The client_id or the redirect_uri is unknown, so the browser cannot be sent back (`invalid-authorization-request`). */
+            /** @description The client_id or the redirect_uri is unknown, or the request is not valid (`invalid-authorization-request`, with the OAuth `error`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7771,7 +7781,7 @@ export interface operations {
                     "application/json": components["schemas"]["AuthorizationRequestOut"];
                 };
             };
-            /** @description No authorization request has this ID: it was decided, expired (10 minutes) or never was (`authorization-request-not-found`). */
+            /** @description No authorization request has this ID: it was decided, expired (10 minutes) or never was, or it was started in another browser (`authorization-request-not-found`). */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -7834,7 +7844,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description No authorization request has this ID: it was decided, expired (10 minutes) or never was (`authorization-request-not-found`). */
+            /** @description No authorization request has this ID: it was decided, expired (10 minutes) or never was, or it was started in another browser (`authorization-request-not-found`). */
             404: {
                 headers: {
                     [name: string]: unknown;

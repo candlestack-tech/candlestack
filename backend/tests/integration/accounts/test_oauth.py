@@ -4,6 +4,7 @@ revocation, connected apps, and the access token at ``/mcp``, with every refusal
 
 import base64
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -15,6 +16,7 @@ import respx
 from fastapi.testclient import TestClient
 
 from candlestack.accounts import authorization, client_metadata
+from candlestack.accounts.authorization import AuthorizationServer
 
 pytestmark = pytest.mark.integration
 
@@ -197,6 +199,7 @@ def test_the_whole_flow_signs_an_mcp_client_in(browser, app_client, sql) -> None
         "logo_uri": None,
         "client_uri": None,
         "redirect_host": "claude.ai",
+        "document_host": None,
     }
     assert app["scopes"] == ["read", "backtests"]
     assert app["last_used_at"] is not None
@@ -288,6 +291,18 @@ def test_registration_refuses_bad_metadata(app_client, metadata, error) -> None:
     oauth_error(response, 400, error)
 
 
+def test_registrations_are_limited_per_address(app_client) -> None:
+    for _ in range(10):
+        app_client.register()
+
+    response = app_client.request(
+        "POST", "/api/v1/oauth/register", json={"redirect_uris": [REDIRECT]}
+    )
+
+    assert problem(response, 429, "rate-limited")["limit"] == 10
+    assert int(response.headers["retry-after"]) >= 1
+
+
 def test_registration_needs_a_json_body(app_client) -> None:
     response = app_client.request(
         "POST", "/api/v1/oauth/register", content=b"nope", headers={"Content-Type": "text/plain"}
@@ -316,6 +331,12 @@ def test_signed_out_the_browser_signs_in_first_and_comes_back(browser, app_clien
     authorized = authorize(browser, client_id)
 
     assert authorized.status_code == 302
+    cookie = authorized.headers["set-cookie"]
+    assert cookie.startswith("oauth_request=")
+    assert "HttpOnly" in cookie
+    assert "Max-Age=600" in cookie
+    assert "Path=/" in cookie
+    assert "SameSite=lax" in cookie
     location = authorized.headers["location"]
     assert location.startswith("/signin?")
     back = query_of(location)["next"]
@@ -353,35 +374,42 @@ def test_an_unknown_client_or_redirect_uri_is_not_followed(browser, app_client, 
         ({"code_challenge_method": "plain"}, "invalid_request"),
         ({"code_challenge_method": None}, "invalid_request"),
         ({"response_type": "token"}, "unsupported_response_type"),
+        ({"response_type": None}, "unsupported_response_type"),
         ({"resource": "https://other.example/mcp"}, "invalid_target"),
-        ({"state": "s" * 2000}, "invalid_request"),
+        ({"state": "s" * 1025}, "invalid_request"),
     ],
 )
-def test_a_bad_request_goes_back_to_the_client_with_its_error(
+def test_a_bad_request_is_refused_and_never_sent_back_to_the_client(
     browser, app_client, params, error
 ) -> None:
+    # Anyone can register any redirect URI: going back to it before the user acted would make
+    # the server an open redirector.
+    client_id = app_client.register(redirect_uris=["https://evil.example/landing"])["client_id"]
+
+    response = authorize(browser, client_id, redirect_uri="https://evil.example/landing", **params)
+
+    assert problem(response, 400, "invalid-authorization-request")["error"] == error
+    assert "location" not in response.headers
+    assert "set-cookie" not in response.headers
+
+
+def test_a_state_of_1024_characters_is_kept(browser, app_client) -> None:
+    browser.sign_in("github")
     client_id = app_client.register()["client_id"]
+    state = "s" * 1024
 
-    response = authorize(browser, client_id, **params)
+    consent = decide(browser, request_id(authorize(browser, client_id, state=state)))
 
-    assert response.status_code == 302
-    location = response.headers["location"]
-    assert location.startswith(REDIRECT + "?")
-    query = query_of(location)
-    assert query["error"] == error
-    assert query["iss"] == ISSUER
-    assert query.get("state") == (None if "state" in params else "the-state")
+    assert query_of(consent.json()["redirect_to"])["state"] == state
 
 
-def test_the_consent_page_reads_the_request_without_a_session(
-    browser, app_client, other_browser
-) -> None:
+def test_the_consent_page_reads_the_request_without_a_session(browser, app_client) -> None:
     client_id = app_client.register(
         client_uri="https://claude.ai", logo_uri="https://claude.ai/logo.png"
     )["client_id"]
     rid = request_id(authorize(browser, client_id, scope="publish offline_access", state=None))
 
-    described = other_browser.get(f"/api/v1/oauth/requests/{rid}")
+    described = browser.get(f"/api/v1/oauth/requests/{rid}")
 
     assert described.status_code == 200
     assert described.headers["cache-control"] == "no-store"
@@ -391,6 +419,7 @@ def test_the_consent_page_reads_the_request_without_a_session(
         "logo_uri": "https://claude.ai/logo.png",
         "client_uri": "https://claude.ai",
         "redirect_host": "claude.ai",
+        "document_host": None,
     }
     assert body["scopes"] == [
         {"scope": "publish", "description": "Publish and unpublish backtests in Experiments"}
@@ -404,6 +433,37 @@ def test_no_scope_asks_for_all_of_them(browser, app_client) -> None:
     body = browser.get(f"/api/v1/oauth/requests/{rid}").json()
 
     assert [item["scope"] for item in body["scopes"]] == ["read", "backtests", "models", "publish"]
+
+
+def test_a_request_is_seen_and_decided_only_in_the_browser_it_started_in(
+    browser, app_client, other_browser
+) -> None:
+    # Someone starts connecting their own app and sends the consent link to Ada: her browser
+    # must not see or allow it, else her account would land in their app.
+    client_id = app_client.register()["client_id"]
+    rid = request_id(authorize(other_browser, client_id))
+    browser.sign_in("github")
+
+    problem(browser.get(f"/api/v1/oauth/requests/{rid}"), 404, "authorization-request-not-found")
+    problem(decide(browser, rid), 404, "authorization-request-not-found")
+    browser.set_cookie("oauth_request", "a-cookie-of-her-own")
+    problem(decide(browser, rid), 404, "authorization-request-not-found")
+
+    # The request is still there for the browser that started it.
+    other_browser.sign_in("github")
+    assert decide(other_browser, rid).status_code == 200
+
+
+def test_requests_open_in_two_tabs_of_one_browser_both_stay_valid(browser, app_client) -> None:
+    browser.sign_in("github")
+    client_id = app_client.register()["client_id"]
+    first = request_id(authorize(browser, client_id))
+    cookie = browser.cookie("oauth_request")
+    second = request_id(authorize(browser, client_id))
+
+    assert browser.cookie("oauth_request") == cookie
+    assert decide(browser, second).status_code == 200
+    assert decide(browser, first).status_code == 200
 
 
 def test_an_unknown_request_is_not_found(browser) -> None:
@@ -478,7 +538,12 @@ def test_someone_off_the_beta_list_cannot_allow(account, app_client, browser) ->
     client_id = app_client.register()["client_id"]
     rid = request_id(authorize(browser, client_id))
 
-    response = bob.request("POST", f"/api/v1/oauth/requests/{rid}", json={"decision": "allow"})
+    response = bob.request(
+        "POST",
+        f"/api/v1/oauth/requests/{rid}",
+        json={"decision": "allow"},
+        headers={"Cookie": f"{bob.cookie}; oauth_request={browser.cookie('oauth_request')}"},
+    )
 
     problem(response, 403, "not-on-beta-list")
 
@@ -532,6 +597,23 @@ def test_a_code_reused_revokes_what_it_gave(browser, app_client) -> None:
     oauth_error(app_client.refresh(client_id, tokens["refresh_token"]), 400, "invalid_grant")
 
 
+def test_a_code_reused_while_it_is_being_traded_revokes_what_it_gives(
+    browser, app_client, monkeypatch, sql
+) -> None:
+    client_id, code = _code(browser, app_client)
+    connect = AuthorizationServer._connect
+
+    async def second_exchange_meanwhile(self, *args):
+        # The second exchange comes after the first took the code, before its tokens exist.
+        await self._end_reused_code(code, 300)
+        return await connect(self, *args)
+
+    monkeypatch.setattr(AuthorizationServer, "_connect", second_exchange_meanwhile)
+
+    oauth_error(app_client.exchange(client_id, code), 400, "invalid_grant")
+    assert sql("SELECT kind FROM oauth_tokens") == []
+
+
 def test_an_expired_code_is_refused(browser, app_client, monkeypatch) -> None:
     client_id, code = _code(browser, app_client)
     later = authorization._now() + authorization.CODE_LIFETIME + timedelta(seconds=1)
@@ -581,7 +663,14 @@ def test_malformed_basic_credentials_are_an_invalid_client(app_client) -> None:
 # --- Refresh ------------------------------------------------------------------------------------
 
 
-def test_a_refresh_rotates_and_a_reused_one_ends_the_family(browser, app_client) -> None:
+def move_clock(monkeypatch, delta: timedelta) -> None:
+    moved = authorization._now() + delta
+    monkeypatch.setattr(authorization, "_now", lambda: moved)
+
+
+def test_a_refresh_rotates_and_a_reused_one_ends_the_family(
+    browser, app_client, monkeypatch
+) -> None:
     client_id, first = connect(browser, app_client)
 
     second = app_client.refresh(client_id, first["refresh_token"], resource=RESOURCE)
@@ -591,11 +680,42 @@ def test_a_refresh_rotates_and_a_reused_one_ends_the_family(browser, app_client)
     assert second["refresh_token"] != first["refresh_token"]
     assert second["scope"] == "read backtests"
     assert app_client.mcp(second["access_token"]).status_code == 200
-    # The used token again: someone has a copy, so the whole family ends.
+    # The used token again, a minute later: someone has a copy, so the whole family ends.
+    move_clock(monkeypatch, authorization.REFRESH_GRACE)
     reused = app_client.refresh(client_id, first["refresh_token"])
     oauth_error(reused, 400, "invalid_grant")
     problem(app_client.mcp(second["access_token"]), 401, "invalid-access-token")
     oauth_error(app_client.refresh(client_id, second["refresh_token"]), 400, "invalid_grant")
+
+
+def test_a_used_refresh_token_again_within_the_grace_is_only_refused(
+    browser, app_client, monkeypatch
+) -> None:
+    client_id, first = connect(browser, app_client)
+    second = app_client.refresh(client_id, first["refresh_token"]).json()
+
+    # A retry after a lost answer, or another session of the client with the same token.
+    move_clock(monkeypatch, authorization.REFRESH_GRACE - timedelta(seconds=1))
+    retried = app_client.refresh(client_id, first["refresh_token"])
+
+    oauth_error(retried, 400, "invalid_grant")
+    assert app_client.mcp(second["access_token"]).status_code == 200
+    assert app_client.refresh(client_id, second["refresh_token"]).status_code == 200
+
+
+def test_two_refreshes_at_once_give_one_answer_and_keep_the_family(browser, app_client) -> None:
+    client_id, first = connect(browser, app_client)
+
+    with ThreadPoolExecutor(2) as pool:
+        answers = list(
+            pool.map(lambda _: app_client.refresh(client_id, first["refresh_token"]), range(2))
+        )
+
+    statuses = sorted(answer.status_code for answer in answers)
+    assert statuses == [200, 400], [answer.text for answer in answers]
+    [winner] = [answer.json() for answer in answers if answer.status_code == 200]
+    assert app_client.mcp(winner["access_token"]).status_code == 200
+    assert app_client.refresh(client_id, winner["refresh_token"]).status_code == 200
 
 
 def test_a_refresh_may_narrow_the_scopes_but_not_widen_them(browser, app_client) -> None:
@@ -762,16 +882,28 @@ def test_connected_apps_need_the_session(browser, app_client) -> None:
     problem(with_token, 403, "session-required")
 
 
-def test_authorizing_again_replaces_the_earlier_tokens(browser, app_client, sql) -> None:
+def test_authorizing_again_keeps_the_earlier_authorization(browser, app_client, sql) -> None:
+    # One client ID can serve many installs (a metadata document): connecting a second machine
+    # must not disconnect the first.
     client_id, first = connect(browser, app_client)
     code = code_of(decide(browser, request_id(authorize(browser, client_id)), scopes=["models"]))
 
     second = app_client.exchange(client_id, code).json()
 
     assert second["scope"] == "read models"
-    problem(app_client.mcp(first["access_token"]), 401, "invalid-access-token")
+    assert app_client.mcp(first["access_token"]).status_code == 200
     assert app_client.mcp(second["access_token"]).status_code == 200
-    assert sql("SELECT scopes FROM connected_apps") == [(["read", "models"],)]
+    assert app_client.refresh(client_id, first["refresh_token"]).status_code == 200
+    assert sql("SELECT scopes FROM connected_apps") == [(["read", "backtests", "models"],)]
+    # Once the first authorization is revoked, a new one shows only what still works.
+    app_client.request(
+        "POST",
+        "/api/v1/oauth/revoke",
+        data={"token": second["refresh_token"], "client_id": client_id},
+    )
+    code = code_of(decide(browser, request_id(authorize(browser, client_id)), scopes=[]))
+    assert app_client.exchange(client_id, code).status_code == 200
+    assert sql("SELECT scopes FROM connected_apps") == [(["read", "backtests"],)]
 
 
 def test_deleting_the_account_deletes_its_apps(browser, app_client, sql) -> None:
@@ -823,6 +955,7 @@ def test_a_client_named_by_its_metadata_document_signs_in(
     assert request.extensions["sni_hostname"] == "app.example.com"
     body = browser.get(f"/api/v1/oauth/requests/{rid}").json()
     assert body["client"]["name"] == "Example app"
+    assert body["client"]["document_host"] == "app.example.com"
     assert again != rid
     tokens = app_client.exchange(DOCUMENT_URL, code_of(decide(browser, rid)))
     assert tokens.status_code == 200, tokens.text

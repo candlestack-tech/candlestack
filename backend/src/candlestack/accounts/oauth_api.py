@@ -3,10 +3,11 @@ authorization server metadata (RFC 8414) and the user's connected apps,
 ``/api/v1/me/connected-apps``.
 
 The client's own endpoints (``authorize``, ``token``, ``register``, ``revoke``) speak OAuth:
-errors of ``token``, ``register`` and ``revoke`` are ``{"error", "error_description"}`` JSON, and
-``authorize`` sends its errors back to the client's redirect URI, except when the client or that
-URI is unknown (a problem then, as nothing proves where to send the browser). The consent page
-of the web app reads and decides the request at ``/api/v1/oauth/requests/{request_id}``.
+errors of ``token``, ``register`` and ``revoke`` are ``{"error", "error_description"}`` JSON.
+``authorize`` answers its errors with a problem and never sends them back to the client's
+redirect URI, which anyone can register (no open redirector). It ties the request to the browser
+with a cookie, and the consent page of the web app reads and decides the request at
+``/api/v1/oauth/requests/{request_id}`` from that browser only.
 """
 
 import logging
@@ -21,7 +22,7 @@ from candlestack.accounts.authorization import (
     AuthorizeParams,
     issuer,
 )
-from candlestack.accounts.cookies import CookiesDep
+from candlestack.accounts.cookies import OAUTH_REQUEST, CookiesDep
 from candlestack.accounts.dependencies import (
     AccountsServiceDep,
     AuthorizationServerDep,
@@ -38,6 +39,7 @@ from candlestack.accounts.errors import (
     OAuthError,
     ScopeNotRequested,
 )
+from candlestack.accounts.oauth_pending import REQUEST_TTL
 from candlestack.accounts.schemas import (
     SCOPE_ORDER,
     AuthorizationRequestOut,
@@ -78,8 +80,8 @@ _CROSS_ORIGIN = problem_doc(
 )
 _REQUEST_NOT_FOUND = problem_doc(
     404,
-    "No authorization request has this ID: it was decided, expired (10 minutes) or never was "
-    "(`authorization-request-not-found`).",
+    "No authorization request has this ID: it was decided, expired (10 minutes) or never was, "
+    "or it was started in another browser (`authorization-request-not-found`).",
 )
 
 
@@ -212,8 +214,8 @@ def authorize_params(  # noqa: PLR0913 (the OAuth parameters)
     responses={
         **problem_doc(
             400,
-            "The client_id or the redirect_uri is unknown, so the browser cannot be sent back "
-            "(`invalid-authorization-request`).",
+            "The client_id or the redirect_uri is unknown, or the request is not valid "
+            "(`invalid-authorization-request`, with the OAuth `error`).",
         ),
         **problem_doc(429, "Too many sign-in requests from this address (`rate-limited`)."),
     },
@@ -229,11 +231,13 @@ async def authorize(
 ) -> RedirectResponse:
     """The authorization endpoint (OAuth 2.1, authorization code with PKCE S256): an MCP
     client sends the browser here. Redirects to the consent page `/oauth/consent?request=<id>`,
-    through `/signin?next=...` when the browser is not signed in, or back to the client's
-    `redirect_uri` with `error` (`unsupported_response_type`, `invalid_request` without an S256
-    `code_challenge`, `invalid_target` for another `resource`), `state` and `iss`. `scope` names
-    any of read, backtests, models and publish (all of them when it names none); the user picks
-    on the consent page."""
+    through `/signin?next=...` when the browser is not signed in, and sets a cookie that ties
+    the request to this browser for 10 minutes. A request that is not valid is a 400 problem
+    whose `error` is the OAuth error (`unsupported_response_type`, `invalid_request` without an
+    S256 `code_challenge` or with a `state` over 1024 characters, `invalid_target` for another
+    `resource`); nothing goes back to the client before the user decided. `scope` names any of
+    read, backtests, models and publish (all of them when it names none); the user picks on the
+    consent page."""
     if wait:
         raise ProblemError(
             429,
@@ -244,12 +248,19 @@ async def authorize(
         )
     session = await browser_session(request, service, cookies)
     try:
-        url = await server.authorize(params, signed_in=session is not None)
+        authorized = await server.authorize(
+            params, signed_in=session is not None, browser=cookies.read(request, OAUTH_REQUEST)
+        )
     except AuthorizeRefused as refused:
         raise ProblemError(
-            400, "invalid-authorization-request", "Invalid authorization request", refused.reason
+            400,
+            "invalid-authorization-request",
+            "Invalid authorization request",
+            refused.reason,
+            extensions={"error": refused.error},
         ) from None
-    response = RedirectResponse(url, status_code=302)
+    response = RedirectResponse(authorized.location, status_code=302)
+    cookies.set(response, OAUTH_REQUEST, authorized.browser, REQUEST_TTL)
     if session is not None:
         session.slide_on(response)
     return response
@@ -382,14 +393,19 @@ def _no_such_request() -> ProblemError:
 
 @router.get("/api/v1/oauth/requests/{request_id}", responses=_REQUEST_NOT_FOUND)
 async def authorization_request(
-    request_id: RequestId, server: AuthorizationServerDep, response: Response
+    request: Request,
+    request_id: RequestId,
+    server: AuthorizationServerDep,
+    cookies: CookiesDep,
+    response: Response,
 ) -> AuthorizationRequestOut:
     """An app's request for access, for the consent page: the app as it names itself, the host
     it returns to and the scopes it asks for in plain words. Needs no session, so the page can
-    name the app before the user signs in; the ID is the secret."""
+    name the app before the user signs in, but only the browser the request started in sees it
+    (the cookie the authorize step set)."""
     response.headers.update(NO_STORE)
     try:
-        return await server.describe(request_id)
+        return await server.describe(request_id, cookies.read(request, OAUTH_REQUEST))
     except NoSuchAuthorizationRequest:
         raise _no_such_request() from None
 
@@ -408,19 +424,23 @@ async def authorization_request(
     },
     dependencies=[Depends(require_same_origin)],
 )
-async def decide(
+async def decide(  # noqa: PLR0913 (the request and what decides it)
+    request: Request,
     request_id: RequestId,
+    *,
     body: ConsentIn,
     user: SessionUserDep,
     server: AuthorizationServerDep,
+    cookies: CookiesDep,
     response: Response,
 ) -> ConsentOut:
-    """The user's decision on an app's request, once: `allow` with the scopes to grant (read
-    always), or `deny`. Answers where the browser goes back to the app: its redirect URI with a
-    `code` (5 minutes, used once) or `error=access_denied`, with `state` and `iss`."""
+    """The user's decision on an app's request, once, from the browser the request started in:
+    `allow` with the scopes to grant (read always), or `deny`. Answers where the browser goes
+    back to the app: its redirect URI with a `code` (5 minutes, used once) or
+    `error=access_denied`, with `state` and `iss`."""
     response.headers.update(NO_STORE)
     try:
-        return await server.decide(user, request_id, body)
+        return await server.decide(user, request_id, body, cookies.read(request, OAUTH_REQUEST))
     except NoSuchAuthorizationRequest:
         raise _no_such_request() from None
     except NotAdmitted:

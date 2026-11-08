@@ -84,8 +84,18 @@ class OAuthStore:
         """Deletes every token one authorization gave."""
         await self._db.execute(delete(AppToken).where(AppToken.family == family))
 
-    async def delete_app_tokens(self, app_id: str) -> None:
-        await self._db.execute(delete(AppToken).where(AppToken.app_id == app_id))
+    async def granted_scopes(self, app_id: str, now: datetime) -> set[str]:
+        """The scopes of the app's authorizations that still work: of its refresh tokens that
+        are neither used nor expired."""
+        rows = await self._db.scalars(
+            select(AppToken.scopes).where(
+                AppToken.app_id == app_id,
+                AppToken.kind == "refresh",
+                AppToken.rotated_at.is_(None),
+                AppToken.expires_at > now,
+            )
+        )
+        return {scope for scopes in rows for scope in scopes}
 
     async def delete_expired_tokens(self, app_id: str, now: datetime) -> None:
         await self._db.execute(

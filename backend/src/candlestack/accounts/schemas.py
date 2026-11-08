@@ -350,10 +350,17 @@ class ClientOut(BaseModel):
         description="The app's name; the host it returns to when it gave none",
         examples=["Claude"],
     )
-    logo_uri: str | None = Field(description="The app's logo, if it gave one")
+    logo_uri: str | None = Field(
+        description="The app's logo, if it gave one: an address the app chose, not checked"
+    )
     client_uri: str | None = Field(description="The app's home page, if it gave one")
     redirect_host: str = Field(
         description="The host the browser returns to after the decision", examples=["claude.ai"]
+    )
+    document_host: str | None = Field(
+        description="For an app whose client ID is the URL of its client ID metadata document: "
+        "that URL's host, which vouches for the name; null for an app that registered itself",
+        examples=["claude.ai"],
     )
 
 
@@ -402,7 +409,8 @@ class ConnectedAppOut(BaseModel):
     )
     client: ClientOut
     scopes: list[Scope] = Field(
-        description="What the app may do, as of the user's last consent",
+        description="What the app may do: the scopes of the last consent and of the app's "
+        "earlier authorizations that still worked then",
         examples=[["read", "backtests"]],
     )
     connected_at: datetime = Field(description="When the user first allowed the app (UTC)")

@@ -3,9 +3,11 @@
 A client registers itself (RFC 7591) or names itself by the https URL of its client ID metadata
 document, which the server fetches. That fetch reaches a URL anyone can choose, so it is held
 tight: https only, an address that resolves to the public internet only (never loopback, a
-private network, link-local or the cloud's metadata address), connected to the very address that
-was checked (no second lookup another answer could slip into), no redirects, at most
-``DOCUMENT_MAX_BYTES`` in ``FETCH_SECONDS``.
+private network, link-local or the cloud's metadata address, nor one of them wrapped in an IPv6
+address), connected to the very address that was checked (no second lookup another answer could
+slip into) on a connection of its own (no proxy from the environment, no pooled connection whose
+TLS was checked for another host), no redirects, at most ``DOCUMENT_MAX_BYTES`` as sent (no
+compression) in ``FETCH_SECONDS``.
 
 Redirect URIs are https URLs, or http on a loopback address for a native app (RFC 8252), and
 must match one the client registered exactly; on a loopback address the port may differ, as a
@@ -30,6 +32,14 @@ DOCUMENT_MAX_BYTES = 16 * 1024
 FETCH_SECONDS = 5.0
 URI_MAX = 512
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+# IPv6 ranges that carry an IPv4 address, which Python counts as global whatever it wraps:
+# NAT64 (64:ff9b::/96, RFC 6052, and the local 64:ff9b:1::/48, RFC 8215) and the deprecated
+# IPv4-compatible addresses (::/96). 6to4 and Teredo are checked through the address they hold.
+_WRAPPING_IPV4 = (
+    ipaddress.ip_network("64:ff9b::/96"),
+    ipaddress.ip_network("64:ff9b:1::/48"),
+    ipaddress.ip_network("::/96"),
+)
 _GRANT_TYPES = frozenset({"authorization_code", "refresh_token"})
 
 # Resolves a host and port to the IP addresses it names; replaced by the tests.
@@ -174,8 +184,12 @@ async def _resolve(host: str, port: int) -> list[str]:
 
 def _is_public(address: str) -> bool:
     ip = ipaddress.ip_address(address.split("%", 1)[0])
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-        ip = ip.ipv4_mapped
+    if isinstance(ip, ipaddress.IPv6Address):
+        if any(ip in network for network in _WRAPPING_IPV4):
+            return False
+        wrapped = ip.ipv4_mapped or ip.sixtofour or (ip.teredo[1] if ip.teredo else None)
+        if wrapped is not None and not _is_public(str(wrapped)):
+            return False
     return ip.is_global and not ip.is_multicast
 
 
@@ -206,10 +220,9 @@ def _document(raw: bytes, url: str) -> ClientMetadataIn:
 
 
 class ClientDocuments:
-    """Fetches client ID metadata documents through the app's HTTP client."""
+    """Fetches client ID metadata documents, each on a connection of its own."""
 
-    def __init__(self, http: httpx.AsyncClient, resolve: Resolver | None = None) -> None:
-        self._http = http
+    def __init__(self, resolve: Resolver | None = None) -> None:
         self._resolve = resolve or _resolve
 
     async def fetch(self, url: str) -> ClientMetadataIn:
@@ -250,20 +263,35 @@ class ClientDocuments:
         if port != 443:
             netloc = f"{netloc}:{port}"
         target = f"https://{netloc}{parts.path}" + (f"?{parts.query}" if parts.query else "")
-        async with self._http.stream(
-            "GET",
-            target,
-            headers={"Host": parts.netloc, "Accept": "application/json"},
-            extensions={"sni_hostname": parts.hostname},
-            follow_redirects=False,
-            timeout=httpx.Timeout(FETCH_SECONDS),
-        ) as response:
+        # A client of its own: the app's pools connections by address, so one whose TLS was
+        # checked for another host on the same address could carry this request, and its proxy
+        # settings from the environment would connect elsewhere than to the address checked.
+        async with (
+            httpx.AsyncClient(
+                trust_env=False,
+                follow_redirects=False,
+                limits=httpx.Limits(max_keepalive_connections=0),
+                timeout=httpx.Timeout(FETCH_SECONDS),
+            ) as http,
+            http.stream(
+                "GET",
+                target,
+                headers={
+                    "Host": parts.netloc,
+                    "Accept": "application/json",
+                    # The limit counts the bytes as sent: compressed, a few could inflate to many.
+                    "Accept-Encoding": "identity",
+                    "Connection": "close",
+                },
+                extensions={"sni_hostname": parts.hostname},
+            ) as response,
+        ):
             if response.status_code != 200:
                 raise ClientDocumentFailed(
                     f"the document's URL answered HTTP {response.status_code}"
                 )
             body = bytearray()
-            async for chunk in response.aiter_bytes():
+            async for chunk in response.aiter_raw():
                 body.extend(chunk)
                 if len(body) > DOCUMENT_MAX_BYTES:
                     raise ClientDocumentFailed(

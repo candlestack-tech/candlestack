@@ -84,12 +84,12 @@ flowchart LR
 | `GET /api/v1/me/api-keys` | the user's API keys that are not revoked, oldest first, without their secrets, and the `limit` of 10; session only ([Accounts](#accounts)) |
 | `POST /api/v1/me/api-keys` | creates an API key (`name`, `scopes`, optional `expires_in_days` 1 to 365); 201 with its `secret`, the only time it is shown; `409 too-many-api-keys` beyond 10 that are neither revoked nor expired; session only |
 | `DELETE /api/v1/me/api-keys/{key_id}` | revokes an API key: it stops working at once; session only |
-| `GET /api/v1/oauth/authorize` | the OAuth authorization endpoint of MCP clients (code with PKCE S256): redirects to the consent page `/oauth/consent?request=<id>` (through `/signin?next=...` without a session) or back to the client with `error`; `400 invalid-authorization-request` for an unknown client or redirect URI ([OAuth](#oauth)) |
+| `GET /api/v1/oauth/authorize` | the OAuth authorization endpoint of MCP clients (code with PKCE S256): redirects to the consent page `/oauth/consent?request=<id>` (through `/signin?next=...` without a session) and ties the request to the browser with a cookie; `400 invalid-authorization-request` (with the OAuth `error`) for an unknown client or redirect URI or a request that is not valid, never a redirect back ([OAuth](#oauth)) |
 | `POST /api/v1/oauth/token` | trades a code and its verifier, or a refresh token, for an access token (an hour) and a new refresh token; OAuth errors as `{"error", "error_description"}` |
 | `POST /api/v1/oauth/register` | dynamic client registration (RFC 7591): 201 with `client_id` and, for a confidential client, its `client_secret` |
 | `POST /api/v1/oauth/revoke` | revokes a client's access or refresh token (RFC 7009) |
-| `GET /api/v1/oauth/requests/{request_id}` | an app's pending request for the consent page: the app as it names itself, the host it returns to, the scopes in plain words; no session needed |
-| `POST /api/v1/oauth/requests/{request_id}` | the user's decision (`allow` with the scopes, or `deny`), once: answers `redirect_to`, the client's redirect URI with a code or `error=access_denied`; session only |
+| `GET /api/v1/oauth/requests/{request_id}` | an app's pending request for the consent page: the app as it names itself, the host of its metadata document, the host it returns to, the scopes in plain words; no session needed, only the browser the request started in |
+| `POST /api/v1/oauth/requests/{request_id}` | the user's decision (`allow` with the scopes, or `deny`), once, from the browser the request started in: answers `redirect_to`, the client's redirect URI with a code or `error=access_denied`; session only |
 | `GET /api/v1/me/connected-apps` | the apps the user allowed (client, scopes, connected, last used), the most recent first; session only |
 | `DELETE /api/v1/me/connected-apps/{app_id}` | disconnects an app: its tokens stop working at once; session only |
 | `GET /api/v1/me/preferences` | the user's settings (backtest defaults, appearance), defaults included |
@@ -142,8 +142,9 @@ flowchart LR
   sign-in of MCP clients `invalid-access-token` (401 at `/mcp`: the token is unknown, expired,
   revoked or for another resource, or its account left the beta list),
   `invalid-authorization-request` (400: an authorize request with an unknown client or redirect
-  URI), `authorization-request-not-found` (404: the consent page's request was decided, expired
-  or never was), `not-on-beta-list` (403: allowing an app from an account off the beta list) and
+  URI or that is not valid, with the OAuth `error`), `authorization-request-not-found` (404:
+  the consent page's request was decided, expired or never was, or started in another browser),
+  `not-on-beta-list` (403: allowing an app from an account off the beta list) and
   `scope-not-requested` (422: granting a scope the app did not ask for, with `scope`), and uses
   `not-found` (404) and `rate-limited` (429: also more than 120 requests a minute with one
   key) too. The ml module adds `model-too-large` (413: a
@@ -1104,47 +1105,73 @@ backend like the rest of the API; the metadata (RFC 8414) is served at
   tight: https with a path, no user name or dot segments; every address the host resolves to must
   be public (no loopback, private, link-local, shared or multicast address, IPv4 in IPv6
   included) and the connection goes to the address that was checked, with the TLS name and
-  certificate check of the host (`sni_hostname`), so a second DNS answer cannot slip in; no
-  redirects; at most 16 KB in 5 seconds; the document's `client_id` must be its URL, it may hold
-  no secret and its method must be `none`. Redirect URIs are https, or http on a loopback address
+  certificate check of the host (`sni_hostname`), so a second DNS answer cannot slip in. NAT64
+  and IPv4-compatible IPv6 addresses are refused, and 6to4 and Teredo ones are judged by the
+  IPv4 address they carry. The fetch uses a client of its own: no keep-alive (a pooled connection
+  checked for another host on the same address could carry it), no proxy from the environment.
+  No redirects; at most 16 KB as sent (`Accept-Encoding: identity`, nothing is inflated) in 5
+  seconds; the document's `client_id` must be its URL, it may hold no secret and its method must
+  be `none`. Redirect URIs are https, or http on a loopback address
   (RFC 8252), without fragments, and must match a registered one exactly; on a loopback address
   the port may differ.
-- **Authorize** (`GET /api/v1/oauth/authorize`): an unknown client or redirect URI is a `400
-  invalid-authorization-request` problem, as nothing proves where to send the browser. Then the
-  errors go back to the redirect URI (with `state` and `iss`, RFC 9207): `response_type` must be
-  `code`, a 43-character S256 `code_challenge` is required (no `plain`), `resource` (RFC 8707)
-  must be the MCP server `<PUBLIC_URL>/mcp` when given (`invalid_target`), and `state` at most
+- **Authorize** (`GET /api/v1/oauth/authorize`): every error is a `400
+  invalid-authorization-request` problem whose `error` is the OAuth error, shown in the browser,
+  and nothing goes back to the redirect URI before the user acted on the consent page: anyone
+  can register any https redirect URI, so an automatic redirect there would make the server an
+  open redirector (RFC 9700, section 4.11.2). The checks: a known client and one of its redirect
+  URIs, `response_type` `code`, a 43-character S256 `code_challenge` (no `plain`), `resource`
+  (RFC 8707) the MCP server `<PUBLIC_URL>/mcp` when given (`invalid_target`), and `state` at most
   1024 characters. `scope` names any of the key scopes (unknown names such as `offline_access`
   are ignored; none means all four). The request waits in Redis for 10 minutes
-  (`oauth:request:<sha256 of its id>`) and the browser goes to the consent page
+  (`oauth:request:<sha256 of its id>`) with the SHA-256 of the browser's `oauth_request` cookie
+  (`__Host-` over https, HttpOnly, SameSite=Lax, 10 minutes; a browser that has one keeps it, so
+  requests open in two tabs both work), and the browser goes to the consent page
   `/oauth/consent?request=<id>` of the web app, through `/signin?next=<that page>` when it has no
-  session: the normal GitHub or Google sign-in with the beta list, and back. The authorize step
-  counts against the sign-in limit of the address (20 a minute).
+  session: the normal GitHub or Google sign-in with the beta list, and back on the same origin,
+  so the cookie comes along. The authorize step counts against the sign-in limit of the address
+  (20 a minute).
 - **Consent**: `GET /api/v1/oauth/requests/{id}` names the app (its `client_name`, else the
   redirect host), its logo and home page, the host it returns to (anyone can register an app
-  called Claude) and the scopes in plain words; it needs no session, so the page can name the app
-  before the sign-in, as the ID is the secret. `POST` with the session and the app's own origin
-  decides it once: `allow` grants the chosen scopes, each one the app asked for (else `422
-  scope-not-requested`), read always, and only for an account on the beta list; `deny` answers
-  `error=access_denied`. The answer's `redirect_to` is where the page sends the browser.
+  called Claude), for a client named by a metadata document that document's host
+  (`document_host`: a document can call itself Claude too, its host cannot lie), and the scopes
+  in plain words. It needs no session, so the page can name the app before the sign-in. Both it
+  and the decision answer only the browser the request started in (its cookie), else `404
+  authorization-request-not-found`: someone who starts connecting their own app and sends the
+  consent link to another user gets nothing from it, as that user's browser cannot see or allow
+  the request. `POST` with the session and the app's own origin decides it once: `allow` grants
+  the chosen scopes, each one the app asked for (else `422 scope-not-requested`), read always,
+  and only for an account on the beta list; `deny` answers `error=access_denied`. The answer's
+  `redirect_to` is where the page sends the browser. The logo is an address the app chose:
+  loading it tells that host the page was shown, and the CSP's `img-src 'self' data:` blocks it
+  once enforced (the consent page, #409, decides how to show it).
 - **Code**: random, 5 minutes, used once, kept in Redis with the client, redirect URI, PKCE
   challenge, scopes, resource and user. The token endpoint checks all of them and the verifier;
-  a code brought a second time ends the tokens it gave (`oauth:used-code:<sha256>` remembers
-  their family for the code's lifetime).
+  a code brought a second time ends the tokens it gave: taking the code and remembering their
+  family (`oauth:used-code:<sha256>`, for the code's lifetime) is one Lua step, and a second
+  exchange that comes before the first committed its tokens leaves `oauth:reused-code:<sha256>`,
+  which the first checks after its commit, so they end either way.
 - **Tokens**: table `oauth_tokens`, kept like API keys: only the SHA-256 of the token, its kind,
   scopes, resource (the MCP server), expiry and family. An access token (`csa_`, 256 random
   bits) works an hour at `/mcp` only, not on the HTTP API; a refresh token (`csr_`) 30 days from
   its issue. A refresh token works once (`rotated_at`, its row locked while it is swapped): the
-  answer holds a new one in the same family, and bringing a used one again deletes the whole
-  family, as a copy is in someone else's hands. A refresh may narrow the scopes, never widen
-  them (`invalid_scope`). Every use checks the beta list and the client the token belongs to;
+  answer holds a new one in the same family, and bringing a used one again more than 60 seconds
+  after its use deletes the whole family, as a copy is in someone else's hands. Within those 60
+  seconds it is only refused (`invalid_grant`): that is a retry after a lost answer, or two
+  sessions of one client sharing the token, and ending the family would sign the user out
+  everywhere. A refresh may narrow the scopes, never widen them (`invalid_scope`); one without
+  `scope` keeps the scopes of the token it uses, so after a narrowing it stays narrow (not the
+  scopes first granted, which RFC 6749 section 6 allows). Every use checks the beta list and the client the token belongs to;
   expired tokens of an app go when it gets new ones. `POST /api/v1/oauth/revoke` (RFC 7009)
   ends a refresh token with its family and an access token alone, and answers 200 also for a
   token that is unknown or another client's.
 - **Connected apps**: table `connected_apps`, one per user and client (deleted with either),
-  with the scopes of the last consent and `last_used_at` (written at most once a minute in a
-  transaction of its own, like a key's). A new authorization of the same client replaces the
-  app's earlier tokens. Its requests at `/mcp` share 120 a minute. `GET` and `DELETE
+  with `last_used_at` (written at most once a minute in a transaction of its own, like a key's).
+  Each authorization of the client is a family of tokens of its own, and a new one leaves the
+  earlier ones working: clients named by a metadata document share one client ID across all
+  installs, so connecting Claude Code on a second machine must not disconnect the first. The
+  app's `scopes` are those of the new consent and of the authorizations that still work (a live
+  refresh token), set on each authorization; a refresh that narrows a family's scopes does not
+  change them. Its requests at `/mcp` share 120 a minute. `GET` and `DELETE
   /api/v1/me/connected-apps` list and disconnect apps with the browser session only; deleting
   the app deletes its tokens.
 - Clients authenticate at the token and revocation endpoints the way they registered: a public

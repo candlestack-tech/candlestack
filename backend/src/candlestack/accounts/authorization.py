@@ -3,19 +3,25 @@ as a user, as the MCP authorization spec asks: the authorization code with PKCE 
 refresh tokens that rotate, clients that register themselves (RFC 7591) or name themselves by
 a client ID metadata document, and tokens bound to the MCP server (RFC 8707).
 
-The flow: the client sends the browser to ``authorize``, which checks the client and its
-redirect URI, keeps the request in Redis and sends the browser to the consent page (through the
-normal sign-in when it is not signed in). The page shows the request (``describe``) and sends
-the user's decision (``decide``), which answers where the browser returns: the client's redirect
-URI with a code, or ``error=access_denied``. The client trades the code and its PKCE verifier
-for an access token (an hour) and a refresh token (30 days) at ``token``.
+The flow: the client sends the browser to ``authorize``, which checks the whole request, keeps
+it in Redis, ties it to that browser with a cookie and sends the browser to the consent page
+(through the normal sign-in when it is not signed in). A request that fails a check is refused
+right there and never sent back to the client: anyone can register a redirect URI, so going
+back before the user acted would make the server an open redirector (RFC 9700, section
+4.11.2). The page shows the request (``describe``) and sends the user's decision (``decide``),
+both only from the browser that started it, so a consent link passed to someone else is
+useless. The decision answers where the browser returns: the client's redirect URI with a code,
+or ``error=access_denied``. The client trades the code and its PKCE verifier for an access token
+(an hour) and a refresh token (30 days) at ``token``.
 
 Tokens are kept like API keys: only their SHA-256, with their scopes and expiry, revocable, the
 connected app's last use written at most once a minute. A connected app is the user and the
-client, with the scopes of the last consent; a new authorization of the same client replaces
-its earlier tokens. A refresh token works once: the answer holds a new one, and bringing a used
-one again ends every token of that authorization, as a stolen copy is in play. Every use checks
-the beta list, so taking someone off it stops their apps at once.
+client; each authorization of it is a family of tokens of its own, so one client ID shared by
+many installs (a metadata document) connects each of them. A refresh token works once: the
+answer holds a new one, and bringing a used one again ends every token of that authorization,
+as a stolen copy is in play; within ``REFRESH_GRACE`` of its use it is only refused, as that is
+a retry or a second session of the same client. Every use checks the beta list, so taking
+someone off it stops their apps at once.
 """
 
 import base64
@@ -92,6 +98,9 @@ REFRESH_PREFIX = "csr_"
 ACCESS_LIFETIME = timedelta(hours=1)
 REFRESH_LIFETIME = timedelta(days=30)
 CODE_LIFETIME = timedelta(minutes=5)
+# A used refresh token that comes again this soon is refused without ending its family: a
+# client retrying after a lost answer, or two of its sessions sharing one token.
+REFRESH_GRACE = timedelta(seconds=60)
 # A fetched client ID metadata document is used this long before it is fetched again.
 DOCUMENT_TTL = timedelta(hours=1)
 # A connected app in use writes its last use at most this often.
@@ -102,6 +111,8 @@ _REFRESH = "refresh"
 _VERIFIER = re.compile(r"[A-Za-z0-9\-._~]{43,128}")
 _CHALLENGE = re.compile(r"[A-Za-z0-9\-_]{43}")
 _STATE_MAX = 1024
+# The value of the cookie that ties authorization requests to a browser.
+_BROWSER = re.compile(r"[A-Za-z0-9\-_]{43}")
 
 
 def _now() -> datetime:
@@ -121,6 +132,10 @@ def protected_resource(settings: Settings) -> str:
 
 def _hash(token: str) -> bytes:
     return hashlib.sha256(token.encode()).digest()
+
+
+def _browser_hash(binding: str) -> str:
+    return hashlib.sha256(binding.encode()).hexdigest()
 
 
 def _s256(verifier: str) -> str:
@@ -177,6 +192,7 @@ def _client_out(client: RegisteredClient, redirect_uri: str) -> ClientOut:
         logo_uri=client.logo_uri,
         client_uri=client.client_uri,
         redirect_host=host,
+        document_host=urlsplit(client.client_id).hostname if client.metadata_document else None,
     )
 
 
@@ -236,6 +252,15 @@ class AuthorizeParams:
     code_challenge_method: str | None
     scope: str | None
     resource: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class Authorized:
+    """Where an authorize request sends the browser, and the value of the cookie that ties the
+    request to it."""
+
+    location: str
+    browser: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,39 +369,41 @@ class AuthorizationServer:
         await self._store.commit()
         return client
 
-    async def authorize(self, params: AuthorizeParams, *, signed_in: bool) -> str:
-        """Where the browser goes from an authorize request: the consent page (through the
-        sign-in page when it is not signed in), or back to the client with an error.
+    async def authorize(
+        self, params: AuthorizeParams, *, signed_in: bool, browser: str | None
+    ) -> Authorized:
+        """Where the browser goes from an authorize request: the consent page, through the
+        sign-in page when it is not signed in. Nothing goes back to the client before the user
+        acted on that page. The request is tied to the browser's cookie `browser`, a new one
+        when it has none, so requests open in two of its tabs both stay valid.
 
         Raises:
-            AuthorizeRefused: The client or its redirect URI is unknown, so the browser cannot
-                be sent back.
+            AuthorizeRefused: The client or its redirect URI is unknown, or the request is not
+                valid (no S256 PKCE, another response type or resource, a state too long).
         """
         client = await self._client_of(params.client_id)
         redirect_uri = params.redirect_uri
         if not redirect_uri or not redirect_uri_matches(client.redirect_uris, redirect_uri):
             raise AuthorizeRefused("The redirect_uri is missing or not one the app registered.")
+        if browser is None or not _BROWSER.fullmatch(browser):
+            browser = secrets.token_urlsafe(32)
         try:
-            pending = self._pending_request(client, redirect_uri, params)
+            pending = self._pending_request(client, redirect_uri, params, browser)
         except OAuthError as error:
-            return self._back(
-                redirect_uri,
-                params.state if params.state and len(params.state) <= _STATE_MAX else None,
-                error=error.error,
-                error_description=error.description,
-            )
+            raise AuthorizeRefused(error.description, error=error.error) from None
         request_id = secrets.token_urlsafe(24)
         await self._pending.put_request(request_id, pending)
         consent = f"{CONSENT_PAGE}?{urlencode({'request': request_id})}"
-        return consent if signed_in else f"{SIGN_IN_PAGE}?{urlencode({'next': consent})}"
+        location = consent if signed_in else f"{SIGN_IN_PAGE}?{urlencode({'next': consent})}"
+        return Authorized(location, browser)
 
     def _pending_request(
-        self, client: RegisteredClient, redirect_uri: str, params: AuthorizeParams
+        self, client: RegisteredClient, redirect_uri: str, params: AuthorizeParams, browser: str
     ) -> PendingAuthorization:
-        """The request to keep for the decision.
+        """The request to keep for the decision, tied to the browser with the cookie `browser`.
 
         Raises:
-            OAuthError: What the client gets back instead.
+            OAuthError: What is wrong with it.
         """
         if params.response_type != "code":
             raise OAuthError("unsupported_response_type", "Only response_type=code is supported.")
@@ -395,6 +422,7 @@ class AuthorizationServer:
             scopes=requested_scopes(params.scope),
             resource=self._resource(params.resource),
             expires_at=_now() + timedelta(seconds=REQUEST_TTL),
+            browser=_browser_hash(browser),
         )
 
     def _resource(self, given: str | None) -> str:
@@ -414,20 +442,36 @@ class AuthorizationServer:
 
     # --- consent --------------------------------------------------------------------------------
 
-    async def _pending_of(self, request_id: str) -> tuple[PendingAuthorization, RegisteredClient]:
+    async def _pending_of(
+        self, request_id: str, browser: str | None
+    ) -> tuple[PendingAuthorization, RegisteredClient]:
+        """The request with the ID, when `browser` is the cookie of the browser it started in.
+
+        Raises:
+            NoSuchAuthorizationRequest: It was decided, expired or never was, or it started in
+                another browser.
+        """
         pending = await self._pending.request(request_id)
-        client = None if pending is None else await self._store.client(pending.client_id)
-        if pending is None or client is None:
+        if (
+            pending is None
+            or browser is None
+            or not secrets.compare_digest(pending.browser, _browser_hash(browser))
+        ):
+            raise NoSuchAuthorizationRequest
+        client = await self._store.client(pending.client_id)
+        if client is None:
             raise NoSuchAuthorizationRequest
         return pending, client
 
-    async def describe(self, request_id: str) -> AuthorizationRequestOut:
-        """The request for the consent screen.
+    async def describe(self, request_id: str, browser: str | None) -> AuthorizationRequestOut:
+        """The request for the consent screen of the browser it started in (its cookie
+        `browser`).
 
         Raises:
-            NoSuchAuthorizationRequest: It was decided, expired or never was.
+            NoSuchAuthorizationRequest: It was decided, expired or never was, or it started in
+                another browser.
         """
-        pending, client = await self._pending_of(request_id)
+        pending, client = await self._pending_of(request_id, browser)
         return AuthorizationRequestOut(
             client=_client_out(client, pending.redirect_uri),
             scopes=[
@@ -436,16 +480,20 @@ class AuthorizationServer:
             expires_at=pending.expires_at,
         )
 
-    async def decide(self, user: User, request_id: str, consent: ConsentIn) -> ConsentOut:
-        """Decides the request for `user`: where the browser returns to the client, with a code
-        for the scopes granted, or with ``error=access_denied``. A request is decided once.
+    async def decide(
+        self, user: User, request_id: str, consent: ConsentIn, browser: str | None
+    ) -> ConsentOut:
+        """Decides the request for `user`, in the browser it started in (its cookie `browser`):
+        where the browser returns to the client, with a code for the scopes granted, or with
+        ``error=access_denied``. A request is decided once.
 
         Raises:
-            NoSuchAuthorizationRequest: It was decided, expired or never was.
+            NoSuchAuthorizationRequest: It was decided, expired or never was, or it started in
+                another browser.
             NotAdmitted: The user is not on the beta list (when allowing).
             ScopeNotRequested: The consent grants a scope the app did not ask for.
         """
-        pending, _client = await self._pending_of(request_id)
+        pending, _client = await self._pending_of(request_id, browser)
         granted: list[Scope] = []
         if consent.decision is Decision.allow:
             if not admitted(self._settings, user.email):
@@ -532,9 +580,13 @@ class AuthorizationServer:
         value = form.get("code")
         if not value:
             raise OAuthError("invalid_request", "code is missing.")
-        code = await self._pending.take_code(value)
+        ttl = int(CODE_LIFETIME.total_seconds())
+        # The family is remembered as the code is taken, so a second exchange that comes at any
+        # time after can end it.
+        family = secrets.token_hex(16)
+        code = await self._pending.take_code(value, family, ttl)
         if code is None:
-            await self._end_reused_code(value)
+            await self._end_reused_code(value, ttl)
             raise _invalid_grant("The code is unknown, used or expired.")
         self._check_code(client, code, form)
         user = await self._store.user(code.user_id)
@@ -542,10 +594,14 @@ class AuthorizationServer:
             raise _invalid_grant("The account is not on the beta list.")
         now = _now()
         app = await self._connect(user, client, code.scopes, now)
-        family = secrets.token_hex(16)
         tokens = self._issue(app, family, code.scopes, code.resource, now)
         await self._store.commit()
-        await self._pending.mark_code_used(value, family, int(CODE_LIFETIME.total_seconds()))
+        if await self._pending.code_reused(value):
+            # A second exchange came before these tokens were committed, so it found none.
+            await self._store.delete_family(family)
+            await self._store.commit()
+            logger.warning("An authorization code was used twice: the tokens it gave are revoked")
+            raise _invalid_grant("The code is unknown, used or expired.")
         return tokens
 
     def _check_code(
@@ -571,9 +627,9 @@ class AuthorizationServer:
         if self._resource(form.get("resource")) != code.resource:
             raise OAuthError("invalid_target", "The resource is not the one of the code.")
 
-    async def _end_reused_code(self, value: str) -> None:
+    async def _end_reused_code(self, value: str, ttl: int) -> None:
         """Ends the tokens a code gave when it is brought again (RFC 6749, section 4.1.2)."""
-        family = await self._pending.used_code_family(value)
+        family = await self._pending.reuse_code(value, ttl)
         if family is not None:
             await self._store.delete_family(family)
             await self._store.commit()
@@ -582,10 +638,13 @@ class AuthorizationServer:
     async def _connect(
         self, user: User, client: RegisteredClient, scopes: list[Scope], now: datetime
     ) -> ConnectedApp:
-        """The user's connected app of the client with the new consent's scopes; its earlier
-        tokens end, as this authorization replaces them."""
+        """The user's connected app of the client, with the scopes of the new consent and of
+        its earlier authorizations that still work. Those keep their tokens: a client ID can be
+        shared by many installs of one app (a metadata document), and connecting one must not
+        disconnect the others."""
         await self._store.lock_user(user.id)
         app = await self._store.app(user.id, client.client_id)
+        granted = {scope.value for scope in scopes}
         if app is None:
             app = ConnectedApp(
                 id=new_connected_app_id(),
@@ -596,8 +655,8 @@ class AuthorizationServer:
             )
             self._store.add(app)
         else:
-            await self._store.delete_app_tokens(app.id)
-        app.scopes = [scope.value for scope in scopes]
+            granted |= await self._store.granted_scopes(app.id, now)
+        app.scopes = [scope.value for scope in _ordered(list(granted))]
         await self._store.flush()  # the tokens refer to it
         return app
 
@@ -642,6 +701,9 @@ class AuthorizationServer:
         token, app, user = found
         now = _now()
         if token.rotated_at is not None:
+            if now - token.rotated_at < REFRESH_GRACE:
+                # A retry, or another session of the client that holds the same token.
+                raise _invalid_grant("The refresh token was used already.")
             await self._store.delete_family(token.family)
             await self._store.commit()
             logger.warning("A used refresh token came again: its family of tokens is revoked")

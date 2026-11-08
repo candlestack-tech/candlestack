@@ -2433,6 +2433,21 @@
             "description": "The app's home page, if it gave one",
             "title": "Client Uri"
           },
+          "document_host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For an app whose client ID is the URL of its client ID metadata document: that URL's host, which vouches for the name; null for an app that registered itself",
+            "examples": [
+              "claude.ai"
+            ],
+            "title": "Document Host"
+          },
           "logo_uri": {
             "anyOf": [
               {
@@ -2442,7 +2457,7 @@
                 "type": "null"
               }
             ],
-            "description": "The app's logo, if it gave one",
+            "description": "The app's logo, if it gave one: an address the app chose, not checked",
             "title": "Logo Uri"
           },
           "name": {
@@ -2466,7 +2481,8 @@
           "name",
           "logo_uri",
           "client_uri",
-          "redirect_host"
+          "redirect_host",
+          "document_host"
         ],
         "title": "ClientOut",
         "type": "object"
@@ -2903,7 +2919,7 @@
             "title": "Last Used At"
           },
           "scopes": {
-            "description": "What the app may do, as of the user's last consent",
+            "description": "What the app may do: the scopes of the last consent and of the app's earlier authorizations that still worked then",
             "examples": [
               [
                 "read",
@@ -11572,7 +11588,7 @@
     },
     "/api/v1/oauth/authorize": {
       "get": {
-        "description": "The authorization endpoint (OAuth 2.1, authorization code with PKCE S256): an MCP\nclient sends the browser here. Redirects to the consent page `/oauth/consent?request=<id>`,\nthrough `/signin?next=...` when the browser is not signed in, or back to the client's\n`redirect_uri` with `error` (`unsupported_response_type`, `invalid_request` without an S256\n`code_challenge`, `invalid_target` for another `resource`), `state` and `iss`. `scope` names\nany of read, backtests, models and publish (all of them when it names none); the user picks\non the consent page.",
+        "description": "The authorization endpoint (OAuth 2.1, authorization code with PKCE S256): an MCP\nclient sends the browser here. Redirects to the consent page `/oauth/consent?request=<id>`,\nthrough `/signin?next=...` when the browser is not signed in, and sets a cookie that ties\nthe request to this browser for 10 minutes. A request that is not valid is a 400 problem\nwhose `error` is the OAuth error (`unsupported_response_type`, `invalid_request` without an\nS256 `code_challenge` or with a `state` over 1024 characters, `invalid_target` for another\n`resource`); nothing goes back to the client before the user decided. `scope` names any of\nread, backtests, models and publish (all of them when it names none); the user picks on the\nconsent page.",
         "operationId": "authorize_api_v1_oauth_authorize_get",
         "parameters": [
           {
@@ -11718,7 +11734,7 @@
                 }
               }
             },
-            "description": "The client_id or the redirect_uri is unknown, so the browser cannot be sent back (`invalid-authorization-request`)."
+            "description": "The client_id or the redirect_uri is unknown, or the request is not valid (`invalid-authorization-request`, with the OAuth `error`)."
           },
           "422": {
             "content": {
@@ -11891,7 +11907,7 @@
     },
     "/api/v1/oauth/requests/{request_id}": {
       "get": {
-        "description": "An app's request for access, for the consent page: the app as it names itself, the host\nit returns to and the scopes it asks for in plain words. Needs no session, so the page can\nname the app before the user signs in; the ID is the secret.",
+        "description": "An app's request for access, for the consent page: the app as it names itself, the host\nit returns to and the scopes it asks for in plain words. Needs no session, so the page can\nname the app before the user signs in, but only the browser the request started in sees it\n(the cookie the authorize step set).",
         "operationId": "authorization_request_api_v1_oauth_requests__request_id__get",
         "parameters": [
           {
@@ -11925,7 +11941,7 @@
                 }
               }
             },
-            "description": "No authorization request has this ID: it was decided, expired (10 minutes) or never was (`authorization-request-not-found`)."
+            "description": "No authorization request has this ID: it was decided, expired (10 minutes) or never was, or it was started in another browser (`authorization-request-not-found`)."
           },
           "422": {
             "content": {
@@ -11944,7 +11960,7 @@
         ]
       },
       "post": {
-        "description": "The user's decision on an app's request, once: `allow` with the scopes to grant (read\nalways), or `deny`. Answers where the browser goes back to the app: its redirect URI with a\n`code` (5 minutes, used once) or `error=access_denied`, with `state` and `iss`.",
+        "description": "The user's decision on an app's request, once, from the browser the request started in:\n`allow` with the scopes to grant (read always), or `deny`. Answers where the browser goes\nback to the app: its redirect URI with a `code` (5 minutes, used once) or\n`error=access_denied`, with `state` and `iss`.",
         "operationId": "decide_api_v1_oauth_requests__request_id__post",
         "parameters": [
           {
@@ -12008,7 +12024,7 @@
                 }
               }
             },
-            "description": "No authorization request has this ID: it was decided, expired (10 minutes) or never was (`authorization-request-not-found`)."
+            "description": "No authorization request has this ID: it was decided, expired (10 minutes) or never was, or it was started in another browser (`authorization-request-not-found`)."
           },
           "422": {
             "content": {

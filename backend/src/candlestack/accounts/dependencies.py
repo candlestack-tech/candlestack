@@ -107,9 +107,9 @@ ApiKeysDep = Annotated[ApiKeys, Depends(get_api_keys)]
 
 
 def get_authorization_server(
-    settings: SettingsDep, redis: RedisDep, db: DbSessionDep, http: HttpClientDep
+    settings: SettingsDep, redis: RedisDep, db: DbSessionDep
 ) -> AuthorizationServer:
-    return AuthorizationServer(settings, OAuthStore(db), OAuthPending(redis), ClientDocuments(http))
+    return AuthorizationServer(settings, OAuthStore(db), OAuthPending(redis), ClientDocuments())
 
 
 AuthorizationServerDep = Annotated[AuthorizationServer, Depends(get_authorization_server)]

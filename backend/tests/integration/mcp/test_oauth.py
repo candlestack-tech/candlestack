@@ -57,10 +57,11 @@ class ConsentingBrowser:
         self.result: AuthorizationCodeResult | None = None
 
     async def open(self, authorization_url: str) -> None:
+        name, _, value = self._cookie.partition("=")
         async with httpx2.AsyncClient(
             transport=httpx2.ASGITransport(app=self._app),
             base_url="http://testserver",
-            headers={"Cookie": self._cookie},
+            cookies={name: value},  # a jar: the cookie of the authorize step comes back too
         ) as browser:
             authorized = await browser.get(authorization_url)
             assert authorized.status_code == 302, authorized.text

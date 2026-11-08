@@ -153,8 +153,9 @@ class RegisteredClient(Base):
 
 
 class ConnectedApp(Base):
-    """A client a user allowed to act for them, with the scopes of their last consent: what
-    Settings lists under Connected apps. Deleting it (disconnect) deletes its tokens."""
+    """A client a user allowed to act for them, with the scopes of its authorizations that
+    worked when it was last authorized: what Settings lists under Connected apps. Each
+    authorization is a family of its tokens. Deleting it (disconnect) deletes its tokens."""
 
     __tablename__ = "connected_apps"
     __table_args__ = (UniqueConstraint("user_id", "client_id"),)
