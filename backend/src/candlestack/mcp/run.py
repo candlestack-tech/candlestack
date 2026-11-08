@@ -553,7 +553,10 @@ async def validate_backtest(
     Answers what would run (the model, the instrument, the model's timeframe and session, the
     warm-up) and whether it would wait in the user's queue; a setup that fails a check answers
     the problem start_backtest would, with what to change in its detail. The arguments are
-    those of start_backtest."""
+    those of start_backtest.
+
+    What each setting does to the trades: get_docs page engine (sections Decision steps and
+    Execution settings)."""
     call = tool_call(ctx)
     body = BacktestIn(
         model=model, data=data, decision=decision, execution=execution, benchmarks=benchmarks
@@ -596,7 +599,10 @@ async def start_backtest(  # noqa: PLR0913 (the setup's groups)
     another.
 
     Answers its ID and status at once; the run takes from seconds to minutes. Then call
-    wait_for_backtest with the ID until it has ended, and get_backtest for the results."""
+    wait_for_backtest with the ID until it has ended, and get_backtest for the results.
+
+    How the settings become trades: get_docs page engine; how the results are computed:
+    get_docs page metrics. Read them before you explain a setting or a result."""
     call = tool_call(ctx)
     body = BacktestIn(
         model=model, data=data, decision=decision, execution=execution, benchmarks=benchmarks
@@ -723,7 +729,10 @@ async def get_backtest(
     That light answer is the default. For its trades (oldest first) pass `trades_per_page`
     (e.g. 50) and `trades_page`; a page past the last one is empty. For the equity curve pass
     `equity_points` (up to 200). Call it after wait_for_backtest answered finished, or for a
-    backtest the user names; it reads what the run stored, so it is quick."""
+    backtest the user names; it reads what the run stored, so it is quick.
+
+    What each statistic means and how it is computed: get_docs page metrics; the problem of a
+    failed backtest: get_docs page api/errors."""
     call = tool_call(ctx)
     async with _runs(call) as runs:
         _, document = await runs.light(
@@ -785,7 +794,10 @@ async def compare_backtests(
 
     max_drawdown is 0 or below and a smaller fall is better: -0.05 is better than -0.20, so its
     best value is the highest one; its `better` says `lower` as in a lower fall, by its size.
-    The marks already account for it."""
+    The marks already account for it.
+
+    What each statistic means and how it is computed: get_docs page metrics; how sweeps and
+    comparisons rank: get_docs page sweeps."""
     call = tool_call(ctx)
     # A client that shows the widget gets the curves of those it draws, not for the model; the
     # widget draws the ones the model asked for (`curve_points`) as they are.

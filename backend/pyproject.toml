@@ -406,8 +406,8 @@ layers = [
 ]
 
 # Inside mcp, the same: the tool reference (a command), the HTTP endpoint, the server, the tools
-# (one module per area), then the convention they follow, the docs it links and the parity
-# table, which names tools and endpoints but imports neither.
+# (one module per area) and the prompts, then the convention they follow, the docs it links and
+# the parity table, which names tools and endpoints but imports neither.
 [[tool.importlinter.contracts]]
 name = "Inside mcp: reference and HTTP -> server -> tools -> convention -> apps, docs and parity"
 type = "layers"
@@ -415,7 +415,7 @@ containers = ["candlestack.mcp"]
 layers = [
     "reference | http",
     "server",
-    "account | manage | market | models | run | sweeps",
+    "account | library | manage | market | models | prompts | run | sweeps",
     "convention",
     "apps | docs | parity",
 ]

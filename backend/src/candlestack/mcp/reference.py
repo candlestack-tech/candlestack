@@ -7,8 +7,8 @@ The website builds its tool reference (``candlestack.tech/docs/mcp/tools/``) fro
 
 For each tool: what ``tools/list`` sends (name, title, description, annotations, input and
 output schema), the scopes an API key needs, an example call and answer, and the endpoints of
-the API it does the work of; then the server's instructions and resources, and the endpoints
-that stay web only, with the reason.
+the API it does the work of; then the server's instructions, resources and prompts, and the
+endpoints that stay web only, with the reason.
 """
 
 import asyncio
@@ -43,9 +43,14 @@ async def _reference() -> dict[str, Any]:
         resource.model_dump(mode="json", by_alias=True, exclude_none=True)
         for resource in await server.list_resources()
     ]
+    prompts = [
+        prompt.model_dump(mode="json", by_alias=True, exclude_none=True)
+        for prompt in await server.list_prompts()
+    ]
     return {
         "server": {"name": server.name, "title": server.title, "instructions": server.instructions},
         "resources": resources,
+        "prompts": prompts,
         "tools": tools,
         "webOnly": [
             {"endpoint": endpoint, "reason": reason} for endpoint, reason in web_only().items()

@@ -50,6 +50,7 @@ from candlestack.experiments.dependencies import (
 )
 from candlestack.experiments.document import (
     BacktestCheck,
+    BacktestDocument,
     BacktestHeader,
     BacktestIn,
     BenchmarkIn,
@@ -123,6 +124,7 @@ __all__ = [
     "Author",
     "BacktestCheck",
     "BacktestCounts",
+    "BacktestDocument",
     "BacktestFilters",
     "BacktestHeader",
     "BacktestIn",

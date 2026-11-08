@@ -1,4 +1,5 @@
-"""The MCP server: its instructions, the ``docs`` resource and the tools, on the official SDK.
+"""The MCP server: its instructions, the ``docs`` resource, the prompts and the tools, on the
+official SDK.
 
 ``CandleStackMCP`` checks the API key's scopes before a tool runs, charges the rate limits what
 a heavy tool costs beyond the request's 1 (``ToolSpec.cost``), and answers every failure as
@@ -17,15 +18,17 @@ from typing import Any, get_type_hints, override
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+from mcp.server.mcpserver.prompts import Prompt
 from mcp.types import CallToolResult, Icon, InputRequiredResult, TextContent
 from pydantic import BaseModel, ValidationError
 
 from candlestack.accounts import charge_rate
 from candlestack.core import ProblemError
-from candlestack.mcp import account, deletes, manage, market, models, run, sweeps
+from candlestack.mcp import account, deletes, library, manage, market, models, run, sweeps
 from candlestack.mcp.apps import add_widget_versions, attached, widget_extension
 from candlestack.mcp.convention import ToolSpec, problem_result, tool_call
 from candlestack.mcp.docs import DOCS_TEXT, DOCS_URI, INSTRUCTIONS
+from candlestack.mcp.prompts import PROMPTS
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +44,7 @@ ICONS = [
 # Every tool of the server, in the order tools/list and the tool reference show them.
 TOOLS: tuple[ToolSpec, ...] = (
     *account.TOOLS,
+    *library.TOOLS,
     *market.TOOLS,
     *models.TOOLS,
     *run.TOOLS,
@@ -125,6 +129,8 @@ class CandleStackMCP(MCPServer):
             mime_type="text/markdown",
         )(_docs)
         add_widget_versions(self)
+        for prompt in PROMPTS:
+            self.add_prompt(Prompt.from_function(prompt.fn, name=prompt.name, title=prompt.title))
 
     @override
     async def call_tool(

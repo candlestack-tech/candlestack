@@ -184,6 +184,8 @@ flowchart LR
   last 24 hours), `idempotency-key-in-use` (409: the first request with the key is still being
   answered, with `retry_after_s` 2, also as `Retry-After`), `backtest-not-queued` (409: cancelling a backtest that runs or has
   ended), `backtests-unavailable` (503: the worker's queue cannot be reached),
+  `docs-unavailable` (503, the MCP tool `get_docs`: the docs website did not answer and no
+  copy of the page an hour old is cached),
   `backtest-not-finished` (409: a download of a queued, running or failed backtest, or
   publishing one),
   `no-document` (409: a test backtest of the seed command has no result document and
@@ -1174,8 +1176,11 @@ call, as the routes' dependencies do), never the API over HTTP.
   `apple-touch-icon.png` 180x180), public on every environment, for clients that show them.
 - **Instructions and docs**: the server's `instructions` say what CandleStack is, how keys and
   scopes work, how errors read, that answers link the app's pages (`url`) for the agent to give
-  the user, and link `https://candlestack.tech/docs/agents/` and
-  `https://candlestack.tech/docs/mcp/`; the resource `candlestack://docs` (Markdown) lists the
+  the user, to read the docs with `get_docs` before explaining the engine, a manifest, a metric
+  or an error (never inventing a formula or a behaviour, saying what is not supported) and to
+  show metrics in a table, and link `https://candlestack.tech/docs/agents/` and
+  `https://candlestack.tech/docs/mcp/`; a unit test keeps them under 2,000 characters, as
+  clients send them with every turn. The resource `candlestack://docs` (Markdown) lists the
   docs pages, the tool reference, the manifest and backtest result references with their JSON
   Schemas, the problem pages and the API reference. The manifest and the result document link
   the website's pages `https://candlestack.tech/docs/manifest/` and
@@ -1217,6 +1222,29 @@ call, as the routes' dependencies do), never the API over HTTP.
   draws, `list_backtests` of the model. It keeps finished backtests' curves in the frame's
   storage for a week, so a conversation opened again asks no more, and draws the answer alone
   if asking fails. Its buttons open only HTTPS pages of the app the card's links name.
+- **Docs tool** (`mcp/library.py`): `get_docs` (scope `read`) serves the published docs to an
+  agent whose client reads no resources (ChatGPT) or cannot open the website. Without `page` it
+  lists the pages (page, title, summary, section) from the website's `llms.txt` and the
+  references: the JSON Schemas of the manifest and the result document (`schemas/manifest`,
+  `schemas/backtest-result`, built from the code as `docs/*.schema.json` is) and `api/errors`,
+  the page of every problem type. With `page` it answers `https://candlestack.tech/docs/<page>.md`,
+  fetched only when `llms.txt` lists the page (a `page` is lowercase words and slashes, so no
+  other address is ever fetched), with the app's HTTP client, no redirects, in 5 s and at most
+  1 MiB. Each answer of the website is cached in the process for 5 minutes; while the website
+  fails, a copy up to an hour old answers, else `503 docs-unavailable`, whose detail gives the
+  user the page's address and tells the agent not to answer from memory. A page longer than
+  20,000 characters (about 5,000 tokens) comes in `parts`, cut before a heading where one fits;
+  `section` answers one `##` or `###` section with its subsections, and `sections` lists the
+  headings. Tool descriptions that an agent would otherwise guess from (`validate_backtest`,
+  `start_backtest`, `get_backtest`, `validate_sweep`, `run_sweep`, `validate_manifest`) name the
+  page to read, always as `get_docs page <page>`; a unit test keeps those pages to a known list.
+- **Prompts** (`mcp/prompts.py`): plans for the common tasks, which clients offer as commands:
+  `first_backtest`, `analyze_backtest`, `compare_my_backtests`, `find_best_model`,
+  `explain_poor_backtest` and `set_up_sweep`, with optional arguments (a backtest, a model, an
+  instrument, a metric) but the backtest of `analyze_backtest` and `explain_poor_backtest`.
+  Each is one user message: the tools to call in their order, the `get_docs` pages to read, and
+  the same rules as the instructions. `prompts/list` counts as a light request, `prompts/get` as
+  one request.
 - **Tools**: one module per area, each with its `TOOLS`, which `server.TOOLS` puts together.
   - `account`: `get_me` (scope `read`): the key's user (ID, name, email, created) and the
     key's scopes.
@@ -1357,8 +1385,8 @@ call, as the routes' dependencies do), never the API over HTTP.
   tool that does not exist, or a planned tool exists already.
 - **Tool reference**: `uv run python -m candlestack.mcp.reference > ../docs/mcp-tools.json`
   writes each tool as `tools/list` sends it (name, title, description, annotations, input and
-  output schemas) with its scopes, example and endpoints, the instructions and resources, and
-  the web only endpoints with their reasons. The file is committed, a unit test fails when it
+  output schemas) with its scopes, example and endpoints, the instructions, resources and
+  prompts (as `prompts/list` sends them), and the web only endpoints with their reasons. The file is committed, a unit test fails when it
   is stale (like `openapi.json`), and the website builds `candlestack.tech/docs/mcp/tools/` from
   it (website#76).
 
@@ -1487,7 +1515,7 @@ A module is a subpackage of `candlestack` under `backend/src/candlestack/`.
 | `jobs` | now | the job queue between the backend and the worker: the job and its result, the Redis keys, the jobs' files on the shared volume, `JobClient` for the backend ([Worker](#worker)) |
 | `worker` | now | the worker's process (`python -m candlestack.worker`): the loop, the job's process with Keras, the safe load of a model, the built-in candles of a check |
 | `experiments` | now | the backtests: starting and running them (`data`, the worker through `jobs`, `signals`, `engine`, `metrics`), their result documents, sweeps, the list of the Backtests page, stars, publishing and Experiments, the Dashboard, the models' usage, the seed command |
-| `mcp` | now | the MCP server at `/mcp` ([MCP](#mcp)): sign-in with an API key, the tool convention, the tools, the parity table and the tool reference |
+| `mcp` | now | the MCP server at `/mcp` ([MCP](#mcp)): sign-in with an API key, the tool convention, the tools, the docs tool, the prompts, the parity table and the tool reference |
 | `admin` | later | team-only administration (roles, audit) under `/admin` |
 
 Folders for later modules are created when their work starts, not before; `started` marks

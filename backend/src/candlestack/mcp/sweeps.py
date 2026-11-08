@@ -140,7 +140,9 @@ async def validate_sweep(
     makes and what each one runs.
 
     Answers the count, the limit of 20, the queue's room and each setup in the grid's order. A
-    setup that fails a check is the problem of that check with `setup`, its place from 1."""
+    setup that fails a check is the problem of that check with `setup`, its place from 1.
+    How a sweep varies and ranks: get_docs page sweeps; the shape of `vary`, with an example:
+    get_docs page mcp/tools (section run_sweep)."""
     call = tool_call(ctx)
     body = SweepIn(base=base, vary=vary or SweepVary(), validate_only=True)
     async with call.db() as db:
@@ -164,6 +166,9 @@ async def run_sweep(
     statistic the ranking orders by. Pass an `idempotency_key` (a UUID you make) to call it
     again safely after a timeout: the same call with the same key within 24 hours answers the
     first sweep instead of starting another.
+
+    How a sweep varies, ranks and compares: get_docs page sweeps; the shape of `vary`:
+    get_docs page mcp/tools (section run_sweep).
 
     Answers the sweep: its ID, each backtest's ID, status and setup, the progress, `eta_s` and,
     for 4 backtests at most, `url`, the app's Compare page of them to show the user. Follow it
