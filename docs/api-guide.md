@@ -272,16 +272,21 @@ key of the scope `models`:
 curl -s -X POST -H "Authorization: Bearer $CANDLESTACK_API_KEY"     -H 'Content-Type: application/json' -d '{"name": "lstm.keras", "size_bytes": 14889779}'     https://app.candlestack.tech/api/v1/models/uploads
 ```
 
-The answer holds the link's `id`, its `url`, `expires_at` (15 minutes) and the `command` that
-sends the file from the folder it is in:
+The answer holds the link's `id`, its `url`, `expires_at` (15 minutes), the `page_url` of its
+upload page and the `command` that sends the file from the folder it is in:
 `curl --fail-with-body -T lstm.keras https://app.candlestack.tech/api/v1/uploads/<token>`
 (it exits with an error and prints the problem when the upload is refused). That request needs
 no key: the token in the link is its only sign-in, so treat the link like a
 key until it is used. A link takes one file of the name's format, no larger than `size_bytes`,
 and the file is checked as any upload. `GET /api/v1/models/uploads/<id>` says how it stands:
 `waiting`, `checking`, `done` with the `model_id`, `failed` with the `problem` and the `check`
-that failed (`upload-interrupted` when the upload stopped midway), or `expired`. A used or expired link answers 410 `upload-link-gone`: ask for a new
-one.
+that failed (`upload-interrupted` when the upload stopped midway), or `expired`. A used or
+expired link answers 410 `upload-link-gone`: ask for a new one.
+
+When the agent cannot run `curl` (claude.ai, ChatGPT), it gives the user the `page_url`
+instead: signed in to CandleStack, the user drops the file there, sees it upload and pass the
+checks, and gets a link to the new model. The page checks the file's size and format before it
+sends anything, so a wrong file leaves the link usable.
 
 ## Check a manifest before setting it
 

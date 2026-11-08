@@ -92,6 +92,7 @@ def test_a_link_is_made_and_keeps_only_its_hash(ada, sql) -> None:
     secret = token(link)
     assert link["id"].startswith("upl_")
     assert link["url"] == f"http://testserver/api/v1/uploads/{secret}"
+    assert link["page_url"] == f"http://testserver/upload/{secret}"
     assert len(secret) == 40
     assert link["command"] == f"curl --fail-with-body -T 'C:\\models\\my lstm.keras' {link['url']}"
     created = datetime.fromisoformat(link["created_at"])
@@ -112,7 +113,8 @@ def test_a_link_is_made_and_keeps_only_its_hash(ada, sql) -> None:
         "keras",
     )
     shown = status(ada, link)
-    assert shown == {key: value for key, value in link.items() if key not in ("url", "command")}
+    shown_once = ("url", "page_url", "command")
+    assert shown == {key: value for key, value in link.items() if key not in shown_once}
     assert secret not in str(shown)
 
 
@@ -174,6 +176,78 @@ def test_another_users_link_is_not_found(ada, bob) -> None:
     link = make_link(ada)
 
     problem(bob.request("GET", f"{LINKS}/{link['id']}"), 404, "not-found")
+
+
+# --- The upload page reads the link -------------------------------------------------------------
+
+
+def by_token(user, link: dict[str, Any]) -> httpx2.Response:
+    return user.request("GET", f"/api/v1/uploads/{token(link)}")
+
+
+def test_the_upload_page_reads_the_link_of_its_user(ada, client) -> None:
+    link = make_link(ada, name="my lstm.keras")
+
+    waiting = by_token(ada, link)
+
+    assert waiting.status_code == 200
+    assert waiting.headers["cache-control"] == "no-store"
+    assert waiting.json() == status(ada, link)
+    assert (waiting.json()["name"], waiting.json()["size_bytes"]) == (
+        "my lstm.keras",
+        len(FUNCTIONAL),
+    )
+    assert waiting.json()["finished_at"] is None
+    assert token(link) not in waiting.text
+    model = put(client, link, FUNCTIONAL).json()
+    done = by_token(ada, link).json()
+    assert (done["status"], done["model_id"]) == ("done", model["id"])
+    assert done["finished_at"] is not None
+
+
+def test_the_upload_page_tells_an_expired_link(ada, sql) -> None:
+    link = make_link(ada)
+    sql("UPDATE model_uploads SET expires_at = now() - interval '1 second'")
+
+    assert by_token(ada, link).json()["status"] == "expired"
+
+
+def test_another_user_learns_nothing_of_a_link(ada, bob, caplog) -> None:
+    link = make_link(ada, name="secret plan.keras")
+
+    with caplog.at_level(logging.INFO):
+        response = bob.request("GET", f"/api/v1/uploads/{token(link)}")
+
+    body = problem(response, 403, "upload-link-of-another-user")
+    assert "secret plan" not in response.text
+    assert body["detail"] == (
+        "Another account asked for this upload link. Sign in with the account that asked for "
+        "it, then open the link again."
+    )
+    ours = [r.getMessage() for r in caplog.records if r.name.startswith("candlestack")]
+    assert f"User {bob.id} opened the upload link of another user" in ours
+    assert not any(token(link) in message for message in ours)
+
+
+def test_the_upload_page_does_not_know_an_unknown_token(ada) -> None:
+    make_link(ada)
+
+    problem(ada.request("GET", "/api/v1/uploads/" + "q" * 40), 404, "upload-link-not-found")
+
+
+def test_an_api_key_cannot_read_a_link_by_its_token(ada, client) -> None:
+    link = make_link(ada)
+    created = ada.request(
+        "POST", "/api/v1/me/api-keys", json={"name": "a", "scopes": ["read", "models"]}
+    )
+    client.cookies = httpx2.Cookies()
+
+    response = client.get(
+        f"/api/v1/uploads/{token(link)}",
+        headers={"Authorization": f"Bearer {created.json()['secret']}"},
+    )
+
+    problem(response, 403, "session-required")
 
 
 # --- The upload ---------------------------------------------------------------------------------

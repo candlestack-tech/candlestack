@@ -2,6 +2,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CATALOG, catalogAnswer, manifest, model, modelsAnswer, problem, stubApi } from '@/test/api';
+import { stubXhr } from '@/test/xhr';
 
 import { ApiError } from './client';
 import {
@@ -11,6 +12,8 @@ import {
   modelsQueryOptions,
   setManifest,
   updateModel,
+  uploadByLink,
+  uploadLinkQueryOptions,
   uploadModel,
 } from './models';
 
@@ -117,5 +120,82 @@ describe('catalogQueryOptions', () => {
     const options = catalogQueryOptions();
     expect(options.staleTime).toBe(Infinity);
     await expect(new QueryClient().fetchQuery(options)).resolves.toEqual(CATALOG);
+  });
+});
+
+describe('uploadLinkQueryOptions', () => {
+  it('reads the link by its token, under the account so signing out forgets it', async () => {
+    const link = { id: 'upl_7f3k2m9qx4', name: 'a.keras', size_bytes: 10, status: 'waiting' };
+    stubApi({ 'GET /api/v1/uploads/tok': { status: 200, body: link } });
+    const options = uploadLinkQueryOptions('tok');
+    expect(options.queryKey).toEqual(['account', 'upload-link', 'tok']);
+    await expect(new QueryClient().fetchQuery(options)).resolves.toEqual(link);
+  });
+});
+
+describe('uploadByLink', () => {
+  it('puts the file as the raw body to the link and reports its progress', async () => {
+    const sent = stubXhr();
+    const progress = vi.fn();
+    const file = new File(['weights'], 'a.keras');
+    const upload = uploadByLink('tok', file, { onProgress: progress });
+    const [request] = sent;
+    expect(request).toMatchObject({ method: 'PUT', url: '/api/v1/uploads/tok', body: file });
+    expect(request?.headers).toMatchObject({ 'Content-Type': 'application/octet-stream' });
+    request?.progress(3, 7);
+    expect(progress).toHaveBeenCalledWith(3, 7);
+    request?.respond(201, model());
+    await expect(upload).resolves.toEqual(model());
+  });
+
+  it('passes a problem on as an ApiError with its slug, body and Retry-After', async () => {
+    const sent = stubXhr();
+    const upload = uploadByLink('tok', new File([''], 'a.keras'), { onProgress: () => undefined });
+    sent[0]?.respond(422, problem(422, 'model-check-failed', 'No weights.', { check: 'weights' }).body, {
+      'Retry-After': '5',
+    });
+    const error: unknown = await upload.catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({
+      status: 422,
+      problem: 'model-check-failed',
+      retryAfter: 5,
+      body: { check: 'weights' },
+    });
+  });
+
+  it('says when the server cannot be reached or answers what the app cannot read', async () => {
+    const sent = stubXhr();
+    const none = uploadByLink('tok', new File([''], 'a.keras'), { onProgress: () => undefined });
+    sent[0]?.fail();
+    await expect(none).rejects.toMatchObject({ status: 0 });
+    const unreadable = uploadByLink('tok', new File([''], 'a.keras'), { onProgress: () => undefined });
+    if (sent[1]) {
+      sent[1].status = 201;
+      sent[1].responseText = '<html>';
+      sent[1].dispatchEvent(new Event('load'));
+    }
+    await expect(unreadable).rejects.toMatchObject({
+      status: 201,
+      message: 'The server sent an answer the app cannot read.',
+    });
+  });
+
+  it('stops when aborted, also before it started', async () => {
+    const sent = stubXhr();
+    const controller = new AbortController();
+    const upload = uploadByLink('tok', new File([''], 'a.keras'), {
+      onProgress: () => undefined,
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(upload).rejects.toMatchObject({ name: 'AbortError' });
+    expect(sent[0]?.aborted).toBe(true);
+    const late = uploadByLink('tok', new File([''], 'a.keras'), {
+      onProgress: () => undefined,
+      signal: controller.signal,
+    });
+    await expect(late).rejects.toMatchObject({ name: 'AbortError' });
+    expect(sent).toHaveLength(1);
   });
 });

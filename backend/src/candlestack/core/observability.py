@@ -30,8 +30,9 @@ ERRORS_PER_HOUR = 100
 
 # Values never sent, on top of Sentry's defaults (passwords, tokens, cookies, authorization):
 # the Alpaca and logo.dev keys as settings, variables and request headers, the DSN, the database
-# URL (it holds the password), and the OAuth client secrets, codes, verifiers, states and
-# tokens of a sign-in.
+# URL (it holds the password), the OAuth client secrets, codes, verifiers, states and tokens of
+# a sign-in, and the page a sign-in returns to (``next``), which may be an upload page whose path
+# holds an upload link's token (``/upload/<token>``).
 _DENYLIST = [
     *DEFAULT_DENYLIST,
     "alpaca_key_id",
@@ -55,6 +56,7 @@ _DENYLIST = [
     "access_token",
     "refresh_token",
     "id_token",
+    "next",
 ]
 # The query of a request is recorded as one string, which the scrubber cannot see into: the
 # httpx integration's ``http.query`` of every outgoing request in breadcrumbs and spans

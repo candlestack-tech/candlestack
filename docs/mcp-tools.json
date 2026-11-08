@@ -11743,6 +11743,10 @@
       "reason": "An image for the app's lists, which an agent does not need."
     },
     {
+      "endpoint": "GET /api/v1/uploads/{token}",
+      "reason": "The upload page reads its link for the signed-in browser; an agent reads the upload with get_model_upload."
+    },
+    {
       "endpoint": "PUT /api/v1/uploads/{token}",
       "reason": "The file goes to the one-time link with curl or the upload page, not through a tool."
     },

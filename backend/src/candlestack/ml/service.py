@@ -51,6 +51,7 @@ from candlestack.ml.errors import (
     UploadInProgress,
     UploadLinkGone,
     UploadLinkNotFound,
+    UploadLinkOfAnotherUser,
     UploadNotFound,
     UploadTimeout,
 )
@@ -121,8 +122,9 @@ _FOREIGN_KEY_VIOLATION = "23503"
 _UNIQUE_VIOLATION = "23505"
 _NAME_INDEX = "uq_models_user_id_name"
 _EMPTY = "The file is empty. Choose the model's {suffix} file and upload it again."
-# Where an upload link points, after the public URL.
+# Where an upload link points, after the public URL, and where its upload page in the app is.
 UPLOAD_PATH = "/api/v1/uploads/"
+UPLOAD_PAGE_PATH = "/upload/"
 _TOKEN = re.compile(rf"[a-z2-7]{{{UPLOAD_TOKEN_LENGTH}}}")
 # How long a link that expired stays readable at least; older ones go when the user makes a new
 # one.
@@ -279,6 +281,7 @@ def _upload_out(upload: ModelUpload, now: datetime) -> ModelUploadOut:
         status=status,
         created_at=upload.created_at,
         expires_at=upload.expires_at,
+        finished_at=upload.finished_at,
         model_id=upload.model_id,
         problem=problem,
         check=None if upload.failed_check is None else ModelCheck(upload.failed_check),
@@ -607,6 +610,7 @@ class ModelsService:
         return ModelUploadCreated(
             **_upload_out(upload, now).model_dump(),
             url=public_url + UPLOAD_PATH + token,
+            page_url=public_url + UPLOAD_PAGE_PATH + token,
             command=f"curl --fail-with-body -T {shlex.quote(new.name)} "
             f"{public_url}{UPLOAD_PATH}{token}",
         )
@@ -621,6 +625,25 @@ class ModelsService:
         if upload is None:
             raise UploadNotFound
         return _upload_out(upload, _now())
+
+    async def upload_of_token(self, user_id: str, token: str) -> ModelUploadOut:
+        """The user's upload link with `token` and how its upload stands, for the upload page
+        the link opens in the browser.
+
+        Raises:
+            UploadLinkNotFound: No link has the token.
+            UploadLinkOfAnotherUser: Another user made the link.
+        """
+        link = (
+            await self._store.upload_by_token(upload_token_hash(token))
+            if _TOKEN.fullmatch(token)
+            else None
+        )
+        if link is None:
+            raise UploadLinkNotFound
+        if link.user_id != user_id:
+            raise UploadLinkOfAnotherUser
+        return _upload_out(link, _now())
 
     async def upload_by_link(
         self,

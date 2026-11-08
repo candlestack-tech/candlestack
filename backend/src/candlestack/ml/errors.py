@@ -88,6 +88,10 @@ class UploadLinkNotFound(Exception):
     """No upload link has the token."""
 
 
+class UploadLinkOfAnotherUser(Exception):
+    """The upload link with the token was made by another user than the one asking."""
+
+
 class UploadLinkGone(Exception):
     """The upload link took its file already, or expired: `reason` is ``used`` or
     ``expired``."""

@@ -176,7 +176,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # About 11 minutes on a quiet runner since the sweeps and the MCP tools; slow runners took
+    # past 15 with every test passing.
+    timeout-minutes: 25
     permissions:
       contents: read
     services:

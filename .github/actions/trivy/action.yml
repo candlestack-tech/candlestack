@@ -11,20 +11,35 @@ description: >-
 #     --certificate-identity https://github.com/aquasecurity/trivy/.github/workflows/reusable-release.yaml@refs/tags/v<version> \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 # and put the version and the archive's sha256 below.
+#
+# GitHub's release downloads sometimes fail for hours, and Trivy has no mirror of its own
+# (get.trivy.dev redirects to the same GitHub file). So the checked archive is kept in the
+# Actions cache under its version and digest, and every run checks it against SHA256 again
+# before it is used, whether it came from the cache or from GitHub.
 runs:
   using: composite
   steps:
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/candlestack-trivy
+        # This file holds the version and the digest, so its hash changes with them.
+        key: trivy-${{ hashFiles('.github/actions/trivy/action.yml') }}
+
     - shell: bash
       env:
         VERSION: 0.74.0
         SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
       # GITHUB_PATH gets a directory holding only the binary of the archive checked against SHA256.
       run: | # zizmor: ignore[github-env]
+        cache=~/.cache/candlestack-trivy
+        mkdir -p "$cache"
+        archive=$cache/trivy_${VERSION}_Linux-64bit.tar.gz
+        if ! echo "$SHA256  $archive" | sha256sum --check --quiet 2>/dev/null; then
+          curl -fsSL --retry 3 --retry-all-errors -o "$archive" \
+            "https://github.com/aquasecurity/trivy/releases/download/v$VERSION/trivy_${VERSION}_Linux-64bit.tar.gz"
+          echo "$SHA256  $archive" | sha256sum --check --quiet
+        fi
         dir=$RUNNER_TEMP/trivy
         mkdir -p "$dir"
-        archive=$dir/trivy.tar.gz
-        curl -fsSL -o "$archive" \
-          "https://github.com/aquasecurity/trivy/releases/download/v$VERSION/trivy_${VERSION}_Linux-64bit.tar.gz"
-        echo "$SHA256  $archive" | sha256sum --check --quiet
         tar -xzf "$archive" -C "$dir" trivy
         echo "$dir" >>"$GITHUB_PATH"
