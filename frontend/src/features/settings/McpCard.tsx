@@ -37,7 +37,7 @@ type Client = {
 const CLIENTS: Client[] = [
   { name: 'Claude', how: 'Add a custom connector, sign in with CandleStack', Logo: ClaudeLogo },
   { name: 'ChatGPT', how: 'Add a connector, sign in with CandleStack', Logo: OpenAILogo },
-  { name: 'Codex', how: 'One command, sign in with codex mcp login', Logo: OpenAILogo, anchor: 'codex' },
+  { name: 'Codex', how: 'One command, sign in with CandleStack', Logo: OpenAILogo, anchor: 'codex' },
   { name: 'Claude Code', how: 'One command, sign in with CandleStack or use an API key', Logo: ClaudeLogo },
   { name: 'Cursor', how: 'One entry in mcp.json with an API key', Logo: CursorLogo },
   { name: 'VS Code', how: 'One entry in mcp.json with an API key', Logo: VSCodeLogo },

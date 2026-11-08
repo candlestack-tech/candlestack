@@ -90,7 +90,7 @@ describe('MCP server card', () => {
     const clients: [string, string][] = [
       ['Claude', 'Add a custom connector, sign in with CandleStack'],
       ['ChatGPT', 'Add a connector, sign in with CandleStack'],
-      ['Codex', 'One command, sign in with codex mcp login'],
+      ['Codex', 'One command, sign in with CandleStack'],
       ['Claude Code', 'One command, sign in with CandleStack or use an API key'],
       ['Cursor', 'One entry in mcp.json with an API key'],
       ['VS Code', 'One entry in mcp.json with an API key'],
