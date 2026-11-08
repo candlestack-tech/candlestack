@@ -1,7 +1,8 @@
 """Comparing backtests (``GET /api/v1/compare``): the results of each with the best and the
 worst of every statistic marked, the setups and what differs between them, and the equity
-curves on one time axis, from what each backtest stored when it ran (``BacktestRuns.stored``):
-never the candles again, so comparing many spends none of a data source's request budget.
+curves on one time axis, from what each backtest stored when it ran (``BacktestRuns.compared``,
+one query for all of them): never the candles again, so comparing many spends none of a data
+source's request budget. The decode of the curves and the points run in a thread.
 
 The Compare page shows this answer as it is (``frontend/src/features/backtests/compare/``:
 ``rows.ts`` writes the values as the texts below, ``chartLines.ts`` draws the curves and reads a
@@ -10,22 +11,22 @@ backtest did best.
 """
 
 from bisect import bisect_right
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
+from functools import partial
 from typing import Any, Literal
 
+import anyio
+import numpy as np
 from pydantic import BaseModel, Field
 
-from candlestack.experiments.document import DocumentAuthor
-from candlestack.experiments.errors import (
-    BacktestNotFound,
-    InvalidBacktest,
-    NoDocument,
-    NotComparable,
-)
+from candlestack.experiments.assembly import CURVES, read_curves
+from candlestack.experiments.document import Decision, DocumentAuthor, Execution
+from candlestack.experiments.errors import InvalidBacktest, NotComparable
 from candlestack.experiments.runs import BacktestRuns
-from candlestack.experiments.schemas import BacktestStatus
+from candlestack.experiments.schemas import BacktestStatus, SetupBenchmark
+from candlestack.experiments.store import Compared
 
 # One is listed as it is, nothing marked: the Compare page shows a single backtest that way.
 COMPARE_MIN = 1
@@ -39,6 +40,8 @@ _CURVE_DECIMALS = 3
 
 Mark = Literal["best", "worst"]
 Better = Literal["higher", "lower", "none"]
+# How the setups are shown: each whole, or what all share once and what differs with each.
+SetupMode = Literal["full", "diff"]
 
 
 class CompareMetric(BaseModel):
@@ -80,7 +83,8 @@ class ComparedBacktest(BaseModel):
         description="What it ran on and with: `instrument`, `model` (its file name), `reads` "
         "(the representation of its manifest), `input` (the model's input, rows by features, "
         "from its manifest's signature), `timeframe`, `period`, and the `decision`, "
-        "`execution` and `benchmarks` (the instruments held) of its result document"
+        "`execution` and `benchmarks` (the instruments held) of its result document. With "
+        "`setup_mode=diff` only its fields of `differs`, the rest once in `shared_setup`"
     )
     candles: int | None = Field(
         description="The candles of its period it ran on (`data.rows.count` of its document); "
@@ -89,11 +93,11 @@ class ComparedBacktest(BaseModel):
     )
     equity: list[float | None] | None = Field(
         description="Its cumulative return (a fraction of its starting capital) at each of "
-        "`times`: its last value up to then, null outside its period; null without results. "
-        "A long backtest's series has a point per day, so its line begins at the end of its "
-        "first day. One that finished before its curves were stored is drawn from its short "
-        "series of at most 60 points, with buy and hold only when its benchmark held its own "
-        "instrument"
+        "`times`: its last value up to then, null outside its period; null without results "
+        "and with `curve_points` 0. A long backtest's series has a point per day, so its line "
+        "begins at the end of its first day, and its stored curve has at most 1,000 points. "
+        "One that finished before its curves were stored is drawn from its short series of at "
+        "most 60 points, with buy and hold only when its benchmark held its own instrument"
     )
     drawdown: list[float | None] | None = Field(
         description="Its fall from its highest equity (a fraction, 0 or below), at the same "
@@ -119,8 +123,13 @@ class CompareOut(BaseModel):
     )
     times: list[int] = Field(
         description=f"The common time axis of the curves, at most {CURVE_POINTS} UTC epoch "
-        "seconds: the first and the last time of each backtest's series and times evenly "
-        "spaced between the earliest and the latest"
+        "seconds (`curve_points`; none with 0): the first and the last time of each "
+        "backtest's series and times evenly spaced between the earliest and the latest"
+    )
+    shared_setup: dict[str, Any] | None = Field(
+        default=None,
+        description="With `setup_mode=diff`, the setup fields every backtest has alike, "
+        "once; each backtest's `setup` then has only its fields of `differs`. Null otherwise",
     )
 
 
@@ -152,34 +161,134 @@ def check_ids(ids: Sequence[str], *, name: str = "The list", empty: str = "") ->
     return list(ids)
 
 
-async def compare(runs: BacktestRuns, user_id: str, ids: Sequence[str]) -> CompareOut:
+async def compare(
+    runs: BacktestRuns,
+    user_id: str,
+    ids: Sequence[str],
+    *,
+    curve_points: int = CURVE_POINTS,
+    setup_mode: SetupMode = "full",
+) -> CompareOut:
     """The comparison of the backtests ``ids``, each the user's own or another account's
-    published one, from what each stored of its light result document.
+    published one, from what each stored when it ran: curves on at most ``curve_points``
+    times (none and no curves read with 0), the setups as ``setup_mode`` says.
 
     Raises:
         NotComparable: One the user cannot see, or test data without a document.
     """
-    documents = []
+    found = await runs.compared(user_id, ids, curves=curve_points > 0)
+    rows = []
     for backtest_id in ids:
-        try:
-            documents.append(await runs.stored(user_id, backtest_id))
-        except BacktestNotFound:
-            raise NotComparable(backtest_id, found=False) from None
-        except NoDocument:
-            raise NotComparable(backtest_id, found=True) from None
-    return compared(documents)
+        row = found.get(backtest_id)
+        if row is None:
+            raise NotComparable(backtest_id, found=False)
+        if row.setup is None:
+            raise NotComparable(backtest_id, found=True)
+        rows.append(row)
+    build = partial(_compare, rows, user_id, points=curve_points, setup_mode=setup_mode)
+    return await anyio.to_thread.run_sync(build)
 
 
-def compared(documents: Sequence[dict[str, Any]]) -> CompareOut:
-    """The comparison of these result documents, in their order."""
+def _compare(
+    rows: Sequence[Compared], user_id: str, *, points: int, setup_mode: SetupMode
+) -> CompareOut:
+    """The comparison of what the backtests stored (CPU work, in a thread)."""
+    documents = [_document(row, user_id, curves=points > 0) for row in rows]
+    return compared(documents, points=points, setup_mode=setup_mode)
+
+
+def _document(row: Compared, user_id: str, *, curves: bool) -> dict[str, Any]:
+    """The parts of a backtest's light result document the comparison reads, from what it
+    stored: its results only the statistics and, with ``curves``, its series' ``CURVES``
+    columns (null until it finished). The decision and the execution read as its document has
+    them, a field added since with its default."""
+    backtest, setup = row.backtest, row.setup
+    assert setup is not None  # ``compare`` refused test data
+    finished = backtest.status == BacktestStatus.finished.value
+    shown = None
+    if finished and row.rows is not None and row.stats is not None:
+        columns: dict[str, list[Any]] = {name: [] for name in CURVES}
+        if curves:
+            columns = (
+                _short_curves(backtest.equity, backtest.setup, row.rows)
+                if row.curves is None
+                else read_curves(row.curves)
+            )
+        shown = {"stats": row.stats, "series": {"columns": columns}}
+    author = DocumentAuthor(id=backtest.user_id, name=row.author, mine=backtest.user_id == user_id)
+    return {
+        "backtest": {
+            "id": backtest.id,
+            "number": backtest.number,
+            "name": backtest.shown_name,
+            "author": author.model_dump(),
+            "public": backtest.published_at is not None,
+            "status": backtest.status,
+            "error": backtest.error,
+        },
+        "model": {
+            "name": setup["model"],
+            "manifest": {
+                "input": {"representation": {"id": setup["reads"]}},
+                "signature": {"input": {"shape": setup["input"]}},
+            },
+        },
+        "data": {**setup["data"], "rows": row.rows if shown is not None else None},
+        "decision": Decision.model_validate(setup["decision"]).model_dump(mode="json"),
+        "execution": Execution.model_validate(setup["execution"]).model_dump(mode="json"),
+        "benchmarks": setup["benchmarks"],
+        "results": shown,
+    }
+
+
+def _short_curves(
+    equity: Mapping[str, list[float]] | None, setup: Mapping[str, Any], rows: Mapping[str, int]
+) -> dict[str, list[Any]]:
+    """The curves of a backtest that finished before they were stored, from its short equity
+    series (``Backtest.set_equity``): its points at the evenly spaced times they were taken at
+    from the first row to the last (``rows``, its document's ``data.rows``), the fall of those
+    points, and the close as buy and hold of its own instrument when that was its benchmark
+    (else no close, so no line)."""
+    if equity is None:
+        return {name: [] for name in CURVES}
+    values = np.asarray(equity["strategy"], dtype=np.float64) + 1.0
+    ts = np.linspace(rows["first_ts"], rows["last_ts"], values.size).astype(np.int64)
+    fall = values / np.maximum.accumulate(values) - 1.0
+    close: list[float | None] = [None] * values.size
+    if setup.get("benchmark") == SetupBenchmark.buy_and_hold.value:
+        close = [value + 1.0 for value in equity["benchmark"]]
+    return {
+        "ts": ts.tolist(),
+        "close": close,
+        "equity": values.tolist(),
+        "drawdown": fall.tolist(),
+    }
+
+
+def compared(
+    documents: Sequence[dict[str, Any]],
+    *,
+    points: int = CURVE_POINTS,
+    setup_mode: SetupMode = "full",
+) -> CompareOut:
+    """The comparison of these result documents, in their order: curves on at most ``points``
+    times (none with 0), the setups as ``setup_mode`` says."""
     stats = [None if doc["results"] is None else doc["results"]["stats"] for doc in documents]
     setups = [setup_of(doc) for doc in documents]
-    lines = [_lines(doc) for doc in documents]
-    times = time_axis([line for each in lines for line in each])
+    differs = differing(setups)
+    shared = None
+    if setup_mode == "diff":
+        split = [split_setup(setup, differs) for setup in setups]
+        shared = split[0][0] if split else {}
+        setups = [own for _, own in split]
+    drawn = points > 0
+    lines = [_lines(doc) if drawn else ([], [], []) for doc in documents]
+    times = time_axis([line for each in lines for line in each], points) if drawn else []
     backtests = []
     for doc, setup, (equity, fall, held) in zip(documents, setups, lines, strict=True):
         header = doc["backtest"]
         finished = doc["results"] is not None
+        curved = finished and drawn
         backtests.append(
             ComparedBacktest(
                 id=header["id"],
@@ -191,13 +300,17 @@ def compared(documents: Sequence[dict[str, Any]]) -> CompareOut:
                 error=header["error"],
                 setup=setup,
                 candles=(doc["data"].get("rows") or {}).get("count") if finished else None,
-                equity=_curve(equity, times) if finished else None,
-                drawdown=_curve(fall, times) if finished else None,
-                buy_and_hold=_curve(held, times) if finished else None,
+                equity=_curve(equity, times) if curved else None,
+                drawdown=_curve(fall, times) if curved else None,
+                buy_and_hold=_curve(held, times) if curved else None,
             )
         )
     return CompareOut(
-        backtests=backtests, metrics=metric_rows(stats), differs=differing(setups), times=times
+        backtests=backtests,
+        metrics=metric_rows(stats),
+        differs=differs,
+        times=times,
+        shared_setup=shared,
     )
 
 
@@ -378,6 +491,33 @@ def _flat(value: dict[str, Any], prefix: str = "") -> dict[str, Any]:
         else:
             flat[path] = inner
     return flat
+
+
+def split_setup(
+    setup: dict[str, Any], differs: Sequence[str]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """A setup in two: its fields that are not in ``differs`` (dotted paths, ``differing``) and
+    those that are, each nested as in the setup."""
+    paths = set(differs)
+
+    def split(value: dict[str, Any], prefix: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        shared: dict[str, Any] = {}
+        own: dict[str, Any] = {}
+        for key, inner in value.items():
+            path = f"{prefix}{key}"
+            if path in paths:
+                own[key] = inner
+            elif isinstance(inner, dict) and any(each.startswith(f"{path}.") for each in paths):
+                alike, apart = split(inner, f"{path}.")
+                if alike:
+                    shared[key] = alike
+                if apart:
+                    own[key] = apart
+            else:
+                shared[key] = inner
+        return shared, own
+
+    return split(setup, "")
 
 
 def differing(setups: Sequence[dict[str, Any]]) -> list[str]:

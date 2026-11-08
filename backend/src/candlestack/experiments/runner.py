@@ -49,19 +49,21 @@ from candlestack.data import (
 from candlestack.experiments.assembly import (
     NothingToTest,
     Run,
+    Stored,
     align_of,
-    curves_parquet,
     equity_points,
     main_benchmark,
     predictions_parquet,
+    results,
     rows_of,
     run,
     stats_out,
+    stored_results,
 )
 from candlestack.experiments.document import Loaded, PredictionsOut, RunnerOut
 from candlestack.experiments.models import Backtest
 from candlestack.experiments.schemas import EQUITY_POINTS, BacktestStatus
-from candlestack.experiments.spec import RunReport, RunSpec
+from candlestack.experiments.spec import RunReport, RunSpec, run_manifest
 from candlestack.experiments.steps import StepRecorder, Steps
 from candlestack.experiments.store import BacktestStore
 from candlestack.jobs import DEFAULT_WAIT, JobClient, JobResult
@@ -297,6 +299,10 @@ class BacktestRunner:
         stored = predictions.filter(pl.col("ts").is_between(period.start, period.end - 1))
         done = await _backtest(spec, candles.frame, stored)
         timings["backtest"] = _ms(clock)
+        # The light results, so reading them never runs the engine again (CPU work, in a thread).
+        kept = await anyio.to_thread.run_sync(
+            lambda: stored_results(results(done, spec.benchmarks, light=True, held=held))
+        )
         blob, digest = predictions_parquet(stored)
         report = RunReport(
             loaded=Loaded(
@@ -312,8 +318,9 @@ class BacktestRunner:
             align=align_of(done),
             runner=_runner(spec, result),
             timings=timings,
+            benchmarks=kept.benchmarks,
         )
-        await self._finish(backtest_id, done, report, blob, steps, held=held)
+        await self._finish(backtest_id, done, report, kept, steps, blob=blob, held=held)
 
     async def _save_steps(self, backtest_id: str, steps: Steps) -> None:
         """Stores the run's steps; Postgres out of reach is a warning, as the run goes on."""
@@ -425,7 +432,8 @@ class BacktestRunner:
             result, predictions = await self._jobs.predict(
                 model=model,
                 sha256=spec.model.sha256,
-                manifest=spec.model.manifest,
+                # A backtest stored before the copy was cut still has the example in it.
+                manifest=run_manifest(spec.model.manifest),
                 candles=candles,
                 wait=self._wait,
                 claimed=steps.claimed,
@@ -447,21 +455,22 @@ class BacktestRunner:
         async with self._db.sessions() as session:
             return await BacktestStore(session).model_of(backtest_id) is None
 
-    async def _finish(
+    async def _finish(  # noqa: PLR0913 (what a run stores)
         self,
         backtest_id: str,
         done: Run,
         report: RunReport,
-        blob: bytes,
+        kept: Stored,
         steps: StepRecorder,
         *,
+        blob: bytes,
         held: Mapping[str, pl.DataFrame],
     ) -> None:
-        """Stores the results, and the steps all done, while the backtest is still running and
-        there (its account may have been deleted meanwhile). ``held`` has the candles of the
-        index fund of each benchmark that holds one, by its ID."""
+        """Stores the results (``kept`` the light ones, ``blob`` the predictions), and the steps
+        all done, while the backtest is still running and there (its account may have been
+        deleted meanwhile). ``held`` has the candles of the index fund of each benchmark that
+        holds one, by its ID."""
         benchmark, benchmark_return = main_benchmark(done, held)
-        curves = curves_parquet(done)
         now = _now()
         async with self._db.sessions() as session:
             backtest = await session.get(Backtest, backtest_id, with_for_update=True)
@@ -472,7 +481,8 @@ class BacktestRunner:
             backtest.stats = shown
             backtest.report = report.model_dump(mode="json")
             backtest.predictions = blob
-            backtest.curves = curves
+            backtest.series, backtest.trades = kept.series, kept.trades
+            backtest.curves = kept.curves
             backtest.total_return = shown["total_return"]
             backtest.buy_and_hold_return = shown["buy_and_hold_return"]
             backtest.benchmark_return = benchmark_return

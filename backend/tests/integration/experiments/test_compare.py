@@ -208,3 +208,30 @@ def test_one_to_twenty_different_backtests(ada, ids: list[str]) -> None:
     response = compare(ada, *ids)
 
     assert (response.status_code, response.json()["type"]) == (422, PROBLEMS + "validation")
+
+
+def test_curve_points_and_the_setup_shown_once(ada, worker) -> None:
+    model_id = ada.runnable_model()
+    first = ada.start(body(model_id)).json()["backtest"]["id"]
+    ada.ended(first)
+    second = ada.start(body(model_id, 0.3)).json()["backtest"]["id"]
+    ada.ended(second)
+    ids = f"{first},{second}"
+
+    bare = ada.request(
+        "GET", "/api/v1/compare", params={"ids": ids, "curve_points": 0, "setup_mode": "diff"}
+    ).json()
+    few = ada.request("GET", "/api/v1/compare", params={"ids": ids, "curve_points": 5}).json()
+
+    assert bare["times"] == []
+    assert [item["equity"] for item in bare["backtests"]] == [None, None]
+    assert bare["metrics"][0]["values"][0] is not None
+    assert bare["differs"] == ["decision.rule.limit"]
+    assert [item["setup"] for item in bare["backtests"]] == [
+        {"decision": {"rule": {"limit": 0.1}}},
+        {"decision": {"rule": {"limit": 0.3}}},
+    ]
+    assert bare["shared_setup"]["instrument"] == "stock:AAPL"
+    assert 2 <= len(few["times"]) <= 5
+    assert few["shared_setup"] is None
+    assert few["backtests"][0]["setup"]["decision"]["rule"]["limit"] == 0.1

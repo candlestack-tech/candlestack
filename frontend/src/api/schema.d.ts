@@ -206,7 +206,8 @@ export interface paths {
          * @description The result document of the user's backtest, whatever its status (`results` is null until
          *     it finished), or of another account's while it is published (`backtest.author`, read only,
          *     `model.id` null), in the light view: a series of more than 10,000 rows has one point per
-         *     UTC day, and only the newest 10,000 trades are in it (`trades.complete` false).
+         *     UTC day, and only the newest 10,000 trades are in it (`trades.complete` false). It is what
+         *     the run stored, so `data.changed` is null: the download compares the candles again.
          */
         get: operations["get_backtest_api_v1_backtests__backtest_id__get"];
         put?: never;
@@ -2485,8 +2486,15 @@ export interface components {
              */
             metrics: components["schemas"]["CompareMetric"][];
             /**
+             * Shared Setup
+             * @description With `setup_mode=diff`, the setup fields every backtest has alike, once; each backtest's `setup` then has only its fields of `differs`. Null otherwise
+             */
+            shared_setup?: {
+                [key: string]: unknown;
+            } | null;
+            /**
              * Times
-             * @description The common time axis of the curves, at most 200 UTC epoch seconds: the first and the last time of each backtest's series and times evenly spaced between the earliest and the latest
+             * @description The common time axis of the curves, at most 200 UTC epoch seconds (`curve_points`; none with 0): the first and the last time of each backtest's series and times evenly spaced between the earliest and the latest
              */
             times: number[];
         };
@@ -2511,7 +2519,7 @@ export interface components {
             drawdown: (number | null)[] | null;
             /**
              * Equity
-             * @description Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results. A long backtest's series has a point per day, so its line begins at the end of its first day. One that finished before its curves were stored is drawn from its short series of at most 60 points, with buy and hold only when its benchmark held its own instrument
+             * @description Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results and with `curve_points` 0. A long backtest's series has a point per day, so its line begins at the end of its first day, and its stored curve has at most 1,000 points. One that finished before its curves were stored is drawn from its short series of at most 60 points, with buy and hold only when its benchmark held its own instrument
              */
             equity: (number | null)[] | null;
             /**
@@ -2542,7 +2550,7 @@ export interface components {
             public: boolean;
             /**
              * Setup
-             * @description What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `input` (the model's input, rows by features, from its manifest's signature), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document
+             * @description What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `input` (the model's input, rows by features, from its manifest's signature), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document. With `setup_mode=diff` only its fields of `differs`, the rest once in `shared_setup`
              */
             setup: {
                 [key: string]: unknown;
@@ -2652,7 +2660,7 @@ export interface components {
             align: components["schemas"]["AlignOut"] | null;
             /**
              * Changed
-             * @description The candles' fingerprint differs from the run's: the source changed them
+             * @description The candles' fingerprint differs from the run's: the source changed them. Only the download loads the candles again to compare; the light view is what the run stored, so null there
              */
             changed: boolean | null;
             instrument: components["schemas"]["InstrumentOut"];
@@ -5489,7 +5497,10 @@ export interface operations {
     };
     get_backtest_api_v1_backtests__backtest_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description `light`: the light view. `summary`: the setup and the statistics only, `results.series` and `results.trades` left empty (`count` 0, `trades.total` still the trades the run had) */
+                view?: "light" | "summary";
+            };
             header?: never;
             path: {
                 /** @description Public ID of the backtest */
@@ -5840,6 +5851,10 @@ export interface operations {
             query: {
                 /** @description 1 to 20 backtest IDs separated by commas: the user's own and published ones of other accounts */
                 ids: string;
+                /** @description The most times of the curves; 0 for none (`times` empty, the curves null) */
+                curve_points?: number;
+                /** @description `full`: each backtest's whole setup. `diff`: what all share once in `shared_setup`, each backtest's `setup` only its fields of `differs` */
+                setup_mode?: "full" | "diff";
             };
             header?: never;
             path?: never;

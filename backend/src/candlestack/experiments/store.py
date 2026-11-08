@@ -30,6 +30,7 @@ from sqlalchemy import (
     select,
     text,
     true,
+    type_coerce,
     update,
 )
 from sqlalchemy.dialects.postgresql import JSONB, aggregate_order_by, array_agg
@@ -129,6 +130,22 @@ class Authored(NamedTuple):
 
     backtest: Backtest
     author: str
+
+
+class Compared(NamedTuple):
+    """What the comparison reads of a backtest (``BacktestStore.compared``): the backtest, its
+    author's display name, the parts of its setup the comparison shows (``setup``: the model's
+    name as ``model``, the representation it reads as ``reads``, its input's shape as
+    ``input``, and the ``data``, ``decision``, ``execution`` and ``benchmarks`` groups as
+    stored; None for test data without a spec), the rows its run found (``report.rows``), its
+    statistics and its curves (None unless asked for)."""
+
+    backtest: Backtest
+    author: str
+    setup: dict[str, Any] | None
+    rows: dict[str, Any] | None
+    stats: dict[str, Any] | None
+    curves: bytes | None
 
 
 class Counts(NamedTuple):
@@ -323,6 +340,33 @@ def _listed() -> Select[Backtest, str, int | None]:
 
 def _authored() -> Select[Backtest, str]:
     return select(Backtest, User.display_name).join(User, User.id == Backtest.user_id)
+
+
+# What the comparison shows of a backtest's setup, cut from its spec in Postgres: the copy of
+# the model's manifest stays in the database.
+_SPEC = Backtest.spec
+_COMPARED_SETUP = case(
+    (_SPEC.is_(None), None),
+    else_=type_coerce(
+        func.jsonb_build_object(
+            "model",
+            _SPEC[("model", "name")],
+            "reads",
+            _SPEC[("model", "manifest", "input", "representation", "id")],
+            "input",
+            _SPEC[("model", "manifest", "signature", "input", "shape")],
+            "data",
+            _SPEC["data"],
+            "decision",
+            _SPEC["decision"],
+            "execution",
+            _SPEC["execution"],
+            "benchmarks",
+            _SPEC["benchmarks"],
+        ),
+        JSONB,
+    ),
+)
 
 
 async def model_usage(
@@ -695,14 +739,16 @@ class BacktestStore:
         return await self._db.scalar(select(Backtest.model_id).where(Backtest.id == backtest_id))
 
     async def with_run(
-        self, user_id: str, backtest_id: str, *, curves: bool = False
+        self, user_id: str, backtest_id: str, *, series: bool = False, trades: bool = False
     ) -> Authored | None:
         """The user's backtest, or another account's while it is published, with what its run
-        stored, its predictions aside (and its curves unless ``curves``), and its author's
-        display name; None for any other."""
+        stored, its predictions and curves aside (and its light series and trades unless
+        ``series`` and ``trades``), and its author's display name; None for any other."""
         stored = [Backtest.spec, Backtest.report, Backtest.stats, Backtest.steps]
-        if curves:
-            stored.append(Backtest.curves)
+        if series:
+            stored.append(Backtest.series)
+        if trades:
+            stored.append(Backtest.trades)
         row = (
             await self._db.execute(
                 _authored()
@@ -711,6 +757,49 @@ class BacktestStore:
             )
         ).first()
         return Authored(*row) if row is not None else None
+
+    async def compared(
+        self, user_id: str, backtest_ids: Sequence[str], *, curves: bool
+    ) -> dict[str, Compared]:
+        """What the comparison reads of each of the backtests that is the user's or another
+        account's published one, by its ID, in one query; the others are left out. The curves
+        only with ``curves``."""
+        query = (
+            select(
+                Backtest,
+                User.display_name,
+                _COMPARED_SETUP,
+                Backtest.report["rows"],
+                Backtest.stats,
+                Backtest.curves if curves else literal(None, Backtest.curves.type),
+            )
+            .join(User, User.id == Backtest.user_id)
+            .where(Backtest.id.in_(backtest_ids), (Backtest.user_id == user_id) | PUBLISHED)
+        )
+        rows = (await self._db.execute(query)).all()
+        return {row[0].id: Compared(*row) for row in rows}
+
+    async def keep_results(
+        self,
+        backtest_id: str,
+        *,
+        series: bytes,
+        trades: bytes,
+        curves: bytes,
+        report: dict[str, Any],
+    ) -> None:
+        """Stores the light results of a finished backtest that finished before they were
+        stored (``report`` with the benchmarks' returns); it keeps curves it has."""
+        await self._db.execute(
+            update(Backtest)
+            .where(Backtest.id == backtest_id, _FINISHED)
+            .values(
+                series=series,
+                trades=trades,
+                curves=func.coalesce(Backtest.curves, curves),
+                report=report,
+            )
+        )
 
     async def run_of(self, backtest_id: str) -> Backtest | None:
         """The backtest with its setup, whoever it is of: what the run reads when it starts."""

@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 import pytest
 import redis
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from redis.exceptions import ConnectionError as RedisConnectionError
 
@@ -130,6 +131,9 @@ def test_a_backtest_runs_and_its_document_has_the_results(ada, market, worker) -
     assert document["model"]["name"] == "raw-candles.keras"
     assert document["model"]["sha256"] == "0" * 64
     assert document["model"]["manifest"]["input"]["window"] == {"length": 25}  # as given
+    # The manifest's notes for people are not copied into the backtest, nor sent to the worker.
+    assert "about" not in document["model"]["manifest"]
+    assert all("about" not in job.manifest for job in worker.jobs)
     data = document["data"]
     assert data["instrument"] == {
         "id": "stock:AAPL",
@@ -151,7 +155,8 @@ def test_a_backtest_runs_and_its_document_has_the_results(ada, market, worker) -
     assert data["loaded"]["start"] == START - 24 * 1800
     assert data["loaded"]["count"] == 24 + 240
     assert data["loaded"]["fingerprint"].startswith("sha256:")
-    assert data["changed"] is False
+    # The light view is what the run stored: only the download compares the candles again.
+    assert data["changed"] is None
     assert data["warm_up"] == {"candles": 24, "kind": "exact", "dropped": 24}
     assert data["rows"] == {"first_ts": START, "last_ts": END - 1800, "count": 240}
     assert data["predictions"]["count"] == 240
@@ -168,9 +173,88 @@ def test_a_backtest_runs_and_its_document_has_the_results(ada, market, worker) -
     assert results["trades"]["complete"] is True
     # The worker gets the stock candles with the mark of each session's last candle.
     assert worker.columns == [["ts", "open", "high", "low", "close", "volume", "session_last"]]
-    # The run loads them in the background, waiting for the source's budget; the document's
-    # load of the same candles is a page's, which does not wait.
-    assert market.background == [True, False]
+    # The run loads them in the background, waiting for the source's budget; the document is
+    # what it stored, so it loads none.
+    assert market.background == [True]
+
+
+class NoData:
+    """The data module of an app whose light view must not reach it: any use fails the test."""
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"The light view used the data module ({name}).")
+
+
+@pytest.mark.usefixtures("worker")
+def test_the_light_view_is_what_the_run_stored_and_loads_no_candles(ada, app: FastAPI) -> None:
+    backtest_id = ada.start(body(ada.runnable_model(), benchmarks=[SPY])).json()["backtest"]["id"]
+    ada.ended(backtest_id)
+    download = ada.download(backtest_id).json()
+    app.state.data_service = NoData()
+
+    light = ada.document(backtest_id)
+    summary = ada.request("GET", f"/api/v1/backtests/{backtest_id}", params={"view": "summary"})
+
+    assert light.status_code == 200, light.text
+    document = light.json()
+    # Under 10,000 rows the light view is the whole document, as a build from the candles.
+    assert download["data"]["changed"] is False
+    assert document == {**download, "data": {**download["data"], "changed": None}}
+    assert summary.status_code == 200, summary.text
+    shown = summary.json()
+    assert {**shown, "results": None} == {**document, "results": None}
+    results = shown["results"]
+    assert results["stats"] == document["results"]["stats"]
+    assert results["benchmarks"] == document["results"]["benchmarks"]
+    assert (results["series"]["count"], results["series"]["columns"]["equity"]) == (0, [])
+    assert results["series"]["benchmarks"] == {"spy": []}
+    trades = results["trades"]
+    assert (trades["count"], trades["columns"]["open_ts"]) == (0, [])
+    assert trades["total"] == document["results"]["trades"]["total"] > 0
+    assert trades["complete"] is False
+
+
+FORGET = (
+    "UPDATE backtests SET series = NULL, trades = NULL, curves = NULL, "
+    "report = report - 'benchmarks' WHERE id = :id"
+)
+KEPT = (
+    "SELECT series IS NOT NULL, trades IS NOT NULL, curves IS NOT NULL, report -> 'benchmarks' "
+    "FROM backtests WHERE id = :id"
+)
+
+
+@pytest.mark.usefixtures("worker")
+def test_a_backtest_from_before_the_light_results_stores_them_on_its_first_read(
+    ada, market, app: FastAPI
+) -> None:
+    backtest_id = ada.start(body(ada.runnable_model())).json()["backtest"]["id"]
+    before = ada.ended(backtest_id)
+    ada.sql(FORGET, id=backtest_id)
+    loads = len(market.loads)
+
+    first = ada.document(backtest_id).json()
+
+    # Built from the candles once, as every read did before, and stored.
+    assert len(market.loads) == loads + 1
+    assert first == before
+    returned = before["results"]["benchmarks"]["bh"]["total_return"]
+    assert ada.sql(KEPT, id=backtest_id) == [(True, True, True, {"bh": pytest.approx(returned)})]
+    app.state.data_service = NoData()
+    assert ada.document(backtest_id).json() == before
+
+
+@pytest.mark.usefixtures("worker")
+def test_a_backtest_from_before_whose_candles_changed_stores_nothing(ada, market) -> None:
+    backtest_id = ada.start(body(ada.runnable_model())).json()["backtest"]["id"]
+    ada.ended(backtest_id)
+    ada.sql(FORGET, id=backtest_id)
+    market.scale = 2.0  # a split adjusted every price
+
+    after = ada.document(backtest_id).json()
+
+    assert after["data"]["changed"] is True
+    assert ada.sql(KEPT, id=backtest_id) == [(False, False, False, None)]
 
 
 @pytest.mark.usefixtures("worker")
@@ -231,7 +315,8 @@ def test_the_download_has_every_row_and_names_the_file(ada) -> None:
     assert download.headers["content-disposition"] == (
         'attachment; filename="candlestack-backtest-1.json"'
     )
-    assert download.json() == document  # under 10,000 rows the light view is the whole
+    # Under 10,000 rows the light view is the whole; only the download compares the candles.
+    assert download.json() == {**document, "data": {**document["data"], "changed": False}}
 
 
 def test_a_crypto_backtest_annualizes_over_every_day(ada, worker) -> None:
@@ -278,8 +363,9 @@ def test_a_stock_backtest_compares_with_an_index_fund(ada, market) -> None:
     assert listed["equity"]["benchmark"] == pytest.approx(list(np.array(spy)[picked] - 1))
     strategy = np.array(results["series"]["columns"]["equity"])[picked] - 1
     assert listed["equity"]["strategy"] == pytest.approx(list(strategy))
-    # The run loads the fund's candles of the period in the background after its own, and
-    # the document loads both again.
+    # The run loads the fund's candles of the period in the background after its own; the
+    # document is what it stored, and the download loads both again.
+    assert ada.download(backtest_id).json()["results"] == results
     own = ("stock:AAPL", (START - 24 * 1800, END))
     fund = ("stock:SPY", (START, END))
     assert list(zip(market.instruments, market.loads, market.background, strict=True)) == [
@@ -288,23 +374,27 @@ def test_a_stock_backtest_compares_with_an_index_fund(ada, market) -> None:
         (*own, False),
         (*fund, False),
     ]
-    # Its errors are the document's, as those of the backtest's own candles.
+    # Its errors are the download's, as those of the backtest's own candles.
     market.refuse_candles_of["SPY"] = SourceUnavailable("alpaca", "Alpaca is not answering.")
-    refused = ada.document(backtest_id)
+    refused = ada.download(backtest_id)
     assert (refused.status_code, refused.json()["type"]) == (503, PROBLEMS + "source-unavailable")
 
 
 @pytest.mark.usefixtures("worker")
-def test_the_document_says_when_the_candles_changed_since(ada, market) -> None:
+def test_the_download_says_when_the_candles_changed_since(ada, market) -> None:
     model_id = ada.runnable_model()
     backtest_id = ada.start(body(model_id)).json()["backtest"]["id"]
-    before = ada.ended(backtest_id)
+    ada.ended(backtest_id)
+    before = ada.download(backtest_id).json()
 
     market.scale = 2.0  # a split adjusted every price
-    after = ada.document(backtest_id).json()
+    after = ada.download(backtest_id).json()
+    light = ada.document(backtest_id).json()
 
     assert before["data"]["changed"] is False
     assert after["data"]["changed"] is True
+    # The light view stays what the run stored.
+    assert light["results"] == before["results"]
     assert after["data"]["loaded"] == before["data"]["loaded"]  # what the run loaded
     assert after["results"]["series"]["columns"]["close"][0] == pytest.approx(
         2 * before["results"]["series"]["columns"]["close"][0]
@@ -1003,13 +1093,13 @@ def test_a_model_deleted_while_the_start_checks_it_is_not_found(ada, market) -> 
 
 @pytest.mark.usefixtures("worker")
 def test_no_connection_waits_on_the_data_module(ada, market) -> None:
-    """The start and the document end their reads before they ask for market data."""
+    """The start and the download end their reads before they ask for market data."""
     backtest_id = ada.start(body(ada.runnable_model())).json()["backtest"]["id"]
     at_start = market.held[0]
     ada.ended(backtest_id)
     market.held.clear()
 
-    ada.document(backtest_id)
+    ada.download(backtest_id)
 
     assert at_start == 0
     assert market.held == [0]

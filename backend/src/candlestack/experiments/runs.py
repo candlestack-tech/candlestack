@@ -6,19 +6,21 @@ A user's backtests run one at a time: a new one waits in the user's queue (``que
 ``store.QUEUE_MAX``) while another of theirs runs, and the runner starts the oldest when that
 one ends (``BacktestRunner``).
 
-The document is built on request: the stored predictions, the candles from the cache and the
-engine, which is deterministic. When the candles' fingerprint differs from the run's (a source
-adjusted old prices), ``data.changed`` says so and the results come from the candles as they
-are now. The comparison reads only what the run stored (``stored``), so it never loads candles.
+The light view (``light``) is what the run stored: the statistics, and its light series and
+trades as zstd Parquet (``assembly.stored_results``), so reading it loads no candles and runs no
+engine. A backtest that finished before those were stored builds them once from the candles and
+stores them. The download is built on request: the stored predictions, the candles from the
+cache and the engine, which is deterministic. When the candles' fingerprint differs from the
+run's (a source adjusted old prices), ``data.changed`` says so and the results come from the
+candles as they are now.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
 from functools import partial
 from typing import Any, NamedTuple
 
 import anyio
-import numpy as np
 import polars as pl
 from redis.exceptions import RedisError
 
@@ -33,7 +35,6 @@ from candlestack.data import (
 )
 from candlestack.engine import ENGINE_VERSION
 from candlestack.experiments.assembly import (
-    CURVES,
     PERIODS_PER_YEAR,
     RISK_FREE_RATE,
     NothingToTest,
@@ -41,14 +42,17 @@ from candlestack.experiments.assembly import (
     align_of,
     document,
     dumps,
-    read_curves,
     read_predictions,
+    read_series,
+    read_trades,
     results,
     rows_of,
     run,
+    stored_results,
 )
 from candlestack.experiments.document import (
     BENCHMARK_ETFS,
+    LIGHT_ROWS,
     BacktestCheck,
     BacktestHeader,
     BacktestIn,
@@ -62,8 +66,10 @@ from candlestack.experiments.document import (
     HysteresisRule,
     InstrumentOut,
     MetricsArgs,
+    SeriesColumns,
     Software,
     ThresholdRule,
+    TradeColumns,
     WarmUpReport,
 )
 from candlestack.experiments.errors import (
@@ -88,9 +94,16 @@ from candlestack.experiments.schemas import (
     SetupDirection,
     SetupTimeframe,
 )
-from candlestack.experiments.spec import RunReport, RunSpec, SpecData, SpecModel, SpecWarmUp
+from candlestack.experiments.spec import (
+    RunReport,
+    RunSpec,
+    SpecData,
+    SpecModel,
+    SpecWarmUp,
+    run_manifest,
+)
 from candlestack.experiments.steps import pending, shown_steps
-from candlestack.experiments.store import QUEUE_MAX, BacktestStore
+from candlestack.experiments.store import QUEUE_MAX, BacktestStore, Compared
 from candlestack.ml import Model
 from candlestack.preprocessing import Manifest, warm_up
 
@@ -308,7 +321,7 @@ class BacktestRuns:
                 framework=model.framework,
                 sha256=model.sha256.hex(),
                 size_bytes=model.size_bytes,
-                manifest=model.manifest or {},
+                manifest=run_manifest(model.manifest or {}),
             ),
             data=SpecData(
                 instrument=_instrument(info),
@@ -333,36 +346,120 @@ class BacktestRuns:
             await self._data.warm_up_start(etf, timeframe, period.start, period.end, 0)
         return spec
 
-    async def document(self, user_id: str, backtest_id: str, *, light: bool) -> tuple[int, bytes]:
+    async def document(
+        self, user_id: str, backtest_id: str, *, light: bool, summary: bool = False
+    ) -> tuple[int, bytes]:
         """The number and the result document of the user's backtest, or of another account's
-        while it is published: the light view, or with ``light`` False the download, which
-        needs a finished backtest.
+        while it is published: the light view (``light``, with ``summary`` its statistics
+        without the series and the trades, ``summarized``), or with ``light`` False the
+        download, built again from the candles, which needs a finished backtest.
 
         Raises:
             BacktestNotFound, NoDocument, BacktestNotFinished (the download), and the data
-            module's errors of loading the candles again (``data.DataError``).
+            module's errors of loading the candles again (``data.DataError``): the download's,
+            and those of the first read of a backtest from before the light results were
+            stored.
         """
+        if light:
+            number, built = await self.light(
+                user_id, backtest_id, series=not summary, trades=not summary
+            )
+            if summary:
+                return number, dumps(summarized(built))
+            # Up to about 1 MB of JSON: written in a thread too.
+            return number, await anyio.to_thread.run_sync(dumps, built)
         found = await self._store.with_run(user_id, backtest_id)
         if found is None:
             raise BacktestNotFound
         backtest = found.backtest
         if backtest.spec is None:
             raise NoDocument
-        finished = backtest.status == BacktestStatus.finished.value
-        if not light and not finished:
+        if backtest.status != BacktestStatus.finished.value or backtest.report is None:
             raise BacktestNotFinished(backtest.status)
         spec = RunSpec.model_validate(backtest.spec)
-        # Only the account's display name and public ID: never its email.
-        author = DocumentAuthor(
-            id=backtest.user_id, name=found.author, mine=backtest.user_id == user_id
+        report = RunReport.model_validate(backtest.report)
+        author = _author(backtest, found.author, user_id)
+        blob, candles, held = await self._inputs(backtest, spec, report)
+        build = partial(
+            _finished, backtest, spec, report, candles, blob, author=author, light=False, held=held
         )
-        if not finished or backtest.report is None:
+        return backtest.number, await anyio.to_thread.run_sync(build)
+
+    async def light(
+        self, user_id: str, backtest_id: str, *, series: bool = True, trades: bool = True
+    ) -> tuple[int, dict[str, Any]]:
+        """The number and the light result document of the user's backtest, or of another
+        account's while it is published, from what its run stored, without the candles and
+        the engine. Its ``results`` have the statistics and the benchmarks' returns, and the
+        series and the trades when asked for (``series``, ``trades``), as NumPy arrays for
+        ``dumps``. ``data.changed`` is null: only the download compares the candles again.
+
+        A backtest that finished before its light results were stored builds them from the
+        candles once and stores them; while its candles differ from the run's, it answers that
+        build (``data.changed`` true) and stores nothing.
+
+        Raises:
+            BacktestNotFound, NoDocument, and the data module's errors of that build.
+        """
+        found = await self._store.with_run(user_id, backtest_id, series=series, trades=trades)
+        if found is None:
+            raise BacktestNotFound
+        backtest = found.backtest
+        if backtest.spec is None:
+            raise NoDocument
+        spec = RunSpec.model_validate(backtest.spec)
+        author = _author(backtest, found.author, user_id)
+        if backtest.status != BacktestStatus.finished.value or backtest.report is None:
             position = None
             if backtest.status == BacktestStatus.queued.value:
                 position = await self._store.queue_position(backtest.id)
-            document = _document(backtest, spec, author=author, queue_position=position)
-            return backtest.number, dumps(document)
+            return backtest.number, _document(
+                backtest, spec, author=author, queue_position=position
+            )
         report = RunReport.model_validate(backtest.report)
+        if report.benchmarks is None:
+            return backtest.number, await self._first_light(backtest, spec, report, author)
+        shown: dict[str, Any] = {
+            "stats": backtest.stats,
+            "benchmarks": _returns(report.benchmarks),
+        }
+        if series or trades:
+            read = partial(
+                _read_light,
+                backtest.series if series else None,
+                backtest.trades if trades else None,
+            )
+            shown |= await anyio.to_thread.run_sync(read)
+        return backtest.number, _stored_document(backtest, spec, report, shown, author)
+
+    async def _first_light(
+        self, backtest: Backtest, spec: RunSpec, report: RunReport, author: DocumentAuthor
+    ) -> dict[str, Any]:
+        """The light document of a backtest that finished before its light results were
+        stored, built from the candles; stored while the candles are still the run's."""
+        blob, candles, held = await self._inputs(backtest, spec, report)
+        changed = candles.fingerprint != report.loaded.fingerprint
+        build = partial(_again, spec, candles.frame, blob, held, light=True)
+        done, shown = await anyio.to_thread.run_sync(build)
+        if done is None or shown is None or changed:
+            return _document(backtest, spec, report, done, shown, author=author, changed=changed)
+        kept = await anyio.to_thread.run_sync(stored_results, shown)
+        report = report.model_copy(update={"benchmarks": kept.benchmarks})
+        await self._store.keep_results(
+            backtest.id,
+            series=kept.series,
+            trades=kept.trades,
+            curves=kept.curves,
+            report=report.model_dump(mode="json"),
+        )
+        await self._store.commit()
+        return _stored_document(backtest, spec, report, shown, author)
+
+    async def _inputs(
+        self, backtest: Backtest, spec: RunSpec, report: RunReport
+    ) -> tuple[bytes, CandleSet, dict[str, pl.DataFrame]]:
+        """What a build of a finished backtest's results runs on: its stored predictions, the
+        candles it loaded, and those of the index fund of each benchmark that holds one."""
         blob = await self._store.predictions(backtest.id)
         assert blob is not None  # a finished run stored them
         # The reads end here, so no connection waits on the data module and the build.
@@ -379,10 +476,14 @@ class BacktestRuns:
             benchmark: (await self._data.candles(etf, timeframe, period.start, period.end)).frame
             for benchmark, etf in spec.etf_benchmarks().items()
         }
-        build = partial(
-            _finished, backtest, spec, report, candles, blob, author=author, light=light, held=held
-        )
-        return backtest.number, await anyio.to_thread.run_sync(build)
+        return blob, candles, held
+
+    async def compared(
+        self, user_id: str, backtest_ids: Sequence[str], *, curves: bool
+    ) -> dict[str, Compared]:
+        """What the comparison reads of the backtests, the user's own and other accounts'
+        published ones, by ID (``BacktestStore.compared``)."""
+        return await self._store.compared(user_id, backtest_ids, curves=curves)
 
     async def header(self, user_id: str, backtest_id: str) -> BacktestHeader:
         """The ``backtest`` group of the document of the user's backtest, or of another
@@ -398,69 +499,104 @@ class BacktestRuns:
         backtest = found.backtest
         if backtest.spec is None:
             raise NoDocument
-        author = DocumentAuthor(
-            id=backtest.user_id, name=found.author, mine=backtest.user_id == user_id
-        )
+        author = _author(backtest, found.author, user_id)
         report = None if backtest.report is None else RunReport.model_validate(backtest.report)
         position = None
         if backtest.status == BacktestStatus.queued.value:
             position = await self._store.queue_position(backtest.id)
         return _header(backtest, report, author=author, queue_position=position)
 
-    async def stored(self, user_id: str, backtest_id: str) -> dict[str, Any]:
-        """The light result document of the user's backtest, or of another account's while it
-        is published, from what its run stored and never the data source: what the comparison
-        reads. ``results`` has only the statistics and the series' ``CURVES`` columns (null
-        until it finished), ``data`` no alignment and ``backtest`` no queue position.
 
-        Raises:
-            BacktestNotFound, NoDocument.
-        """
-        found = await self._store.with_run(user_id, backtest_id, curves=True)
-        if found is None:
-            raise BacktestNotFound
-        backtest = found.backtest
-        if backtest.spec is None:
-            raise NoDocument
-        spec = RunSpec.model_validate(backtest.spec)
-        author = DocumentAuthor(
-            id=backtest.user_id, name=found.author, mine=backtest.user_id == user_id
-        )
-        finished = backtest.status == BacktestStatus.finished.value
-        if not finished or backtest.report is None or backtest.stats is None:
-            return _document(backtest, spec, author=author)
-        report = RunReport.model_validate(backtest.report)
-        if backtest.curves is None:
-            columns = _short_curves(backtest, report)
-        else:
-            columns = read_curves(backtest.curves)
-        shown = {"stats": backtest.stats, "series": {"columns": columns}}
-        document = _document(backtest, spec, report, shown=shown, author=author)
-        # The rows the run found, as a rebuild of the document finds them again.
-        document["data"]["rows"] = report.rows.model_dump()
-        return document
+def _author(backtest: Backtest, name: str, user_id: str) -> DocumentAuthor:
+    """The document's author: only the account's display name and public ID, never its email."""
+    return DocumentAuthor(id=backtest.user_id, name=name, mine=backtest.user_id == user_id)
 
 
-def _short_curves(backtest: Backtest, report: RunReport) -> dict[str, list[Any]]:
-    """The curves of a backtest that finished before they were stored, from its short equity
-    series (``Backtest.set_equity``): its points at the evenly spaced times they were taken at
-    from the first row to the last, the fall of those points, and the close as buy and hold of
-    its own instrument when that was its benchmark (else no close, so no line)."""
-    if backtest.equity is None:
-        return {name: [] for name in CURVES}
-    equity = np.asarray(backtest.equity["strategy"], dtype=np.float64) + 1.0
-    rows = report.rows
-    ts = np.linspace(rows.first_ts, rows.last_ts, equity.size).astype(np.int64)
-    fall = equity / np.maximum.accumulate(equity) - 1.0
-    close: list[float | None] = [None] * equity.size
-    if backtest.setup.get("benchmark") == SetupBenchmark.buy_and_hold.value:
-        close = [value + 1.0 for value in backtest.equity["benchmark"]]
-    return {
-        "ts": ts.tolist(),
-        "close": close,
-        "equity": equity.tolist(),
-        "drawdown": fall.tolist(),
+def _returns(benchmarks: Mapping[str, float | None]) -> dict[str, dict[str, float | None]]:
+    return {benchmark: {"total_return": value} for benchmark, value in benchmarks.items()}
+
+
+def _read_light(series: bytes | None, trades: bytes | None) -> dict[str, Any]:
+    """The stored light series and trades given (CPU work, in a thread)."""
+    shown: dict[str, Any] = {}
+    if series is not None:
+        shown["series"] = read_series(series)
+    if trades is not None:
+        shown["trades"] = read_trades(trades)
+    return shown
+
+
+def _stored_document(
+    backtest: Backtest,
+    spec: RunSpec,
+    report: RunReport,
+    shown: dict[str, Any],
+    author: DocumentAuthor,
+) -> dict[str, Any]:
+    """The light document of a finished backtest from what its run stored."""
+    built = _document(backtest, spec, report, shown=shown, author=author)
+    # The rows and the alignment the run found, as a build from the candles finds them again.
+    built["data"]["rows"] = report.rows.model_dump(mode="json")
+    built["data"]["align"] = report.align.model_dump(mode="json")
+    return built
+
+
+# The columns of the series and the trades, which the summary view leaves empty.
+_SERIES_COLUMNS = tuple(SeriesColumns.model_fields)
+_TRADE_COLUMNS = tuple(field.alias or name for name, field in TradeColumns.model_fields.items())
+
+
+def summarized(built: dict[str, Any]) -> dict[str, Any]:
+    """The summary view of a light document (``light`` without the series and the trades):
+    its ``results`` have the statistics and the benchmarks' returns, and the series and the
+    trades of the document's form left empty (``count`` 0; ``trades.total`` still how many
+    trades the run had)."""
+    shown = built["results"]
+    if shown is None:
+        return built
+    day = built["data"]["rows"]["count"] > LIGHT_ROWS
+    total = shown["stats"]["num_trades"]
+    columns = [name for name in _SERIES_COLUMNS if not day or name not in ("prediction", "signal")]
+    empty = {
+        **shown,
+        "series": {
+            "resolution": "day" if day else "candle",
+            "count": 0,
+            "columns": {name: [] for name in columns},
+            "benchmarks": {benchmark: [] for benchmark in shown["benchmarks"]},
+        },
+        "trades": {
+            "count": 0,
+            "total": total,
+            "complete": total == 0,
+            "columns": {name: [] for name in _TRADE_COLUMNS},
+        },
     }
+    return {**built, "results": empty}
+
+
+def _again(
+    spec: RunSpec,
+    candles: pl.DataFrame,
+    blob: bytes,
+    held: Mapping[str, pl.DataFrame],
+    *,
+    light: bool,
+) -> tuple[Run | None, dict[str, Any] | None]:
+    """The engine's run of a finished backtest again and its ``results`` group (CPU work, in a
+    thread); neither when the candles changed so much that no prediction lands on one."""
+    try:
+        done = run(
+            candles,
+            read_predictions(blob),
+            period=spec.data.period,
+            decision=spec.decision,
+            execution=spec.execution,
+            periods_per_year=spec.metrics.periods_per_year,
+        )
+    except NothingToTest:
+        return None, None
+    return done, results(done, spec.benchmarks, light=light, held=held)
 
 
 def _finished(  # noqa: PLR0913 (what a build of the document is made of)
@@ -477,19 +613,8 @@ def _finished(  # noqa: PLR0913 (what a build of the document is made of)
     """The document of a finished backtest, its results built again (CPU work, in a thread).
     ``held`` has the candles of the index fund of each benchmark that holds one, by its ID."""
     changed = candles.fingerprint != report.loaded.fingerprint
-    try:
-        done = run(
-            candles.frame,
-            read_predictions(blob),
-            period=spec.data.period,
-            decision=spec.decision,
-            execution=spec.execution,
-            periods_per_year=spec.metrics.periods_per_year,
-        )
-    except NothingToTest:
-        # The candles changed so much that no prediction lands on one any more.
-        return dumps(_document(backtest, spec, report, author=author, changed=changed))
-    shown = results(done, spec.benchmarks, light=light, held=held)
+    # Without a run the candles changed so much that no prediction lands on one any more.
+    done, shown = _again(spec, candles.frame, blob, held, light=light)
     return dumps(_document(backtest, spec, report, done, shown, author=author, changed=changed))
 
 

@@ -794,21 +794,27 @@ download gets everything.
 ### Stored, and built on request
 
 The engine is deterministic: the same candles, predictions and settings give the same bytes. A
-backtest stores only what cannot be recomputed quickly:
+backtest stores what cannot be recomputed quickly, and its light view, so reading it never
+loads candles:
 
 | Stored | Size | Why |
 | --- | --- | --- |
-| the setup: the model (ID, name, SHA-256, a copy of its manifest), the instrument and period, the decision and the execution settings | a few KB | the run cannot be repeated without it |
+| the setup: the model (ID, name, SHA-256, a copy of its manifest without its `example` and `about`), the instrument and period, the decision and the execution settings | a few KB | the run cannot be repeated without it |
 | the predictions: `ts` and `prediction` per row, Parquet | about 140 KB for 10 years of 30-minute stock candles, 700 KB for crypto | running the model is the slow part |
 | `stats`, the 12 metrics | 1 KB | the Backtests list and the Dashboard sort by them |
-| the curves: `ts`, `close`, `equity` and `drawdown` of the light series, Parquet | at most about 240 KB (10,000 rows), about 90 KB for 10 years per day | comparing backtests loads no candles |
+| the light series (each benchmark's equity among its columns) and the light trades, Parquet, and each benchmark's total return | up to about 120 KB and 250 KB | the light view and `get_backtest` load no candles and run no engine |
+| the curves: `ts`, `close`, `equity` and `drawdown` of the light series cut to 1,000 points, Parquet | about 10 to 30 KB | comparing backtests loads no candles |
 | the fingerprint and range of the loaded candles | under 1 KB | tells whether the candles changed since |
 
-The series, the trades and the document itself are built when they are asked for: the candles
-from the cache (and those of the index fund a benchmark holds), the stored predictions, then
-`signals`, `backtest` and `metrics`, well under a second. A source can re-adjust old prices (after a split or a dividend); then the candles'
-fingerprint differs, the document says so (`data.changed` is true) and is built from the
-candles as they are now, so its `results.stats` can differ from the stored ones.
+The light view is what the run stored, read back as the same columns, so it is the document a
+build gives, byte for byte, with `data.changed` null. The download is built when it is asked
+for: the candles from the cache (and those of the index fund a benchmark holds), the stored
+predictions, then `signals`, `backtest` and `metrics`, well under a second. A source can
+re-adjust old prices (after a split or a dividend); then the candles' fingerprint differs, the
+download says so (`data.changed` is true) and is built from the candles as they are now, so its
+`results.stats` can differ from the stored ones. A backtest that finished before its light view
+was stored builds it the same way on its first read and stores it, unless its candles changed
+(then every read builds it, `data.changed` true).
 
 ### The shape
 
@@ -932,9 +938,9 @@ compares it with what is printed here; change both together.
 Until a backtest finished, its document has the setup only: `results` is null, and so are
 `software.runner`, `data.loaded`, `changed`, `rows`, `predictions`, `align` and
 `warm_up.dropped` (`warm_up.candles` and `kind` come from the manifest when it starts). As the
-results are built on request, `software.engine_version`, `data.rows` and `data.align` are those
-of the build; `data.loaded` and `data.predictions` are what the run stored, and the Backtests
-list keeps the statistics and the engine version of the run itself.
+download is built on request, its `software.engine_version`, `data.rows` and `data.align` are
+those of the build; `data.loaded` and `data.predictions` are what the run stored, and the
+Backtests list keeps the statistics and the engine version of the run itself.
 
 ### Benchmarks of a backtest
 
@@ -953,7 +959,7 @@ for is refused as the backtest's own period is.
   are 1.0. `total_return` is the last value less 1, null when the fund has no price by the
   last row (the equity is then 1.0 throughout). The run loads the fund's candles once in its
   `candles` step, in the background (a fund that cannot be loaded fails it), and each build of
-  the document loads them again.
+  the download loads them again.
 
 `stats.buy_and_hold_return` and the Backtests list's buy and hold stay buy and hold of the
 backtest's own instrument, whatever the benchmark. The run also stores its benchmark's return
@@ -997,6 +1003,7 @@ row and every trade.
 | Use | Route | Series | Trades |
 | --- | --- | --- | --- |
 | the page, the API | `GET /api/v1/backtests/{id}`, any status (`results` null until it finishes) | light | light |
+| the summary | `GET /api/v1/backtests/{id}?view=summary` | empty (`count` 0) | empty (`count` 0, `total` the run's) |
 | the download | `GET /api/v1/backtests/{id}/download`, an attachment; `409 backtest-not-finished` before it finishes | every row | every trade |
 
 A 10-year run of 30-minute stock candles is about 4 MB as a download (1.4 MB compressed); a

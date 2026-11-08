@@ -3,6 +3,8 @@
 document is built from them (``runs.py``); they are read through these models, as the
 preferences are, so a field added later reads as its default."""
 
+from collections.abc import Mapping
+
 from pydantic import BaseModel, Field
 
 from candlestack.data import InstrumentId
@@ -20,10 +22,21 @@ from candlestack.experiments.document import (
     RunnerOut,
 )
 
+# The parts of a manifest a backtest leaves out of its copy (``run_manifest``).
+_NOT_RUN = ("example", "about")
+
+
+def run_manifest(manifest: Mapping[str, object]) -> dict[str, object]:
+    """The copy of a model's manifest a backtest keeps and sends to the worker: without its
+    example (only the model's check runs it, and it can be large) and its notes for people
+    (``about``), so each of a user's many backtests stores only what it ran with."""
+    return {key: value for key, value in manifest.items() if key not in _NOT_RUN}
+
 
 class SpecModel(BaseModel):
-    """The model when the backtest started: its file and a copy of its manifest, so a later
-    change to the model never changes what the backtest means."""
+    """The model when the backtest started: its file and a copy of its manifest
+    (``run_manifest``), so a later change to the model never changes what the backtest means.
+    One stored before the copy was cut has the manifest's example and notes too."""
 
     name: str
     framework: str
@@ -84,3 +97,7 @@ class RunReport(BaseModel):
     align: AlignOut
     runner: RunnerOut | None
     timings: dict[str, float | None] = Field(default_factory=dict)
+    # Each benchmark's total return by its ID, stored with the light series and trades
+    # (``Backtest.series``, ``trades``); None for a backtest that finished before they were,
+    # until its document is first read.
+    benchmarks: dict[str, float | None] | None = None
