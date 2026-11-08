@@ -171,6 +171,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backtests/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Backtest
+         * @description Checks a new backtest as `POST /api/v1/backtests` does, with the same body and the same
+         *     problems, and starts nothing: what would run (the model, the instrument as the catalog has
+         *     it, the model's timeframe and session, the warm-up) and whether it would wait in the
+         *     user's queue. An API key needs only the scope `read`.
+         */
+        post: operations["check_backtest_api_v1_backtests_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backtests/{backtest_id}": {
         parameters: {
             query?: never;
@@ -780,6 +803,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/models/{model_id}/manifest/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Manifest
+         * @description Checks a manifest for the model as `PUT /api/v1/models/{model_id}/manifest` would, and
+         *     keeps nothing: a dry run, for an editor or an agent to fix the manifest before it sets it.
+         *     The body is the manifest. `valid` says whether every check passed; else `problems` lists
+         *     what is wrong, at most 10, each with the `field` it is about, a `detail` of one sentence
+         *     and the values that fit there (`allowed`). It changes nothing, so an API key needs only
+         *     `read`.
+         */
+        post: operations["check_manifest_api_v1_models__model_id__manifest_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/oauth/authorize": {
         parameters: {
             query?: never;
@@ -1228,6 +1276,45 @@ export interface components {
              * @description What the app asks for, in the order read, backtests, models, publish; read is always granted
              */
             scopes: components["schemas"]["ScopeOut"][];
+        };
+        /**
+         * BacktestCheck
+         * @description What a start with this setup would run: every check of `POST /api/v1/backtests` passed
+         *     and nothing was stored.
+         */
+        BacktestCheck: {
+            /**
+             * Benchmarks
+             * @description As the run would store them: the instrument IDs as the catalog writes them
+             */
+            benchmarks: components["schemas"]["BenchmarkOut"][];
+            instrument: components["schemas"]["InstrumentOut"];
+            model: components["schemas"]["CheckedModel"];
+            period: components["schemas"]["Period"];
+            /**
+             * Queue Position
+             * @description Where it would wait in the user's queue (1 starts next); null when it would start now
+             */
+            queue_position: number | null;
+            /**
+             * Session
+             * @description The model's session
+             * @example regular
+             */
+            session: string;
+            /**
+             * Starts
+             * @description `queued` while another backtest of the user runs or waits
+             * @enum {string}
+             */
+            starts: "now" | "queued";
+            /**
+             * Timeframe
+             * @description The model's timeframe
+             * @example 30m
+             */
+            timeframe: string;
+            warm_up: components["schemas"]["CheckedWarmUp"];
         };
         /**
          * BacktestCounts
@@ -2193,6 +2280,45 @@ export interface components {
          * @enum {string}
          */
         CheckPart: "trial_run" | "example";
+        /** CheckedModel */
+        CheckedModel: {
+            /**
+             * Framework
+             * @example keras
+             */
+            framework: string;
+            /**
+             * Id
+             * @example mdl_k2m9qx47f3
+             */
+            id: string;
+            /**
+             * Name
+             * @example raw-candles.keras
+             */
+            name: string;
+        };
+        /** CheckedWarmUp */
+        CheckedWarmUp: {
+            /**
+             * Candles
+             * @description Candles the model needs before the period, loaded with it
+             * @example 24
+             */
+            candles: number;
+            /**
+             * Kind
+             * @description `estimate` for a representation whose need depends on the prices (Renko, Kagi)
+             * @enum {string}
+             */
+            kind: "exact" | "estimate";
+            /**
+             * Load Start
+             * @description Where the load with the warm-up starts, UTC epoch seconds
+             * @example 1717329600
+             */
+            load_start: number;
+        };
         /**
          * ClientOut
          * @description The app as it describes itself: anyone can register an app named Claude, so the host it
@@ -3356,6 +3482,67 @@ export interface components {
              * @constant
              */
             version: 1;
+        };
+        /**
+         * ManifestCheckOut
+         * @description The result of checking a manifest without keeping it.
+         */
+        ManifestCheckOut: {
+            /**
+             * More Problems
+             * @description Problems found beyond those listed
+             * @example 0
+             */
+            more_problems: number;
+            /**
+             * Problems
+             * @description What is wrong, at most 10; empty when it is valid
+             */
+            problems: components["schemas"]["ManifestProblemOut"][];
+            /**
+             * Unknown Blocks
+             * @description The blocks it names that the catalog does not have
+             * @example []
+             */
+            unknown_blocks: string[];
+            /**
+             * Valid
+             * @description Every check passed: setting this manifest would make the model `ready`
+             */
+            valid: boolean;
+        };
+        /**
+         * ManifestProblemOut
+         * @description One thing wrong with a manifest, in a form to fix it from.
+         */
+        ManifestProblemOut: {
+            /**
+             * Allowed
+             * @description The values that fit in `field` when the check knows them: the blocks of the step, the fields or parameters of the object, the options of a choice, the shape to give; empty when nothing fits (a block without parameters); null when the check does not say
+             * @example [
+             *       "close@1",
+             *       "rsi@1"
+             *     ]
+             */
+            allowed: unknown[] | null;
+            /**
+             * Check
+             * @description The check that found it: `schema` (the form), `catalog` (the blocks and their steps), `params` (a block's parameters), `names` (the columns' names), `signature` (against the window and the columns), `example` (its shapes) or `model` (against the input and output the upload read from the model file)
+             * @enum {string}
+             */
+            check: "schema" | "catalog" | "params" | "names" | "signature" | "example" | "model";
+            /**
+             * Detail
+             * @description What is wrong, in one sentence, and sometimes a second that says what to do
+             * @example The catalog has no block pocket-pivot@1 yet, so it cannot run.
+             */
+            detail: string;
+            /**
+             * Field
+             * @description The field of the manifest it is about, as a path; null when it is about the whole document
+             * @example input.features[2].id
+             */
+            field: string | null;
         };
         /**
          * ManifestSummary
@@ -5076,6 +5263,102 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BacktestDocument"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no model with this ID (`not-found`), or the instrument is not in the catalog (`instrument-not-found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The model has no manifest (`model-needs-setup`), or the user has 20 backtests waiting already (`queue-full`, with `limit`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description An invalid setup (`validation`), a model of another market (`instrument-not-for-model`), a period outside the data (`period-out-of-range`), without the candles the model needs before it (`warm-up-out-of-range`), or with more candles than allowed (`too-many-candles`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A data source sent candles that failed validation (`source-data-invalid`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    check_backtest_api_v1_backtests_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestCheck"];
                 };
             };
             /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
@@ -7227,7 +7510,89 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description A check failed (`manifest-check-failed`): `problems` lists what is wrong, at most 10, each with its `check` (`schema`, `catalog`, `params`, `names`, `signature`, `example` or `model`) and a `detail` of one sentence; `more_problems` counts the rest and `unknown_blocks` names the blocks the catalog does not have. `detail` says the same in words. */
+            /** @description A check failed (`manifest-check-failed`): `problems` lists what is wrong, at most 10, each with its `check` (`schema`, `catalog`, `params`, `names`, `signature`, `example` or `model`), the `field` it is about (a path such as `input.features[2].id`, null for the whole manifest), a `detail` of one sentence and the values that fit there in `allowed` (null when the check does not say); `more_problems` counts the rest and `unknown_blocks` names the blocks the catalog does not have. `detail` says the same in words. `POST /api/v1/models/{model_id}/manifest/check` runs the same checks and keeps nothing. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    check_manifest_api_v1_models__model_id__manifest_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Public ID of the model */
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        /** @description The manifest (docs/preprocessing.md), as JSON */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Manifest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManifestCheckOut"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no model with this ID (`not-found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The manifest is larger than 1 MB (`manifest-too-large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from candlestack.preprocessing import Check
+
 # The name of a model without its extension, as the Rename dialog edits it.
 NAME_MAX = 60
 # Limits of the uploaded files (binary megabytes, as the app shows them).
@@ -278,4 +280,46 @@ class ModelUploadCreated(ModelUploadOut):
             "curl --fail-with-body -T lstm-signals.keras https://app.candlestack.tech/api/v1/uploads/"
             + "x" * 40
         ],
+    )
+
+
+class ManifestProblemOut(BaseModel):
+    """One thing wrong with a manifest, in a form to fix it from."""
+
+    check: Check = Field(
+        description="The check that found it: `schema` (the form), `catalog` (the blocks and "
+        "their steps), `params` (a block's parameters), `names` (the columns' names), "
+        "`signature` (against the window and the columns), `example` (its shapes) or `model` "
+        "(against the input and output the upload read from the model file)"
+    )
+    field: str | None = Field(
+        description="The field of the manifest it is about, as a path; null when it is about "
+        "the whole document",
+        examples=["input.features[2].id"],
+    )
+    detail: str = Field(
+        description="What is wrong, in one sentence, and sometimes a second that says what to do",
+        examples=["The catalog has no block pocket-pivot@1 yet, so it cannot run."],
+    )
+    allowed: list[Any] | None = Field(
+        description="The values that fit in `field` when the check knows them: the blocks of "
+        "the step, the fields or parameters of the object, the options of a choice, the shape "
+        "to give; empty when nothing fits (a block without parameters); null when the check "
+        "does not say",
+        examples=[["close@1", "rsi@1"]],
+    )
+
+
+class ManifestCheckOut(BaseModel):
+    """The result of checking a manifest without keeping it."""
+
+    valid: bool = Field(
+        description="Every check passed: setting this manifest would make the model `ready`"
+    )
+    problems: list[ManifestProblemOut] = Field(
+        description="What is wrong, at most 10; empty when it is valid"
+    )
+    more_problems: int = Field(description="Problems found beyond those listed", examples=[0])
+    unknown_blocks: list[str] = Field(
+        description="The blocks it names that the catalog does not have", examples=[[]]
     )
