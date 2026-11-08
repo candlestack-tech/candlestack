@@ -15,7 +15,7 @@ are now. The comparison reads only what the run stored (``stored``), so it never
 from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from functools import partial
-from typing import Any
+from typing import Any, NamedTuple
 
 import anyio
 import numpy as np
@@ -99,6 +99,21 @@ _REPRESENTATIONS = {"renko": Representation.renko, "kagi": Representation.kagi}
 CANCELLED = "You cancelled the backtest before it ran."
 
 
+class Prepared(NamedTuple):
+    """A new backtest after the reads of its checks (``BacktestRuns.prepare``): the user's
+    model, the manifest it runs with, the instrument and the body with its benchmarks checked."""
+
+    model: Model
+    manifest: Manifest
+    instrument_id: InstrumentId
+    body: BacktestIn
+
+    @property
+    def representation(self) -> Representation:
+        """What the model reads, as the app names it."""
+        return Representation(_representation(self.manifest))
+
+
 class BacktestRuns:
     def __init__(
         self, store: BacktestStore, data: DataService, runner: BacktestRunner, app_version: str
@@ -118,6 +133,37 @@ class BacktestRuns:
             BacktestsUnavailable, and the data module's errors of the instrument and the
             period (``data.DataError``).
         """
+        prepared = await self.prepare(user_id, body)
+        author = DocumentAuthor(id=user_id, name=await self._store.author_name(user_id), mine=True)
+        # Before the slower checks; again under the lock below, where it counts.
+        if await self._store.queued(user_id) >= QUEUE_MAX:
+            raise QueueFull
+        await self.ready()
+        spec = await self.spec(prepared)
+        await self._store.lock_user(user_id)
+        if await self._store.queued(user_id) >= QUEUE_MAX:
+            raise QueueFull
+        # The model may have been deleted meanwhile; held now until the backtest is stored.
+        if not await self._store.hold_model(user_id, prepared.model.id):
+            raise ModelNotFound
+        backtest = self.new_backtest(
+            user_id, prepared, spec, number=await self._store.last_number(user_id) + 1
+        )
+        await self._store.add_named(backtest)
+        started = await self.take_next(user_id)
+        position = await self._store.queue_position(backtest.id)
+        await self._store.commit()
+        self.run(started)
+        document = _document(backtest, spec, author=author, queue_position=position)
+        return backtest, dumps(document)
+
+    async def prepare(self, user_id: str, body: BacktestIn) -> Prepared:
+        """The reads of a new backtest's checks: its benchmarks, and the user's model with the
+        manifest it runs with on the instrument.
+
+        Raises:
+            InvalidBacktest, ModelNotFound, ModelNeedsSetup, InstrumentNotForModel.
+        """
         instrument_id = InstrumentId.parse(body.data.instrument.id)
         body = body.model_copy(
             update={"benchmarks": _check_benchmarks(body.benchmarks, instrument_id)}
@@ -125,29 +171,37 @@ class BacktestRuns:
         model = await self._store.run_model(user_id, body.model.id)
         if model is None:
             raise ModelNotFound
-        manifest = _manifest(model, instrument_id)
-        author = DocumentAuthor(id=user_id, name=await self._store.author_name(user_id), mine=True)
-        # Before the slower checks; again under the lock below, where it counts.
-        if await self._store.queued(user_id) >= QUEUE_MAX:
-            raise QueueFull
-        # The reads so far end here, so no connection waits on the queue and the data module.
+        return Prepared(model, _manifest(model, instrument_id), instrument_id, body)
+
+    async def ready(self) -> None:
+        """Ends the reads, so no connection waits on the queue and the data module, and checks
+        that the worker's queue answers.
+
+        Raises:
+            BacktestsUnavailable.
+        """
         await self._store.commit()
         try:
             await self._runner.ping()
         except RedisError as error:
             raise BacktestsUnavailable from error
-        spec = await self._spec(model, manifest, instrument_id, body)
-        await self._store.lock_user(user_id)
-        if await self._store.queued(user_id) >= QUEUE_MAX:
-            raise QueueFull
-        # The model may have been deleted meanwhile; held now until the backtest is stored.
-        if not await self._store.hold_model(user_id, model.id):
-            raise ModelNotFound
-        backtest = Backtest(
+
+    def new_backtest(
+        self,
+        user_id: str,
+        prepared: Prepared,
+        spec: RunSpec,
+        *,
+        number: int,
+        sweep_id: str | None = None,
+    ) -> Backtest:
+        """The row of a new backtest, at the end of the user's queue (``queued``): it runs at
+        once when it is the queue's first."""
+        model, manifest, instrument_id = prepared.model, prepared.manifest, prepared.instrument_id
+        return Backtest(
             id=new_backtest_id(),
             user_id=user_id,
-            number=await self._store.last_number(user_id) + 1,
-            # At the end of the queue; it runs at once when it is the queue's first.
+            number=number,
             status=BacktestStatus.queued.value,
             instruments=[{"market": instrument_id.market, "symbol": instrument_id.symbol}],
             representation=_representation(manifest),
@@ -158,17 +212,20 @@ class BacktestRuns:
             spec=spec.model_dump(mode="json"),
             input_shape=list(manifest.signature.input.shape),
             steps=pending(),
+            sweep_id=sweep_id,
             created_at=datetime.now(UTC),
         )
-        await self._store.add_named(backtest)
-        # Also an older one, should the queue have stood still (``BacktestRunner.resume``).
-        started = await self._store.take_next(user_id, datetime.now(UTC))
-        position = await self._store.queue_position(backtest.id)
-        await self._store.commit()
+
+    async def take_next(self, user_id: str) -> Backtest | None:
+        """Marks the user's oldest queued backtest running, under ``lock_user``, while none of
+        theirs runs: the one just stored, or an older one should the queue have stood still
+        (``BacktestRunner.resume``). Hand it to ``run`` once committed."""
+        return await self._store.take_next(user_id, datetime.now(UTC))
+
+    def run(self, started: Backtest | None) -> None:
+        """Runs the backtest ``take_next`` started, once its transaction committed."""
         if started is not None:
             self._runner.start(started.id)
-        document = _document(backtest, spec, author=author, queue_position=position)
-        return backtest, dumps(document)
 
     async def cancel(self, user_id: str, backtest_id: str) -> bytes:
         """Cancels the user's queued backtest: it fails, as cancelled, and never runs. Returns
@@ -190,12 +247,15 @@ class BacktestRuns:
         _, content = await self.document(user_id, backtest_id, light=True)
         return content
 
-    async def _spec(
-        self, model: Model, manifest: Manifest, instrument_id: InstrumentId, body: BacktestIn
-    ) -> RunSpec:
+    async def spec(self, prepared: Prepared) -> RunSpec:
         """The setup to store: the model with its manifest, the instrument as the catalog has
         it and where the load with the warm-up starts (the period checked against the data, of
-        the index fund a benchmark holds too)."""
+        the index fund a benchmark holds too).
+
+        Raises:
+            The data module's errors of the instrument and the period (``data.DataError``).
+        """
+        model, manifest, instrument_id, body = prepared
         timeframe = Timeframe(manifest.input.timeframe)
         needed = warm_up(manifest)
         period = body.data.period
@@ -289,8 +349,7 @@ class BacktestRuns:
         """The light result document of the user's backtest, or of another account's while it
         is published, from what its run stored and never the data source: what the comparison
         reads. ``results`` has only the statistics and the series' ``CURVES`` columns (null
-        until it finished), and ``data`` and ``backtest`` none of what the rows or the queue
-        would tell.
+        until it finished), ``data`` no alignment and ``backtest`` no queue position.
 
         Raises:
             BacktestNotFound, NoDocument.
@@ -314,7 +373,10 @@ class BacktestRuns:
         else:
             columns = read_curves(backtest.curves)
         shown = {"stats": backtest.stats, "series": {"columns": columns}}
-        return _document(backtest, spec, report, shown=shown, author=author)
+        document = _document(backtest, spec, report, shown=shown, author=author)
+        # The rows the run found, as a rebuild of the document finds them again.
+        document["data"]["rows"] = report.rows.model_dump()
+        return document
 
 
 def _short_curves(backtest: Backtest, report: RunReport) -> dict[str, list[Any]]:
@@ -391,6 +453,8 @@ def _document(  # noqa: PLR0913 (the document's sources)
             published_at=backtest.published_at,
             status=BacktestStatus(backtest.status),
             queue_position=queue_position,
+            # Only the author can open the sweep: others see that there was none.
+            sweep_id=backtest.sweep_id if author.mine else None,
             created_at=backtest.created_at,
             started_at=backtest.started_at,
             finished_at=backtest.finished_at,

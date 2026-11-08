@@ -30,7 +30,7 @@ flowchart LR
         tunnel --> cloudflared["cloudflared"]
         cloudflared --> caddy["edge Caddy<br/>routes by hostname"]
         subgraph envbox["one environment: prod or stage"]
-            caddy -->|"/api/*"| backend["backend<br/>FastAPI on granian :8000"]
+            caddy -->|"/api/*, /mcp"| backend["backend<br/>FastAPI on granian :8000"]
             caddy -->|"everything else"| frontend["frontend<br/>static page, Caddy :8080"]
             backend --> redis[("redis<br/>cache only")]
             backend --> postgres[("postgres<br/>users, sessions, settings, models, backtests")]
@@ -101,8 +101,12 @@ flowchart LR
 | `GET /api/v1/backtests` | a page of 10 of the user's backtests: search `q` (name, number, symbol or model name), `show` (`all`, `starred`, `failed`, `public`), `model` (a model's name), `sort` and `order`, `page`; with the total, the pages and what the filter panel shows (the counts of all, starred, failed and published backtests, the models used) ([Backtests](#backtests)) |
 | `PATCH /api/v1/backtests/{backtest_id}` | stars, unstars, renames (`409 name-taken`; a name of null goes back to the generated one), publishes or unpublishes the user's backtest |
 | `GET /api/v1/experiments` | a page of 12 of the backtests every account published ([Experiments](#experiments)): search `q` (the backtest's name, symbol, model name or author's name), `mine` or `author` (a user ID), `market`, `symbol`, `representation`, `timeframe`, `sort` and `order`, `page`; with the total, the pages, the counts (all published, the user's, the accounts that published) and what the filters offer |
-| `GET /api/v1/compare?ids=<id>,<id>` | 2 to 20 backtests side by side, the user's own and others' published ones, as the Compare page shows them ([Compare](#compare)) |
+| `GET /api/v1/compare?ids=<id>,<id>` | 1 to 20 backtests side by side, the user's own and others' published ones, as the Compare page shows them ([Compare](#compare)) |
+| `POST /api/v1/sweeps` | starts a backtest for every combination of a base setup and the lists in `vary` (models, instruments, periods, decision rules), 2 to 20, all in the user's queue or none; 201 with the sweep and `Location`, or with `validate_only` 200 with the count and each setup and nothing started ([Sweeps](#sweeps)) |
+| `GET /api/v1/sweeps/{sweep_id}` | the user's sweep: progress, each backtest's ID, status and setup, and once all ended the ranking by `metric` (the sweep's own unless the query names another) ([Sweeps](#sweeps)) |
 | `GET /api/v1/dashboard` | everything the Dashboard shows in one response: the counts, the 6 newest backtests, the 5 best finished ones by Sharpe ratio, return, drawdown and win rate, the 4 best starred ones, and the 4 newest published backtests of anyone with how many are published |
+| `POST /mcp` (and `GET`, `DELETE`) | the MCP server, Streamable HTTP, signed in with an API key only ([MCP](#mcp)); not in the API reference |
+| `GET /.well-known/oauth-protected-resource/mcp` | the MCP server's protected resource metadata (RFC 9728): its address, scopes and docs; not in the API reference |
 | `GET /api/v1/docs` | API reference (Scalar); public on prod |
 | `GET /api/v1/openapi.json` | OpenAPI schema; snapshot committed as [openapi.json](openapi.json) |
 
@@ -151,7 +155,11 @@ flowchart LR
   backtest and its number); it uses `not-found` (404: no backtest or model of the user with the
   ID; for a result document, also no published backtest of another account with it),
   `validation` (422, also a benchmark of
-  another instrument, or of SPY, QQQ or DIA on a crypto backtest), and the data module's
+  another instrument, or of SPY, QQQ or DIA on a crypto backtest, and a sweep of fewer than 2 or
+  more than 20 backtests, the latter with `count` and `limit`), `queue-full` for a sweep too
+  (409: the queue has room for fewer than its backtests, with `limit`, `count` and `room`), a
+  sweep's setup that fails a check with that check's problem and `setup` (the setup's place in
+  the grid, from 1), and the data module's
   `warm-up-out-of-range`, `period-out-of-range`, `too-many-candles`, `instrument-not-found`,
   `source-unavailable` and `source-data-invalid` for the instrument and the period (and the
   fund a benchmark holds).
@@ -227,8 +235,10 @@ flowchart LR
   (the dev user's keys work where the dev sign-in does). A request with a key ignores any
   cookie; a wrong key is 401 `invalid-api-key`, whatever is wrong with it. Each key has 120
   requests a minute (Redis, 429 `rate-limited` with `Retry-After`), and its `last_used_at`
-  is written at most once a minute. At most 10 keys of a user are neither revoked nor
-  expired; creating one locks the user's row, so two at once cannot pass the limit. A revoked
+  is written at most once a minute, in a transaction of its own on another connection: best
+  effort, a failed write is a warning and the request goes on. At most 10 keys of a user are
+  neither revoked nor expired; creating one locks the user's row, so two at once cannot pass
+  the limit, and draws a second key when the first one's prefix is taken. A revoked
   key keeps its row and leaves the list; an expired one stays listed until it is revoked.
 - **Scopes**: the dependency a route takes decides what a key may do there
   (`accounts.dependencies`), and a new route is closed to keys until it says otherwise.
@@ -238,8 +248,8 @@ flowchart LR
   backtest PATCH takes `CallerDep` and needs `publish` for `public`, `backtests` for the rest;
   `SessionUserDep` refuses every key (the keys themselves, deleting the account, sign-in
   methods, signing out everywhere; signing out refuses keys too). The API reference shows
-  the scheme `apiKey` with the scope of each route, rewritten from the dependencies by
-  `accounts.document_api_keys`.
+  the scheme `apiKey` (`accounts.API_KEY_SCHEME`) with the scope of each route, rewritten from
+  the dependencies by `accounts.document_api_keys`.
 - Every route of the signed-in user that returns user data sends `Cache-Control: no-store`, and
   every change requires the app's own origin, except a request with an API key and no cookie
   at all (`core.require_same_origin`): nothing the browser adds by itself signs it in, and no
@@ -614,8 +624,10 @@ checked at the next start.
   trades, how long the run took, the engine version), a short equity series, the model's input
   shape (`input_shape`, JSONB: rows by features, from the signature of the manifest it ran
   with), the error of a failed one, the star, when it was started (`created_at`), began to run
-  (`started_at`, null while it is queued) and finished, and when it was
-  published (`published_at`, null while it is not). Results are null for a failed backtest. A
+  (`started_at`, null while it is queued) and finished, when it was
+  published (`published_at`, null while it is not) and the sweep that started it (`sweep_id`,
+  a foreign key to `sweeps` that becomes null should the sweep go; null for one started
+  alone). Results are null for a failed backtest. A
   backtest run in the app also stores (deferred columns, which the list and the Dashboard
   never read) what the result document is built from (docs/engine.md, "Stored, and built on
   request"): `spec` (JSONB: the model's name, framework, SHA-256, size and a copy of its
@@ -837,13 +849,15 @@ The backtests users published, which every signed-in account (the beta list's) c
 
 ## Compare
 
-`GET /api/v1/compare?ids=bt_a,bt_b,...` (`experiments/compare.py`) compares 2 to 20 backtests, so
-an agent gets the app's verdict without downloading and comparing the documents itself.
+`GET /api/v1/compare?ids=bt_a,bt_b,...` (`experiments/compare.py`) compares 1 to 20 backtests, so
+an agent gets the app's verdict without downloading and comparing the documents itself, and the
+Compare page shows the same answer (#401). One alone is listed with nothing marked: the page shows
+a single backtest that way while it asks for one more.
 
 - **Access** is that of `GET /api/v1/backtests/{backtest_id}`: the user's own, whatever their
   status, and others' while published, in the order asked for; an ID the user cannot see is
-  `404 not-found` and test data `409 no-document`, each with `id` naming that backtest. Fewer
-  than 2 or more than 20 IDs, an empty one or one twice is `422 validation`.
+  `404 not-found` and test data `409 no-document`, each with `id` naming that backtest. More
+  than 20 IDs, an empty one or one twice is `422 validation`.
 - **Only what is stored** (`BacktestRuns.stored`): the setup (`spec`), the statistics (`stats`)
   and the curves (`curves`) each backtest stored when it ran, never the candles, so it makes no
   request to a data source. Rebuilding the documents did: on stage three backtests spent
@@ -851,15 +865,17 @@ an agent gets the app's verdict without downloading and comparing the documents 
   integration test swaps the data module for one that fails on any use.
 - **Statistics** (`metrics`): the 12 of `results.stats` in the Compare table's order, each with
   `better` (`higher`, `lower` or `none`), the value of each backtest and its mark, `best`,
-  `worst` or null. The rules are the page's (`frontend/src/features/backtests/compare/rows.ts`):
+  `worst` or null, which the page shows as they are (its `rows.ts` only writes the values):
   a fall counts by its size whatever its sign, fees are better lower, the trades, the time in
   the market and buy and hold are better neither way; values that read the same on the page
   (one decimal of a percent, two of the average trade and of a ratio) count as equal; nothing is
   marked with fewer than two values or when all are equal. A running or failed backtest is
   listed with its status (and error) and null values and marks.
-- **Setups**: each backtest's `setup` (instrument, model file, what it reads, timeframe, period,
-  `decision`, `execution`, the benchmarks' instruments) and `differs`, the dotted paths of the
-  fields whose values differ (one only some have counts).
+- **Setups**: each backtest's `setup` (instrument, model file, what it reads, the model's input
+  shape from its manifest's signature, timeframe, period, `decision`, `execution`, the
+  benchmarks' instruments) and `differs`, the dotted paths of the fields whose values differ
+  (one only some have counts). `candles`, beside the setup, is how many candles of its period it
+  ran on (null without results), so it never counts as a difference of the setups.
 - **Curves**: `times`, at most 200 times shared by all (the first and the last of each series,
   the rest evenly spaced from the earliest to the latest), and for each backtest `equity` (its
   cumulative return), `drawdown` (its fall from the top, 0 or below) and `buy_and_hold` (the
@@ -874,8 +890,121 @@ an agent gets the app's verdict without downloading and comparing the documents 
   finished before `curves` was stored is drawn from its short equity series (at most 60 points
   from its first row to its last, the drawdown of those points, buy and hold only when its
   benchmark held its own instrument): its candles are not stored, so no migration can work the
-  curves out. About 20 KB for four backtests over their whole axes, against the four whole
-  documents the page loads today.
+  curves out. About 22 KB (4 KB gzipped) for four backtests over their whole axes; the four
+  light documents the page loaded before were 5 to 6 MB (1.6 to 2.1 MB gzipped).
+
+## Sweeps
+
+`POST /api/v1/sweeps` (`experiments/sweeps.py`) runs a grid of setups in one request, and
+`GET /api/v1/sweeps/{sweep_id}` ranks them, so an agent can ask which combination of
+representation, model and post-processing does best without starting and comparing 20
+backtests itself.
+
+- **The grid**: `base` is the body of `POST /api/v1/backtests`, `vary` has lists that replace
+  its values: `models` (IDs), `instruments`, `periods` and `rules` (a `decision.rule` each). A
+  list left out or empty keeps the base's value; each value once per list (two spellings of one
+  instrument count as one), at most 20 per list. The base still needs its model and instrument
+  when `models` or `instruments` replace them. An unknown field of the request is `422
+  validation` (the base alone ignores them, as `POST /api/v1/backtests` does), so a mistyped
+  `validate_only` never starts a sweep. Every combination is one backtest, in the order models,
+  instruments, periods, rules. The
+  representation and the timeframe are the model's manifest's, so a sweep varies them by
+  listing models that read them. A buy and hold benchmark of the base's instrument holds each
+  backtest's own instrument; a fund (SPY, QQQ, DIA) stays.
+- **Limits**: 2 to 20 backtests (`422 validation`, the size counted before the grid is built,
+  with `count` and `limit` above 20), and the user's queue must have room for all of them:
+  `409 queue-full` with `limit`, `count` and `room` when fewer than `count` places of the 20
+  are free (checked after the reads and again under the lock of the user).
+- **Checks**: every setup passes the checks of `POST /api/v1/backtests` (`BacktestRuns.prepare`
+  and `spec`) before anything is stored; the first that fails answers with its problem, its
+  detail prefixed `Setup N of the sweep:` and `setup` N (from 1). Then, under the lock of the
+  user, the models are held, the sweep is stored and its backtests are added at the end of the
+  queue in the grid's order (consecutive numbers), and the first starts when nothing of the
+  user runs: all in one transaction, so a sweep starts whole or not at all. `validate_only`
+  runs the same checks, the queue's room included, and answers 200 with `count`, `limit`,
+  `queue_room` and each setup, storing nothing.
+- **Table** `sweeps`: `id` (`sw_` and 10 characters), the user (cascade), `metric` (the
+  statistic it ranks by, `sharpe` unless the request names another), `grid` (JSONB: each
+  setup with its backtest's ID: model ID and name, representation, timeframe, instrument,
+  period, rule) and `created_at`. Its backtests are ordinary rows of `backtests` with
+  `sweep_id` (a partial index finds them): in the list, comparable, publishable and cancellable
+  one by one, run by the queue as any other. The result document of another user's published
+  backtest has `sweep_id` null, as its model ID: only the author can open the sweep.
+- **Progress**: how many of its backtests are queued, running, finished and failed, and each
+  one's ID, number, name, status, place in the queue, error and setup; `done` once none is
+  queued or running.
+- **Ranking**, once done: the backtests by the metric (`metric` of the query, else the sweep's),
+  one of the 9 statistics with a direction (not the trades, the time in the market or buy and
+  hold), from the `stats` each run stored, with the rules of [Compare](#compare)
+  (`compare.metric_rows`, `compare.ranks`): a fall by its size, the fees lower first, values that
+  read the same in the app share a rank (1, 1, 3), the best and the worst marked as Compare
+  marks them. Failed backtests, and a statistic that is undefined, come last without a rank.
+  The ranking has the IDs, so `GET /api/v1/compare` gives every statistic, the setups and the
+  curves.
+
+## MCP
+
+The `mcp` module serves a remote MCP server at `/mcp` inside the app, on the official Python SDK
+(`mcp`), so Claude, ChatGPT, Cursor and any MCP client use CandleStack. Its tools call the same
+services as the routes (the module builds them from `app.state` and a Postgres session per
+call, as the routes' dependencies do), never the API over HTTP.
+
+- **Transport**: Streamable HTTP, stateless, answers as JSON (`json_response`). Every request
+  stands alone, so any process answers it and a deploy breaks no session; the SDK answers both
+  the 2026-07-28 protocol and the initialize handshake of the earlier ones. `main` adds the
+  routes (`mount_mcp`) and runs the SDK's session manager in the lifespan (`serving_mcp`), last,
+  so it stops first. The SDK's Host check is off (the edge sets the host); a request with an
+  `Origin` other than `PUBLIC_URL` is `403 cross-origin-request`, against DNS rebinding.
+- **Sign-in**: an API key in `Authorization: Bearer`, checked by `accounts.key_caller` as on a
+  route (the hash, revoked, expired, the beta list, 120 requests a minute, the last use); every
+  HTTP request counts, `initialize` and `tools/list` included. Without a key: `401
+  not-signed-in` with `WWW-Authenticate: Bearer resource_metadata="<PUBLIC_URL>/.well-known/oauth-protected-resource/mcp"`,
+  as the MCP authorization spec asks; a key that does not sign in: `401 invalid-api-key` with
+  `error="invalid_token"` and the same URL. The metadata (RFC 9728) names the resource
+  (`<PUBLIC_URL>/mcp`), the scopes and the docs and lists no authorization server until OAuth
+  comes (#408). Cookies play no part.
+- **Scopes per tool**: each tool names the scopes a key needs (`read` for the tools that only
+  read); the server checks them before the tool runs and answers `missing-scope` as the
+  routes do.
+- **Tool convention** (`mcp/convention.py`, checked when the server is built): a `verb_noun`
+  name of at most 32 characters, a title, the docstring as the description a model reads (what
+  it does, when to use it, what it answers; the link to its docs page is added), typed
+  arguments and a Pydantic output model (the input and output schemas), the annotations
+  `readOnlyHint`, `destructiveHint` and `idempotentHint` always set (`openWorldHint` false), and
+  an example call for the tool reference. A tool that only reads needs `read` alone, one that
+  changes data the scope of what it changes.
+- **Errors**: a failed tool call is a tool error (`isError`) whose text is the API's problem as
+  JSON (`type`, `title`, `status`, `detail` and the extensions): the `ProblemError` the tool
+  raised, `validation` (422, with `errors`, never the values) for arguments that do not fit the
+  input schema, `not-found` for an unknown tool, `missing-scope`, and `internal-error` for a
+  crash, which is logged with its traceback (a Sentry issue) and tells the model nothing more.
+- **Instructions and docs**: the server's `instructions` say what CandleStack is, how keys and
+  scopes work, how errors read and link `https://candlestack.tech/docs/agents/` and
+  `https://candlestack.tech/docs/mcp/`; the resource `candlestack://docs` (Markdown) lists the
+  docs pages, the tool reference, the manifest and backtest result references with their JSON
+  Schemas, the problem pages and the API reference.
+- **Tools**: `get_me` (scope `read`): the key's user (ID, name, email, created) and the key's
+  scopes. `validate_sweep` (scope `read`, as the convention asks of a tool that changes nothing,
+  while the dry run over HTTP needs `backtests` because it is the route that starts a sweep; it
+  still runs each setup's checks against the data source, so a read key spends the same
+  requests as a dry run), `run_sweep` (scope `backtests`)
+  and `get_sweep` (scope `read`): the dry run, the start and the progress and ranking of a
+  sweep, on the service of `POST /api/v1/sweeps` and `GET /api/v1/sweeps/{sweep_id}`
+  (`experiments.build_sweeps`, its errors as problems through `experiments.sweep_problems`),
+  answering what the routes answer ([Sweeps](#sweeps)). The tools of the other areas come
+  with #399 and #402 to #405.
+- **Parity table** (`mcp/parity.py`): every endpoint of the API reference, by method and path,
+  maps to the tools that do the same, to `Planned` with the task that adds them, or to
+  `WebOnly` with the reason (sign-in, sessions, the keys themselves, deleting the account,
+  sign-in methods, the theme, health, icons, the file download). A unit test fails when an
+  endpoint has no entry, an entry names an endpoint or tool that does not exist, or a planned
+  tool exists already.
+- **Tool reference**: `uv run python -m candlestack.mcp.reference > ../docs/mcp-tools.json`
+  writes each tool as `tools/list` sends it (name, title, description, annotations, input and
+  output schemas) with its scopes, example and endpoints, the instructions and resources, and
+  the web only endpoints with their reasons. The file is committed, a unit test fails when it
+  is stale (like `openapi.json`), and the website builds `candlestack.tech/docs/mcp/tools/` from
+  it (website#76).
 
 ## Modules
 
@@ -894,7 +1023,8 @@ A module is a subpackage of `candlestack` under `backend/src/candlestack/`.
 | `cli` | started | the `candlestack-bt` command: backtests from files on the command line |
 | `jobs` | now | the job queue between the backend and the worker: the job and its result, the Redis keys, the jobs' files on the shared volume, `JobClient` for the backend ([Worker](#worker)) |
 | `worker` | now | the worker's process (`python -m candlestack.worker`): the loop, the job's process with Keras, the safe load of a model, the built-in candles of a check |
-| `experiments` | now | the backtests: starting and running them (`data`, the worker through `jobs`, `signals`, `engine`, `metrics`), their result documents, the list of the Backtests page, stars, publishing and Experiments, the Dashboard, the models' usage, the seed command |
+| `experiments` | now | the backtests: starting and running them (`data`, the worker through `jobs`, `signals`, `engine`, `metrics`), their result documents, sweeps, the list of the Backtests page, stars, publishing and Experiments, the Dashboard, the models' usage, the seed command |
+| `mcp` | now | the MCP server at `/mcp` ([MCP](#mcp)): sign-in with an API key, the tool convention, the tools, the parity table and the tool reference |
 | `admin` | later | team-only administration (roles, audit) under `/admin` |
 
 Folders for later modules are created when their work starts, not before; `started` marks
@@ -902,14 +1032,15 @@ the ones whose folder exists while their code is being written.
 
 ## Import rules
 
-- Dependencies point one way: `experiments` -> `ml` -> `accounts` | `data` | `jobs` -> `core`.
+- Dependencies point one way: `mcp` -> `experiments` -> `ml` -> `accounts` | `data` | `jobs`
+  -> `core`. `mcp` sits on top, as its tools use every module's services.
   `core` imports no other module, and `jobs` none at all. `experiments` runs the backtests:
   it imports `data`, `jobs`, `preprocessing` (a manifest's warm-up) and the backtest modules
   `signals`, `engine` and `metrics` as well.
 - The backtest modules `signals`, `engine` and `metrics`, and `preprocessing`, stand alone:
   they import no other module of the project, not each other, and no server library
   (`fastapi`, `starlette`, `scalar_fastapi`, `granian`, `redis`, `httpx`, `sentry_sdk`,
-  `pydantic_settings`, `sqlalchemy`, `asyncpg`, `alembic`, `authlib`). They are
+  `pydantic_settings`, `sqlalchemy`, `asyncpg`, `alembic`, `authlib`, `mcp`). They are
   plain functions on Polars frames (Pydantic for their settings and the manifest, NumPy for
   the model's input), put together only by the code that runs them: `cli`, the worker and
   `experiments`. The worker runs `preprocessing` without network, so it must not need
@@ -1074,6 +1205,8 @@ to check that an error reaches Sentry. The Sentry settings are recorded in
 | Changes on behalf of the user require the app's own origin (`core.require_same_origin`), the OAuth round trip a state bound to the browser (Redis and a cookie) and PKCE | every host under candlestack.tech is the same site to the browser, so SameSite cookies alone do not stop a page on another of them; the state stops login CSRF; PKCE stops a stolen code |
 | API keys for scripts and agents: `cs_` and 200 random bits, only the SHA-256 stored, shown once, scopes `read` / `backtests` / `models` / `publish`, optional expiry, `Authorization: Bearer` | a script or an agent (the MCP server next) must not copy the browser's session cookie, which can do everything; a key can be limited, revoked alone and recognised by its prefix, a database leak does not leak keys, and the beta list still applies on every request |
 | A route is closed to API keys unless its dependency opens it (`read` on GET routes, a named scope on changes) | a new route is safe by default, and the reference shows each route's scope from the same dependencies |
+| The MCP server inside the app at `/mcp`, on the official SDK, Streamable HTTP, stateless with JSON answers, signed in with the API keys | its tools call the services the routes call, so the web, the API and MCP stay one layer; stateless needs no session store and survives deploys and more processes; the keys already carry scopes, the beta list and a rate limit, and OAuth for claude.ai and ChatGPT comes on top (#408) |
+| Task-shaped tools on one convention, a parity table checked in CI and a tool reference generated from the server | an agent works in tasks, not endpoints; the table keeps MCP equal to the web app or says why not; the docs cannot drift from the tools |
 | Preferences as one JSONB document per section of Settings, read through Pydantic models with defaults | a new setting needs no migration of the rows; the models validate both what is saved and what is read |
 | Account deletion through hooks that other modules register in `main.py` | `accounts` stays at the bottom of the import graph, yet the account's rows in other modules go with it in one transaction; data outside Postgres (model files) is the hook's to keep consistent with a rollback |
 | An upload is checked statically (the zip, its JSON and the HDF5 metadata) in a limited child process, never loaded; only what an allowlist generated from Keras names passes | loading a Keras file can run code from it (a `Lambda` layer is pickled Python, a `function` object any Keras function), and the API process must run no user's code and carry no framework; an allowlist fails closed on what a new Keras release or an attacker adds, where a list of what is known to be bad would not; the parsers of zip and HDF5 meet hostile files, so they run where a crash or a leak costs only a failed check |

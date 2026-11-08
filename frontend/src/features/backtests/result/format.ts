@@ -12,14 +12,17 @@ type Benchmark = BacktestDocument['benchmarks'][number];
 type Tone = 'up' | 'down' | undefined;
 
 // A benchmark of the backtest's own instrument is buy and hold, any other an ETF.
+const holdsOwn = (own: string, held: string) => held.toLowerCase() === own.toLowerCase();
 const ownInstrument = (doc: BacktestDocument, benchmark: Benchmark) =>
-  benchmark.instrument.toLowerCase() === doc.data.instrument.id.toLowerCase();
+  holdsOwn(doc.data.instrument.id, benchmark.instrument);
 
-// What the page calls a benchmark: "Buy and hold", or the symbol of the ETF ("stock:SPY" is SPY).
-export function benchmarkName(doc: BacktestDocument, benchmark: Benchmark): string {
-  const { instrument } = benchmark;
-  return ownInstrument(doc, benchmark) ? 'Buy and hold' : instrument.slice(instrument.indexOf(':') + 1);
-}
+// What the page calls the benchmark that holds `held` of a backtest of `own`: "Buy and hold", or
+// the symbol of the ETF ("stock:SPY" is SPY).
+const heldName = (own: string, held: string) =>
+  holdsOwn(own, held) ? 'Buy and hold' : held.slice(held.indexOf(':') + 1);
+
+export const benchmarkName = (doc: BacktestDocument, benchmark: Benchmark): string =>
+  heldName(doc.data.instrument.id, benchmark.instrument);
 
 // A metric as the page shows it: its name, the value written out and its colour, if any.
 export type Metric = { name: string; value: string; tone: Tone };
@@ -138,20 +141,48 @@ const bps = (value: number) => percent(value / 10_000);
 // One line of the setup: what it is and its value.
 export type SetupRow = readonly [label: string, value: string];
 
-// The model's rows: what it reads, its candles and its input ("Candles", "30m", "25 × 23"), from
-// the manifest stored with the run, checked when it was given. The candles are the run's when the
-// manifest does not say.
-function modelRows(doc: BacktestDocument): SetupRow[] {
+type Decision = BacktestDocument['decision'];
+
+// What the setup box writes of a backtest, from its document or from the comparison's `setup`.
+// `reads` and `input` come from the manifest stored with the run, checked when it was given;
+// `candles` are the rows it ran on, unknown until it finished.
+export type RunSetup = {
+  instrument: string;
+  reads: string | null;
+  timeframe: string;
+  input: readonly number[] | null;
+  period: BacktestDocument['data']['period'];
+  candles: number | null;
+  decision: Decision;
+  execution: BacktestDocument['execution'];
+  benchmarks: readonly string[];
+};
+
+// The candles are the run's when the manifest does not say.
+export function runSetupOf(doc: BacktestDocument): RunSetup {
   const { input, signature } = doc.model.manifest as unknown as Partial<Manifest>;
-  const rows: (SetupRow | undefined)[] = [
-    input && ['Reads', manifestRepresentation(input.representation.id)],
-    ['Timeframe', input?.timeframe ?? doc.data.timeframe],
-    signature && ['Input', formatGrid(signature.input.shape)],
-  ];
-  return rows.filter((row) => row !== undefined);
+  return {
+    instrument: doc.data.instrument.id,
+    reads: input?.representation.id ?? null,
+    timeframe: input?.timeframe ?? doc.data.timeframe,
+    input: signature?.input.shape ?? null,
+    period: doc.data.period,
+    candles: doc.data.rows?.count ?? null,
+    decision: doc.decision,
+    execution: doc.execution,
+    benchmarks: doc.benchmarks.map((benchmark) => benchmark.instrument),
+  };
 }
 
-type Decision = BacktestDocument['decision'];
+// The model's rows: what it reads, its candles and its input ("Candles", "30m", "25 × 23").
+function modelRows({ reads, timeframe, input }: RunSetup): SetupRow[] {
+  const rows: (SetupRow | null)[] = [
+    reads === null ? null : ['Reads', manifestRepresentation(reads)],
+    ['Timeframe', timeframe],
+    input === null ? null : ['Input', formatGrid(input)],
+  ];
+  return rows.filter((row) => row !== null);
+}
 
 const candles = (count: number) => `${formatCount(count)} ${count === 1 ? 'candle' : 'candles'}`;
 
@@ -199,8 +230,8 @@ const FILLS: Record<BacktestDocument['execution']['fill'], string> = {
 };
 
 // The fill, the stops and the costs, then what it is compared with.
-function executionRows(doc: BacktestDocument): SetupRow[] {
-  const { fill, stop_loss, drawdown_stop, position_size, fee_bps, slippage_bps } = doc.execution;
+function executionRows({ execution, instrument, benchmarks }: RunSetup): SetupRow[] {
+  const { fill, stop_loss, drawdown_stop, position_size, fee_bps, slippage_bps } = execution;
   const rows: (SetupRow | false)[] = [
     ['Fills at', FILLS[fill]],
     stop_loss != null && ['Stop loss', percent(stop_loss)],
@@ -208,7 +239,7 @@ function executionRows(doc: BacktestDocument): SetupRow[] {
     position_size < 1 && ['Position size', percent(position_size)],
     ['Fees', bps(fee_bps)],
     ['Slippage', bps(slippage_bps)],
-    ...doc.benchmarks.map((benchmark): SetupRow => ['Benchmark', benchmarkName(doc, benchmark)]),
+    ...benchmarks.map((held): SetupRow => ['Benchmark', heldName(instrument, held)]),
   ];
   return rows.filter((row) => row !== false);
 }
@@ -218,19 +249,19 @@ function executionRows(doc: BacktestDocument): SetupRow[] {
 export type SetupGroup = { name: 'Model' | 'Data' | 'Decision' | 'Execution'; rows: SetupRow[] };
 
 // The setup it ran with, in the builder's steps. The period's days are UTC, as in the header.
-export function setupOf(doc: BacktestDocument, style: Pick<DateStyle, 'dateFormat'>): SetupGroup[] {
-  const { data, decision } = doc;
+export function setupGroups(setup: RunSetup, style: Pick<DateStyle, 'dateFormat'>): SetupGroup[] {
+  const { period, candles: count, decision } = setup;
   const day = (seconds: number) =>
     formatDate(new Date(seconds * 1000), { timeZone: 'UTC', dateFormat: style.dateFormat });
   const steps = stepRows(decision);
   return [
-    { name: 'Model', rows: modelRows(doc) },
+    { name: 'Model', rows: modelRows(setup) },
     {
       name: 'Data',
       rows: [
-        ['From', day(data.period.start)],
-        ['To', day(data.period.end - 1)],
-        ...(data.rows ? [['Candles', formatCount(data.rows.count)] as const] : []),
+        ['From', day(period.start)],
+        ['To', day(period.end - 1)],
+        ...(count === null ? [] : [['Candles', formatCount(count)] as const]),
       ],
     },
     {
@@ -242,6 +273,9 @@ export function setupOf(doc: BacktestDocument, style: Pick<DateStyle, 'dateForma
         ['Positions', decision.long_only ? 'Long only' : 'Long and short'],
       ],
     },
-    { name: 'Execution', rows: executionRows(doc) },
+    { name: 'Execution', rows: executionRows(setup) },
   ];
 }
+
+export const setupOf = (doc: BacktestDocument, style: Pick<DateStyle, 'dateFormat'>) =>
+  setupGroups(runSetupOf(doc), style);

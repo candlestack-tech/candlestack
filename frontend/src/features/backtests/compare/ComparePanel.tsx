@@ -172,7 +172,7 @@ export function ComparePanel({ userId }: { userId: string }) {
   useEffect(() => {
     claimCompare(userId);
   }, [userId]);
-  usePanelPicks();
+  usePanelPicks(!comparing);
   if ((picks.length === 0 && gone.length === 0) || comparing) return null;
   const count = `${picks.length} of ${SLOTS}`;
   if (hidden) return <FoldedPanel count={count} />;

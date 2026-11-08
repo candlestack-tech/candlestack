@@ -256,7 +256,8 @@ export interface paths {
          *     best and the worst marked, the setups and which of their fields differ, and the equity and
          *     the drawdown of each and the return of holding its instrument on one time axis of at most
          *     200 times. A backtest that is running or failed is listed with its status and without
-         *     values. Access is that of `GET /api/v1/backtests/{backtest_id}`. It reads only what each
+         *     values; one alone is listed with nothing marked, as the page shows a single backtest. Access
+         *     is that of `GET /api/v1/backtests/{backtest_id}`. It reads only what each
          *     backtest stored when it ran, so it loads no candles from a data source.
          */
         get: operations["compare_backtests_api_v1_compare_get"];
@@ -760,6 +761,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sweeps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Sweep
+         * @description Starts a backtest for every combination of the values in `vary` over the `base` setup
+         *     (the body of `POST /api/v1/backtests`): models, instruments, periods and decision rules,
+         *     2 to 20 backtests, in that order. Every setup is checked as `POST /api/v1/backtests`
+         *     checks one, and the user's queue must have room for all of them (up to 20 wait); then they
+         *     all go to the end of the queue, or none does. With `validate_only` nothing starts: the
+         *     answer is 200 with the count and each setup. The sweep's backtests are ordinary backtests
+         *     with its `sweep_id`. `GET /api/v1/sweeps/{sweep_id}` follows them and ranks them once all
+         *     ended.
+         */
+        post: operations["start_sweep_api_v1_sweeps_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sweeps/{sweep_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Sweep
+         * @description The user's sweep: how many of its backtests are queued, running, finished and failed,
+         *     each backtest's ID, status and setup, and once none is queued or running (`done`) the
+         *     ranking by the metric, with the marking rules of `GET /api/v1/compare`.
+         */
+        get: operations["get_sweep_api_v1_sweeps__sweep_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/uploads/{token}": {
         parameters: {
             query?: never;
@@ -821,7 +871,7 @@ export interface components {
             id: string;
             /**
              * Last Used At
-             * @description When a request last signed in with the key (UTC), to the minute; null: never used
+             * @description When a request last signed in with the key (UTC); written at most once a minute, so it may lag by up to a minute; null: never used
              */
             last_used_at: string | null;
             /**
@@ -903,7 +953,7 @@ export interface components {
             id: string;
             /**
              * Last Used At
-             * @description When a request last signed in with the key (UTC), to the minute; null: never used
+             * @description When a request last signed in with the key (UTC); written at most once a minute, so it may lag by up to a minute; null: never used
              */
             last_used_at: string | null;
             /**
@@ -1218,6 +1268,12 @@ export interface components {
              * @description The steps of the run in their order, while it runs and after: the failed one of a failed backtest is `failed` and its error is `error`. Empty for a backtest that failed before steps were recorded
              */
             steps: components["schemas"]["BacktestStep"][];
+            /**
+             * Sweep Id
+             * @description The sweep it was started in (`GET /api/v1/sweeps/{sweep_id}`); null for a backtest started alone, and for another user's
+             * @example null
+             */
+            sweep_id: string | null;
         };
         /**
          * BacktestIn
@@ -1413,6 +1469,12 @@ export interface components {
              */
             starred: boolean;
             status: components["schemas"]["BacktestStatus"];
+            /**
+             * Sweep Id
+             * @description The sweep it was started in (`GET /api/v1/sweeps/{sweep_id}`); null for a backtest started alone
+             * @example null
+             */
+            sweep_id: string | null;
             /**
              * Total Return
              * @description Return of the strategy over the period, a fraction
@@ -2028,6 +2090,12 @@ export interface components {
              */
             buy_and_hold: (number | null)[] | null;
             /**
+             * Candles
+             * @description The candles of its period it ran on (`data.rows.count` of its document); null without results
+             * @example 12480
+             */
+            candles: number | null;
+            /**
              * Drawdown
              * @description Its fall from its highest equity (a fraction, 0 or below), at the same times; per day, the day's lowest
              */
@@ -2065,7 +2133,7 @@ export interface components {
             public: boolean;
             /**
              * Setup
-             * @description What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document
+             * @description What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `input` (the model's input, rows by features, from its manifest's signature), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document
              */
             setup: {
                 [key: string]: unknown;
@@ -3829,6 +3897,285 @@ export interface components {
              */
             used_bytes: number;
         };
+        /** SweepBacktest */
+        SweepBacktest: {
+            /**
+             * Error
+             * @description What went wrong, for a failed one
+             */
+            error: string | null;
+            /**
+             * Id
+             * @example bt_7f3k2m9qx4
+             */
+            id: string;
+            /**
+             * Name
+             * @example Silent Orion
+             */
+            name: string;
+            /**
+             * Number
+             * @description The user's own number, shown as #N
+             * @example 12
+             */
+            number: number;
+            /**
+             * Queue Position
+             * @description Where a queued backtest is in the user's queue: 1 starts next
+             */
+            queue_position: number | null;
+            setup: components["schemas"]["SweepSetup"];
+            status: components["schemas"]["BacktestStatus"];
+        };
+        /**
+         * SweepIn
+         * @description A new sweep: a base setup, the values to vary and the statistic to rank by.
+         */
+        SweepIn: {
+            /** @description The body of `POST /api/v1/backtests`. It still needs `model.id` and `data.instrument` when `vary` lists models or instruments, whose values then replace them */
+            base: components["schemas"]["BacktestIn"];
+            /**
+             * @description What the ranking orders by, unless `GET /api/v1/sweeps/{sweep_id}` names another
+             * @default sharpe
+             */
+            metric: components["schemas"]["SweepMetric"];
+            /**
+             * Validate Only
+             * @description Check every setup and the queue's room and answer with the plan, without starting anything
+             * @default false
+             */
+            validate_only: boolean;
+            vary?: components["schemas"]["SweepVary"];
+        };
+        /**
+         * SweepMetric
+         * @description A statistic of `results.stats` the ranking can use: one that is better higher or lower.
+         * @enum {string}
+         */
+        SweepMetric: "total_return" | "max_drawdown" | "sharpe" | "sortino" | "win_rate" | "avg_trade_return" | "best_trade_return" | "worst_trade_return" | "fees_paid";
+        /**
+         * SweepOut
+         * @description A sweep: its backtests, how far they are, and once all ended the ranking.
+         */
+        SweepOut: {
+            /**
+             * Backtests
+             * @description In the grid's order
+             */
+            backtests: components["schemas"]["SweepBacktest"][];
+            /**
+             * Count
+             * @description Its backtests
+             * @example 6
+             */
+            count: number;
+            /**
+             * Created At
+             * Format: date-time
+             * @description When it was started (UTC)
+             */
+            created_at: string;
+            /**
+             * Done
+             * @description None of its backtests is queued or running
+             */
+            done: boolean;
+            /**
+             * Id
+             * @example sw_7f3k2m9qx4
+             */
+            id: string;
+            /** @description What the ranking orders by */
+            metric: components["schemas"]["SweepMetric"];
+            progress: components["schemas"]["SweepProgress"];
+            /** @description Null until every backtest ended. For every statistic, the setups and the curves, ask `GET /api/v1/compare` with the IDs of `backtests` */
+            ranking: components["schemas"]["SweepRanking"] | null;
+        };
+        /**
+         * SweepPlan
+         * @description The answer of a dry run (`validate_only`): what the sweep would start.
+         */
+        SweepPlan: {
+            /**
+             * Count
+             * @description Backtests the sweep would start
+             * @example 6
+             */
+            count: number;
+            /**
+             * Limit
+             * @description The most a sweep starts
+             * @example 20
+             */
+            limit: number;
+            /**
+             * Queue Room
+             * @description Backtests the user's queue has room for now
+             * @example 20
+             */
+            queue_room: number;
+            /**
+             * Setups
+             * @description Each backtest's setup, in the grid's order
+             */
+            setups: components["schemas"]["SweepSetup"][];
+        };
+        /**
+         * SweepProgress
+         * @description How many of the sweep's backtests have each status.
+         */
+        SweepProgress: {
+            /** Failed */
+            failed: number;
+            /** Finished */
+            finished: number;
+            /** Queued */
+            queued: number;
+            /** Running */
+            running: number;
+        };
+        /** SweepRanked */
+        SweepRanked: {
+            /**
+             * Id
+             * @example bt_7f3k2m9qx4
+             */
+            id: string;
+            /**
+             * Mark
+             * @description `best` or `worst` as `GET /api/v1/compare` marks it, else null
+             */
+            mark: ("best" | "worst") | null;
+            /**
+             * Name
+             * @example Silent Orion
+             */
+            name: string;
+            /**
+             * Number
+             * @example 12
+             */
+            number: number;
+            /**
+             * Rank
+             * @description 1 for the best; values that read the same in the app share a rank (1, 1, 3); null without a value (failed, or the statistic is undefined)
+             * @example 1
+             */
+            rank: number | null;
+            /**
+             * Value
+             * @description The statistic, as in `results.stats`
+             * @example 1.42
+             */
+            value: number | null;
+        };
+        /**
+         * SweepRanking
+         * @description The backtests by one statistic, the best first, those without a value last.
+         */
+        SweepRanking: {
+            /** Backtests */
+            backtests: components["schemas"]["SweepRanked"][];
+            /**
+             * Better
+             * @description Which way is better: `lower` for a fall by its size and for the fees
+             * @enum {string}
+             */
+            better: "higher" | "lower";
+            /**
+             * Label
+             * @description What the app calls it
+             * @example Sharpe
+             */
+            label: string;
+            metric: components["schemas"]["SweepMetric"];
+        };
+        /**
+         * SweepSetup
+         * @description What one backtest of the sweep runs on and with.
+         */
+        SweepSetup: {
+            /**
+             * Instrument
+             * @description `<market>:<symbol>`
+             * @example stock:AAPL
+             */
+            instrument: string;
+            /**
+             * Model
+             * @description Public ID of the model
+             * @example mdl_k2m9qx47f3
+             */
+            model: string;
+            /**
+             * Model Name
+             * @description Its name when the sweep started
+             * @example lstm.keras
+             */
+            model_name: string;
+            period: components["schemas"]["Period"];
+            representation: components["schemas"]["Representation"];
+            /**
+             * Rule
+             * @description The decision rule, as `decision.rule` of the result document
+             * @example {
+             *       "limit": 0.1,
+             *       "name": "threshold"
+             *     }
+             */
+            rule: {
+                [key: string]: unknown;
+            };
+            /**
+             * Timeframe
+             * @description The model's timeframe
+             * @example 30m
+             */
+            timeframe: string;
+        };
+        /**
+         * SweepVary
+         * @description The values to vary, each list in place of the base's value; a list left out or empty
+         *     keeps the base's. Every combination is one backtest.
+         */
+        SweepVary: {
+            /**
+             * Instruments
+             * @description `<market>:<symbol>` IDs. A benchmark that holds the base's instrument holds each backtest's own
+             * @example [
+             *       "stock:AAPL",
+             *       "stock:MSFT"
+             *     ]
+             */
+            instruments?: string[];
+            /**
+             * Models
+             * @description Public IDs of the user's models. A model's manifest sets what it reads (the representation) and its timeframe, so list models to vary those
+             * @example [
+             *       "mdl_k2m9qx47f3",
+             *       "mdl_t9n8v7d6a5"
+             *     ]
+             */
+            models?: string[];
+            /** Periods */
+            periods?: components["schemas"]["Period"][];
+            /**
+             * Rules
+             * @description Decision rules in place of `decision.rule`: other limits of one rule, or other rules
+             * @example [
+             *       {
+             *         "limit": 0.1,
+             *         "name": "threshold"
+             *       },
+             *       {
+             *         "limit": 0.2,
+             *         "name": "threshold"
+             *       }
+             *     ]
+             */
+            rules?: (components["schemas"]["ThresholdRule"] | components["schemas"]["HysteresisRule"] | components["schemas"]["KmeansRule"])[];
+        };
         /**
          * Tensor
          * @description The shape of one sample without the batch axis, and its type.
@@ -4736,7 +5083,7 @@ export interface operations {
     compare_backtests_api_v1_compare_get: {
         parameters: {
             query: {
-                /** @description 2 to 20 backtest IDs separated by commas: the user's own and published ones of other accounts */
+                /** @description 1 to 20 backtest IDs separated by commas: the user's own and published ones of other accounts */
                 ids: string;
             };
             header?: never;
@@ -4790,7 +5137,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Fewer than 2 or more than 20 IDs, an empty one or one twice (`validation`). */
+            /** @description More than 20 IDs, an empty one or one twice (`validation`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6401,6 +6748,182 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogOut"];
+                };
+            };
+        };
+    };
+    start_sweep_api_v1_sweeps_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SweepIn"];
+            };
+        };
+        responses: {
+            /** @description `validate_only`: what the sweep would start */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SweepPlan"];
+                };
+            };
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SweepOut"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no model with an ID (`not-found`), or an instrument is not in the catalog (`instrument-not-found`); `setup` names the setup. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A model has no manifest (`model-needs-setup`, with `setup`), or the user's queue has room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count` and `room`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description An invalid body or fewer than 2 or more than 20 backtests (`validation`, the latter with `count` and `limit`), or a setup that fails a check of `POST /api/v1/backtests` (`instrument-not-for-model`, `period-out-of-range`, `warm-up-out-of-range`, `too-many-candles`, `validation`; `setup` names it, from 1). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A data source sent candles that failed validation (`source-data-invalid`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_sweep_api_v1_sweeps__sweep_id__get: {
+        parameters: {
+            query?: {
+                /** @description What the ranking orders by, instead of the sweep's own `metric` */
+                metric?: components["schemas"]["SweepMetric"] | null;
+            };
+            header?: never;
+            path: {
+                /** @description Public ID of the sweep */
+                sweep_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SweepOut"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no sweep with this ID. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };

@@ -1,10 +1,11 @@
 """The accounts tables in Postgres: the queries the service needs, in the request's session.
-Nothing here commits; the service does, once a change is complete."""
+Nothing here commits; the service does, once a change is complete. The one exception is the last
+use of an API key, written in a transaction of its own (``touch_api_key``)."""
 
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -164,3 +165,10 @@ class AccountStore:
             )
         ).first()
         return None if row is None else (row[0], row[1])
+
+    async def touch_api_key(self, key_id: str, when: datetime) -> None:
+        """Writes the key's last use and commits it in a session of its own, on another
+        connection of the pool: when that fails, the request's session is left as it was."""
+        async with AsyncSession(self._db.bind) as own:
+            await own.execute(update(ApiKey).where(ApiKey.id == key_id).values(last_used_at=when))
+            await own.commit()

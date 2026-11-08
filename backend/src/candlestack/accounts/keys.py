@@ -12,10 +12,13 @@ are managed with the browser session only.
 """
 
 import hashlib
+import logging
 import re
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+
+from sqlalchemy.orm.attributes import set_committed_value
 
 from candlestack.accounts.errors import NoSuchApiKey, TooManyApiKeys
 from candlestack.accounts.models import ApiKey, User, new_api_key_id
@@ -30,7 +33,7 @@ from candlestack.accounts.schemas import (
 )
 from candlestack.accounts.service import admitted
 from candlestack.accounts.store import AccountStore
-from candlestack.core import Settings
+from candlestack.core import DATABASE_ERRORS, Settings
 
 KEY_PREFIX = "cs_"
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz234567"
@@ -41,6 +44,8 @@ _KEY = re.compile(rf"{KEY_PREFIX}[{_ALPHABET}]{{{_SHOWN + _SECRET}}}")
 # A key in use writes its last use at most this often, so a busy script costs one write a
 # minute.
 LAST_USED_REFRESH = timedelta(minutes=1)
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -110,6 +115,9 @@ class ApiKeys:
         if await self._store.active_api_keys(user.id, now) >= API_KEYS_MAX:
             raise TooManyApiKeys
         secret = new_key()
+        # The prefix is unique and has 40 random bits: once in a long while it is another key's.
+        if await self._store.api_key_by_prefix(secret[:_PREFIX_LENGTH]) is not None:
+            secret = new_key()
         key = ApiKey(
             id=new_api_key_id(),
             user_id=user.id,
@@ -160,8 +168,18 @@ class ApiKeys:
         return KeyUser(key, user)
 
     async def mark_used(self, key: ApiKey) -> None:
-        """Records that the key signed a request in, at most once a ``LAST_USED_REFRESH``."""
+        """Records that the key signed a request in, at most once a ``LAST_USED_REFRESH``.
+
+        Best effort: when Postgres fails to write it, a warning is logged and the request goes
+        on, as the key did sign in.
+        """
         now = _now()
-        if key.last_used_at is None or now - key.last_used_at >= LAST_USED_REFRESH:
-            key.last_used_at = now
-            await self._store.commit()
+        if key.last_used_at is not None and now - key.last_used_at < LAST_USED_REFRESH:
+            return
+        try:
+            await self._store.touch_api_key(key.id, now)
+        except DATABASE_ERRORS:
+            logger.warning("Could not record the last use of API key %s", key.id, exc_info=True)
+            return
+        # As written, so the request's own commit, if any, does not write it again.
+        set_committed_value(key, "last_used_at", now)

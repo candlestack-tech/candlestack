@@ -5,8 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { addToCompare, clearCompare } from '@/features/backtests/compare/selection';
 import { valueAt } from '@/features/backtests/compare/chartLines';
-import { ARSEN, backtestDocument, backtestsAnswer, problem, sessionWithPreferences, stubApi } from '@/test/api';
+import { ARSEN, backtestDocument, backtestsAnswer, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
+import { compareAnswers, compareMissing } from '@/test/compare';
 import { othersDocument } from '@/test/experiments';
 import { charts } from '@/test/lightweightCharts';
 
@@ -45,6 +46,13 @@ function doc(number: number, stats: Partial<Stats> = {}) {
 const BETTER = doc(12, { total_return: 0.9, max_drawdown: -0.05, sharpe: null, fees_paid: 0.01, num_trades: 99 });
 const WORSE = doc(11, { total_return: 0.1, max_drawdown: -0.3, sharpe: null, fees_paid: 0.05, num_trades: 1 });
 const MIDDLE = doc(10);
+// How the server marks these three (GET /api/v1/compare): the best and the worst return, fall and
+// fees; the rest are equal, better neither way, or known for one only.
+const MARKED = compareAnswers([BETTER, WORSE, MIDDLE], {
+  total_return: ['best', 'worst', null],
+  max_drawdown: ['best', 'worst', null],
+  fees_paid: ['best', 'worst', null],
+});
 
 const answer = (body: unknown) => ({ status: 200, body });
 const LISTS = {
@@ -52,11 +60,15 @@ const LISTS = {
   ...backtestsAnswer({ backtests: [], counts: { all: 0, starred: 0, failed: 0, public: 0 }, models: [] }),
 };
 
+// Chooses the backtests of these documents: their pages, and the comparisons the page asks for.
 const choose = (...docs: ReturnType<typeof doc>[]) => {
   docs.forEach(({ backtest }) => {
     addToCompare({ id: backtest.id, number: backtest.number, name: backtest.name, symbol: 'AAPL' });
   });
-  return Object.fromEntries(docs.map((each) => [`GET /api/v1/backtests/${each.backtest.id}`, answer(each)]));
+  return {
+    ...Object.fromEntries(docs.map((each) => [`GET /api/v1/backtests/${each.backtest.id}`, answer(each)])),
+    ...compareAnswers(docs),
+  };
 };
 
 const row = (label: string) =>
@@ -88,7 +100,7 @@ describe('the compare page', () => {
   });
 
   it('marks the best value of a row in green and the worst in red, the rest plain', async () => {
-    stubApi({ ...LISTS, ...choose(BETTER, WORSE, MIDDLE) });
+    stubApi({ ...LISTS, ...choose(BETTER, WORSE, MIDDLE), ...MARKED });
     await renderApp('/backtests/compare');
     await screen.findByRole('rowheader', { name: 'Total return' });
     expect(marks('Total return')).toEqual(['best', 'worst', 'plain']);
@@ -98,7 +110,7 @@ describe('the compare page', () => {
   });
 
   it('marks nothing when the values are equal or none is better, and a dash for a missing one', async () => {
-    stubApi({ ...LISTS, ...choose(BETTER, WORSE, MIDDLE) });
+    stubApi({ ...LISTS, ...choose(BETTER, WORSE, MIDDLE), ...MARKED });
     await renderApp('/backtests/compare');
     await screen.findByRole('rowheader', { name: 'Win rate' });
     expect(marks('Win rate')).toEqual(['plain', 'plain', 'plain']);
@@ -130,7 +142,7 @@ describe('the compare page', () => {
     stubApi({
       ...LISTS,
       ...choose(BETTER, WORSE),
-      'GET /api/v1/backtests/bt_11': problem(404, 'not-found', 'No such backtest.'),
+      ...compareMissing([BETTER, WORSE], 'bt_11'),
     });
     await renderApp('/backtests/compare');
     expect(await screen.findByText('1 of 4 backtests. Add one more to compare')).toBeDefined();
@@ -149,7 +161,11 @@ describe('the compare page', () => {
   it('writes a small average with two decimals and no fall without a sign', async () => {
     const small = doc(12, { avg_trade_return: 0.0041, max_drawdown: 0 });
     const close = doc(11, { avg_trade_return: 0.0044, max_drawdown: -0.1 });
-    stubApi({ ...LISTS, ...choose(small, close) });
+    stubApi({
+      ...LISTS,
+      ...choose(small, close),
+      ...compareAnswers([small, close], { avg_trade_return: ['worst', 'best'] }),
+    });
     await renderApp('/backtests/compare');
     await screen.findByRole('rowheader', { name: 'Avg. trade' });
     expect(row('Avg. trade').map((cell) => cell.textContent)).toEqual(['+0.41 %', '+0.44 %', 'No backtest']);
@@ -179,8 +195,22 @@ describe('the compare page', () => {
     await renderApp('/backtests/compare');
     const user = userEvent.setup();
     await user.click(await screen.findByRole('link', { name: 'Bright Vega' }));
-    await user.click(await screen.findByRole('button', { name: '← Compare backtests' }));
+    // The page loads its document now: the comparison did not.
+    await screen.findByRole('button', { name: 'Download JSON' });
+    await user.click(screen.getByRole('button', { name: '← Compare backtests' }));
     expect(await screen.findByRole('heading', { level: 1, name: 'Compare backtests' })).toBeDefined();
+  });
+
+  it('reads the server’s comparison, never the backtests’ documents (#401)', async () => {
+    const fetch = stubApi({ ...LISTS, ...choose(BETTER, WORSE) });
+    await renderApp('/backtests/compare');
+    await screen.findByRole('rowheader', { name: 'Total return' });
+    const asked = fetch.mock.calls.map(([path]) => path);
+    expect(asked).toContain('/api/v1/compare?ids=bt_12,bt_11');
+    expect(asked.filter((path) => path.startsWith('/api/v1/backtests/bt_'))).toEqual([]);
+    // The setup as each stored it: the model's input from its manifest, the candles it ran on.
+    expect(row('Input').map((cell) => cell.textContent)).toEqual(['25 × 5', '25 × 5', 'No backtest']);
+    expect(row('Candles').map((cell) => cell.textContent)).toEqual(['5', '5', 'No backtest']);
   });
 
   it('shows no panel on its own page', async () => {
@@ -201,7 +231,7 @@ describe('comparing with another account’s backtests', () => {
       symbol: 'AAPL',
       author: 'Tymur Tkach',
     });
-    return { [`GET /api/v1/backtests/${doc.backtest.id}`]: answer(doc) };
+    return { [`GET /api/v1/backtests/${doc.backtest.id}`]: answer(doc), ...compareAnswers([BETTER, doc]) };
   };
 
   it('counts whose they are, and names the author in the head, the legends and the Author row', async () => {
@@ -235,7 +265,7 @@ describe('comparing with another account’s backtests', () => {
     stubApi({
       ...LISTS,
       ...choose(BETTER, WORSE),
-      [`GET /api/v1/backtests/${doc.backtest.id}`]: problem(404, 'not-found', 'Not found.'),
+      ...compareMissing([doc, BETTER, WORSE], doc.backtest.id),
     });
     await renderApp('/backtests/compare');
     const note = (await screen.findByText(/, so it left your Compare\.$/)).parentElement!;

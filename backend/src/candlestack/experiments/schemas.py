@@ -195,6 +195,11 @@ class BacktestOut(BaseModel):
         ),
         examples=[None],
     )
+    sweep_id: str | None = Field(
+        description="The sweep it was started in (`GET /api/v1/sweeps/{sweep_id}`); null for "
+        "a backtest started alone",
+        examples=[None],
+    )
     seeded: bool = Field(description="Test data of the seed command, with no result document")
     instruments: list[BacktestInstrument] = Field(
         description="The instruments, in the order chosen"

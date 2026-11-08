@@ -174,9 +174,11 @@ function useDrawn(panes: RefObject<Pane[]>, lines: readonly Line[]) {
       });
     });
   }, [panes, timeZone, dateFormat, timeFormat]);
-  // A backtest's document never changes once it finished, so this says when the lines did, whatever
-  // made the page draw again; the view of time stays until then.
-  const signature = lines.map(({ id, color, equity }) => `${id} ${color} ${String(equity.length)}`).join();
+  // A finished backtest's line changes only with the comparison's times, so this says when the lines
+  // did, whatever made the page draw again; the view of time stays until then.
+  const signature = lines
+    .map(({ id, color, equity }) => [id, color, equity.length, equity[0]?.time, equity.at(-1)?.time].join(' '))
+    .join();
   const latest = useRef(lines);
   useEffect(() => {
     latest.current = lines;

@@ -22,6 +22,24 @@ export type BacktestIn = components['schemas']['BacktestIn'];
 // The results Best backtests ranks by.
 export type BestMetric = keyof Dashboard['best'];
 
+// What a compared backtest ran on and with (`setup` of GET /api/v1/compare), from its document.
+export type ComparedSetup = {
+  instrument: string;
+  model: string;
+  reads: string | null;
+  input: number[] | null;
+  timeframe: string;
+  period: BacktestDocument['data']['period'];
+  decision: BacktestDocument['decision'];
+  execution: BacktestDocument['execution'];
+  benchmarks: string[];
+};
+export type ComparedBacktest = Omit<components['schemas']['ComparedBacktest'], 'setup'> & { setup: ComparedSetup };
+// Backtests side by side as the server compares them: the statistics with the best and the worst
+// marked, the setups, and the curves on one time axis.
+export type Comparison = Omit<components['schemas']['CompareOut'], 'backtests'> & { backtests: ComparedBacktest[] };
+export type CompareMetric = Comparison['metrics'][number];
+
 // What the Backtests page asks for; a value left out is the API's default (all, newest first,
 // page 1).
 export type BacktestsParams = {
@@ -104,6 +122,17 @@ export const getBacktestFile = (id: string) => getBlob(`${backtestPath(id)}/down
 // POST /api/v1/backtests: starts a backtest and answers with its document, `running`, or
 // `queued` while another backtest of the user runs.
 export const startBacktest = (body: BacktestIn) => postJson<BacktestDocument>('/v1/backtests', body);
+
+// GET /api/v1/compare: the chosen backtests side by side, from what each stored when it ran (about
+// 20 KB for four). While another choice loads, the last answer stays on screen.
+export function compareQueryOptions(ids: readonly string[]) {
+  return queryOptions({
+    queryKey: ['account', 'compare', ids],
+    queryFn: ({ signal }) => get<Comparison>(`/v1/compare?ids=${ids.map(encodeURIComponent).join(',')}`, signal),
+    enabled: ids.length > 0,
+    placeholderData: keepPreviousData,
+  });
+}
 
 // POST /api/v1/backtests/{id}/cancel: takes the user's queued backtest out of the queue, so it
 // never runs, and answers with its document, `failed` with the cancel in its error. One that has
