@@ -12,7 +12,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { meQueryOptions, modelsQueryOptions, preferencesQueryOptions } from '@/api';
-import { ARSEN, DEFAULT_PREFERENCES, MB, NOT_SIGNED_IN, model, stubApi } from '@/test/api';
+import { ADA, DEFAULT_PREFERENCES, MB, NOT_SIGNED_IN, model, stubApi } from '@/test/api';
 
 import { useDeleteAccount, useSignOut, useSignOutEverywhere } from './useLeaveAccount';
 
@@ -49,7 +49,7 @@ async function open(useLeave: Hook) {
   const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ['/settings'] }) });
   await router.load();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  queryClient.setQueryData(ME, ARSEN);
+  queryClient.setQueryData(ME, ADA);
   queryClient.setQueryData(PREFERENCES, DEFAULT_PREFERENCES);
   queryClient.setQueryData(MODELS, {
     models: [model()],
@@ -96,7 +96,7 @@ describe('useLeaveAccount', () => {
     const { router, queryClient } = await open(useSignOut);
     expect(await screen.findByText('Still here')).toBeDefined();
     expect(router.state.location.pathname).toBe('/settings');
-    expect(queryClient.getQueryData(ME)).toEqual(ARSEN);
+    expect(queryClient.getQueryData(ME)).toEqual(ADA);
     expect(queryClient.getQueryData(PREFERENCES)).toEqual(DEFAULT_PREFERENCES);
   });
 });

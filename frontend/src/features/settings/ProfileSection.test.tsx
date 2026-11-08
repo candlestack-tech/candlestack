@@ -3,7 +3,7 @@ import { cleanup, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { ARSEN, problem, sentBody, session, stubApi } from '@/test/api';
+import { ADA, problem, sentBody, session, stubApi } from '@/test/api';
 import { renderApp, warmUpSettings } from '@/test/app';
 
 beforeAll(warmUpSettings);
@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 const RENAME = 'PATCH /api/v1/me';
-const RENAMED = { ...ARSEN, display_name: 'Filip Hodoň' };
+const RENAMED = { ...ADA, display_name: 'Filip Hodoň' };
 
 const card = () => within(screen.getByRole('region', { name: 'Profile' }));
 const nameField = () => card().getByRole<HTMLInputElement>('textbox', { name: 'Display name' });
@@ -22,11 +22,11 @@ const indicator = () => card().getByRole('status');
 
 describe('Profile', () => {
   it('shows the drawn initials, the name and email, the display name to change, the email and the user ID', async () => {
-    stubApi(session(ARSEN));
+    stubApi(session(ADA));
     await renderApp('/settings/profile');
     expect(card().getByText('AL')).toBeDefined();
-    expect(nameField().value).toBe('Arsen Labovich');
-    expect(card().getAllByText('arsen@example.com')).toHaveLength(2);
+    expect(nameField().value).toBe('Ada Lovelace');
+    expect(card().getAllByText('ada@example.com')).toHaveLength(2);
     expect(card().getByText('usr_7f3k2m9qx4').tagName).toBe('CODE');
     expect(card().queryByRole('button', { name: /copy/i })).toBeNull();
     expect(card().queryByRole('button', { name: /save/i })).toBeNull();
@@ -34,7 +34,7 @@ describe('Profile', () => {
   });
 
   it('saves a changed name, trimmed, on leaving the field, and shows it everywhere', async () => {
-    const fetch = stubApi({ ...session(ARSEN), [RENAME]: { status: 200, body: RENAMED } });
+    const fetch = stubApi({ ...session(ADA), [RENAME]: { status: 200, body: RENAMED } });
     await renderApp('/settings/profile');
     const user = userEvent.setup();
 
@@ -50,7 +50,7 @@ describe('Profile', () => {
   });
 
   it('saves the name on Enter, once', async () => {
-    const fetch = stubApi({ ...session(ARSEN), [RENAME]: { status: 200, body: RENAMED } });
+    const fetch = stubApi({ ...session(ADA), [RENAME]: { status: 200, body: RENAMED } });
     await renderApp('/settings/profile');
     const user = userEvent.setup();
     await user.clear(nameField());
@@ -63,18 +63,18 @@ describe('Profile', () => {
   });
 
   it('puts the saved name back on Esc and sends nothing', async () => {
-    const fetch = stubApi(session(ARSEN));
+    const fetch = stubApi(session(ADA));
     await renderApp('/settings/profile');
     const user = userEvent.setup();
     await user.type(nameField(), ' Jr');
     await user.keyboard('{Escape}');
-    expect(nameField().value).toBe('Arsen Labovich');
+    expect(nameField().value).toBe('Ada Lovelace');
     await user.tab();
     expect(sentBody(fetch, RENAME)).toBeUndefined();
   });
 
   it('does not send an empty name: the field says so and the card shows Not saved', async () => {
-    const fetch = stubApi(session(ARSEN));
+    const fetch = stubApi(session(ADA));
     await renderApp('/settings/profile');
     const user = userEvent.setup();
     await user.clear(nameField());
@@ -92,7 +92,7 @@ describe('Profile', () => {
       { status: 503, body: { detail: 'Down for a minute.' } },
       { status: 200, body: RENAMED },
     ];
-    const fetch = stubApi({ ...session(ARSEN), [RENAME]: async () => answers.shift()! });
+    const fetch = stubApi({ ...session(ADA), [RENAME]: async () => answers.shift()! });
     await renderApp('/settings/profile');
     const user = userEvent.setup();
     await user.clear(nameField());
@@ -110,7 +110,7 @@ describe('Profile', () => {
 
   it("says in plain words when the API refuses the name, not in the API's", async () => {
     stubApi({
-      ...session(ARSEN),
+      ...session(ADA),
       [RENAME]: problem(422, 'validation', "body 'display_name': String should have at most 80 characters"),
     });
     await renderApp('/settings/profile');
@@ -121,7 +121,7 @@ describe('Profile', () => {
   });
 
   it('asks before leaving with an empty name: Keep editing stays, Discard leaves', async () => {
-    stubApi(session(ARSEN));
+    stubApi(session(ADA));
     const { router } = await renderApp('/settings/profile');
     const user = userEvent.setup();
     await user.clear(nameField());

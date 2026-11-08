@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import { meQueryOptions, type Instrument } from '@/api';
 import type { ListSort } from '@/routes/instrumentsSearch';
-import { ARSEN } from '@/test/api';
+import { ADA } from '@/test/api';
 import { classes } from '@/test/markup';
 
 import { InstrumentTable } from './InstrumentTable';
@@ -290,7 +290,7 @@ describe('InstrumentTable candles', () => {
 
   it("writes the day as the chart's axis does for a signed-in user", async () => {
     const signedIn = new QueryClient();
-    signedIn.setQueryData(meQueryOptions().queryKey, ARSEN);
+    signedIn.setQueryData(meQueryOptions().queryKey, ADA);
     const [btc = ''] = rows(await render(undefined, [BTC], signedIn));
     expect(cells(btc)[4]).toContain('group-hover/day:block">9 Oct · close 80,600.00</span>');
   });

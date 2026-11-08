@@ -129,12 +129,12 @@ describe('patch and put', () => {
       [patch, 'PATCH'],
       [put, 'PUT'],
     ] as const) {
-      answer(200, '{"display_name":"Arsen"}');
-      await expect(send('/v1/me', { display_name: 'Arsen' })).resolves.toEqual({ display_name: 'Arsen' });
+      answer(200, '{"display_name":"Ada"}');
+      await expect(send('/v1/me', { display_name: 'Ada' })).resolves.toEqual({ display_name: 'Ada' });
       expect(fetch).toHaveBeenCalledWith('/api/v1/me', {
         method,
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: '{"display_name":"Arsen"}',
+        body: '{"display_name":"Ada"}',
       });
     }
   });

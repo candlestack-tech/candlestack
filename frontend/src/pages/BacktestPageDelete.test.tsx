@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BacktestDocument } from '@/api';
 import { addToCompare, clearCompare } from '@/features/backtests/compare/selection';
 import {
-  ARSEN,
+  ADA,
   backtestDocument,
   backtestsAnswer,
   dashboardAnswer,
@@ -56,7 +56,7 @@ type Answers = Parameters<typeof stubApi>[0];
 
 async function openPage(answers: Answers, url = PAGE) {
   const fetch = stubApi({
-    ...sessionWithPreferences(ARSEN),
+    ...sessionWithPreferences(ADA),
     [CANDLES]: { status: 200, body: candles(TIMES) },
     ...backtestsAnswer({ backtests: [] }),
     ...dashboardAnswer(),

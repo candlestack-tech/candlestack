@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Model } from '@/api';
-import { ARSEN, catalogAnswer, manifest, MB, modelsAnswer, problem, sentBody, session, stubApi } from '@/test/api';
+import { ADA, catalogAnswer, manifest, MB, modelsAnswer, problem, sentBody, session, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 import { addButton, file, jsonFile, LSTM, openUpload, PUT, READY, steps, UPLOAD, type Answers } from '@/test/upload';
 
@@ -242,7 +242,7 @@ describe('the upload, step 2: the manifest', () => {
 
 describe('Add manifest', () => {
   it('starts from the model, keeps the manifest and marks the tile ready', async () => {
-    stubApi({ ...session(ARSEN), ...modelsAnswer([LSTM]), ...catalogAnswer });
+    stubApi({ ...session(ADA), ...modelsAnswer([LSTM]), ...catalogAnswer });
     await renderApp('/models');
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'Add manifest to lstm-signals.keras' }));
@@ -263,7 +263,7 @@ describe('Add manifest', () => {
   });
 
   it('keeps the model when the dialog is cancelled', async () => {
-    const fetch = stubApi({ ...session(ARSEN), ...modelsAnswer([LSTM]), ...catalogAnswer });
+    const fetch = stubApi({ ...session(ADA), ...modelsAnswer([LSTM]), ...catalogAnswer });
     await renderApp('/models');
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'Add manifest to lstm-signals.keras' }));

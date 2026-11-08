@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Instrument } from '@/api';
 import {
-  ARSEN,
+  ADA,
   DEFAULT_PREFERENCES,
   model,
   modelsAnswer,
@@ -73,7 +73,7 @@ const LISTS = {
   'GET /api/v1/data/instruments?limit=20&offset=0&market=stock': search([AAPL]),
 };
 // A user whose default benchmark is SPY.
-const SPY_DEFAULT = sessionWithPreferences(ARSEN, {
+const SPY_DEFAULT = sessionWithPreferences(ADA, {
   ...DEFAULT_PREFERENCES,
   backtest_defaults: { ...DEFAULT_PREFERENCES.backtest_defaults, benchmark: 'SPY' },
 });
@@ -106,7 +106,7 @@ afterEach(() => {
 
 async function openBuilder(url = '/backtests/new', answers: Parameters<typeof stubApi>[0] = {}) {
   const fetch = stubApi({
-    ...sessionWithPreferences(ARSEN),
+    ...sessionWithPreferences(ADA),
     ...modelsAnswer([DRAFT, CRYPTO, STOCKS]),
     ...LISTS,
     [RUN]: STARTED,
@@ -409,7 +409,7 @@ describe('the backtest builder', () => {
   });
 
   it('goes back to the page it was opened from', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...modelsAnswer([]) });
+    stubApi({ ...sessionWithPreferences(ADA), ...modelsAnswer([]) });
     await renderApp('/backtests/new');
     expect((await screen.findByRole('link', { name: '← Dashboard' })).getAttribute('href')).toBe('/dashboard');
     expect(await screen.findByText('No models yet')).toBeDefined();

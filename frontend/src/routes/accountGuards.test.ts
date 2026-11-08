@@ -3,7 +3,7 @@ import { isRedirect, type ParsedLocation } from '@tanstack/react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { meQueryOptions } from '@/api';
-import { ARSEN, session, stubApi } from '@/test/api';
+import { ADA, session, stubApi } from '@/test/api';
 
 import { requireSignedIn, skipSignInWhenSignedIn } from './accountGuards';
 
@@ -31,14 +31,14 @@ describe('requireSignedIn', () => {
   });
 
   it('lets a signed-in user open the page', async () => {
-    stubApi(session(ARSEN));
+    stubApi(session(ADA));
     expect(await redirectOf(requireSignedIn({ queryClient: client(), location: at('/models') }))).toBeUndefined();
   });
 
   it('asks the API nothing when the user is already known', async () => {
     const fetch = stubApi(session(null));
     const queryClient = client();
-    queryClient.setQueryData(meQueryOptions().queryKey, ARSEN);
+    queryClient.setQueryData(meQueryOptions().queryKey, ADA);
     expect(await redirectOf(requireSignedIn({ queryClient, location: at('/models') }))).toBeUndefined();
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -63,7 +63,7 @@ describe('skipSignInWhenSignedIn', () => {
       ['/models?page=2', '/models?page=2'],
       [undefined, '/dashboard'],
     ] as const) {
-      stubApi(session(ARSEN));
+      stubApi(session(ADA));
       const sent = await redirectOf(
         skipSignInWhenSignedIn({ queryClient: client(), search: { next, error: undefined } }),
       );

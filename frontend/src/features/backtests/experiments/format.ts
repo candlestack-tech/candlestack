@@ -18,7 +18,7 @@ export function readsText(experiment: Pick<Experiment, 'representation' | 'model
 export const benchmarkLabel = (benchmark: Experiment['setup']['benchmark']) =>
   benchmark === 'bh' ? 'Buy and hold' : benchmark;
 
-// The author's first name, for "More by Tymur" and "The model file stays with Tymur".
+// The author's first name, for "More by Alan" and "The model file stays with Alan".
 export const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? name;
 
 // What the comparison needs of a published backtest: another account's carries its author's

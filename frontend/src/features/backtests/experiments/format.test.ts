@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { ARSEN, backtestDocument, spyDocument } from '@/test/api';
-import { experiment, TYMUR } from '@/test/experiments';
+import { ADA, backtestDocument, spyDocument } from '@/test/api';
+import { experiment, ALAN } from '@/test/experiments';
 
 import { benchmarkLabel, cardOf, cardOfDocument, experimentTarget, firstName, readsText } from './format';
 
@@ -21,7 +21,7 @@ describe('the words of Experiments', () => {
   });
 
   it('takes the first name of an author', () => {
-    expect(firstName('Tymur Tkach')).toBe('Tymur');
+    expect(firstName('Alan Turing')).toBe('Alan');
     expect(firstName('  Cher ')).toBe('Cher');
   });
 });
@@ -35,9 +35,9 @@ describe('experimentTarget', () => {
       description: 'NVDA · Renko · 30m',
       status: 'finished',
       symbol: 'NVDA',
-      author: 'Tymur Tkach',
+      author: 'Alan Turing',
     });
-    expect(experimentTarget(experiment({ author: { ...TYMUR, mine: true } })).author).toBeUndefined();
+    expect(experimentTarget(experiment({ author: { ...ALAN, mine: true } })).author).toBeUndefined();
   });
 });
 
@@ -54,7 +54,7 @@ describe('the facts of a card', () => {
       benchmark: { label: 'SPY', series: [0, 0.05, 0.1, 0.143], value: 0.143 },
       totalReturn: 0.412,
       trades: 188,
-      author: TYMUR,
+      author: ALAN,
       publishedAt: '2026-10-17T10:14:00Z',
     });
   });
@@ -71,7 +71,7 @@ describe('the facts of a card', () => {
       input: '25 × 5',
       benchmark: { label: 'Buy and hold', value: -0.02 },
       totalReturn: -0.05195,
-      author: { name: ARSEN.display_name, mine: true },
+      author: { name: ADA.display_name, mine: true },
       publishedAt: null,
     });
     expect(card.strategy?.[0]).toBe(0);

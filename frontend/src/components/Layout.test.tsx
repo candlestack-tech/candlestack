@@ -2,7 +2,7 @@
 import { cleanup, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ARSEN, dashboardAnswer, modelsAnswer, session, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, dashboardAnswer, modelsAnswer, session, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 
 afterEach(() => {
@@ -32,7 +32,7 @@ describe('the frame of a page on a phone', () => {
   });
 
   it('in the app: the header and the footer 16 px in, the page 20 px under the header', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...dashboardAnswer(), ...modelsAnswer([]) });
+    stubApi({ ...sessionWithPreferences(ADA), ...dashboardAnswer(), ...modelsAnswer([]) });
     await renderApp('/dashboard');
     await screen.findByRole('navigation', { name: 'Workspace' });
     expect(classesOf(header())).toEqual(expect.arrayContaining(inset(16)));

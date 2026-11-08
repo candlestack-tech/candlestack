@@ -3,7 +3,7 @@ import { cleanup, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ARSEN, backtest, backtestsAnswer, failedBacktest, problem, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, backtest, backtestsAnswer, failedBacktest, problem, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
 
 // #12 (Bright Vega) finished today at 10:05 in New York, #11 failed yesterday, #10 on three
@@ -59,7 +59,7 @@ const asked = (fetch: ReturnType<typeof stubApi>) =>
 
 describe('the Backtests page', () => {
   it('counts the backtests under the title and shows a row for each', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
+    stubApi({ ...sessionWithPreferences(ADA), ...backtestsAnswer(PAGE) });
     await renderApp('/backtests');
     await screen.findByText('#12');
     expect(subtitle()).toBe('3 backtests');
@@ -89,7 +89,7 @@ describe('the Backtests page', () => {
     const counts = { ...COUNTS, public: 1 };
     const published = backtest({ public: true, published_at: '2026-10-16T09:12:00Z' });
     const fetch = stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...backtestsAnswer({ ...PAGE, backtests: [published, ELEVEN], total: 3, counts }),
       ...backtestsAnswer({ ...PAGE, backtests: [published], total: 1, counts }, '?show=public'),
     });
@@ -110,7 +110,7 @@ describe('the Backtests page', () => {
   // #318: the instruments of a row are named with their icons, the rest as +N with all of them in
   // the title.
   it('shows each instrument with its icon', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
+    stubApi({ ...sessionWithPreferences(ADA), ...backtestsAnswer(PAGE) });
     await renderApp('/backtests');
     await screen.findByText('#12');
     const icons = rows().map((row) => row.querySelector('td:nth-child(3) img')?.getAttribute('src'));
@@ -130,7 +130,7 @@ describe('the Backtests page', () => {
     const name = `${'BLESK_ATR06_R8_OHLC_LAM08_EOD_SPLIT_ATR_NO-VOL_OPT1_8_M25x23_'.repeat(2)}`.slice(0, 84) + '.keras';
     expect(name).toHaveLength(90);
     const long = failedBacktest({ model: { id: 'mdl_7f3k2m9qx4', name, framework: 'keras' } });
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer({ ...PAGE, backtests: [long] }) });
+    stubApi({ ...sessionWithPreferences(ADA), ...backtestsAnswer({ ...PAGE, backtests: [long] }) });
     await renderApp('/backtests');
     await screen.findByText('#12');
     expect(screen.getByRole('table').className.split(' ')).toContain('table-fixed');
@@ -167,39 +167,39 @@ describe('the Backtests page', () => {
   });
 
   it('says how many match a search, and one backtest in the singular', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer({ ...PAGE, total: 1 }, '?q=11') });
+    stubApi({ ...sessionWithPreferences(ADA), ...backtestsAnswer({ ...PAGE, total: 1 }, '?q=11') });
     await renderApp('/backtests?q=11');
     expect(await screen.findByText('1 of 3')).toBeDefined();
     cleanup();
 
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer({ backtests: [TWELVE] }) });
+    stubApi({ ...sessionWithPreferences(ADA), ...backtestsAnswer({ backtests: [TWELVE] }) });
     await renderApp('/backtests');
     expect(await screen.findByText('1 backtest')).toBeDefined();
   });
 
   it('says No backtests yet for an account without any, and No backtests match for a search', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer({}) });
+    stubApi({ ...sessionWithPreferences(ADA), ...backtestsAnswer({}) });
     await renderApp('/backtests');
     expect(await screen.findByText('No backtests yet')).toBeDefined();
     expect(subtitle()).toBe('0 backtests');
     expect(screen.queryByRole('navigation', { name: 'Pages' })).toBeNull();
     cleanup();
 
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer({ counts: COUNTS, total: 0 }, '?q=zzz') });
+    stubApi({ ...sessionWithPreferences(ADA), ...backtestsAnswer({ counts: COUNTS, total: 0 }, '?q=zzz') });
     await renderApp('/backtests?q=zzz');
     expect(await screen.findByText('No backtests match')).toBeDefined();
     expect(subtitle()).toBe('0 of 3');
   });
 
   it('says why the backtests could not load', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), 'GET /api/v1/backtests': { status: 503, body: { detail: 'Down.' } } });
+    stubApi({ ...sessionWithPreferences(ADA), 'GET /api/v1/backtests': { status: 503, body: { detail: 'Down.' } } });
     await renderApp('/backtests');
     await vi.waitFor(() => expect(subtitle()).toBe('Down.'));
   });
 
   it("says in plain words when the API refuses the request, not in the API's", async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       'GET /api/v1/backtests': problem(422, 'validation', "query parameter 'page': Input should be at least 1"),
     });
     await renderApp('/backtests');
@@ -209,7 +209,7 @@ describe('the Backtests page', () => {
   it.each(['page=0', 'page=abc', 'page=-3', 'show=bar', 'sort=foo', 'order=x', 'show=bar&sort=foo&page=abc'])(
     'opens the plain list for ?%s, without asking the API for it',
     async (query) => {
-      const fetch = stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
+      const fetch = stubApi({ ...sessionWithPreferences(ADA), ...backtestsAnswer(PAGE) });
       await renderApp(`/backtests?${query}`);
       expect(await screen.findByText('3 backtests')).toBeDefined();
       expect(asked(fetch)).toEqual(['/api/v1/backtests']);
@@ -218,7 +218,7 @@ describe('the Backtests page', () => {
 
   it('searches as the typing pauses, from page 1, keeping the focus in the field', async () => {
     const fetch = stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...backtestsAnswer({ ...PAGE, page: 2, pages: 2, total: 13 }, '?page=2'),
       ...backtestsAnswer({ ...PAGE, backtests: [TEN], total: 1 }, '?q=btc'),
     });
@@ -234,7 +234,7 @@ describe('the Backtests page', () => {
 
   it('keeps the rows of the page on screen while the next one loads', async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...backtestsAnswer({ ...PAGE, pages: 2, total: 13 }),
       'GET /api/v1/backtests?page=2': () => new Promise(() => {}),
     });
@@ -247,7 +247,7 @@ describe('the Backtests page', () => {
 
   it('sorts by a column down, then up, then back to newest first', async () => {
     const fetch = stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...backtestsAnswer(PAGE),
       ...backtestsAnswer(PAGE, '?sort=return&order=desc'),
       ...backtestsAnswer(PAGE, '?sort=return&order=asc'),
@@ -271,7 +271,7 @@ describe('the Backtests page', () => {
   });
 
   it('writes the headers of the number columns in mono at the right', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
+    stubApi({ ...sessionWithPreferences(ADA), ...backtestsAnswer(PAGE) });
     await renderApp('/backtests');
     await screen.findByText('#12');
     const mono = screen
@@ -286,7 +286,7 @@ describe('the Backtests page', () => {
   it("shows a backtest's own name in place of the generated one, in full on hover when it is cut", async () => {
     const long = 'MSFT Renko retest after the fee fix, long only, threshold 0.2, second try';
     const named = backtest({ name: long });
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer({ ...PAGE, backtests: [named, TEN] }) });
+    stubApi({ ...sessionWithPreferences(ADA), ...backtestsAnswer({ ...PAGE, backtests: [named, TEN] }) });
     await renderApp('/backtests');
     const name = await screen.findByText(long);
     expect(screen.queryByText('Bright Vega')).toBeNull();
@@ -305,7 +305,7 @@ describe('the Backtests page', () => {
 
   it('sorts by the name of the backtest, A to Z first', async () => {
     const fetch = stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...backtestsAnswer(PAGE),
       ...backtestsAnswer(PAGE, '?sort=name&order=asc'),
     });
@@ -318,7 +318,7 @@ describe('the Backtests page', () => {
   });
 
   it('opens a row from the keyboard, ringing the row while its link has the focus', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
+    stubApi({ ...sessionWithPreferences(ADA), ...backtestsAnswer(PAGE) });
     const { router } = await renderApp('/backtests');
     const star = await screen.findByRole('button', { name: 'Star Bright Vega' });
     star.focus();
@@ -333,7 +333,7 @@ describe('the Backtests page', () => {
   });
   it('stars a backtest at once and takes the star back when the API refuses', async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...backtestsAnswer(PAGE),
       'PATCH /api/v1/backtests/bt_7f3k2m9qx4': () =>
         new Promise((resolve) => setTimeout(() => resolve(problem(404, 'not-found', 'Gone.')), 50)),
@@ -348,7 +348,7 @@ describe('the Backtests page', () => {
 
   it('drops a backtest that loses its star from the Starred list at once', async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...backtestsAnswer({ ...PAGE, backtests: [TEN], total: 1 }, '?show=starred'),
       'PATCH /api/v1/backtests/bt_q7r8s9t2u3': () => new Promise(() => {}),
     });
@@ -360,7 +360,7 @@ describe('the Backtests page', () => {
 
   it("opens a backtest's page, but not from its star", async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...backtestsAnswer(PAGE),
       'PATCH /api/v1/backtests/bt_q7r8s9t2u3': { status: 200, body: { ...TEN, starred: false } },
     });
@@ -375,7 +375,7 @@ describe('the Backtests page', () => {
   });
 
   it('pages through the backtests', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer({ ...PAGE, pages: 2, total: 13 }) });
+    stubApi({ ...sessionWithPreferences(ADA), ...backtestsAnswer({ ...PAGE, pages: 2, total: 13 }) });
     await renderApp('/backtests');
     const pager = await screen.findByRole('navigation', { name: 'Pages' });
     expect(pager.textContent).toBe('PreviousPage 1 of 2Next');
@@ -384,7 +384,7 @@ describe('the Backtests page', () => {
 
   it('goes to the last page from a link past the end', async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...backtestsAnswer({ ...PAGE, backtests: [], page: 9, pages: 2, total: 13 }, '?page=9'),
       ...backtestsAnswer({ ...PAGE, page: 2, pages: 2, total: 13 }, '?page=2'),
     });
