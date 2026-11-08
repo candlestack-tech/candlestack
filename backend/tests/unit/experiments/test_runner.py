@@ -4,12 +4,19 @@ warning, moved on later. The runs and the queues themselves are integration test
 (tests/integration/experiments/test_runs.py)."""
 
 import asyncio
+import json
 import logging
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
+import polars as pl
 import pytest
 
 from candlestack.experiments import BacktestRunner
+from candlestack.experiments.runner import _covers
+from candlestack.preprocessing import parse_manifest
 
 pytestmark = pytest.mark.anyio
 
@@ -187,3 +194,82 @@ async def test_a_run_that_fails_on_a_bug_is_reported_and_its_marking_too(
     errors = [record for record in caplog.records if record.levelno == logging.ERROR]
     assert "failed with an error of CandleStack" in errors[0].getMessage()
     assert "was not marked failed" in caplog.text
+
+
+# --- The warm-up of a run ----------------------------------------------------------------------
+
+MANIFEST = json.loads(
+    (Path(__file__).parents[2] / "fixtures" / "keras" / "raw_candles.manifest.json").read_text()
+)
+# 2024-01-01, the start of the period of these tests.
+START = 1_704_067_200
+
+
+def candles(before: int, after: int = 10) -> pl.DataFrame:
+    """30-minute candles, ``before`` of them before ``START`` and ``after`` from it on."""
+    ts = START + 1800 * np.arange(-before, after, dtype=np.int64)
+    close = 100 + np.sin(ts / 7_000)
+    return pl.DataFrame(
+        {
+            "ts": ts,
+            "open": close,
+            "high": close + 1,
+            "low": close - 1,
+            "close": close,
+            "volume": np.full(ts.size, 1000.0),
+        }
+    )
+
+
+@pytest.mark.parametrize(("before", "covered"), [(24, True), (30, True), (23, False)])
+def test_a_warm_up_covers_the_period_with_a_sample_on_its_first_candle(
+    before: int, covered: bool
+) -> None:
+    assert _covers(candles(before), parse_manifest(MANIFEST), START) is covered
+
+
+def test_a_period_without_candles_or_with_candles_the_model_refuses_needs_no_more() -> None:
+    manifest = parse_manifest(MANIFEST)
+    refused = candles(10).with_columns(close=pl.lit(float("nan")))
+
+    assert _covers(candles(10, after=0), manifest, START) is True
+    assert _covers(refused, manifest, START) is True
+
+
+class _Market:
+    """A data module whose warm-up starts where ``start`` says: no load may follow."""
+
+    def __init__(self, start: int) -> None:
+        self.start = start
+
+    async def warm_up_start(self, *_args: Any) -> int:
+        return self.start
+
+    async def candles(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("loaded again")
+
+
+def _spec(manifest: dict[str, Any]) -> Any:
+    return SimpleNamespace(
+        model=SimpleNamespace(manifest=manifest),
+        data=SimpleNamespace(
+            instrument=SimpleNamespace(id="stock:AAPL"),
+            timeframe="30m",
+            period=SimpleNamespace(start=START, end=START + 10 * 1800),
+        ),
+    )
+
+
+async def test_a_warm_up_is_not_lengthened_without_earlier_candles_or_a_manifest() -> None:
+    frame = candles(10)
+    loaded = SimpleNamespace(frame=frame, start=START - 10 * 1800, marked_frame=lambda: frame)
+    # The data module has no candle before those loaded.
+    runs = BacktestRunner(
+        None,  # ty: ignore[invalid-argument-type]
+        data=_Market(loaded.start),  # ty: ignore[invalid-argument-type]
+        jobs=None,  # ty: ignore[invalid-argument-type]
+    )
+
+    assert await runs._with_warm_up(_spec(MANIFEST), loaded) is loaded  # ty: ignore[invalid-argument-type]
+    # A manifest that does not parse is the worker's to refuse.
+    assert await runs._with_warm_up(_spec({"version": 0}), loaded) is loaded

@@ -2329,7 +2329,7 @@ export interface components {
         CheckedWarmUp: {
             /**
              * Candles
-             * @description Candles the model needs before the period, loaded with it
+             * @description Candles the model needs before the period, loaded with it; where an `estimate` falls short, the run loads twice as many, up to three times
              * @example 24
              */
             candles: number;
@@ -2718,7 +2718,7 @@ export interface components {
             /**
              * Email
              * @description The account's email
-             * @example arsen@example.com
+             * @example ada@example.com
              */
             email: string;
             provider: components["schemas"]["Provider"];
@@ -3627,13 +3627,13 @@ export interface components {
             /**
              * Display Name
              * @description Name shown in the app
-             * @example Arsen Labovich
+             * @example Ada Lovelace
              */
             display_name: string;
             /**
              * Email
              * @description From the identity provider, read-only
-             * @example arsen@example.com
+             * @example ada@example.com
              */
             email: string;
             /**
@@ -3664,7 +3664,7 @@ export interface components {
             /**
              * Display Name
              * @description Name shown in the app; surrounding whitespace is dropped
-             * @example Arsen Labovich
+             * @example Ada Lovelace
              */
             display_name: string;
         };
@@ -4343,13 +4343,13 @@ export interface components {
             /**
              * Email
              * @description The account's email at the provider, as of its last sign-in or connect
-             * @example arsen@example.com
+             * @example ada@example.com
              */
             email: string;
             /**
              * Login
              * @description The account's GitHub username; null for Google
-             * @example arsen
+             * @example ada
              */
             login: string | null;
             provider: components["schemas"]["Provider"];
@@ -4969,7 +4969,7 @@ export interface components {
         WarmUpReport: {
             /**
              * Candles
-             * @description Candles loaded before the period for the warm-up
+             * @description Candles the model needs before the period (its warm-up), loaded with it; where an `estimate` fell short the run loaded more, from `loaded.start`
              */
             candles: number;
             /**

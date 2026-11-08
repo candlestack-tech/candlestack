@@ -311,6 +311,78 @@ def test_the_document_says_when_the_candles_changed_since(ada, market) -> None:
     )
 
 
+def renko() -> dict[str, Any]:
+    """The raw-candles test model's manifest on Renko triples (25 x 5, the volume replaced by
+    each triple's direction): a warm-up of 267 candles, an estimate."""
+    changed = manifest(
+        representation={"id": "renko-triples@1", "params": {"atr_multiple": 0.6}},
+        window={"length": 25, "last": "current"},
+    )
+    changed["input"]["features"][4] = {
+        "name": "direction",
+        "id": "renko-direction@1",
+        "norm": {"id": "none@1"},
+    }
+    return changed
+
+
+# A period after a market that stood still for three days: no brick formed there.
+CALM_START = START + 20 * DAY
+CALM_END = CALM_START + 5 * DAY
+
+
+def test_two_representations_run_on_the_same_candles_of_the_period(ada, market, worker) -> None:
+    market.calm = (CALM_START - 3 * DAY, CALM_START)
+    worker.built = True
+    data = period(CALM_START, CALM_END)
+    windows = ada.start(body(ada.runnable_model(), data=data)).json()["backtest"]["id"]
+    windows_document = ada.ended(windows)
+    renko_model = ada.runnable_model(renko(), name="renko.keras")
+    bricks = ada.start(body(renko_model, data=data)).json()["backtest"]["id"]
+    bricks_document = ada.ended(bricks)
+
+    for document in (windows_document, bricks_document):
+        assert document["backtest"]["status"] == "finished", document["backtest"]["error"]
+        rows = document["data"]["rows"]
+        assert rows == {"first_ts": CALM_START, "last_ts": CALM_END - 1800, "count": 240}
+        assert document["data"]["align"]["candles_without_prediction"] == 0
+    # Buy and hold of the same candles, whatever the model reads.
+    held = windows_document["results"]["stats"]["buy_and_hold_return"]
+    assert bricks_document["results"]["stats"]["buy_and_hold_return"] == held
+    # The estimated warm-up of 267 candles began in the calm and made too few bricks before
+    # the period, so the run loaded twice as many; the windows' exact one sufficed.
+    assert windows_document["data"]["loaded"]["start"] == CALM_START - 24 * 1800
+    bricks_data = bricks_document["data"]
+    assert bricks_data["warm_up"]["candles"] == 267
+    assert bricks_data["loaded"]["start"] == CALM_START - 2 * 267 * 1800
+    assert step(bricks_document, "candles")["candles"] == 2 * 267 + 240
+    # The document loads what the run loaded, so it shows the same results.
+    assert market.loads[-1] == (CALM_START - 2 * 267 * 1800, CALM_END)
+
+
+def test_a_warm_up_the_data_cannot_lengthen_starts_at_the_first_prediction(
+    ada, market, worker, monkeypatch
+) -> None:
+    market.calm = (CALM_START - 3 * DAY, CALM_START)
+    worker.built = True
+    check = market.warm_up_start
+
+    async def no_further(instrument, timeframe, start, end, candles):
+        if candles > 267:
+            raise WarmUpOutOfRange(instrument, timeframe, candles, None)
+        return await check(instrument, timeframe, start, end, candles)
+
+    monkeypatch.setattr(market, "warm_up_start", no_further)
+    started = ada.start(body(ada.runnable_model(renko()), data=period(CALM_START, CALM_END)))
+    document = ada.ended(started.json()["backtest"]["id"])
+
+    assert document["backtest"]["status"] == "finished", document["backtest"]["error"]
+    data = document["data"]
+    assert data["loaded"]["start"] == CALM_START - 267 * 1800
+    assert data["rows"]["first_ts"] > CALM_START
+    assert data["rows"]["count"] < 240
+
+
 @pytest.mark.usefixtures("real_worker")
 def test_a_run_with_the_real_worker(ada) -> None:
     model_id = ada.runnable_model(file=KERAS / "raw_candles.keras")

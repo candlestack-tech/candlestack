@@ -29,8 +29,8 @@
         "arguments": {},
         "result": {
           "created_at": "2026-10-01T09:30:00Z",
-          "display_name": "Arsen Labovich",
-          "email": "arsen@example.com",
+          "display_name": "Ada Lovelace",
+          "email": "ada@example.com",
           "id": "usr_7f3k2m9qx4",
           "scopes": [
             "read",
@@ -5287,7 +5287,7 @@
           "CheckedWarmUp": {
             "properties": {
               "candles": {
-                "description": "Candles the model needs before the period, loaded with it",
+                "description": "Candles the model needs before the period, loaded with it; where an `estimate` falls short, the run loads twice as many, up to three times",
                 "examples": [
                   24
                 ],
@@ -6911,7 +6911,7 @@
             "author": {
               "id": "usr_7f3k2m9qx4",
               "mine": true,
-              "name": "Arsen Labovich"
+              "name": "Ada Lovelace"
             },
             "created_at": "2026-11-02T09:30:00Z",
             "duration_s": 162.0,
@@ -8125,7 +8125,7 @@
               "author": {
                 "id": "usr_7f3k2m9qx4",
                 "mine": true,
-                "name": "Arsen Labovich"
+                "name": "Ada Lovelace"
               },
               "buy_and_hold": [
                 0.0,
@@ -8160,7 +8160,7 @@
               "author": {
                 "id": "usr_7f3k2m9qx4",
                 "mine": true,
-                "name": "Arsen Labovich"
+                "name": "Ada Lovelace"
               },
               "buy_and_hold": [
                 0.0,
