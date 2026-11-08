@@ -138,6 +138,42 @@ async def list_backtests(
     return await service.backtests(user.id, query)
 
 
+@contextmanager
+def update_problems() -> Iterator[None]:
+    """Raises the errors of starring, renaming, publishing or unpublishing a backtest
+    (``BacktestsService.update``) as problem details: for the route and the MCP tools."""
+    try:
+        yield
+    except BacktestNotFound:
+        raise ProblemError(
+            404, "not-found", "Not Found", "You have no backtest with this ID."
+        ) from None
+    except NameTaken as taken:
+        raise ProblemError(
+            409,
+            "name-taken",
+            "Name taken",
+            f"You already have a backtest called {taken.name} (#{taken.number}). Pick another "
+            "name.",
+            headers=NO_STORE,  # it names a backtest of the user
+        ) from None
+    except NoDocument:
+        raise ProblemError(
+            409,
+            "no-document",
+            "No result document",
+            "This backtest is test data from before backtests ran in the app, so it cannot be "
+            "published.",
+        ) from None
+    except BacktestNotFinished:
+        raise ProblemError(
+            409,
+            "backtest-not-finished",
+            "Backtest not finished",
+            "Only a finished backtest can be published.",
+        ) from None
+
+
 @router.patch(
     "/api/v1/backtests/{backtest_id}",
     responses={
@@ -179,36 +215,8 @@ async def update_backtest(
     }
     caller.require(*(scope for scope in Scope if scope in needed))
     response.headers.update(NO_STORE)
-    try:
+    with update_problems():
         return await service.update(caller.user.id, backtest_id, body)
-    except BacktestNotFound:
-        raise ProblemError(
-            404, "not-found", "Not Found", "You have no backtest with this ID."
-        ) from None
-    except NameTaken as taken:
-        raise ProblemError(
-            409,
-            "name-taken",
-            "Name taken",
-            f"You already have a backtest called {taken.name} (#{taken.number}). Pick another "
-            "name.",
-            headers=NO_STORE,  # it names a backtest of the user
-        ) from None
-    except NoDocument:
-        raise ProblemError(
-            409,
-            "no-document",
-            "No result document",
-            "This backtest is test data from before backtests ran in the app, so it cannot be "
-            "published.",
-        ) from None
-    except BacktestNotFinished:
-        raise ProblemError(
-            409,
-            "backtest-not-finished",
-            "Backtest not finished",
-            "Only a finished backtest can be published.",
-        ) from None
 
 
 def experiments_query(  # noqa: PLR0913 (one argument per query parameter)
@@ -400,8 +408,8 @@ def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911, P
 
 @contextmanager
 def backtest_problems() -> Iterator[None]:
-    """Raises the errors of starting a backtest, of its document, of a comparison and of the
-    market data they load as problem details, for the routes and the MCP tools."""
+    """Raises the errors of starting or cancelling a backtest, of its document, of a comparison
+    and of the market data they load as problem details, for the routes and the MCP tools."""
     with data_problems():
         try:
             yield
