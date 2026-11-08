@@ -156,6 +156,21 @@
           },
           "title": "Steps",
           "type": "array"
+        },
+        "sweep_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The sweep it was started in (`GET /api/v1/sweeps/{sweep_id}`); null for a backtest started alone",
+          "examples": [
+            null
+          ],
+          "title": "Sweep Id"
         }
       },
       "required": [
@@ -168,6 +183,7 @@
         "published_at",
         "status",
         "queue_position",
+        "sweep_id",
         "created_at",
         "started_at",
         "finished_at",

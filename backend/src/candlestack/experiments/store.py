@@ -39,7 +39,7 @@ from sqlalchemy.orm import InstrumentedAttribute, aliased, undefer
 from sqlalchemy.sql import visitors
 
 from candlestack.accounts import User
-from candlestack.experiments.models import Backtest
+from candlestack.experiments.models import Backtest, Sweep
 from candlestack.experiments.names import generated_name
 from candlestack.experiments.schemas import (
     BacktestShow,
@@ -582,6 +582,28 @@ class BacktestStore:
             else:
                 return
             attempt += 1
+
+    async def add_sweep(self, sweep: Sweep) -> None:
+        """Adds the sweep, written at once so its backtests can name it."""
+        self._db.add(sweep)
+        await self._db.flush()
+
+    async def sweep(self, user_id: str, sweep_id: str) -> Sweep | None:
+        """The user's sweep with the ID; None also when it is another user's."""
+        return await self._db.scalar(
+            select(Sweep).where(Sweep.id == sweep_id, Sweep.user_id == user_id)
+        )
+
+    async def sweep_backtests(self, sweep: Sweep) -> list[Listed]:
+        """The backtests of the sweep in the order they were made, the grid's, with their
+        statistics (``stats``, null until one finished)."""
+        rows = await self._db.execute(
+            _listed()
+            .options(undefer(Backtest.stats))
+            .where(Backtest.user_id == sweep.user_id, Backtest.sweep_id == sweep.id)
+            .order_by(Backtest.number)
+        )
+        return [Listed(*row) for row in rows]
 
     async def running(self, user_id: str) -> bool:
         """Whether a backtest of the user is running."""

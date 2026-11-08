@@ -41,15 +41,20 @@ def signed_in(app: FastAPI) -> FastAPI:
         ("GET", "/api/v1/backtests/bt_7f3k2m9qx4/download"),
         ("POST", "/api/v1/backtests/bt_7f3k2m9qx4/cancel"),
         ("GET", "/api/v1/compare?ids=bt_7f3k2m9qx4,bt_t9n8v7d6a5"),
+        ("POST", "/api/v1/sweeps"),
+        ("GET", "/api/v1/sweeps/sw_7f3k2m9qx4"),
     ],
 )
 def test_the_backtests_need_a_session(client: TestClient, method: str, path: str) -> None:
     json = {"starred": True} if method == "PATCH" else None
+    new = {
+        "model": {"id": "mdl_7f3k2m9qx4"},
+        "data": {"instrument": {"id": "stock:AAPL"}, "period": {"start": 0, "end": 86400}},
+    }
     if path == "/api/v1/backtests":
-        json = {
-            "model": {"id": "mdl_7f3k2m9qx4"},
-            "data": {"instrument": {"id": "stock:AAPL"}, "period": {"start": 0, "end": 86400}},
-        }
+        json = new
+    if path == "/api/v1/sweeps":
+        json = {"base": new, "vary": {"models": ["mdl_7f3k2m9qx4", "mdl_t9n8v7d6a5"]}}
 
     response = client.request(method, path, headers=ORIGIN, json=json)
 
@@ -58,7 +63,9 @@ def test_the_backtests_need_a_session(client: TestClient, method: str, path: str
 
 
 @pytest.mark.usefixtures("signed_in")
-@pytest.mark.parametrize("path", ["/api/v1/backtests", "/api/v1/backtests/bt_7f3k2m9qx4/cancel"])
+@pytest.mark.parametrize(
+    "path", ["/api/v1/backtests", "/api/v1/backtests/bt_7f3k2m9qx4/cancel", "/api/v1/sweeps"]
+)
 def test_starting_or_cancelling_a_backtest_needs_the_apps_own_origin(
     client: TestClient, path: str
 ) -> None:
@@ -84,6 +91,40 @@ def test_a_new_backtest_without_its_groups_is_a_422(
     client: TestClient, body: dict[str, object]
 ) -> None:
     response = client.post("/api/v1/backtests", json=body, headers=ORIGIN)
+
+    assert response.status_code == 422
+    assert response.json()["type"] == PROBLEMS + "validation"
+
+
+@pytest.mark.usefixtures("signed_in")
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"vary": {"rules": [{"name": "threshold", "limit": 0.1}]}},
+        {"base": {"model": {"id": "mdl_x"}}, "vary": {}},
+        {
+            "base": {
+                "model": {"id": "mdl_x"},
+                "data": {"instrument": {"id": "stock:AAPL"}, "period": {"start": 0, "end": 9}},
+            },
+            "metric": "num_trades",
+        },
+    ],
+    ids=["empty", "no-base", "base-without-data", "metric-without-direction"],
+)
+def test_a_new_sweep_without_a_base_or_with_a_wrong_metric_is_a_422(
+    client: TestClient, body: dict[str, object]
+) -> None:
+    response = client.post("/api/v1/sweeps", json=body, headers=ORIGIN)
+
+    assert response.status_code == 422
+    assert response.json()["type"] == PROBLEMS + "validation"
+
+
+@pytest.mark.usefixtures("signed_in")
+def test_a_sweep_is_ranked_only_by_a_statistic_with_a_direction(client: TestClient) -> None:
+    response = client.get("/api/v1/sweeps/sw_7f3k2m9qx4", params={"metric": "exposure"})
 
     assert response.status_code == 422
     assert response.json()["type"] == PROBLEMS + "validation"
