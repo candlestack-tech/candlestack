@@ -2,5 +2,5 @@
 export { AccountMenu } from './AccountMenu';
 export { Avatar } from './Avatar';
 export { SignedInUserContext, useSignedInUser } from './signedInUser';
-export { useDeleteAccount, useSignOutEverywhere, useSwitchAccount } from './useLeaveAccount';
+export { useDeleteAccount, useSignOutEverywhere, useSignOutHere, useSwitchAccount } from './useLeaveAccount';
 export { useMe } from './useMe';

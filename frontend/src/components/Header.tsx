@@ -47,11 +47,15 @@ function MainNav() {
 }
 
 // Signed out: Sign in and Try Backtest, both to the sign-in page (the first sign-in creates the
-// account), which leaves them out. Sign in waits for md: with the nav, the row needs about 675 px.
+// account), which leaves them out, as does the consent page. Sign in waits for md: with the nav,
+// the row needs about 675 px.
 // Signed in: Dashboard and the avatar with its menu.
 function Actions() {
   const me = useMe();
-  const onSignIn = useRouterState({ select: (state) => state.location.pathname === '/signin' });
+  // The sign-in page and the consent page sign in themselves.
+  const onSignIn = useRouterState({
+    select: ({ location }) => location.pathname === '/signin' || location.pathname === '/oauth/consent',
+  });
   return (
     <div className="ml-auto flex items-center gap-2">
       {me ? (

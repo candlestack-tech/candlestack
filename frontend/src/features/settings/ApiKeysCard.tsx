@@ -4,7 +4,6 @@ import { useState } from 'react';
 import type { ApiKey, ApiKeys } from '@/api';
 import { ACCENT_BUTTON, BUTTON_SIZES, OUTLINE_BUTTON } from '@/components/buttonStyles';
 import { DashboardCard } from '@/components/DashboardCard';
-import { ErrorNote } from '@/components/ErrorNote';
 import { HINT } from '@/components/Hint';
 import { KeyIcon } from '@/components/icons';
 import { Button } from '@/components/ui/button';
@@ -15,7 +14,7 @@ import { cn } from '@/lib/utils';
 
 import { expiryText, isExpired, lastUsedText } from './apiKeyText';
 import { CreateKeyDialog } from './CreateKeyDialog';
-import { GuideLink, KeyName, KeyTile, ScopeChips, WarnNote } from './keyParts';
+import { GuideLink, KeyName, KeyTile, LoadError, ScopeChips, WarnNote } from './keyParts';
 import { RevokeKeyDialog } from './RevokeKeyDialog';
 import { SettingsLead, SettingsRow } from './rows';
 import { useApiKeys } from './useApiKeys';
@@ -155,24 +154,6 @@ function KeyList({ keys, now, onRevoke }: ListProps) {
         ))}
       </div>
     </>
-  );
-}
-
-// What went wrong loading the keys, and Try again.
-function LoadError({ error, retrying, onRetry }: { error: Error; retrying: boolean; onRetry: () => void }) {
-  return (
-    <div className="mb-2 flex items-center gap-3">
-      <ErrorNote>{error.message}</ErrorNote>
-      <Button
-        type="button"
-        variant="outline"
-        className={cn(BUTTON_SIZES.sm, OUTLINE_BUTTON)}
-        disabled={retrying}
-        onClick={onRetry}
-      >
-        Try again
-      </Button>
-    </div>
   );
 }
 

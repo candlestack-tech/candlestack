@@ -182,6 +182,10 @@ names the layout: `useSearch({ from: '/_app/instruments' })`.
 - `/dashboard`, `/backtests`, `/experiments`, `/models`, `/upload/$token`, `/instruments`,
   `/instrument/$id` and `/settings` sit behind a guard (`src/routes/accountGuards.ts`): signed out, it redirects to `/signin?next=<the
   page asked for>`. The app code loads on demand.
+- `/oauth/consent?request=<id>` is the consent page of an app's OAuth request
+  ([Consent page](#consent-page)). On the way there (`/signin?next=/oauth/consent?...`, where
+  the API's authorize step sends a signed-out browser) the sign-in page hands over to it, as the
+  consent page signs in itself and names the app; after a denied or failed sign-in it stays.
 - `next` is only ever a path of this app (`appPath` in `src/routes/signInSearch.ts`): anything
   that leaves the origin (`https://…`, `//…`, `/\…`), `/signin` itself and `/api/…` are dropped,
   so signing in is no open redirect. The validator sets every key it drops to `undefined`: the
@@ -290,11 +294,52 @@ The two sections with the account's preferences load them in the route's loader
   on its way, and a click beside it does not close the shown key. The list is asked again on
   coming back to the tab (a key's last use moves with every request it signs). Revoke and Delete
   ask first. The Docs row links the API docs of the same host until the website's API guide is
-  live (website#75). The MCP server card stays Coming soon, with the server address of the same
-  host.
+  live (website#75).
+- The MCP server card (`McpCard.tsx`, #409): the server address of the same host
+  (`window.location.origin` + `/mcp`, so stage shows stage's) with Copy; one line per client
+  (Claude, ChatGPT, Claude Code, Cursor, VS Code, other clients) with its real mark
+  (`src/components/clientLogos.tsx`, the official files the website's docs use), how it connects
+  and Guide to `https://candlestack.tech/docs/mcp/install/`; then Connected apps:
+  `GET /api/v1/me/connected-apps` under `['account', 'connected-apps']` (`src/api/oauth.ts`,
+  asked again on coming back to the tab), each app with its tile, name, the host it returns to,
+  its scopes, last use and when it connected, and Disconnect, which asks first
+  (`DELETE /api/v1/me/connected-apps/{id}`; a 404 counts as gone). Without apps a dashed box says
+  how to connect one. The app's tile (`src/components/AppTile.tsx`) draws the mark of a known app
+  by the host it returns to (claude.ai, chatgpt.com: the API checks that host against the
+  registered redirect URIs, so a name cannot borrow it), else the `logo_uri` the app gave (sent
+  without a referrer), else its initial; a logo that does not load falls back to the initial.
 - Account: Sign out everywhere (`POST /api/v1/auth/sign-out-everywhere`) and Delete account
   (`DELETE /api/v1/me`, after the app's dialog). Both then forget the user and their data and go
   to the home page, as Sign out does (`useLeaveAccount.ts`).
+
+## Consent page
+
+`/oauth/consent?request=<id>` (#409, `src/pages/ConsentPage.tsx`, the parts in
+`src/features/consent/`, design `mockups/api-mcp` `#consent`) is where the API's OAuth authorize
+step sends the browser when an MCP client such as Claude or ChatGPT signs in
+(`docs/architecture.md`, OAuth). It sits with the public pages under the site's header, without
+the sidebar, one card in the middle like the sign-in page; the header leaves out Sign in and Try
+Backtest there. `request` must look like the API's IDs (`src/routes/consentSearch.ts`), else it is
+dropped and never put into a request path. The route's loader asks for
+`GET /api/v1/oauth/requests/{id}` (no session needed) while the page's code loads; a failed answer
+is not asked again on mount.
+
+- Signed in: the app's tile linked to the CandleStack mark, "Claude wants access to your
+  CandleStack account", "From claude.ai" (the host it returns to, as anyone can register an app
+  called Claude), Signed in as with Not you? (signs out and stays on the page), the scopes in the
+  API's plain words with boxes (read always and faded, the others only when the app asked for
+  them; Run backtests and Manage models start on, Publish off), what an app can never do, Cancel
+  and Allow. Either posts `POST /api/v1/oauth/requests/{id}` (`deny`, or `allow` with the ticked
+  scopes) and sends the browser to the answer's `redirect_to`; the buttons stay off until it has
+  left.
+- Signed out: the same card offers GitHub and Google and names the app; signing in comes back to
+  the page.
+- Off the beta list (`403 not-on-beta-list` on Allow): the sign-in page's words, with Use another
+  account (signs out, then the sign-in on the card) and Contact the team. A session that ended
+  meanwhile (401) shows the sign-in.
+- A request that was decided, expired (10 minutes) or never was (404, also when the decision gets
+  it) and an address without one: "This request has expired" with Go to Dashboard. Any other
+  failure to load says why, with Try again.
 
 ## Models
 

@@ -130,17 +130,19 @@ describe('Settings', () => {
     expect(card.queryByText('Backtests')).toBeNull();
   });
 
-  it('shows the API keys, and the MCP server as coming soon with the address of this host', async () => {
+  it('shows the API keys, and the MCP server with the address of this host', async () => {
     stubApi({
       ...sessionWithPreferences(ARSEN),
       'GET /api/v1/me/api-keys': { status: 200, body: { items: [], limit: 10 } },
+      'GET /api/v1/me/connected-apps': { status: 200, body: { items: [] } },
     });
     await renderApp('/settings/api-and-mcp');
     const keys = within(screen.getByRole('region', { name: 'API keys' }));
     expect(await keys.findByText('No API keys yet')).toBeDefined();
     expect(keys.queryByText('Coming soon')).toBeNull();
     const mcp = within(screen.getByRole('region', { name: 'MCP server' }));
-    expect(mcp.getByText('Coming soon')).toBeDefined();
+    expect(mcp.queryByText('Coming soon')).toBeNull();
     expect(mcp.getByText(`${window.location.origin}/mcp`)).toBeDefined();
+    expect(await mcp.findByText('No apps connected')).toBeDefined();
   });
 });
