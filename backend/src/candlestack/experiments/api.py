@@ -1,8 +1,7 @@
 """HTTP API of the experiments module: the signed-in user's backtests under
 ``/api/v1/backtests`` (the list, starting one, cancelling a queued one, its result document and
-its download), the
-backtests every account published under ``/api/v1/experiments`` and the Dashboard under
-``/api/v1/dashboard``.
+its download), the backtests every account published under ``/api/v1/experiments``, the
+comparison of backtests under ``/api/v1/compare`` and the Dashboard under ``/api/v1/dashboard``.
 """
 
 from collections.abc import Iterator
@@ -14,6 +13,14 @@ from fastapi import APIRouter, Depends, Path, Query, Response
 from candlestack.accounts import BacktestsUserDep, CallerDep, CurrentUserDep, Scope
 from candlestack.core import NO_STORE, ProblemError, problem_doc, require_same_origin
 from candlestack.data import data_problems
+from candlestack.experiments.compare import (
+    COMPARE_MAX,
+    COMPARE_MIN,
+    IDS_MAX_LENGTH,
+    CompareOut,
+    compare,
+    parse_ids,
+)
 from candlestack.experiments.dependencies import BacktestRunsDep, BacktestsServiceDep
 from candlestack.experiments.document import BacktestDocument, BacktestIn
 from candlestack.experiments.errors import (
@@ -27,6 +34,7 @@ from candlestack.experiments.errors import (
     ModelNotFound,
     NameTaken,
     NoDocument,
+    NotComparable,
     QueueFull,
 )
 from candlestack.experiments.schemas import (
@@ -497,3 +505,68 @@ async def download_backtest(
         number, content = await runs.document(user.id, backtest_id, light=False)
     disposition = f'attachment; filename="candlestack-backtest-{number}.json"'
     return _json(content, response, headers={"Content-Disposition": disposition})
+
+
+@router.get(
+    "/api/v1/compare",
+    responses={
+        **_NOT_SIGNED_IN,
+        **problem_doc(
+            404,
+            "Neither the user's backtest nor a published one has one of the IDs (`not-found`; "
+            "`id` names it).",
+        ),
+        **problem_doc(
+            409,
+            "One of them is test data without a result document (`no-document`; `id` names it).",
+        ),
+        **problem_doc(
+            422,
+            f"Fewer than {COMPARE_MIN} or more than {COMPARE_MAX} IDs, an empty one or one twice "
+            "(`validation`).",
+        ),
+        **_SOURCE_ERRORS,
+    },
+)
+async def compare_backtests(
+    ids: Annotated[
+        str,
+        Query(
+            max_length=IDS_MAX_LENGTH,
+            description=(
+                f"{COMPARE_MIN} to {COMPARE_MAX} backtest IDs separated by commas: the user's own "
+                "and published ones of other accounts"
+            ),
+            examples=["bt_7f3k2m9qx4,bt_t9n8v7d6a5"],
+        ),
+    ],
+    user: CurrentUserDep,
+    runs: BacktestRunsDep,
+    response: Response,
+) -> CompareOut:
+    """Backtests side by side, as the Compare page shows them: each statistic of each with the
+    best and the worst marked, the setups and which of their fields differ, and the equity and
+    the drawdown of each and the return of holding its instrument on one time axis of at most
+    200 times. A backtest that is running or failed is listed with its status and without
+    values. Access is that of `GET /api/v1/backtests/{backtest_id}`."""
+    response.headers.update(NO_STORE)
+    with _problems():
+        try:
+            return await compare(runs, user.id, parse_ids(ids))
+        except NotComparable as error:
+            if error.found:
+                raise ProblemError(
+                    409,
+                    "no-document",
+                    "No result document",
+                    f"{error.backtest_id} is test data from before backtests ran in the app, so "
+                    "it has no results to compare.",
+                    extensions={"id": error.backtest_id},
+                ) from None
+            raise ProblemError(
+                404,
+                "not-found",
+                "Not Found",
+                f"Neither you nor a published backtest has the ID {error.backtest_id}.",
+                extensions={"id": error.backtest_id},
+            ) from None

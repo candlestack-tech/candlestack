@@ -98,6 +98,7 @@ flowchart LR
 | `GET /api/v1/backtests` | a page of 10 of the user's backtests: search `q` (name, number, symbol or model name), `show` (`all`, `starred`, `failed`, `public`), `model` (a model's name), `sort` and `order`, `page`; with the total, the pages and what the filter panel shows (the counts of all, starred, failed and published backtests, the models used) ([Backtests](#backtests)) |
 | `PATCH /api/v1/backtests/{backtest_id}` | stars, unstars, renames (`409 name-taken`; a name of null goes back to the generated one), publishes or unpublishes the user's backtest |
 | `GET /api/v1/experiments` | a page of 12 of the backtests every account published ([Experiments](#experiments)): search `q` (the backtest's name, symbol, model name or author's name), `mine` or `author` (a user ID), `market`, `symbol`, `representation`, `timeframe`, `sort` and `order`, `page`; with the total, the pages, the counts (all published, the user's, the accounts that published) and what the filters offer |
+| `GET /api/v1/compare?ids=<id>,<id>` | 2 to 20 backtests side by side, the user's own and others' published ones, as the Compare page shows them ([Compare](#compare)) |
 | `GET /api/v1/dashboard` | everything the Dashboard shows in one response: the counts, the 6 newest backtests, the 5 best finished ones by Sharpe ratio, return, drawdown and win rate, the 4 best starred ones, and the 4 newest published backtests of anyone with how many are published |
 | `GET /api/v1/docs` | API reference (Scalar); public on prod |
 | `GET /api/v1/openapi.json` | OpenAPI schema; snapshot committed as [openapi.json](openapi.json) |
@@ -790,6 +791,40 @@ The backtests users published, which every signed-in account (the beta list's) c
   timeframes (1m to 1d) of the published backtests of the scope (all, `mine` or `author`) and
   the search, whatever the other filters, each with its count, only those that occur. A
   partial index on `published_at` (where it is not null) serves the catalog and the Dashboard.
+
+## Compare
+
+`GET /api/v1/compare?ids=bt_a,bt_b,...` (`experiments/compare.py`) compares 2 to 20 backtests, so
+an agent gets the app's verdict without downloading and comparing the documents itself.
+
+- **Access** is that of `GET /api/v1/backtests/{backtest_id}`: the user's own, whatever their
+  status, and others' while published. It builds each result document in the light view, in
+  the order asked for, and reads it; an ID the user cannot see is `404 not-found` and test data
+  `409 no-document`, each with `id` naming that backtest. Each document is a rebuild of its
+  run (the engine and the candles), one after another, so 20 backtests make a slow request: the
+  per-key rate limit (#394) should weigh it. Fewer than 2 or more than 20 IDs, an
+  empty one or one twice is `422 validation`.
+- **Statistics** (`metrics`): the 12 of `results.stats` in the Compare table's order, each with
+  `better` (`higher`, `lower` or `none`), the value of each backtest and its mark, `best`,
+  `worst` or null. The rules are the page's (`frontend/src/features/backtests/compare/rows.ts`):
+  a fall counts by its size whatever its sign, fees are better lower, the trades, the time in
+  the market and buy and hold are better neither way; values that read the same on the page
+  (one decimal of a percent, two of the average trade and of a ratio) count as equal; nothing is
+  marked with fewer than two values or when all are equal. A running or failed backtest is
+  listed with its status (and error) and null values and marks.
+- **Setups**: each backtest's `setup` (instrument, model file, what it reads, timeframe, period,
+  `decision`, `execution`, the benchmarks' instruments) and `differs`, the dotted paths of the
+  fields whose values differ (one only some have counts).
+- **Curves**: `times`, at most 200 times shared by all (the first and the last of each series,
+  the rest evenly spaced from the earliest to the latest), and for each backtest `equity` (its
+  cumulative return), `drawdown` (its fall from the top, 0 or below) and `buy_and_hold` (the
+  return of holding its instrument) as fractions to 0.1 %, the precision of the page's charts,
+  at those times: a line's last value up to a time, null outside its period, as the page's
+  charts read a line (`chartLines.ts`, `valueAt`). The light document of a backtest of more than
+  10,000 candles has a point per UTC day (the day's last, the lowest drawdown), so its lines
+  begin at the end of its first day; buy and hold is measured from the price held from, so it
+  ends at the `buy_and_hold_return` statistic either way. About 20 KB for four backtests over
+  their whole axes, against the four whole documents the page loads today.
 
 ## Modules
 
