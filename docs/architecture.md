@@ -102,6 +102,8 @@ flowchart LR
 | `PATCH /api/v1/backtests/{backtest_id}` | stars, unstars, renames (`409 name-taken`; a name of null goes back to the generated one), publishes or unpublishes the user's backtest |
 | `GET /api/v1/experiments` | a page of 12 of the backtests every account published ([Experiments](#experiments)): search `q` (the backtest's name, symbol, model name or author's name), `mine` or `author` (a user ID), `market`, `symbol`, `representation`, `timeframe`, `sort` and `order`, `page`; with the total, the pages, the counts (all published, the user's, the accounts that published) and what the filters offer |
 | `GET /api/v1/compare?ids=<id>,<id>` | 1 to 20 backtests side by side, the user's own and others' published ones, as the Compare page shows them ([Compare](#compare)) |
+| `POST /api/v1/sweeps` | starts a backtest for every combination of a base setup and the lists in `vary` (models, instruments, periods, decision rules), 2 to 20, all in the user's queue or none; 201 with the sweep and `Location`, or with `validate_only` 200 with the count and each setup and nothing started ([Sweeps](#sweeps)) |
+| `GET /api/v1/sweeps/{sweep_id}` | the user's sweep: progress, each backtest's ID, status and setup, and once all ended the ranking by `metric` (the sweep's own unless the query names another) ([Sweeps](#sweeps)) |
 | `GET /api/v1/dashboard` | everything the Dashboard shows in one response: the counts, the 6 newest backtests, the 5 best finished ones by Sharpe ratio, return, drawdown and win rate, the 4 best starred ones, and the 4 newest published backtests of anyone with how many are published |
 | `POST /mcp` (and `GET`, `DELETE`) | the MCP server, Streamable HTTP, signed in with an API key only ([MCP](#mcp)); not in the API reference |
 | `GET /.well-known/oauth-protected-resource/mcp` | the MCP server's protected resource metadata (RFC 9728): its address, scopes and docs; not in the API reference |
@@ -153,7 +155,11 @@ flowchart LR
   backtest and its number); it uses `not-found` (404: no backtest or model of the user with the
   ID; for a result document, also no published backtest of another account with it),
   `validation` (422, also a benchmark of
-  another instrument, or of SPY, QQQ or DIA on a crypto backtest), and the data module's
+  another instrument, or of SPY, QQQ or DIA on a crypto backtest, and a sweep of fewer than 2 or
+  more than 20 backtests, the latter with `count` and `limit`), `queue-full` for a sweep too
+  (409: the queue has room for fewer than its backtests, with `limit`, `count` and `room`), a
+  sweep's setup that fails a check with that check's problem and `setup` (the setup's place in
+  the grid, from 1), and the data module's
   `warm-up-out-of-range`, `period-out-of-range`, `too-many-candles`, `instrument-not-found`,
   `source-unavailable` and `source-data-invalid` for the instrument and the period (and the
   fund a benchmark holds).
@@ -619,8 +625,10 @@ checked at the next start.
   trades, how long the run took, the engine version), a short equity series, the model's input
   shape (`input_shape`, JSONB: rows by features, from the signature of the manifest it ran
   with), the error of a failed one, the star, when it was started (`created_at`), began to run
-  (`started_at`, null while it is queued) and finished, and when it was
-  published (`published_at`, null while it is not). Results are null for a failed backtest. A
+  (`started_at`, null while it is queued) and finished, when it was
+  published (`published_at`, null while it is not) and the sweep that started it (`sweep_id`,
+  a foreign key to `sweeps` that becomes null should the sweep go; null for one started
+  alone). Results are null for a failed backtest. A
   backtest run in the app also stores (deferred columns, which the list and the Dashboard
   never read) what the result document is built from (docs/engine.md, "Stored, and built on
   request"): `spec` (JSONB: the model's name, framework, SHA-256, size and a copy of its
@@ -886,6 +894,55 @@ a single backtest that way while it asks for one more.
   curves out. About 22 KB (4 KB gzipped) for four backtests over their whole axes; the four
   light documents the page loaded before were 5 to 6 MB (1.6 to 2.1 MB gzipped).
 
+## Sweeps
+
+`POST /api/v1/sweeps` (`experiments/sweeps.py`) runs a grid of setups in one request, and
+`GET /api/v1/sweeps/{sweep_id}` ranks them, so an agent can ask which combination of
+representation, model and post-processing does best without starting and comparing 20
+backtests itself.
+
+- **The grid**: `base` is the body of `POST /api/v1/backtests`, `vary` has lists that replace
+  its values: `models` (IDs), `instruments`, `periods` and `rules` (a `decision.rule` each). A
+  list left out or empty keeps the base's value; each value once per list (two spellings of one
+  instrument count as one), at most 20 per list. The base still needs its model and instrument
+  when `models` or `instruments` replace them. An unknown field of the request is `422
+  validation` (the base alone ignores them, as `POST /api/v1/backtests` does), so a mistyped
+  `validate_only` never starts a sweep. Every combination is one backtest, in the order models,
+  instruments, periods, rules. The
+  representation and the timeframe are the model's manifest's, so a sweep varies them by
+  listing models that read them. A buy and hold benchmark of the base's instrument holds each
+  backtest's own instrument; a fund (SPY, QQQ, DIA) stays.
+- **Limits**: 2 to 20 backtests (`422 validation`, the size counted before the grid is built,
+  with `count` and `limit` above 20), and the user's queue must have room for all of them:
+  `409 queue-full` with `limit`, `count` and `room` when fewer than `count` places of the 20
+  are free (checked after the reads and again under the lock of the user).
+- **Checks**: every setup passes the checks of `POST /api/v1/backtests` (`BacktestRuns.prepare`
+  and `spec`) before anything is stored; the first that fails answers with its problem, its
+  detail prefixed `Setup N of the sweep:` and `setup` N (from 1). Then, under the lock of the
+  user, the models are held, the sweep is stored and its backtests are added at the end of the
+  queue in the grid's order (consecutive numbers), and the first starts when nothing of the
+  user runs: all in one transaction, so a sweep starts whole or not at all. `validate_only`
+  runs the same checks, the queue's room included, and answers 200 with `count`, `limit`,
+  `queue_room` and each setup, storing nothing.
+- **Table** `sweeps`: `id` (`sw_` and 10 characters), the user (cascade), `metric` (the
+  statistic it ranks by, `sharpe` unless the request names another), `grid` (JSONB: each
+  setup with its backtest's ID: model ID and name, representation, timeframe, instrument,
+  period, rule) and `created_at`. Its backtests are ordinary rows of `backtests` with
+  `sweep_id` (a partial index finds them): in the list, comparable, publishable and cancellable
+  one by one, run by the queue as any other. The result document of another user's published
+  backtest has `sweep_id` null, as its model ID: only the author can open the sweep.
+- **Progress**: how many of its backtests are queued, running, finished and failed, and each
+  one's ID, number, name, status, place in the queue, error and setup; `done` once none is
+  queued or running.
+- **Ranking**, once done: the backtests by the metric (`metric` of the query, else the sweep's),
+  one of the 9 statistics with a direction (not the trades, the time in the market or buy and
+  hold), from the `stats` each run stored, with the rules of [Compare](#compare)
+  (`compare.metric_rows`, `compare.ranks`): a fall by its size, the fees lower first, values that
+  read the same in the app share a rank (1, 1, 3), the best and the worst marked as Compare
+  marks them. Failed backtests, and a statistic that is undefined, come last without a rank.
+  The ranking has the IDs, so `GET /api/v1/compare` gives every statistic, the setups and the
+  curves.
+
 ## MCP
 
 The `mcp` module serves a remote MCP server at `/mcp` inside the app, on the official Python SDK
@@ -930,8 +987,8 @@ call, as the routes' dependencies do), never the API over HTTP.
 - **Tools**: one module per area, each with its `TOOLS`, which `server.TOOLS` joins.
   - `account`: `get_me` (scope `read`): the key's user (ID, name, email, created) and the
     key's scopes.
-  - `market` (scope `read`, but `update_backtest_defaults`): `search_instruments` (a query, optional market and exchange,
-    pages with `offset` and `next_offset`), `top_instruments` (the most traded, the top
+  - `market` (scope `read`, but `update_backtest_defaults`): `search_instruments` (a query,
+    optional market and exchange, pages with `offset` and `next_offset`), `top_instruments` (the most traded, the top
     gainers or losers, of a market or both: the list without a query), `get_instrument` (its
     timeframes and the period of its candles), `get_candles`, `preprocessing_catalog` (the
     blocks of a manifest, optionally of one step, without the app's `group` and `tunable`
@@ -954,6 +1011,14 @@ call, as the routes' dependencies do), never the API over HTTP.
     (`DataService.first_candles`, which counts the session candles of a stock exactly with
     `latest_end`) and `next_start`, where they end, for the next page. Its description says
     the data terms (Alpaca's data for the user's personal, noncommercial use only).
+  - `sweeps`: `validate_sweep` (scope `read`, as the convention asks of a tool that changes
+    nothing, while the dry run over HTTP needs `backtests` because it is the route that starts
+    a sweep; it still runs each setup's checks against the data source, so a read key spends
+    the same requests as a dry run), `run_sweep` (scope `backtests`) and `get_sweep` (scope
+    `read`): the dry run, the start and the progress and ranking of a sweep, on the service of
+    `POST /api/v1/sweeps` and `GET /api/v1/sweeps/{sweep_id}` (`experiments.build_sweeps`, its
+    errors as problems through `experiments.sweep_problems`), answering what the routes answer
+    ([Sweeps](#sweeps)).
   - The tools of the other areas come with #399 and #403 to #405.
 - **Parity table** (`mcp/parity.py`): every endpoint of the API reference, by method and path,
   maps to the tools that do the same, to `Planned` with the task that adds them, or to
@@ -985,7 +1050,7 @@ A module is a subpackage of `candlestack` under `backend/src/candlestack/`.
 | `cli` | started | the `candlestack-bt` command: backtests from files on the command line |
 | `jobs` | now | the job queue between the backend and the worker: the job and its result, the Redis keys, the jobs' files on the shared volume, `JobClient` for the backend ([Worker](#worker)) |
 | `worker` | now | the worker's process (`python -m candlestack.worker`): the loop, the job's process with Keras, the safe load of a model, the built-in candles of a check |
-| `experiments` | now | the backtests: starting and running them (`data`, the worker through `jobs`, `signals`, `engine`, `metrics`), their result documents, the list of the Backtests page, stars, publishing and Experiments, the Dashboard, the models' usage, the seed command |
+| `experiments` | now | the backtests: starting and running them (`data`, the worker through `jobs`, `signals`, `engine`, `metrics`), their result documents, sweeps, the list of the Backtests page, stars, publishing and Experiments, the Dashboard, the models' usage, the seed command |
 | `mcp` | now | the MCP server at `/mcp` ([MCP](#mcp)): sign-in with an API key, the tool convention, the tools, the parity table and the tool reference |
 | `admin` | later | team-only administration (roles, audit) under `/admin` |
 

@@ -112,6 +112,7 @@ def backtest_out(listed: Listed) -> BacktestOut:
         number=backtest.number,
         status=BacktestStatus(backtest.status),
         queue_position=listed.queue_position,
+        sweep_id=backtest.sweep_id,
         seeded=backtest.seeded,
         instruments=[BacktestInstrument.model_validate(item) for item in backtest.instruments],
         representation=Representation(backtest.representation),
