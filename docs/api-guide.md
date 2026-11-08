@@ -277,6 +277,35 @@ and the file is checked as any upload. `GET /api/v1/models/uploads/<id>` says ho
 that failed (`upload-interrupted` when the upload stopped midway), or `expired`. A used or expired link answers 410 `upload-link-gone`: ask for a new
 one.
 
+## Check a manifest before setting it
+
+A model runs once it has a manifest (`PUT /api/v1/models/<id>/manifest` with the manifest as
+the body, a key of the scope `models`). To try one first, `POST` it to
+`/api/v1/models/<id>/manifest/check` with a `read` key: the same checks run and nothing is
+kept. The answer says whether every check passed (`valid`) and, if not, lists what is wrong,
+in a form a script or an agent can fix the manifest from:
+
+```json
+{
+  "valid": false,
+  "problems": [
+    {
+      "check": "schema",
+      "field": "input.session",
+      "detail": "input.session: Input should be 'regular' or '24/7'.",
+      "allowed": ["regular", "24/7"]
+    }
+  ],
+  "more_problems": 0,
+  "unknown_blocks": []
+}
+```
+
+`field` is the path the problem is about (null for the whole manifest) and `allowed` what fits
+there when the check knows it (the blocks of the step, the fields of the object, the options of
+a choice, the shape to give). A refused `PUT` answers `422 manifest-check-failed` with the same
+`problems`. The format: [preprocessing.md](preprocessing.md#the-manifest).
+
 ## Errors
 
 Every error is an RFC 9457 `application/problem+json` body: `type`

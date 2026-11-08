@@ -113,6 +113,2513 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
+      "description": "The user's uploaded models, oldest first, in short: ID, name, format, state, star, the timeframe and session of the manifest, how many backtests used each and the best Sharpe ratio; and the storage they take of the user's quota.\n\nA model's state says what it can do: `needs_setup` has no manifest yet, so it cannot run (set_manifest gives it one); `ready` passed the manifest's checks and can be backtested; `verified` also gave the output of the manifest's example in a trial run. Use get_model for one model in full.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_models",
+      "endpoints": [
+        "GET /api/v1/models"
+      ],
+      "example": {
+        "arguments": {},
+        "result": {
+          "file_max_bytes": 52428800,
+          "models": [
+            {
+              "backtest_count": 4,
+              "best_sharpe": 1.42,
+              "created_at": "2026-11-02T09:30:00Z",
+              "framework": "keras",
+              "id": "mdl_7f3k2m9qx4",
+              "name": "lstm.keras",
+              "session": "regular",
+              "starred": true,
+              "state": "verified",
+              "timeframe": "30m"
+            }
+          ],
+          "quota_bytes": 104857600,
+          "used_bytes": 1489779
+        }
+      },
+      "inputSchema": {
+        "properties": {},
+        "title": "list_modelsArguments",
+        "type": "object"
+      },
+      "name": "list_models",
+      "outputSchema": {
+        "$defs": {
+          "Framework": {
+            "description": "The format of a model file: Keras (`.keras`) or ONNX (`.onnx`).",
+            "enum": [
+              "keras",
+              "onnx"
+            ],
+            "title": "Framework",
+            "type": "string"
+          },
+          "ModelBrief": {
+            "description": "A model of the user, in short.",
+            "properties": {
+              "backtest_count": {
+                "description": "Backtests that used it, failed ones included",
+                "title": "Backtest Count",
+                "type": "integer"
+              },
+              "best_sharpe": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Best Sharpe ratio of its finished backtests; null without one",
+                "title": "Best Sharpe"
+              },
+              "created_at": {
+                "description": "When it was uploaded (UTC)",
+                "format": "date-time",
+                "title": "Created At",
+                "type": "string"
+              },
+              "framework": {
+                "$ref": "#/$defs/Framework"
+              },
+              "id": {
+                "description": "Public ID of the model",
+                "examples": [
+                  "mdl_7f3k2m9qx4"
+                ],
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "description": "File name, extension included",
+                "examples": [
+                  "lstm.keras"
+                ],
+                "title": "Name",
+                "type": "string"
+              },
+              "session": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "`regular` (US trading hours) or `24/7` (crypto); null without a manifest",
+                "examples": [
+                  "regular"
+                ],
+                "title": "Session"
+              },
+              "starred": {
+                "description": "The user starred the model",
+                "title": "Starred",
+                "type": "boolean"
+              },
+              "state": {
+                "$ref": "#/$defs/ModelState"
+              },
+              "timeframe": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The timeframe of the candles its manifest reads; null without a manifest",
+                "examples": [
+                  "30m"
+                ],
+                "title": "Timeframe"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "framework",
+              "state",
+              "starred",
+              "timeframe",
+              "session",
+              "backtest_count",
+              "best_sharpe",
+              "created_at"
+            ],
+            "title": "ModelBrief",
+            "type": "object"
+          },
+          "ModelState": {
+            "description": "How far a model got: `needs_setup` (no manifest yet, so it cannot run), `ready` (its\nmanifest passed every check that reads the files, against this model too) or `verified`\n(a trial run in the worker gave the output of the manifest's example).",
+            "enum": [
+              "needs_setup",
+              "ready",
+              "verified"
+            ],
+            "title": "ModelState",
+            "type": "string"
+          }
+        },
+        "description": "The user's models and the storage they take.",
+        "properties": {
+          "file_max_bytes": {
+            "description": "The largest file an upload takes",
+            "title": "File Max Bytes",
+            "type": "integer"
+          },
+          "models": {
+            "description": "Oldest first",
+            "items": {
+              "$ref": "#/$defs/ModelBrief"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "quota_bytes": {
+            "description": "Bytes the user's models may take",
+            "title": "Quota Bytes",
+            "type": "integer"
+          },
+          "used_bytes": {
+            "description": "Bytes the models take",
+            "title": "Used Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "models",
+          "used_bytes",
+          "quota_bytes",
+          "file_max_bytes"
+        ],
+        "title": "ModelsResult",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "List models"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "One of the user's models in full: its file (format, size, weights, input and output shapes), its state, what its manifest says in short (representation, timeframe, session, input shape, warm-up), its backtests, and how the trial run of its manifest went.\n\nAfter set_manifest, call it to see the trial run: `checked_at` is set when it ended, `state` is `verified` when it passed, and `check_failed` with `check_error` say why it failed (the model stays `ready`). get_manifest gives the whole manifest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_model",
+      "endpoints": [
+        "GET /api/v1/models"
+      ],
+      "example": {
+        "arguments": {
+          "model_id": "mdl_7f3k2m9qx4"
+        },
+        "result": {
+          "backtest_count": 4,
+          "best_sharpe": 1.42,
+          "check_error": null,
+          "check_failed": null,
+          "checked_at": null,
+          "created_at": "2026-11-02T09:30:00Z",
+          "framework": "keras",
+          "id": "mdl_7f3k2m9qx4",
+          "input_shape": [
+            25,
+            5
+          ],
+          "manifest_summary": {
+            "input_shape": [
+              25,
+              5
+            ],
+            "representation": {
+              "id": "candles@1",
+              "params": {}
+            },
+            "session": "regular",
+            "timeframe": "30m",
+            "warm_up": {
+              "candles": 24,
+              "kind": "exact"
+            }
+          },
+          "name": "lstm.keras",
+          "output_shape": [
+            1
+          ],
+          "parameters": 124000,
+          "size_bytes": 1489779,
+          "starred": true,
+          "state": "ready"
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "model_id": {
+            "description": "Public ID of the model, as list_models gives it",
+            "examples": [
+              "mdl_7f3k2m9qx4"
+            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Model Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id"
+        ],
+        "title": "get_modelArguments",
+        "type": "object"
+      },
+      "name": "get_model",
+      "outputSchema": {
+        "$defs": {
+          "BlockUse": {
+            "properties": {
+              "id": {
+                "description": "A block of the catalog and its version",
+                "examples": [
+                  "candles@1"
+                ],
+                "title": "Id",
+                "type": "string"
+              },
+              "params": {
+                "additionalProperties": true,
+                "description": "Its parameters as the manifest gives them",
+                "examples": [
+                  {}
+                ],
+                "title": "Params",
+                "type": "object"
+              }
+            },
+            "required": [
+              "id",
+              "params"
+            ],
+            "title": "BlockUse",
+            "type": "object"
+          },
+          "CheckPart": {
+            "description": "The part of the worker's check of a model with its manifest that failed: `trial_run`\n(the run on built-in candles) or `example` (the output for the manifest's example is not\nthe expected one, after a trial run that passed).",
+            "enum": [
+              "trial_run",
+              "example"
+            ],
+            "title": "CheckPart",
+            "type": "string"
+          },
+          "Framework": {
+            "description": "The format of a model file: Keras (`.keras`) or ONNX (`.onnx`).",
+            "enum": [
+              "keras",
+              "onnx"
+            ],
+            "title": "Framework",
+            "type": "string"
+          },
+          "ManifestSummary": {
+            "description": "What the model's manifest says, in short; the whole manifest is\n`GET /api/v1/models/{model_id}/manifest`.",
+            "properties": {
+              "input_shape": {
+                "description": "One sample: rows by columns (the features, in their order)",
+                "examples": [
+                  [
+                    25,
+                    5
+                  ]
+                ],
+                "items": {
+                  "type": "integer"
+                },
+                "title": "Input Shape",
+                "type": "array"
+              },
+              "representation": {
+                "$ref": "#/$defs/BlockUse",
+                "description": "Which rows the model sees"
+              },
+              "session": {
+                "description": "`regular` (US trading hours) or `24/7` (around the clock)",
+                "examples": [
+                  "regular"
+                ],
+                "title": "Session",
+                "type": "string"
+              },
+              "timeframe": {
+                "description": "The timeframe of the candles it reads",
+                "examples": [
+                  "30m"
+                ],
+                "title": "Timeframe",
+                "type": "string"
+              },
+              "warm_up": {
+                "$ref": "#/$defs/WarmUpOut"
+              }
+            },
+            "required": [
+              "representation",
+              "timeframe",
+              "session",
+              "input_shape",
+              "warm_up"
+            ],
+            "title": "ManifestSummary",
+            "type": "object"
+          },
+          "ModelState": {
+            "description": "How far a model got: `needs_setup` (no manifest yet, so it cannot run), `ready` (its\nmanifest passed every check that reads the files, against this model too) or `verified`\n(a trial run in the worker gave the output of the manifest's example).",
+            "enum": [
+              "needs_setup",
+              "ready",
+              "verified"
+            ],
+            "title": "ModelState",
+            "type": "string"
+          },
+          "WarmUpOut": {
+            "properties": {
+              "candles": {
+                "description": "Candles a backtest loads before the first sample",
+                "examples": [
+                  24
+                ],
+                "title": "Candles",
+                "type": "integer"
+              },
+              "kind": {
+                "description": "`exact` when every candle is a row; `estimate` with rows that span several candles (Renko), where the run loads more and reports what the warm-up used",
+                "enum": [
+                  "exact",
+                  "estimate"
+                ],
+                "title": "Kind",
+                "type": "string"
+              }
+            },
+            "required": [
+              "candles",
+              "kind"
+            ],
+            "title": "WarmUpOut",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "backtest_count": {
+            "description": "Backtests that used the model, failed ones included; 0 until backtests exist",
+            "examples": [
+              0
+            ],
+            "title": "Backtest Count",
+            "type": "integer"
+          },
+          "best_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Best Sharpe ratio of its finished backtests; null without one",
+            "examples": [
+              null
+            ],
+            "title": "Best Sharpe"
+          },
+          "check_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the trial run of its manifest in the worker failed, in plain sentences; null when it passed or has not run (the model stays `ready`)",
+            "examples": [
+              null
+            ],
+            "title": "Check Error"
+          },
+          "check_failed": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CheckPart"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which part of that check failed; null when it passed or has not run",
+            "examples": [
+              null
+            ]
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the worker's check of its manifest (the trial run, then the example) came to an end, passed or failed (UTC); null while it has not, as without a manifest",
+            "examples": [
+              null
+            ],
+            "title": "Checked At"
+          },
+          "created_at": {
+            "description": "When the model was uploaded (UTC)",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "framework": {
+            "$ref": "#/$defs/Framework"
+          },
+          "id": {
+            "description": "Public ID of the model",
+            "examples": [
+              "mdl_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "input_shape": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Shape of one input sample without the batch dimension, e.g. 25 candles by 23 features; null when the file does not say",
+            "examples": [
+              [
+                25,
+                23
+              ]
+            ],
+            "title": "Input Shape"
+          },
+          "manifest_summary": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ManifestSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What its manifest says, in short; null without one"
+          },
+          "name": {
+            "description": "File name, extension included; Rename changes only the part before it",
+            "examples": [
+              "my-tsmixer.keras"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "output_shape": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Shape of one output without the batch dimension; null when unknown",
+            "examples": [
+              [
+                1
+              ]
+            ],
+            "title": "Output Shape"
+          },
+          "parameters": {
+            "description": "Number of weights in the file",
+            "examples": [
+              1240000
+            ],
+            "title": "Parameters",
+            "type": "integer"
+          },
+          "size_bytes": {
+            "description": "Size of the file",
+            "examples": [
+              14889779
+            ],
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "starred": {
+            "description": "The user starred the model",
+            "title": "Starred",
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/$defs/ModelState"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "framework",
+          "size_bytes",
+          "parameters",
+          "input_shape",
+          "output_shape",
+          "starred",
+          "backtest_count",
+          "best_sharpe",
+          "created_at",
+          "state",
+          "manifest_summary",
+          "checked_at",
+          "check_failed",
+          "check_error"
+        ],
+        "title": "ModelOut",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Get a model"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "The manifest of one of the user's models: how CandleStack builds the model's input from candles (the timeframe, the session, the representation, the features and their normalization, the window) and the shapes of its input and output.\n\nThe example is left out unless you ask for it. set_manifest replaces the whole manifest, so to change a manifest and keep its example, read it with include_example true and send the example back. A model without a manifest answers the problem no-manifest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_manifest",
+      "endpoints": [
+        "GET /api/v1/models/{model_id}/manifest"
+      ],
+      "example": {
+        "arguments": {
+          "model_id": "mdl_7f3k2m9qx4"
+        },
+        "result": {
+          "example_included": false,
+          "example_samples": 0,
+          "manifest": {
+            "about": {},
+            "example": null,
+            "input": {
+              "features": [
+                {
+                  "id": "open@1",
+                  "name": "open",
+                  "norm": {
+                    "id": "none@1",
+                    "params": {}
+                  },
+                  "params": {}
+                },
+                {
+                  "id": "high@1",
+                  "name": "high",
+                  "norm": {
+                    "id": "none@1",
+                    "params": {}
+                  },
+                  "params": {}
+                },
+                {
+                  "id": "low@1",
+                  "name": "low",
+                  "norm": {
+                    "id": "none@1",
+                    "params": {}
+                  },
+                  "params": {}
+                },
+                {
+                  "id": "close@1",
+                  "name": "close",
+                  "norm": {
+                    "id": "none@1",
+                    "params": {}
+                  },
+                  "params": {}
+                },
+                {
+                  "id": "volume@1",
+                  "name": "volume",
+                  "norm": {
+                    "id": "none@1",
+                    "params": {}
+                  },
+                  "params": {}
+                }
+              ],
+              "representation": {
+                "id": "candles@1",
+                "params": {}
+              },
+              "session": "regular",
+              "timeframe": "30m",
+              "window": {
+                "last": "closed",
+                "length": 25
+              }
+            },
+            "signature": {
+              "input": {
+                "dtype": "float32",
+                "shape": [
+                  25,
+                  5
+                ]
+              },
+              "output": {
+                "dtype": "float32",
+                "meaning": "score",
+                "shape": [
+                  1
+                ]
+              }
+            },
+            "version": 1
+          }
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "include_example": {
+            "default": false,
+            "description": "Include the example, a small input with the output the model must give for it, which can be large",
+            "title": "Include Example",
+            "type": "boolean"
+          },
+          "model_id": {
+            "description": "Public ID of the model, as list_models gives it",
+            "examples": [
+              "mdl_7f3k2m9qx4"
+            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Model Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id"
+        ],
+        "title": "get_manifestArguments",
+        "type": "object"
+      },
+      "name": "get_manifest",
+      "outputSchema": {
+        "$defs": {
+          "BlockRef": {
+            "additionalProperties": false,
+            "description": "One step: a block of the catalog with its parameters.",
+            "properties": {
+              "id": {
+                "description": "A block of the catalog and its version",
+                "examples": [
+                  "candles@1"
+                ],
+                "maxLength": 64,
+                "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*@[1-9][0-9]*$",
+                "title": "Id",
+                "type": "string"
+              },
+              "params": {
+                "additionalProperties": true,
+                "description": "The block's parameters, checked against the catalog",
+                "maxProperties": 32,
+                "title": "Params",
+                "type": "object"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "title": "BlockRef",
+            "type": "object"
+          },
+          "Example": {
+            "additionalProperties": false,
+            "description": "A small input with the output the model must give for it (within 1e-4).",
+            "properties": {
+              "input": {
+                "description": "Samples of the shape of `signature.input`",
+                "items": {
+                  "items": {
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "type": "array"
+                },
+                "minItems": 1,
+                "title": "Input",
+                "type": "array"
+              },
+              "output": {
+                "description": "The model's output for each sample",
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "minItems": 1,
+                "title": "Output",
+                "type": "array"
+              }
+            },
+            "required": [
+              "input",
+              "output"
+            ],
+            "title": "Example",
+            "type": "object"
+          },
+          "Feature": {
+            "additionalProperties": false,
+            "description": "One column of the input: its name, the block that computes it and its normalization.",
+            "properties": {
+              "id": {
+                "description": "A block of the catalog and its version",
+                "examples": [
+                  "candles@1"
+                ],
+                "maxLength": 64,
+                "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*@[1-9][0-9]*$",
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "description": "The column's name, unique in the manifest",
+                "maxLength": 64,
+                "minLength": 1,
+                "title": "Name",
+                "type": "string"
+              },
+              "norm": {
+                "$ref": "#/$defs/BlockRef",
+                "description": "How the column is scaled; without one it is not (none@1)"
+              },
+              "params": {
+                "additionalProperties": true,
+                "description": "The block's parameters, checked against the catalog",
+                "maxProperties": 32,
+                "title": "Params",
+                "type": "object"
+              }
+            },
+            "required": [
+              "name",
+              "id"
+            ],
+            "title": "Feature",
+            "type": "object"
+          },
+          "Input": {
+            "additionalProperties": false,
+            "description": "The candles the model expects and how its input is built from them.",
+            "properties": {
+              "features": {
+                "description": "The columns, in their order",
+                "items": {
+                  "$ref": "#/$defs/Feature"
+                },
+                "maxItems": 256,
+                "minItems": 1,
+                "title": "Features",
+                "type": "array"
+              },
+              "representation": {
+                "$ref": "#/$defs/BlockRef",
+                "description": "Which rows the model sees"
+              },
+              "session": {
+                "description": "`regular`: US trading hours; `24/7`: around the clock, as crypto trades",
+                "enum": [
+                  "regular",
+                  "24/7"
+                ],
+                "title": "Session",
+                "type": "string"
+              },
+              "timeframe": {
+                "enum": [
+                  "1m",
+                  "5m",
+                  "15m",
+                  "30m",
+                  "1h",
+                  "4h",
+                  "1d"
+                ],
+                "title": "Timeframe",
+                "type": "string"
+              },
+              "window": {
+                "$ref": "#/$defs/Window"
+              }
+            },
+            "required": [
+              "timeframe",
+              "session",
+              "representation",
+              "features",
+              "window"
+            ],
+            "title": "Input",
+            "type": "object"
+          },
+          "Manifest": {
+            "additionalProperties": false,
+            "description": "What a model takes and gives, stored with the model (docs/preprocessing.md).",
+            "properties": {
+              "about": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Free text for people: trained on which instruments, which period, notes",
+                "title": "About",
+                "type": "object"
+              },
+              "example": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Example"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "input": {
+                "$ref": "#/$defs/Input"
+              },
+              "signature": {
+                "$ref": "#/$defs/Signature"
+              },
+              "version": {
+                "const": 1,
+                "description": "The version of the manifest's form",
+                "title": "Version",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "version",
+              "input",
+              "signature"
+            ],
+            "title": "CandleStack model manifest",
+            "type": "object"
+          },
+          "Output": {
+            "additionalProperties": false,
+            "properties": {
+              "dtype": {
+                "const": "float32",
+                "title": "Dtype",
+                "type": "string"
+              },
+              "meaning": {
+                "const": "score",
+                "description": "`score`: the sign is the direction, the size is compared with the threshold",
+                "title": "Meaning",
+                "type": "string"
+              },
+              "shape": {
+                "examples": [
+                  [
+                    25,
+                    5
+                  ]
+                ],
+                "items": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "maxItems": 8,
+                "minItems": 1,
+                "title": "Shape",
+                "type": "array"
+              }
+            },
+            "required": [
+              "shape",
+              "dtype",
+              "meaning"
+            ],
+            "title": "Output",
+            "type": "object"
+          },
+          "Signature": {
+            "additionalProperties": false,
+            "description": "What goes into the model and what comes out; must equal what the model file says.",
+            "properties": {
+              "input": {
+                "$ref": "#/$defs/Tensor"
+              },
+              "output": {
+                "$ref": "#/$defs/Output"
+              }
+            },
+            "required": [
+              "input",
+              "output"
+            ],
+            "title": "Signature",
+            "type": "object"
+          },
+          "Tensor": {
+            "additionalProperties": false,
+            "description": "The shape of one sample without the batch axis, and its type.",
+            "properties": {
+              "dtype": {
+                "const": "float32",
+                "title": "Dtype",
+                "type": "string"
+              },
+              "shape": {
+                "examples": [
+                  [
+                    25,
+                    5
+                  ]
+                ],
+                "items": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "maxItems": 8,
+                "minItems": 1,
+                "title": "Shape",
+                "type": "array"
+              }
+            },
+            "required": [
+              "shape",
+              "dtype"
+            ],
+            "title": "Tensor",
+            "type": "object"
+          },
+          "Window": {
+            "additionalProperties": false,
+            "description": "How rows make one sample: the parameters of the catalog's ``window@1``.",
+            "properties": {
+              "last": {
+                "default": "closed",
+                "description": "The last row of a sample: the last finished one (`closed`), or the row still forming (`current`, for representations with rows that span several candles)",
+                "enum": [
+                  "closed",
+                  "current"
+                ],
+                "title": "Last",
+                "type": "string"
+              },
+              "length": {
+                "description": "How many rows make one sample",
+                "maximum": 1000,
+                "minimum": 1,
+                "title": "Length",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "length"
+            ],
+            "title": "Window",
+            "type": "object"
+          }
+        },
+        "description": "A model's manifest.",
+        "properties": {
+          "example_included": {
+            "description": "The example is in `manifest`; false when it was left out to keep the answer short or the manifest has none",
+            "title": "Example Included",
+            "type": "boolean"
+          },
+          "example_samples": {
+            "description": "How many samples the manifest's example has; 0 without an example",
+            "title": "Example Samples",
+            "type": "integer"
+          },
+          "manifest": {
+            "$ref": "#/$defs/Manifest",
+            "description": "The manifest, its defaults filled in; `example` is null when it is left out (see `example_included`)"
+          }
+        },
+        "required": [
+          "manifest",
+          "example_samples",
+          "example_included"
+        ],
+        "title": "ManifestResult",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Get a model's manifest"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Checks a manifest for one of the user's models without keeping it: a dry run of set_manifest, which changes nothing. It runs every check set_manifest runs: the form, the catalog (every block exists and sits in its step), the blocks' parameters, the names of the columns, the signature against the window and the columns, the shapes of the example, and the signature against the input and output read from the model file.\n\n`valid` says whether every check passed. Else each of `problems` (at most 10; `more_problems` counts the rest) names its `field` (a path such as input.features[2].id), says what is wrong in `detail` and, when the check knows them, lists the values that fit there in `allowed`: fix those fields and check again, then call set_manifest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#validate_manifest",
+      "endpoints": [
+        "POST /api/v1/models/{model_id}/manifest/check"
+      ],
+      "example": {
+        "arguments": {
+          "manifest": {
+            "input": {
+              "features": [
+                {
+                  "id": "open@1",
+                  "name": "open"
+                },
+                {
+                  "id": "high@1",
+                  "name": "high"
+                },
+                {
+                  "id": "low@1",
+                  "name": "low"
+                },
+                {
+                  "id": "close@1",
+                  "name": "close"
+                },
+                {
+                  "id": "volume@1",
+                  "name": "volume"
+                }
+              ],
+              "representation": {
+                "id": "candles@1"
+              },
+              "session": "us",
+              "timeframe": "30m",
+              "window": {
+                "length": 25
+              }
+            },
+            "signature": {
+              "input": {
+                "dtype": "float32",
+                "shape": [
+                  25,
+                  5
+                ]
+              },
+              "output": {
+                "dtype": "float32",
+                "meaning": "score",
+                "shape": [
+                  1
+                ]
+              }
+            },
+            "version": 1
+          },
+          "model_id": "mdl_7f3k2m9qx4"
+        },
+        "result": {
+          "more_problems": 0,
+          "problems": [
+            {
+              "allowed": [
+                "regular",
+                "24/7"
+              ],
+              "check": "schema",
+              "detail": "input.session: Input should be 'regular' or '24/7'.",
+              "field": "input.session"
+            }
+          ],
+          "unknown_blocks": [],
+          "valid": false
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "manifest": {
+            "additionalProperties": true,
+            "description": "The manifest as a JSON object, version 1: `version`, `input` (timeframe, session, representation, features with their normalization, window), `signature` (input and output shapes) and optionally `example` and `about`. Guide: https://candlestack.tech/docs/manifest; JSON Schema: https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/manifest.schema.json. At most 1 MB as JSON.",
+            "title": "Manifest",
+            "type": "object"
+          },
+          "model_id": {
+            "description": "Public ID of the model, as list_models gives it",
+            "examples": [
+              "mdl_7f3k2m9qx4"
+            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Model Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "manifest"
+        ],
+        "title": "validate_manifestArguments",
+        "type": "object"
+      },
+      "name": "validate_manifest",
+      "outputSchema": {
+        "$defs": {
+          "ManifestProblemOut": {
+            "description": "One thing wrong with a manifest, in a form to fix it from.",
+            "properties": {
+              "allowed": {
+                "anyOf": [
+                  {
+                    "items": {},
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The values that fit in `field` when the check knows them: the blocks of the step, the fields or parameters of the object, the options of a choice, the shape to give; empty when nothing fits (a block without parameters); null when the check does not say",
+                "examples": [
+                  [
+                    "close@1",
+                    "rsi@1"
+                  ]
+                ],
+                "title": "Allowed"
+              },
+              "check": {
+                "description": "The check that found it: `schema` (the form), `catalog` (the blocks and their steps), `params` (a block's parameters), `names` (the columns' names), `signature` (against the window and the columns), `example` (its shapes) or `model` (against the input and output the upload read from the model file)",
+                "enum": [
+                  "schema",
+                  "catalog",
+                  "params",
+                  "names",
+                  "signature",
+                  "example",
+                  "model"
+                ],
+                "title": "Check",
+                "type": "string"
+              },
+              "detail": {
+                "description": "What is wrong, in one sentence, and sometimes a second that says what to do",
+                "examples": [
+                  "The catalog has no block pocket-pivot@1 yet, so it cannot run."
+                ],
+                "title": "Detail",
+                "type": "string"
+              },
+              "field": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The field of the manifest it is about, as a path; null when it is about the whole document",
+                "examples": [
+                  "input.features[2].id"
+                ],
+                "title": "Field"
+              }
+            },
+            "required": [
+              "check",
+              "field",
+              "detail",
+              "allowed"
+            ],
+            "title": "ManifestProblemOut",
+            "type": "object"
+          }
+        },
+        "description": "The result of checking a manifest without keeping it.",
+        "properties": {
+          "more_problems": {
+            "description": "Problems found beyond those listed",
+            "examples": [
+              0
+            ],
+            "title": "More Problems",
+            "type": "integer"
+          },
+          "problems": {
+            "description": "What is wrong, at most 10; empty when it is valid",
+            "items": {
+              "$ref": "#/$defs/ManifestProblemOut"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "unknown_blocks": {
+            "description": "The blocks it names that the catalog does not have",
+            "examples": [
+              []
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unknown Blocks",
+            "type": "array"
+          },
+          "valid": {
+            "description": "Every check passed: setting this manifest would make the model `ready`",
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "valid",
+          "problems",
+          "more_problems",
+          "unknown_blocks"
+        ],
+        "title": "ManifestCheckOut",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Check a manifest"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Gives one of the user's models its manifest, or replaces the one it has, when every check passes (the checks of validate_manifest); the model is then `ready` and can be backtested. A manifest that fails answers the problem manifest-check-failed, whose `problems` name the `field`, the `detail` and the `allowed` values of each thing wrong: fix them and call it again, or try a manifest with validate_manifest first.\n\nThe whole manifest is replaced: what you leave out is gone, the example included. A trial run of the model with the manifest follows in the background: get_model shows it `verified` when the model gave the output of the manifest's example, or `check_error` when it failed.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#set_manifest",
+      "endpoints": [
+        "PUT /api/v1/models/{model_id}/manifest"
+      ],
+      "example": {
+        "arguments": {
+          "manifest": {
+            "input": {
+              "features": [
+                {
+                  "id": "open@1",
+                  "name": "open"
+                },
+                {
+                  "id": "high@1",
+                  "name": "high"
+                },
+                {
+                  "id": "low@1",
+                  "name": "low"
+                },
+                {
+                  "id": "close@1",
+                  "name": "close"
+                },
+                {
+                  "id": "volume@1",
+                  "name": "volume"
+                }
+              ],
+              "representation": {
+                "id": "candles@1"
+              },
+              "session": "regular",
+              "timeframe": "30m",
+              "window": {
+                "length": 25
+              }
+            },
+            "signature": {
+              "input": {
+                "dtype": "float32",
+                "shape": [
+                  25,
+                  5
+                ]
+              },
+              "output": {
+                "dtype": "float32",
+                "meaning": "score",
+                "shape": [
+                  1
+                ]
+              }
+            },
+            "version": 1
+          },
+          "model_id": "mdl_7f3k2m9qx4"
+        },
+        "result": {
+          "backtest_count": 4,
+          "best_sharpe": 1.42,
+          "check_error": null,
+          "check_failed": null,
+          "checked_at": null,
+          "created_at": "2026-11-02T09:30:00Z",
+          "framework": "keras",
+          "id": "mdl_7f3k2m9qx4",
+          "input_shape": [
+            25,
+            5
+          ],
+          "manifest_summary": {
+            "input_shape": [
+              25,
+              5
+            ],
+            "representation": {
+              "id": "candles@1",
+              "params": {}
+            },
+            "session": "regular",
+            "timeframe": "30m",
+            "warm_up": {
+              "candles": 24,
+              "kind": "exact"
+            }
+          },
+          "name": "lstm.keras",
+          "output_shape": [
+            1
+          ],
+          "parameters": 124000,
+          "size_bytes": 1489779,
+          "starred": true,
+          "state": "ready"
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "manifest": {
+            "additionalProperties": true,
+            "description": "The manifest as a JSON object, version 1: `version`, `input` (timeframe, session, representation, features with their normalization, window), `signature` (input and output shapes) and optionally `example` and `about`. Guide: https://candlestack.tech/docs/manifest; JSON Schema: https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/manifest.schema.json. At most 1 MB as JSON.",
+            "title": "Manifest",
+            "type": "object"
+          },
+          "model_id": {
+            "description": "Public ID of the model, as list_models gives it",
+            "examples": [
+              "mdl_7f3k2m9qx4"
+            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Model Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "manifest"
+        ],
+        "title": "set_manifestArguments",
+        "type": "object"
+      },
+      "name": "set_manifest",
+      "outputSchema": {
+        "$defs": {
+          "BlockUse": {
+            "properties": {
+              "id": {
+                "description": "A block of the catalog and its version",
+                "examples": [
+                  "candles@1"
+                ],
+                "title": "Id",
+                "type": "string"
+              },
+              "params": {
+                "additionalProperties": true,
+                "description": "Its parameters as the manifest gives them",
+                "examples": [
+                  {}
+                ],
+                "title": "Params",
+                "type": "object"
+              }
+            },
+            "required": [
+              "id",
+              "params"
+            ],
+            "title": "BlockUse",
+            "type": "object"
+          },
+          "CheckPart": {
+            "description": "The part of the worker's check of a model with its manifest that failed: `trial_run`\n(the run on built-in candles) or `example` (the output for the manifest's example is not\nthe expected one, after a trial run that passed).",
+            "enum": [
+              "trial_run",
+              "example"
+            ],
+            "title": "CheckPart",
+            "type": "string"
+          },
+          "Framework": {
+            "description": "The format of a model file: Keras (`.keras`) or ONNX (`.onnx`).",
+            "enum": [
+              "keras",
+              "onnx"
+            ],
+            "title": "Framework",
+            "type": "string"
+          },
+          "ManifestSummary": {
+            "description": "What the model's manifest says, in short; the whole manifest is\n`GET /api/v1/models/{model_id}/manifest`.",
+            "properties": {
+              "input_shape": {
+                "description": "One sample: rows by columns (the features, in their order)",
+                "examples": [
+                  [
+                    25,
+                    5
+                  ]
+                ],
+                "items": {
+                  "type": "integer"
+                },
+                "title": "Input Shape",
+                "type": "array"
+              },
+              "representation": {
+                "$ref": "#/$defs/BlockUse",
+                "description": "Which rows the model sees"
+              },
+              "session": {
+                "description": "`regular` (US trading hours) or `24/7` (around the clock)",
+                "examples": [
+                  "regular"
+                ],
+                "title": "Session",
+                "type": "string"
+              },
+              "timeframe": {
+                "description": "The timeframe of the candles it reads",
+                "examples": [
+                  "30m"
+                ],
+                "title": "Timeframe",
+                "type": "string"
+              },
+              "warm_up": {
+                "$ref": "#/$defs/WarmUpOut"
+              }
+            },
+            "required": [
+              "representation",
+              "timeframe",
+              "session",
+              "input_shape",
+              "warm_up"
+            ],
+            "title": "ManifestSummary",
+            "type": "object"
+          },
+          "ModelState": {
+            "description": "How far a model got: `needs_setup` (no manifest yet, so it cannot run), `ready` (its\nmanifest passed every check that reads the files, against this model too) or `verified`\n(a trial run in the worker gave the output of the manifest's example).",
+            "enum": [
+              "needs_setup",
+              "ready",
+              "verified"
+            ],
+            "title": "ModelState",
+            "type": "string"
+          },
+          "WarmUpOut": {
+            "properties": {
+              "candles": {
+                "description": "Candles a backtest loads before the first sample",
+                "examples": [
+                  24
+                ],
+                "title": "Candles",
+                "type": "integer"
+              },
+              "kind": {
+                "description": "`exact` when every candle is a row; `estimate` with rows that span several candles (Renko), where the run loads more and reports what the warm-up used",
+                "enum": [
+                  "exact",
+                  "estimate"
+                ],
+                "title": "Kind",
+                "type": "string"
+              }
+            },
+            "required": [
+              "candles",
+              "kind"
+            ],
+            "title": "WarmUpOut",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "backtest_count": {
+            "description": "Backtests that used the model, failed ones included; 0 until backtests exist",
+            "examples": [
+              0
+            ],
+            "title": "Backtest Count",
+            "type": "integer"
+          },
+          "best_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Best Sharpe ratio of its finished backtests; null without one",
+            "examples": [
+              null
+            ],
+            "title": "Best Sharpe"
+          },
+          "check_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the trial run of its manifest in the worker failed, in plain sentences; null when it passed or has not run (the model stays `ready`)",
+            "examples": [
+              null
+            ],
+            "title": "Check Error"
+          },
+          "check_failed": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CheckPart"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which part of that check failed; null when it passed or has not run",
+            "examples": [
+              null
+            ]
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the worker's check of its manifest (the trial run, then the example) came to an end, passed or failed (UTC); null while it has not, as without a manifest",
+            "examples": [
+              null
+            ],
+            "title": "Checked At"
+          },
+          "created_at": {
+            "description": "When the model was uploaded (UTC)",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "framework": {
+            "$ref": "#/$defs/Framework"
+          },
+          "id": {
+            "description": "Public ID of the model",
+            "examples": [
+              "mdl_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "input_shape": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Shape of one input sample without the batch dimension, e.g. 25 candles by 23 features; null when the file does not say",
+            "examples": [
+              [
+                25,
+                23
+              ]
+            ],
+            "title": "Input Shape"
+          },
+          "manifest_summary": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ManifestSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What its manifest says, in short; null without one"
+          },
+          "name": {
+            "description": "File name, extension included; Rename changes only the part before it",
+            "examples": [
+              "my-tsmixer.keras"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "output_shape": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Shape of one output without the batch dimension; null when unknown",
+            "examples": [
+              [
+                1
+              ]
+            ],
+            "title": "Output Shape"
+          },
+          "parameters": {
+            "description": "Number of weights in the file",
+            "examples": [
+              1240000
+            ],
+            "title": "Parameters",
+            "type": "integer"
+          },
+          "size_bytes": {
+            "description": "Size of the file",
+            "examples": [
+              14889779
+            ],
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "starred": {
+            "description": "The user starred the model",
+            "title": "Starred",
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/$defs/ModelState"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "framework",
+          "size_bytes",
+          "parameters",
+          "input_shape",
+          "output_shape",
+          "starred",
+          "backtest_count",
+          "best_sharpe",
+          "created_at",
+          "state",
+          "manifest_summary",
+          "checked_at",
+          "check_failed",
+          "check_error"
+        ],
+        "title": "ModelOut",
+        "type": "object"
+      },
+      "scopes": [
+        "models"
+      ],
+      "title": "Set a model's manifest"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Renames one of the user's models; its extension stays, so `lstm-v2` makes `lstm-v2.keras`. A name the user has for another model, in any case, answers the problem model-name-taken.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#rename_model",
+      "endpoints": [
+        "PATCH /api/v1/models/{model_id}"
+      ],
+      "example": {
+        "arguments": {
+          "model_id": "mdl_7f3k2m9qx4",
+          "name": "lstm-v2"
+        },
+        "result": {
+          "backtest_count": 4,
+          "best_sharpe": 1.42,
+          "created_at": "2026-11-02T09:30:00Z",
+          "framework": "keras",
+          "id": "mdl_7f3k2m9qx4",
+          "name": "lstm-v2.keras",
+          "session": "regular",
+          "starred": true,
+          "state": "verified",
+          "timeframe": "30m"
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "model_id": {
+            "description": "Public ID of the model, as list_models gives it",
+            "examples": [
+              "mdl_7f3k2m9qx4"
+            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Model Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "The new name without the extension, which stays (`.keras` or `.onnx`); no slashes or control characters",
+            "examples": [
+              "lstm-v2"
+            ],
+            "maxLength": 60,
+            "minLength": 1,
+            "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "name"
+        ],
+        "title": "rename_modelArguments",
+        "type": "object"
+      },
+      "name": "rename_model",
+      "outputSchema": {
+        "$defs": {
+          "Framework": {
+            "description": "The format of a model file: Keras (`.keras`) or ONNX (`.onnx`).",
+            "enum": [
+              "keras",
+              "onnx"
+            ],
+            "title": "Framework",
+            "type": "string"
+          },
+          "ModelState": {
+            "description": "How far a model got: `needs_setup` (no manifest yet, so it cannot run), `ready` (its\nmanifest passed every check that reads the files, against this model too) or `verified`\n(a trial run in the worker gave the output of the manifest's example).",
+            "enum": [
+              "needs_setup",
+              "ready",
+              "verified"
+            ],
+            "title": "ModelState",
+            "type": "string"
+          }
+        },
+        "description": "A model of the user, in short.",
+        "properties": {
+          "backtest_count": {
+            "description": "Backtests that used it, failed ones included",
+            "title": "Backtest Count",
+            "type": "integer"
+          },
+          "best_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Best Sharpe ratio of its finished backtests; null without one",
+            "title": "Best Sharpe"
+          },
+          "created_at": {
+            "description": "When it was uploaded (UTC)",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "framework": {
+            "$ref": "#/$defs/Framework"
+          },
+          "id": {
+            "description": "Public ID of the model",
+            "examples": [
+              "mdl_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "File name, extension included",
+            "examples": [
+              "lstm.keras"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`regular` (US trading hours) or `24/7` (crypto); null without a manifest",
+            "examples": [
+              "regular"
+            ],
+            "title": "Session"
+          },
+          "starred": {
+            "description": "The user starred the model",
+            "title": "Starred",
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/$defs/ModelState"
+          },
+          "timeframe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The timeframe of the candles its manifest reads; null without a manifest",
+            "examples": [
+              "30m"
+            ],
+            "title": "Timeframe"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "framework",
+          "state",
+          "starred",
+          "timeframe",
+          "session",
+          "backtest_count",
+          "best_sharpe",
+          "created_at"
+        ],
+        "title": "ModelBrief",
+        "type": "object"
+      },
+      "scopes": [
+        "models"
+      ],
+      "title": "Rename a model"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Stars or unstars one of the user's models; the app lists starred models first in its pickers.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#star_model",
+      "endpoints": [
+        "PATCH /api/v1/models/{model_id}"
+      ],
+      "example": {
+        "arguments": {
+          "model_id": "mdl_7f3k2m9qx4",
+          "starred": true
+        },
+        "result": {
+          "backtest_count": 4,
+          "best_sharpe": 1.42,
+          "created_at": "2026-11-02T09:30:00Z",
+          "framework": "keras",
+          "id": "mdl_7f3k2m9qx4",
+          "name": "lstm.keras",
+          "session": "regular",
+          "starred": true,
+          "state": "verified",
+          "timeframe": "30m"
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "model_id": {
+            "description": "Public ID of the model, as list_models gives it",
+            "examples": [
+              "mdl_7f3k2m9qx4"
+            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Model Id",
+            "type": "string"
+          },
+          "starred": {
+            "default": true,
+            "description": "true stars the model, false unstars it",
+            "title": "Starred",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "model_id"
+        ],
+        "title": "star_modelArguments",
+        "type": "object"
+      },
+      "name": "star_model",
+      "outputSchema": {
+        "$defs": {
+          "Framework": {
+            "description": "The format of a model file: Keras (`.keras`) or ONNX (`.onnx`).",
+            "enum": [
+              "keras",
+              "onnx"
+            ],
+            "title": "Framework",
+            "type": "string"
+          },
+          "ModelState": {
+            "description": "How far a model got: `needs_setup` (no manifest yet, so it cannot run), `ready` (its\nmanifest passed every check that reads the files, against this model too) or `verified`\n(a trial run in the worker gave the output of the manifest's example).",
+            "enum": [
+              "needs_setup",
+              "ready",
+              "verified"
+            ],
+            "title": "ModelState",
+            "type": "string"
+          }
+        },
+        "description": "A model of the user, in short.",
+        "properties": {
+          "backtest_count": {
+            "description": "Backtests that used it, failed ones included",
+            "title": "Backtest Count",
+            "type": "integer"
+          },
+          "best_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Best Sharpe ratio of its finished backtests; null without one",
+            "title": "Best Sharpe"
+          },
+          "created_at": {
+            "description": "When it was uploaded (UTC)",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "framework": {
+            "$ref": "#/$defs/Framework"
+          },
+          "id": {
+            "description": "Public ID of the model",
+            "examples": [
+              "mdl_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "File name, extension included",
+            "examples": [
+              "lstm.keras"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`regular` (US trading hours) or `24/7` (crypto); null without a manifest",
+            "examples": [
+              "regular"
+            ],
+            "title": "Session"
+          },
+          "starred": {
+            "description": "The user starred the model",
+            "title": "Starred",
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/$defs/ModelState"
+          },
+          "timeframe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The timeframe of the candles its manifest reads; null without a manifest",
+            "examples": [
+              "30m"
+            ],
+            "title": "Timeframe"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "framework",
+          "state",
+          "starred",
+          "timeframe",
+          "session",
+          "backtest_count",
+          "best_sharpe",
+          "created_at"
+        ],
+        "title": "ModelBrief",
+        "type": "object"
+      },
+      "scopes": [
+        "models"
+      ],
+      "title": "Star a model"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Deletes one of the user's models and its file for good, which frees its storage; its backtests stay. It cannot be undone, so ask the user first and give the model's name back in confirm_name: a name that is not the model's answers the problem confirmation-mismatch and deletes nothing.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#delete_model",
+      "endpoints": [
+        "DELETE /api/v1/models/{model_id}"
+      ],
+      "example": {
+        "arguments": {
+          "confirm_name": "lstm.keras",
+          "model_id": "mdl_7f3k2m9qx4"
+        },
+        "result": {
+          "freed_bytes": 1489779,
+          "id": "mdl_7f3k2m9qx4",
+          "name": "lstm.keras"
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm_name": {
+            "description": "The model's name, extension included, exactly as list_models gives it, as the confirmation that this is the model to delete",
+            "examples": [
+              "lstm.keras"
+            ],
+            "minLength": 1,
+            "title": "Confirm Name",
+            "type": "string"
+          },
+          "model_id": {
+            "description": "Public ID of the model, as list_models gives it",
+            "examples": [
+              "mdl_7f3k2m9qx4"
+            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Model Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "confirm_name"
+        ],
+        "title": "delete_modelArguments",
+        "type": "object"
+      },
+      "name": "delete_model",
+      "outputSchema": {
+        "description": "The model that was deleted.",
+        "properties": {
+          "freed_bytes": {
+            "description": "The storage its file took, now free",
+            "title": "Freed Bytes",
+            "type": "integer"
+          },
+          "id": {
+            "description": "Public ID of the model",
+            "examples": [
+              "mdl_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its file name",
+            "examples": [
+              "lstm.keras"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "freed_bytes"
+        ],
+        "title": "DeletedModel",
+        "type": "object"
+      },
+      "scopes": [
+        "models"
+      ],
+      "title": "Delete a model"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Makes a one-time link to upload a model file (Keras `.keras` or ONNX `.onnx`, at most 50 MB) into the user's models. You never send the file through a tool: the file goes from the user's computer to the link, either by running `command` (curl) in the folder the file is in, or by opening `page_url` in the browser and dropping the file there.\n\nThe link takes one file within 15 minutes and counts against the user's storage; the file is checked as any upload (a real model with trained weights, nothing from it run). Treat `url` and `command` like a key until the upload is done. Then call get_model_upload with the link's `id` to see how it went and get the new model's ID; give the model a manifest with set_manifest before backtesting it.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#create_model_upload",
+      "endpoints": [
+        "POST /api/v1/models",
+        "POST /api/v1/models/uploads"
+      ],
+      "example": {
+        "arguments": {
+          "file_name": "lstm.keras",
+          "size_bytes": 1489779
+        },
+        "result": {
+          "command": "curl --fail-with-body -T lstm.keras https://app.candlestack.tech/api/v1/uploads/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "expires_at": "2026-11-02T09:45:00Z",
+          "id": "upl_7f3k2m9qx4",
+          "name": "lstm.keras",
+          "next_steps": "Ask the user to upload lstm.keras before 09:45 UTC: either run the command in the folder the file is in, or open the page and drop the file there. Then call get_model_upload with id upl_7f3k2m9qx4.",
+          "page_url": "https://app.candlestack.tech/upload/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "size_bytes": 1489779,
+          "url": "https://app.candlestack.tech/api/v1/uploads/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "file_name": {
+            "description": "The model file's name, extension included (`.keras` or `.onnx`), or its path on the user's computer; the model gets the base name",
+            "examples": [
+              "lstm.keras"
+            ],
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "File Name",
+            "type": "string"
+          },
+          "size_bytes": {
+            "description": "The file's size in bytes: the link takes no larger file",
+            "exclusiveMinimum": 0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "file_name",
+          "size_bytes"
+        ],
+        "title": "create_model_uploadArguments",
+        "type": "object"
+      },
+      "name": "create_model_upload",
+      "outputSchema": {
+        "description": "A one-time link to upload a model file through.",
+        "properties": {
+          "command": {
+            "description": "The curl command that uploads the file, run in the folder it is in on the user's computer; it prints the problem when the upload is refused",
+            "title": "Command",
+            "type": "string"
+          },
+          "expires_at": {
+            "description": "Until when the link takes its file (UTC)",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "description": "Public ID of the link, for get_model_upload",
+            "examples": [
+              "upl_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name the model gets",
+            "examples": [
+              "lstm.keras"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "next_steps": {
+            "description": "What to tell the user, and what to call then",
+            "title": "Next Steps",
+            "type": "string"
+          },
+          "page_url": {
+            "description": "The app's upload page of the link, where the signed-in user drops the file in the browser instead",
+            "title": "Page Url",
+            "type": "string"
+          },
+          "size_bytes": {
+            "description": "The largest file the link takes",
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "url": {
+            "description": "Where the file goes with PUT, with no other sign-in; the token in it is the link's only key until it is used",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "size_bytes",
+          "expires_at",
+          "command",
+          "url",
+          "page_url",
+          "next_steps"
+        ],
+        "title": "UploadLink",
+        "type": "object"
+      },
+      "scopes": [
+        "models"
+      ],
+      "title": "Make an upload link"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "How the upload through a one-time link stands: `waiting` for the file, `checking` while it comes in and is checked, `done` with the new model's `model_id`, `failed` with the `problem` and the `error` to tell the user, or `expired` unused. A failed or expired link is spent: make a new one with create_model_upload.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_model_upload",
+      "endpoints": [
+        "POST /api/v1/models",
+        "GET /api/v1/models/uploads/{upload_id}"
+      ],
+      "example": {
+        "arguments": {
+          "upload_id": "upl_7f3k2m9qx4"
+        },
+        "result": {
+          "error": null,
+          "expires_at": "2026-11-02T09:45:00Z",
+          "id": "upl_7f3k2m9qx4",
+          "model_id": "mdl_7f3k2m9qx4",
+          "name": "lstm.keras",
+          "problem": null,
+          "status": "done"
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "upload_id": {
+            "description": "Public ID of the link, as create_model_upload gave it",
+            "examples": [
+              "upl_7f3k2m9qx4"
+            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Upload Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "upload_id"
+        ],
+        "title": "get_model_uploadArguments",
+        "type": "object"
+      },
+      "name": "get_model_upload",
+      "outputSchema": {
+        "$defs": {
+          "UploadStatus": {
+            "description": "Where an upload through a link stands: `waiting` for the file, `checking` while it comes\nin and is checked, `done` (the model is made), `failed` (`problem` says why) or `expired`\n(the link was not used in time).",
+            "enum": [
+              "waiting",
+              "checking",
+              "done",
+              "failed",
+              "expired"
+            ],
+            "title": "UploadStatus",
+            "type": "string"
+          }
+        },
+        "description": "How the upload through a link stands.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the upload failed and what to do, in plain words; else null",
+            "title": "Error"
+          },
+          "expires_at": {
+            "description": "Until when the link takes its file (UTC)",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "description": "Public ID of the link",
+            "examples": [
+              "upl_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The model the upload made once `done`; else null",
+            "title": "Model Id"
+          },
+          "name": {
+            "description": "The name the model gets",
+            "examples": [
+              "lstm.keras"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The problem the upload answered once `failed` (`model-check-failed`, `storage-full`, `upload-interrupted`, ...); else null",
+            "title": "Problem"
+          },
+          "status": {
+            "$ref": "#/$defs/UploadStatus"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "expires_at",
+          "model_id",
+          "problem",
+          "error"
+        ],
+        "title": "UploadState",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Check an upload"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "Checks a backtest setup without starting anything: the same checks as start_backtest (the model is the user's and has a manifest, the instrument fits the model, the period with the candles the model needs before it fits the market data, the queue has room). Call it before start_backtest when you built the setup yourself.\n\nAnswers what would run (the model, the instrument, the model's timeframe and session, the warm-up) and whether it would wait in the user's queue; a setup that fails a check answers the problem start_backtest would, with what to change in its detail. The arguments are those of start_backtest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#validate_backtest",
       "endpoints": [
         "POST /api/v1/backtests/check"

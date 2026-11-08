@@ -25,7 +25,7 @@ from candlestack.ml.service import (
     _out,
     _upload_out,
 )
-from candlestack.preprocessing import Manifest, ManifestProblem, parse_manifest
+from candlestack.preprocessing import Finding, Manifest, ManifestProblem, parse_manifest
 
 if TYPE_CHECKING:
     from candlestack.ml.storage import ModelStorage
@@ -194,9 +194,9 @@ def test_a_text_holding_nul_is_a_problem_of_the_form() -> None:
         ManifestProblem(
             "schema",
             (
-                f"input.features[0].name {cannot_keep}",
-                f"A field name in about {cannot_keep}",
-                f"about.note {cannot_keep}",
+                Finding(f"input.features[0].name {cannot_keep}", "input.features[0].name"),
+                Finding(f"A field name in about {cannot_keep}", "about"),
+                Finding(f"about.note {cannot_keep}", "about.note"),
             ),
         )
     ]

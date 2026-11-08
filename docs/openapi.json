@@ -4464,6 +4464,120 @@
         "title": "CandleStack model manifest",
         "type": "object"
       },
+      "ManifestCheckOut": {
+        "description": "The result of checking a manifest without keeping it.",
+        "properties": {
+          "more_problems": {
+            "description": "Problems found beyond those listed",
+            "examples": [
+              0
+            ],
+            "title": "More Problems",
+            "type": "integer"
+          },
+          "problems": {
+            "description": "What is wrong, at most 10; empty when it is valid",
+            "items": {
+              "$ref": "#/components/schemas/ManifestProblemOut"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "unknown_blocks": {
+            "description": "The blocks it names that the catalog does not have",
+            "examples": [
+              []
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unknown Blocks",
+            "type": "array"
+          },
+          "valid": {
+            "description": "Every check passed: setting this manifest would make the model `ready`",
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "valid",
+          "problems",
+          "more_problems",
+          "unknown_blocks"
+        ],
+        "title": "ManifestCheckOut",
+        "type": "object"
+      },
+      "ManifestProblemOut": {
+        "description": "One thing wrong with a manifest, in a form to fix it from.",
+        "properties": {
+          "allowed": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The values that fit in `field` when the check knows them: the blocks of the step, the fields or parameters of the object, the options of a choice, the shape to give; empty when nothing fits (a block without parameters); null when the check does not say",
+            "examples": [
+              [
+                "close@1",
+                "rsi@1"
+              ]
+            ],
+            "title": "Allowed"
+          },
+          "check": {
+            "description": "The check that found it: `schema` (the form), `catalog` (the blocks and their steps), `params` (a block's parameters), `names` (the columns' names), `signature` (against the window and the columns), `example` (its shapes) or `model` (against the input and output the upload read from the model file)",
+            "enum": [
+              "schema",
+              "catalog",
+              "params",
+              "names",
+              "signature",
+              "example",
+              "model"
+            ],
+            "title": "Check",
+            "type": "string"
+          },
+          "detail": {
+            "description": "What is wrong, in one sentence, and sometimes a second that says what to do",
+            "examples": [
+              "The catalog has no block pocket-pivot@1 yet, so it cannot run."
+            ],
+            "title": "Detail",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The field of the manifest it is about, as a path; null when it is about the whole document",
+            "examples": [
+              "input.features[2].id"
+            ],
+            "title": "Field"
+          }
+        },
+        "required": [
+          "check",
+          "field",
+          "detail",
+          "allowed"
+        ],
+        "title": "ManifestProblemOut",
+        "type": "object"
+      },
       "ManifestSummary": {
         "description": "What the model's manifest says, in short; the whole manifest is\n`GET /api/v1/models/{model_id}/manifest`.",
         "properties": {
@@ -10695,7 +10809,7 @@
                 }
               }
             },
-            "description": "A check failed (`manifest-check-failed`): `problems` lists what is wrong, at most 10, each with its `check` (`schema`, `catalog`, `params`, `names`, `signature`, `example` or `model`) and a `detail` of one sentence; `more_problems` counts the rest and `unknown_blocks` names the blocks the catalog does not have. `detail` says the same in words."
+            "description": "A check failed (`manifest-check-failed`): `problems` lists what is wrong, at most 10, each with its `check` (`schema`, `catalog`, `params`, `names`, `signature`, `example` or `model`), the `field` it is about (a path such as `input.features[2].id`, null for the whole manifest), a `detail` of one sentence and the values that fit there in `allowed` (null when the check does not say); `more_problems` counts the rest and `unknown_blocks` names the blocks the catalog does not have. `detail` says the same in words. `POST /api/v1/models/{model_id}/manifest/check` runs the same checks and keeps nothing."
           },
           "429": {
             "content": {
@@ -10716,6 +10830,122 @@
           }
         ],
         "summary": "Set Manifest",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/manifest/check": {
+      "post": {
+        "description": "Checks a manifest for the model as `PUT /api/v1/models/{model_id}/manifest` would, and\nkeeps nothing: a dry run, for an editor or an agent to fix the manifest before it sets it.\nThe body is the manifest. `valid` says whether every check passed; else `problems` lists\nwhat is wrong, at most 10, each with the `field` it is about, a `detail` of one sentence\nand the values that fit there (`allowed`). It changes nothing, so an API key needs only\n`read`.",
+        "operationId": "check_manifest_api_v1_models__model_id__manifest_check_post",
+        "parameters": [
+          {
+            "description": "Public ID of the model",
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "description": "Public ID of the model",
+              "examples": [
+                "mdl_7f3k2m9qx4"
+              ],
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Manifest"
+              }
+            }
+          },
+          "description": "The manifest (docs/preprocessing.md), as JSON",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManifestCheckOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The user has no model with this ID (`not-found`)."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The manifest is larger than 1 MB (`manifest-too-large`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
+        "summary": "Check Manifest",
         "tags": [
           "models"
         ]
