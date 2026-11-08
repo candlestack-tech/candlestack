@@ -113,6 +113,17 @@ def safe_next(path: str | None, default: str = DEFAULT_NEXT) -> str:
     return path
 
 
+def _code_of(provider: Provider, code: str | None, error: str | None) -> str:
+    """The code the provider returned to the callback.
+
+    Raises:
+        SignInFailed: It returned an error or no code (cancelled or refused).
+    """
+    if error is not None or not code:
+        raise SignInFailed(f"{provider} returned no code (cancelled or refused)")
+    return code
+
+
 def is_connect_state(state: str | None) -> bool:
     """Whether the callback's `state` is that of connecting a sign-in method; it may be forged,
     so it only picks the page a failure returns to."""
@@ -252,9 +263,11 @@ class AccountsService:
 
         Raises:
             SignInFailed: The sign-in or connect was cancelled or failed, or the session that
-                started the connect ended or is not this browser's any more.
+                started the connect ended or is not this browser's any more. Once the state
+                is known, a sign-in's carries the page it was going to (``next_path``).
             SignInMethodTaken: The account to connect signs in to another user.
-            SignInDenied: The account's email is not on the beta list (sign-in only).
+            SignInDenied: The account's email is not on the beta list (sign-in only); it
+                carries the page the sign-in was going to (``next_path``).
         """
         if not state or not browser_state or len(state) > _MAX_STATE:
             raise SignInFailed("the state is missing or too long")
@@ -263,9 +276,8 @@ class AccountsService:
         pending = await self._pending.take_sign_in(state)
         if pending is None or pending.provider is not provider:
             raise SignInFailed("the state is unknown or expired")
-        if error is not None or not code:
-            raise SignInFailed(f"{provider} returned no code (cancelled or refused)")
         if pending.connect_session is not None:
+            code = _code_of(provider, code, error)
             signed_in = await self._connecting(pending.connect_session, session_token)
             await self._connect(
                 signed_in.user,
@@ -274,6 +286,22 @@ class AccountsService:
             return SignInDone(
                 next_path=pending.next, session_token=session_token if signed_in.extended else None
             )
+        try:
+            return await self._sign_in(provider, pending, _code_of(provider, code, error))
+        except (SignInFailed, SignInDenied) as failed:
+            # Back on the sign-in page, the browser keeps where it was going (an app's consent
+            # page, say), to try again or to name the app.
+            failed.next_path = pending.next
+            raise
+
+    async def _sign_in(self, provider: Provider, pending: PendingSignIn, code: str) -> SignInDone:
+        """Signs in the account the provider vouches for with `code`.
+
+        Raises:
+            SignInFailed: The provider failed, or the user with its email signs in with
+                another account of the provider.
+            SignInDenied: The account's email is not on the beta list.
+        """
         account = await self._oauth.fetch_account(provider, code=code, verifier=pending.verifier)
         identity = await self._store.identity(account.provider, account.subject)
         known = None if identity is None else await self._store.user(identity.user_id)

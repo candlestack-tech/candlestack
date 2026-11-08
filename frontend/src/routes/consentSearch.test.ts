@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { consentPath, isConsentPath, validateConsentSearch } from './consentSearch';
+import { consentPath, consentRequestOf, isConsentPath, validateConsentSearch } from './consentSearch';
 
 // The router passes the raw search object; SearchSchemaInput is only a type marker.
 type RawSearch = Parameters<typeof validateConsentSearch>[0];
@@ -24,5 +24,15 @@ describe('consentPath and isConsentPath', () => {
     expect(isConsentPath('/oauth/consent')).toBe(true);
     expect(isConsentPath('/oauth/consentx?request=a')).toBe(false);
     expect(isConsentPath('/dashboard')).toBe(false);
+  });
+});
+
+describe('consentRequestOf', () => {
+  it('reads the request of a consent page, and nothing from another page or a broken ID', () => {
+    expect(consentRequestOf(consentPath('Zx9_-aB3'))).toBe('Zx9_-aB3');
+    expect(consentRequestOf('/oauth/consent?request=..%2Fme')).toBeUndefined();
+    expect(consentRequestOf('/oauth/consent')).toBeUndefined();
+    expect(consentRequestOf('/dashboard?request=Zx9_-aB3')).toBeUndefined();
+    expect(consentRequestOf(undefined)).toBeUndefined();
   });
 });

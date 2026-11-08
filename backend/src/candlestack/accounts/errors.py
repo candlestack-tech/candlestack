@@ -6,13 +6,15 @@ the others into problems."""
 class SignInFailed(Exception):
     """The sign-in cannot go on: cancelled, refused or broken at the provider, a state that
     does not match, a provider that is not configured. ``reason`` is for the log and never
-    holds a secret or personal data; ``code`` is the ``error`` the page it returns to shows."""
+    holds a secret or personal data; ``code`` is the ``error`` the page it returns to shows.
+    ``next_path`` is the page a sign-in was going to, once its state is known."""
 
     code = "failed"
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
+        self.next_path: str | None = None
 
 
 class SignInMethodTaken(SignInFailed):
@@ -26,11 +28,13 @@ class SignInMethodTaken(SignInFailed):
 
 class SignInDenied(Exception):
     """The provider vouched for the account, but its email is not on the beta list. The
-    account waits in Redis under ``denial_id`` for the sign-in page to name it."""
+    account waits in Redis under ``denial_id`` for the sign-in page to name it.
+    ``next_path`` is the page the sign-in was going to."""
 
     def __init__(self, denial_id: str) -> None:
         super().__init__("account not on the beta list")
         self.denial_id = denial_id
+        self.next_path: str | None = None
 
 
 class NoSuchSignInMethod(Exception):

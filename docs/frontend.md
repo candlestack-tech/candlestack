@@ -163,7 +163,8 @@ Sign-in is GitHub or Google only (#208), designed in the design repository: the 
   sets it to `null`).
 - Signing in is a full page navigation to `/api/v1/auth/{github|google}/start?next=<path>`. The
   API sends the browser to the provider, and from there back to `next` (default `/dashboard`),
-  to `/signin?error=denied` or to `/signin?error=failed`.
+  to `/signin?error=denied` or to `/signin?error=failed`, both with `next` when the sign-in had
+  one other than the default.
 - `GET /api/v1/auth/denied` names the account the beta list just turned away.
 - `POST /api/v1/auth/sign-out` ends the session. The avatar menu's Sign out then sets the user
   to `null` and goes to the home page; a 401 (the session had already ended) counts the same.
@@ -176,7 +177,10 @@ names the layout: `useSearch({ from: '/_app/instruments' })`.
 
 - `/signin?next=&error=` shows the start (GitHub, Google, the beta note) or, after
   `error=denied`, who was turned away with Use another account (back to the start, `next`
-  kept) and Contact the team. A clicked button stays busy ("Opening GitHub", a spinner) while
+  kept) and Contact the team. When `next` is an app's consent page, the loader also reads that
+  request (`GET /api/v1/oauth/requests/{id}`) and the page shows the consent page's
+  not-on-the-beta-list card naming the app, whose Use another account goes back to the consent
+  page; a request that is gone (404) gets the plain card. A clicked button stays busy ("Opening GitHub", a spinner) while
   the browser leaves; Back from the provider offers the buttons again. An open session skips
   the page and goes to `next` or `/dashboard`.
 - `/dashboard`, `/backtests`, `/experiments`, `/models`, `/upload/$token`, `/instruments`,
@@ -306,9 +310,14 @@ The two sections with the account's preferences load them in the route's loader
   its scopes, last use and when it connected, and Disconnect, which asks first
   (`DELETE /api/v1/me/connected-apps/{id}`; a 404 counts as gone). Without apps a dashed box says
   how to connect one. The app's tile (`src/components/AppTile.tsx`) draws the mark of a known app
-  by the host it returns to (claude.ai, chatgpt.com: the API checks that host against the
-  registered redirect URIs, so a name cannot borrow it), else the `logo_uri` the app gave (sent
-  without a referrer), else its initial; a logo that does not load falls back to the initial.
+  (claude.ai, chatgpt.com) by the host that vouches for it: for an app named by a client ID
+  metadata document that document's host (`document_host`; a document elsewhere that returns to
+  claude.ai gets no mark), else the host it returns to (the API answers the host the browser
+  really returned to at the consent, one of the redirect URIs the app registered, so neither a
+  name nor a second registered URI can borrow it); else, for an app named by a metadata
+  document, the `logo_uri` it gave (sent without a referrer); else its initial. An app that
+  registered itself never shows its `logo_uri`, which could be a picture of anyone's mark; a logo
+  that does not load falls back to the initial.
 - Account: Sign out everywhere (`POST /api/v1/auth/sign-out-everywhere`) and Delete account
   (`DELETE /api/v1/me`, after the app's dialog). Both then forget the user and their data and go
   to the home page, as Sign out does (`useLeaveAccount.ts`).
@@ -327,12 +336,16 @@ is not asked again on mount.
 
 - Signed in: the app's tile linked to the CandleStack mark, "Claude wants access to your
   CandleStack account", "From claude.ai" (the host it returns to, as anyone can register an app
-  called Claude), Signed in as with Not you? (signs out and stays on the page), the scopes in the
-  API's plain words with boxes (read always and faded, the others only when the app asked for
-  them; Run backtests and Manage models start on, Publish off), what an app can never do, Cancel
-  and Allow. Either posts `POST /api/v1/oauth/requests/{id}` (`deny`, or `allow` with the ticked
-  scopes) and sends the browser to the answer's `redirect_to`; the buttons stay off until it has
-  left.
+  called Claude), who names it: "Named by claude.ai" for an app named by a client ID metadata
+  document (its `document_host`, which a document cannot fake), "Named by the app itself, not
+  checked" for one that registered itself; Signed in as with Not you? (signs out and stays on the
+  page), the scopes in the API's plain words with boxes (read always and faded, the others only
+  when the app asked for them; Run backtests and Manage models start on, Publish off), what an
+  app can never do, Cancel and Allow. Either posts `POST /api/v1/oauth/requests/{id}` (`deny`, or
+  `allow` with the ticked scopes) and sends the browser to the answer's `redirect_to`; the
+  buttons, the boxes and Not you? stay off until it has left. Back from the app, a page the
+  browser restores from its back-forward cache (`pageshow` with `persisted`) offers the buttons
+  again; the request is used by then, so either says it has expired.
 - Signed out: the same card offers GitHub and Google and names the app; signing in comes back to
   the page.
 - Off the beta list (`403 not-on-beta-list` on Allow): the sign-in page's words, with Use another
@@ -547,7 +560,7 @@ so its back link returns there (else "← Backtests").
   link while it exists),
   the period's first and last UTC day, when it ran and how long. A finished one has
   `[Download JSON | ?]` (the download is `GET /api/v1/backtests/{id}/download`, which the browser
-  saves as `candlestack-backtest-<N>.json`; `?` opens https://candlestack.tech/docs/backtest-json)
+  saves as `candlestack-backtest-<N>.json`; `?` opens https://candlestack.tech/docs/backtest-json/)
   and Add to compare. Rename (any status) names it with `PATCH /api/v1/backtests/{id}`: the name
   replaces the title, with the number beside it, and shows under the number in the lists.
 - Queued (#400): the badge says how many are ahead ("Queued · 2 ahead", the running one and
