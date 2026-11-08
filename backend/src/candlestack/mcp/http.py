@@ -20,8 +20,11 @@ the limit is answered as the tool's error with the problem ``rate-limited`` and 
 show as a failed connection.
 
 The transport is stateless with JSON answers: every request stands alone, so any process can
-answer it and a deploy breaks no session. ``serving_mcp`` runs the SDK's session manager with
-the app (its lifespan); ``mount_mcp`` adds the routes.
+answer it and a deploy breaks no session. A ``tools/call`` that asks for progress (a
+``progressToken`` in its ``_meta``) from a client that accepts ``text/event-stream`` is answered
+as an SSE stream instead, which carries the tool's ``notifications/progress`` before its
+result; a JSON answer has no room for them. ``serving_mcp`` runs the SDK's session managers
+with the app (its lifespan), one for each kind of answer; ``mount_mcp`` adds the routes.
 """
 
 import logging
@@ -31,6 +34,7 @@ from typing import Any
 
 import orjson
 from fastapi import FastAPI
+from mcp.server.streamable_http import check_accept_headers
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import JSONRPCResponse
 from starlette.requests import Request
@@ -191,6 +195,20 @@ def _call_id(message: dict[str, Any] | None) -> str | int | None:
     return None
 
 
+def _streamed(request: Request, message: dict[str, Any] | None) -> bool:
+    """Whether to answer the request as an SSE stream: a tools/call `message` with a
+    ``progressToken`` from a client that accepts one, so the tool's progress reaches it."""
+    if message is None or message.get("method") != "tools/call":
+        return False
+    params = message.get("params")
+    meta = params.get("_meta") if isinstance(params, dict) else None
+    token = meta.get("progressToken") if isinstance(meta, dict) else None
+    if not isinstance(token, str | int) or isinstance(token, bool):
+        return False
+    _, has_sse = check_accept_headers(request)
+    return has_sse
+
+
 def _replayed(body: bytes, receive: Receive) -> Receive:
     """`receive` with the body that was read from it given again first, for the SDK."""
     pending = True
@@ -241,7 +259,8 @@ class _McpEndpoint:
             await _tool_error(call_id, problem)(scope, receive, send)
             return
         setattr(request.state, CALLER_STATE, caller)
-        await state.mcp_sessions.handle_request(scope, receive, send)
+        sessions = state.mcp_streams if _streamed(request, message) else state.mcp_sessions
+        await sessions.handle_request(scope, receive, send)
 
 
 async def _metadata(request: Request) -> JSONResponse:
@@ -273,18 +292,23 @@ def mount_mcp(app: FastAPI) -> None:
 
 @asynccontextmanager
 async def serving_mcp(app: FastAPI) -> AsyncIterator[None]:
-    """Runs the SDK's session manager and opens get_docs' client while the app runs; on
-    shutdown the calls in progress are cancelled."""
+    """Runs the SDK's session managers and opens get_docs' client while the app runs: the
+    manager that answers JSON (``mcp_sessions``) and the one that answers the calls that ask for
+    progress as SSE streams (``mcp_streams``); on shutdown the calls in progress are
+    cancelled."""
     server = app.state.mcp_server
-    # A new session manager for each run of the app (the SDK runs one only once). The Host
-    # check of the SDK is off: the edge sets the host, and _sign_in checks the origin.
-    server.streamable_http_app(
-        stateless_http=True,
-        json_response=True,
-        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
-    )
-    sessions = server.session_manager
-    app.state.mcp_sessions = sessions
-    async with docs_client() as docs_http, sessions.run():
+    # New session managers for each run of the app (the SDK runs one only once); each call
+    # makes one and leaves it on the server. The Host check of the SDK is off: the edge sets
+    # the host, and _sign_in checks the origin.
+    managers = []
+    for json_response in (True, False):
+        server.streamable_http_app(
+            stateless_http=True,
+            json_response=json_response,
+            transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+        )
+        managers.append(server.session_manager)
+    app.state.mcp_sessions, app.state.mcp_streams = managers
+    async with docs_client() as docs_http, managers[0].run(), managers[1].run():
         app.state.docs_http = docs_http
         yield

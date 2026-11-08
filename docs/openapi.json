@@ -1886,6 +1886,122 @@
         "title": "BacktestsPage",
         "type": "object"
       },
+      "BacktestsUpdateIn": {
+        "additionalProperties": false,
+        "description": "Star, unstar, publish or unpublish many backtests at once: the fields of\n``BacktestUpdate`` but the name, for each of `ids`.",
+        "properties": {
+          "ids": {
+            "description": "1 to 100 IDs of the user's backtests",
+            "examples": [
+              [
+                "bt_7f3k2m9qx4",
+                "bt_t9n8v7d6a5"
+              ]
+            ],
+            "items": {
+              "maxLength": 32,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Ids",
+            "type": "array"
+          },
+          "public": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Publish them in Experiments (true) or take them back (false). Only a finished backtest made in the app can be published",
+            "title": "Public"
+          },
+          "starred": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Star them (true) or unstar them",
+            "title": "Starred"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "BacktestsUpdateIn",
+        "type": "object"
+      },
+      "BacktestsUpdated": {
+        "description": "What changed.",
+        "properties": {
+          "cannot_publish": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With `public` true: IDs of the user's backtests that cannot be published (queued, running or failed, or test data without a result document); nothing changed for them. Null otherwise",
+            "examples": [
+              []
+            ],
+            "title": "Cannot Publish"
+          },
+          "count": {
+            "description": "How many are now as asked",
+            "examples": [
+              2
+            ],
+            "title": "Count",
+            "type": "integer"
+          },
+          "not_found": {
+            "description": "IDs the user has no backtest with (deleted, or another account's): nothing changed for them",
+            "examples": [
+              []
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Not Found",
+            "type": "array"
+          },
+          "updated": {
+            "description": "The IDs of the backtests that are now as asked, in the order given, those that were already included",
+            "examples": [
+              [
+                "bt_7f3k2m9qx4",
+                "bt_t9n8v7d6a5"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Updated",
+            "type": "array"
+          }
+        },
+        "required": [
+          "updated",
+          "count",
+          "not_found"
+        ],
+        "title": "BacktestsUpdated",
+        "type": "object"
+      },
       "Benchmark": {
         "description": "What each backtest is measured against: buy and hold of its own instruments, or an ETF.",
         "enum": [
@@ -9125,6 +9241,90 @@
           }
         ],
         "summary": "Delete Backtests",
+        "tags": [
+          "backtests"
+        ]
+      }
+    },
+    "/api/v1/backtests/update": {
+      "post": {
+        "description": "Stars, unstars, publishes or unpublishes up to 100 of the user's backtests at once, as\n`PATCH /api/v1/backtests/{backtest_id}` does one. IDs the user has no backtest with are\nlisted in `not_found`, and when publishing, the backtests that cannot be published (queued,\nrunning or failed) in `cannot_publish`; nothing changes for them, the rest change. What is\nalready as asked stays, so sending the same request again is safe. With an API key,\npublishing and unpublishing need the scope `publish`, starring `backtests`.",
+        "operationId": "update_backtests_api_v1_backtests_update_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestsUpdateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestsUpdated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Neither `starred` nor `public`, or more than 100 IDs (`validation`)."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "backtests"
+            ]
+          },
+          {
+            "apiKey": [
+              "publish"
+            ]
+          }
+        ],
+        "summary": "Update Backtests",
         "tags": [
           "backtests"
         ]

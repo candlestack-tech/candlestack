@@ -220,6 +220,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backtests/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update Backtests
+         * @description Stars, unstars, publishes or unpublishes up to 100 of the user's backtests at once, as
+         *     `PATCH /api/v1/backtests/{backtest_id}` does one. IDs the user has no backtest with are
+         *     listed in `not_found`, and when publishing, the backtests that cannot be published (queued,
+         *     running or failed) in `cannot_publish`; nothing changes for them, the rest change. What is
+         *     already as asked stays, so sending the same request again is safe. With an API key,
+         *     publishing and unpublishing need the scope `publish`, starring `backtests`.
+         */
+        post: operations["update_backtests_api_v1_backtests_update_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backtests/{backtest_id}": {
         parameters: {
             query?: never;
@@ -2078,6 +2103,65 @@ export interface components {
              * @example 15
              */
             total: number;
+        };
+        /**
+         * BacktestsUpdateIn
+         * @description Star, unstar, publish or unpublish many backtests at once: the fields of
+         *     ``BacktestUpdate`` but the name, for each of `ids`.
+         */
+        BacktestsUpdateIn: {
+            /**
+             * Ids
+             * @description 1 to 100 IDs of the user's backtests
+             * @example [
+             *       "bt_7f3k2m9qx4",
+             *       "bt_t9n8v7d6a5"
+             *     ]
+             */
+            ids: string[];
+            /**
+             * Public
+             * @description Publish them in Experiments (true) or take them back (false). Only a finished backtest made in the app can be published
+             */
+            public?: boolean | null;
+            /**
+             * Starred
+             * @description Star them (true) or unstar them
+             */
+            starred?: boolean | null;
+        };
+        /**
+         * BacktestsUpdated
+         * @description What changed.
+         */
+        BacktestsUpdated: {
+            /**
+             * Cannot Publish
+             * @description With `public` true: IDs of the user's backtests that cannot be published (queued, running or failed, or test data without a result document); nothing changed for them. Null otherwise
+             * @example []
+             */
+            cannot_publish?: string[] | null;
+            /**
+             * Count
+             * @description How many are now as asked
+             * @example 2
+             */
+            count: number;
+            /**
+             * Not Found
+             * @description IDs the user has no backtest with (deleted, or another account's): nothing changed for them
+             * @example []
+             */
+            not_found: string[];
+            /**
+             * Updated
+             * @description The IDs of the backtests that are now as asked, in the order given, those that were already included
+             * @example [
+             *       "bt_7f3k2m9qx4",
+             *       "bt_t9n8v7d6a5"
+             *     ]
+             */
+            updated: string[];
         };
         /**
          * Benchmark
@@ -5747,6 +5831,66 @@ export interface operations {
                 };
             };
             /** @description Neither or both of `ids` and `sweep_id`, or more than 100 IDs (`validation`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    update_backtests_api_v1_backtests_update_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestsUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestsUpdated"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Neither `starred` nor `public`, or more than 100 IDs (`validation`). */
             422: {
                 headers: {
                     [name: string]: unknown;

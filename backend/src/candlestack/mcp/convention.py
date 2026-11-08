@@ -39,8 +39,8 @@ _NAME = re.compile(r"[a-z]+(_[a-z0-9]+){1,3}")
 _NAME_MAX = 32
 # Where the HTTP layer leaves the caller of a request (``request.state``), for the tools.
 CALLER_STATE = "mcp_caller"
-# The longest wait of one call of a wait tool: clients give up on a call after a minute or so,
-# and the transport answers JSON at the end of the call, so the agent calls again.
+# The longest wait of one call of a wait tool: clients give up on a call after a minute or so
+# (progress notifications do not reset every client's timeout), so the agent calls again.
 WAIT_MAX_S = 60
 WAIT_DEFAULT_S = 50
 # The most backtests the app's compare page shows side by side, its slots (`COMPARE_SLOTS` in
@@ -166,6 +166,22 @@ class ToolCall:
 def runner_of(call: ToolCall) -> BacktestRunner:
     """The app's backtest runner, which tells a wait when a backtest changed."""
     return call.state.backtest_runner
+
+
+class Progress:
+    """The progress a wait reports to a client that asked for it with a ``progressToken``
+    (``notifications/progress``; without a token nothing is sent). Each notification must be
+    higher than the last, as MCP asks, so a value that is not is left out."""
+
+    def __init__(self, ctx: Context) -> None:
+        self._ctx = ctx
+        self._last: float | None = None
+
+    async def report(self, progress: float, total: float, message: str) -> None:
+        if self._last is not None and progress <= self._last:
+            return
+        self._last = progress
+        await self._ctx.report_progress(progress, total, message)
 
 
 def tool_call(ctx: Context) -> ToolCall:

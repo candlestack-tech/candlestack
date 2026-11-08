@@ -1,5 +1,6 @@
 """The tools that find, organise and publish the user's backtests: the list of the Backtests
-page, rename, star, cancel a queued one, Experiments, publish and unpublish, and the Dashboard.
+page, rename, star (one or many), cancel a queued one, Experiments, publish and unpublish (one
+or many), and the Dashboard.
 
 They call ``BacktestsService`` and ``BacktestRuns`` as the routes do, raise the routes' problems
 (``update_problems``, ``backtest_problems``) and answer compact models: a backtest without its
@@ -22,6 +23,7 @@ from candlestack.experiments import (
     PAGE_SIZE,
     PER_PAGE_MAX,
     QUERY_MAX,
+    UPDATE_MAX,
     Author,
     BacktestCounts,
     BacktestFilters,
@@ -31,6 +33,7 @@ from candlestack.experiments import (
     BacktestShow,
     BacktestSort,
     BacktestStatus,
+    BacktestsUpdated,
     BacktestUpdate,
     ExperimentCounts,
     ExperimentFacets,
@@ -69,6 +72,15 @@ BacktestId = Annotated[
 Page = Annotated[int, Field(ge=1, le=PAGE_MAX, description="The page, from 1")]
 Order = Annotated[
     SortOrder, Field(description="Direction of the sort; the default sort is newest first anyway")
+]
+# The IDs a bulk change takes, as delete_backtests does.
+BacktestIds = Annotated[
+    list[Annotated[str, Field(min_length=1, max_length=32, examples=["bt_7f3k2m9qx4"])]],
+    Field(
+        min_length=1,
+        max_length=UPDATE_MAX,
+        description=f"1 to {UPDATE_MAX} IDs of the user's backtests, from list_backtests",
+    ),
 ]
 # Whether a list answers its counts and filter values, which cost queries of their own.
 IncludeFacets = Annotated[
@@ -433,6 +445,21 @@ async def star_backtest(
     return await _update(ctx, backtest_id, BacktestUpdate(starred=starred))
 
 
+async def star_backtests(
+    ids: BacktestIds,
+    ctx: Context,
+    *,
+    starred: Annotated[bool, Field(description="true stars them, false unstars them")] = True,
+) -> BacktestsUpdated:
+    """Stars up to 100 of the user's backtests at once, or unstars them with starred false, as
+    star_backtest does one. Answers the IDs now as asked in `updated` (those that already were
+    included, so calling it again changes nothing) and the IDs the user has no backtest with in
+    `not_found`, which change nothing."""
+    call = tool_call(ctx)
+    async with call.db() as db:
+        return await get_backtests_service(db).update_many(call.user.id, ids, starred=starred)
+
+
 async def cancel_backtest(backtest_id: BacktestId, ctx: Context) -> CancelledBacktest:
     """Cancels one of the user's queued backtests, so it never runs: it becomes failed, with an
     error that says it was cancelled, and stays in the list. Only a queued backtest can be
@@ -527,6 +554,27 @@ async def unpublish_backtest(backtest_id: BacktestId, ctx: Context) -> BacktestS
     """Takes one of the user's backtests out of Experiments: no other account can see it any
     more, and it leaves their comparisons. The backtest itself stays. Ask the user first."""
     return await _update(ctx, backtest_id, BacktestUpdate(public=False))
+
+
+async def publish_backtests(
+    ids: BacktestIds,
+    ctx: Context,
+    *,
+    published: Annotated[
+        bool, Field(description="true publishes them, false takes them out of Experiments")
+    ] = True,
+) -> BacktestsUpdated:
+    """Publishes up to 100 of the user's finished backtests in Experiments at once, or with
+    published false takes them out, as publish_backtest and unpublish_backtest do one: a
+    published backtest is visible to every account of the beta with its name, the user's
+    display name, setup, results, charts, trades and its model's name and input (never the
+    model file). Ask the user before publishing or unpublishing. Answers the IDs now as asked
+    in `updated` (those that already were included, so calling it again changes nothing), the
+    IDs the user has no backtest with in `not_found`, and when publishing those that cannot be
+    published (queued, running or failed) in `cannot_publish`; nothing changes for those two."""
+    call = tool_call(ctx)
+    async with call.db() as db:
+        return await get_backtests_service(db).update_many(call.user.id, ids, public=published)
 
 
 def _ranked(backtests: list[BacktestOut], result: str) -> list[RankedBacktest]:
@@ -656,6 +704,19 @@ TOOLS = (
         example=Example(arguments={"backtest_id": "bt_7f3k2m9qx4"}, result=_ORION_STATE),
     ),
     ToolSpec(
+        star_backtests,
+        name="star_backtests",
+        title="Star backtests",
+        scopes=(Scope.backtests,),
+        annotations=changes(destructive=False, idempotent=True),
+        example=Example(
+            arguments={"ids": ["bt_7f3k2m9qx4", "bt_t9n8v7d6a5", "bt_nonexistent"]},
+            result=BacktestsUpdated(
+                updated=["bt_7f3k2m9qx4", "bt_t9n8v7d6a5"], count=2, not_found=["bt_nonexistent"]
+            ),
+        ),
+    ),
+    ToolSpec(
         cancel_backtest,
         name="cancel_backtest",
         title="Cancel a queued backtest",
@@ -735,6 +796,22 @@ TOOLS = (
         scopes=(Scope.publish,),
         annotations=changes(destructive=True, idempotent=True),
         example=Example(arguments={"backtest_id": "bt_7f3k2m9qx4"}, result=_ORION_STATE),
+    ),
+    ToolSpec(
+        publish_backtests,
+        name="publish_backtests",
+        title="Publish backtests",
+        scopes=(Scope.publish,),
+        annotations=changes(destructive=True, idempotent=True),
+        example=Example(
+            arguments={"ids": ["bt_7f3k2m9qx4", "bt_t9n8v7d6a5"]},
+            result=BacktestsUpdated(
+                updated=["bt_7f3k2m9qx4"],
+                count=1,
+                not_found=[],
+                cannot_publish=["bt_t9n8v7d6a5"],
+            ),
+        ),
     ),
     ToolSpec(
         get_dashboard,

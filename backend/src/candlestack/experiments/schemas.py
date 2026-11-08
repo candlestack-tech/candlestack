@@ -3,7 +3,7 @@ stores (its instruments and setup)."""
 
 from datetime import UTC, date, datetime
 from enum import StrEnum
-from typing import Self
+from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -24,6 +24,8 @@ QUERY_MAX = 100
 MODEL_NAME_MAX = 255
 # The most points of a backtest's equity series: enough for a small chart.
 EQUITY_POINTS = 60
+# The most backtests one request stars or publishes: as many as one deletes.
+UPDATE_MAX = 100
 
 
 class BacktestStatus(StrEnum):
@@ -360,6 +362,55 @@ class BacktestUpdate(BaseModel):
         if not self.model_fields_set:
             raise ValueError("send what to change: starred, name, public or more of them")
         return self
+
+
+class BacktestsUpdateIn(BaseModel):
+    """Star, unstar, publish or unpublish many backtests at once: the fields of
+    ``BacktestUpdate`` but the name, for each of `ids`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ids: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(
+        min_length=1,
+        max_length=UPDATE_MAX,
+        description=f"1 to {UPDATE_MAX} IDs of the user's backtests",
+        examples=[["bt_7f3k2m9qx4", "bt_t9n8v7d6a5"]],
+    )
+    starred: bool | None = Field(default=None, description="Star them (true) or unstar them")
+    public: bool | None = Field(
+        default=None,
+        description="Publish them in Experiments (true) or take them back (false). Only a "
+        "finished backtest made in the app can be published",
+    )
+
+    @model_validator(mode="after")
+    def _says_something(self) -> Self:
+        if self.starred is None and self.public is None:
+            raise ValueError("send what to change: starred, public or both")
+        return self
+
+
+class BacktestsUpdated(BaseModel):
+    """What changed."""
+
+    updated: list[str] = Field(
+        description="The IDs of the backtests that are now as asked, in the order given, those "
+        "that were already included",
+        examples=[["bt_7f3k2m9qx4", "bt_t9n8v7d6a5"]],
+    )
+    count: int = Field(description="How many are now as asked", examples=[2])
+    not_found: list[str] = Field(
+        description="IDs the user has no backtest with (deleted, or another account's): "
+        "nothing changed for them",
+        examples=[[]],
+    )
+    cannot_publish: list[str] | None = Field(
+        default=None,
+        description="With `public` true: IDs of the user's backtests that cannot be published "
+        "(queued, running or failed, or test data without a result document); nothing changed "
+        "for them. Null otherwise",
+        examples=[[]],
+    )
 
 
 class BestBacktests(BaseModel):

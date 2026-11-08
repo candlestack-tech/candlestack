@@ -203,6 +203,14 @@ class Doomed(NamedTuple):
     sweep_id: str | None
 
 
+class Marked(NamedTuple):
+    """A backtest about to be starred or published (``BacktestStore.to_mark``)."""
+
+    id: str
+    status: str
+    has_spec: bool
+
+
 class StatusRow(NamedTuple):
     """Where a backtest stands (``BacktestStore.statuses``): its row without what its run
     stored, its author's display name, its place in the queue while queued, and the timings
@@ -589,6 +597,30 @@ class BacktestStore:
             select(Backtest.spec.is_not(None)).where(Backtest.id == backtest_id)
         )
         return bool(found)
+
+    async def to_mark(self, user_id: str, backtest_ids: Sequence[str]) -> list[Marked]:
+        """The user's backtests with one of the IDs, locked until the transaction ends (a run
+        that is finishing stores its status first), without what their runs stored."""
+        rows = await self._db.execute(
+            select(Backtest.id, Backtest.status, Backtest.spec.is_not(None))
+            .where(Backtest.user_id == user_id, Backtest.id.in_(backtest_ids))
+            .with_for_update()
+        )
+        return [Marked(*row) for row in rows]
+
+    async def mark(
+        self, backtest_ids: Sequence[str], *, starred: bool | None, public: bool | None
+    ) -> None:
+        """Stars or unstars the backtests, and publishes or takes them back, as each field
+        that is not None asks; one published already keeps when it was published."""
+        values: dict[str, Any] = {}
+        if starred is not None:
+            values["starred"] = starred
+        if public is not None:
+            values["published_at"] = (
+                func.coalesce(Backtest.published_at, func.now()) if public else None
+            )
+        await self._db.execute(update(Backtest).where(Backtest.id.in_(backtest_ids)).values(values))
 
     # --- The names --------------------------------------------------------------------------------
 

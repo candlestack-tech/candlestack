@@ -40,6 +40,7 @@ from candlestack.mcp.convention import (
     WAIT_MAX_S,
     Example,
     IdempotencyKey,
+    Progress,
     ToolCall,
     ToolSpec,
     changes,
@@ -266,15 +267,18 @@ async def wait_for_sweep(
     """Waits until every backtest of a sweep of the user has ended or `timeout_s` seconds
     passed, then answers how many are queued, running, finished and failed, `eta_s`, and once
     `done` the ranking get_sweep gives with `url`, the app's Compare page of the best 4 to show
-    the user. When `done` is false, call it again: a sweep's backtests run one after another."""
+    the user. When `done` is false, call it again: a sweep's backtests run one after another. A
+    client that asks for progress gets how many ended while it waits."""
     call = tool_call(ctx)
     deadline = anyio.current_time() + timeout_s
     ids, _ = await _progress(call, sweep_id)
+    reported = Progress(ctx)
     with runner_of(call).watch(ids) as changed:
         while True:
             changed.clear()
             ids, progress = await _progress(call, sweep_id)
             done = not progress.queued and not progress.running
+            await reported.report(*sweep_progress(progress))
             left = deadline - anyio.current_time()
             if done or left <= 0:
                 break
@@ -297,6 +301,17 @@ async def wait_for_sweep(
         ranking=ranking,
         url=None if ranking is None else _compare_url(call, ids, ranking),
     )
+
+
+def sweep_progress(progress: SweepProgress) -> tuple[int, int, str]:
+    """The progress of a wait for a sweep: its backtests that ended of all, and its message."""
+    ended = progress.finished + progress.failed
+    total = ended + progress.queued + progress.running
+    message = (
+        f"{ended} of {total} ended: {progress.finished} finished, {progress.failed} failed, "
+        f"{progress.running} running, {progress.queued} queued"
+    )
+    return ended, total, message
 
 
 async def _progress(call: ToolCall, sweep_id: str) -> tuple[list[str], SweepProgress]:
