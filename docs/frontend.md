@@ -518,10 +518,11 @@ so its back link returns there (else "← Backtests").
 
 - The choice: up to 4 finished backtests in slots, kept in `localStorage` (`selection.ts`), so it
   stays after a reload in this browser. A slot gives a backtest its colour, and removing another
-  moves nothing. One that no longer exists leaves the choice when the page gets a 404.
+  moves nothing. One that no longer exists leaves the choice when the comparison answers 404 with
+  its `id`; the comparison of the rest names the next, if any.
 - Other accounts' backtests from Experiments can be compared too; their slot keeps the author's
-  name. The panel asks for their documents (the compare page reads the same cache), and one that
-  now answers 404 was unpublished: it leaves the comparison but keeps its slot, dashed in the
+  name. The panel asks for their documents (not on the compare page, whose comparison tells the
+  same), and one that now answers 404 was unpublished: it leaves the comparison but keeps its slot, dashed in the
   warning colour, "#57 was unpublished" with the author's initials, until the user dismisses it
   (the compare page says "Vladyslav Shudiehov unpublished #57, so it left your Compare."). The
   user's own that answers 404 was deleted and leaves at once (`leaveCompare`).
@@ -536,11 +537,15 @@ so its back link returns there (else "← Backtests").
   or failed one or at 4, and a button on a backtest's page. The Compare panel in the bottom right
   corner of the signed-in pages lists them; Compare opens the page from 2. It can fold to a small
   button and is not on the compare page.
+- The page reads one request, `GET /api/v1/compare` (`compareQueryOptions`, under
+  `['account', 'compare', ids]`), never the backtests' documents: about 22 KB for four instead of
+  5 to 6 MB. While a new choice loads, the last answer shows the backtests still chosen.
 - The page: Equity and Drawdown on two TradingView Lightweight Charts with one crosshair and one
-  view of time, a line per backtest from its own start, on the light view of each document; then a
-  table. In each row of the results the best value is green and the worst red, the others plain,
-  and all plain when they read the same or when no value is better (Trades, Time in market, Buy
-  and hold). The setup follows, with a dash where a backtest has no such row.
+  view of time, a line per backtest from its own start, at the comparison's times; then a table.
+  In each row of the results the best value is green and the worst red as the server marked
+  them, the others plain (all plain when they read the same or when no value is better: Trades,
+  Time in market, Buy and hold); `rows.ts` only writes the values. The setup follows, written as
+  a backtest's page writes it (`setupGroups`), with a dash where a backtest has no such row.
 
 ## Experiments
 

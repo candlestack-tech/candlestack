@@ -1,9 +1,9 @@
-import { useQueries } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useCanGoBack, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
 import { Scale, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
-import { backtestQueryOptions, type BacktestDocument } from '@/api';
+import { compareQueryOptions, type CompareMetric } from '@/api';
 import { ErrorNote } from '@/components/ErrorNote';
 import { PageTitle } from '@/components/PageTitle';
 import { Button } from '@/components/ui/button';
@@ -19,32 +19,31 @@ import {
   lineOf,
   pickName,
   removeFromCompare,
+  useComparedNames,
   useCompareSelection,
-  useLeaveMissing,
-  useNamesOf,
+  useLeaveCompared,
   type CompareColumn,
   type ComparePick,
 } from '@/features/backtests';
 import { usePageTitle } from '@/lib/usePageTitle';
 
-// The chosen backtests in the order of their slots, each with its colour. A chosen one that no
-// longer exists leaves the choice; another account's that was unpublished says so (leaveCompare).
+// The chosen backtests in the order of their slots, each with its colour, as the server compares
+// them (GET /api/v1/compare). While a new choice loads, the last answer shows those still chosen. A
+// chosen one that no longer exists leaves the choice; another account's that was unpublished says
+// so (leaveCompare).
 function useColumns() {
   const { slots, picks, full } = useCompareSelection();
-  const results = useQueries({ queries: picks.map((pick) => backtestQueryOptions(pick.id)) });
-  useLeaveMissing(picks, results);
-  useNamesOf(picks, results);
-  const docs = new Map<string, BacktestDocument>();
-  picks.forEach((pick, index) => {
-    const data = results[index]?.data;
-    if (data) docs.set(pick.id, data);
+  const { data, error } = useQuery(compareQueryOptions(picks.map((pick) => pick.id)));
+  useLeaveCompared(error);
+  const backtests = data?.backtests ?? [];
+  useComparedNames(backtests);
+  const columns: CompareColumn[] = slots.flatMap((slot, color) => {
+    const index = slot && !slot.gone ? backtests.findIndex((backtest) => backtest.id === slot.id) : -1;
+    const backtest = backtests[index];
+    return backtest ? [{ backtest, index, color: SLOT_COLORS[color] ?? 'currentColor' }] : [];
   });
-  const columns: CompareColumn[] = slots.flatMap((slot, index) => {
-    const doc = slot && !slot.gone && docs.get(slot.id);
-    return doc ? [{ doc, color: SLOT_COLORS[index] ?? 'currentColor' }] : [];
-  });
-  const failed = results.some((result) => result.error && !isMissing(result.error));
-  return { columns, picks, full, failed };
+  const failed = error !== null && !isMissing(error);
+  return { columns, metrics: data?.metrics ?? [], times: data?.times ?? [], picks, full, failed };
 }
 
 // "← Dashboard": back where the page was opened from, the Backtests page when it was opened
@@ -108,14 +107,25 @@ function UnpublishedNote({ pick }: { pick: ComparePick }) {
   );
 }
 
-// The charts and the table, once the documents are in.
-function Compared({ columns, canAdd, onAdd }: { columns: CompareColumn[]; canAdd: boolean; onAdd: () => void }) {
-  const lines = useMemo(() => columns.flatMap(({ doc, color }) => lineOf(doc, color) ?? []), [columns]);
+type ComparedProps = {
+  columns: CompareColumn[];
+  metrics: readonly CompareMetric[];
+  times: readonly number[];
+  canAdd: boolean;
+  onAdd: () => void;
+};
+
+// The charts and the table, once the comparison is in.
+function Compared({ columns, metrics, times, canAdd, onAdd }: ComparedProps) {
+  const lines = useMemo(
+    () => columns.flatMap(({ backtest, color }) => lineOf(backtest, times, color) ?? []),
+    [columns, times],
+  );
   if (columns.length === 0) return null;
   return (
     <>
       <CompareCharts lines={lines} />
-      <CompareTable columns={columns} canAdd={canAdd} onAdd={onAdd} />
+      <CompareTable columns={columns} metrics={metrics} canAdd={canAdd} onAdd={onAdd} />
     </>
   );
 }
@@ -132,7 +142,7 @@ function countLine(picks: readonly ComparePick[]): string {
 // user's and those of others from Experiments.
 export function ComparePage() {
   usePageTitle('Compare backtests');
-  const { columns, picks, full, failed } = useColumns();
+  const { columns, metrics, times, picks, full, failed } = useColumns();
   const { gone } = useCompareSelection();
   const [adding, setAdding] = useState(false);
   const open = () => {
@@ -158,7 +168,11 @@ export function ComparePage() {
         <UnpublishedNote key={pick.id} pick={pick} />
       ))}
       {failed && <ErrorNote className="mb-3">Could not load every backtest. Try again.</ErrorNote>}
-      {count === 0 ? <Empty onAdd={open} /> : <Compared columns={columns} canAdd={!full} onAdd={open} />}
+      {count === 0 ? (
+        <Empty onAdd={open} />
+      ) : (
+        <Compared columns={columns} metrics={metrics} times={times} canAdd={!full} onAdd={open} />
+      )}
       <ComparePicker open={adding} onOpenChange={setAdding} />
     </>
   );

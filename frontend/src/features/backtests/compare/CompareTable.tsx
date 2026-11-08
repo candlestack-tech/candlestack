@@ -1,19 +1,20 @@
 import { Link } from '@tanstack/react-router';
 import { X } from 'lucide-react';
 
-import type { BacktestDocument } from '@/api';
+import type { CompareMetric, ComparedBacktest } from '@/api';
 import { Button } from '@/components/ui/button';
 import { BUTTON_SIZES } from '@/components/buttonStyles';
 import { useViewerDateStyle } from '@/features/preferences';
 import { cn } from '@/lib/utils';
 
 import { AuthorAvatar } from '../experiments/AuthorAvatar';
-import { documentDescription } from '../names';
+import { comparedDescription } from '../names';
 import { BacktestName } from '../parts';
 import { resultRows, setupRows, type CompareRow, type Mark } from './rows';
 import { removeFromCompare } from './selection';
 
-export type CompareColumn = { doc: BacktestDocument; color: string };
+// A backtest of the comparison, its place in the answer (`index`) and its slot's colour.
+export type CompareColumn = { backtest: ComparedBacktest; index: number; color: string };
 
 const LABEL = 'px-3.5 py-2 text-left align-middle text-[13px] font-normal text-muted-foreground';
 const CELL = 'min-w-0 truncate px-3.5 py-2 align-middle text-[13.5px]';
@@ -35,8 +36,8 @@ function Author({ name, text = name, className }: { name: string; text?: string;
 
 // A column's head: its colour and its name opening it, what it ran on under it, and another
 // account's author by initials and name (backtest-names, .cmp-h).
-function Heading({ doc, color }: CompareColumn) {
-  const { id, name, author } = doc.backtest;
+function Heading({ backtest, color }: Omit<CompareColumn, 'index'>) {
+  const { id, name, author } = backtest;
   return (
     <th scope="col" className={cn(LINE, 'px-3.5 py-2 text-left align-top font-normal')}>
       <div className="flex items-start justify-between gap-2">
@@ -53,7 +54,7 @@ function Heading({ doc, color }: CompareColumn) {
             </Link>
           </div>
           <span className="mt-px ml-[18px] block truncate font-mono text-xs text-muted-foreground">
-            {documentDescription(doc)}
+            {comparedDescription(backtest)}
           </span>
           {!author.mine && <Author name={author.name} className="mt-[5px] ml-[18px] gap-1.5 text-xs font-medium" />}
         </div>
@@ -117,13 +118,22 @@ function Rows({ title, rows, mono, spare, span }: RowsProps) {
   );
 }
 
-type Props = { columns: readonly CompareColumn[]; canAdd: boolean; onAdd: () => void };
+type Props = {
+  columns: readonly CompareColumn[];
+  metrics: readonly CompareMetric[];
+  canAdd: boolean;
+  onAdd: () => void;
+};
 
 // A column per backtest under its colour, the results with the best of each row in green and the
 // worst in red, then the setup. Beside them the way to add one more while there is room.
-export function CompareTable({ columns, canAdd, onAdd }: Props) {
+export function CompareTable({ columns, metrics, canAdd, onAdd }: Props) {
   const style = useViewerDateStyle();
-  const docs = columns.map(({ doc }) => doc);
+  const backtests = columns.map(({ backtest }) => backtest);
+  const results = resultRows(
+    metrics,
+    columns.map(({ index }) => index),
+  );
   const span = 1 + columns.length + (canAdd ? 1 : 0);
   return (
     <section className="mt-4 overflow-x-auto rounded-lg border bg-background">
@@ -134,7 +144,7 @@ export function CompareTable({ columns, canAdd, onAdd }: Props) {
               Backtest
             </th>
             {columns.map((column) => (
-              <Heading key={column.doc.backtest.id} {...column} />
+              <Heading key={column.backtest.id} backtest={column.backtest} color={column.color} />
             ))}
             {canAdd && (
               <th scope="col" className={cn(LINE, 'px-3.5 py-2 text-left align-middle font-normal')}>
@@ -146,8 +156,8 @@ export function CompareTable({ columns, canAdd, onAdd }: Props) {
           </tr>
         </thead>
         <tbody>
-          <Rows title="Results" rows={resultRows(docs)} mono spare={canAdd} span={span} />
-          <Rows title="Setup" rows={setupRows(docs, style)} mono={false} spare={canAdd} span={span} />
+          <Rows title="Results" rows={results} mono spare={canAdd} span={span} />
+          <Rows title="Setup" rows={setupRows(backtests, style)} mono={false} spare={canAdd} span={span} />
         </tbody>
       </table>
     </section>
