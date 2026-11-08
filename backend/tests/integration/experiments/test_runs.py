@@ -990,7 +990,8 @@ def test_backtests_run_in_as_many_slots_as_the_runner_has(ada, bob, app, worker)
     assert adas["status"] == "running"
     # Bob has none running, yet waits for the one slot.
     assert (bobs["status"], bobs["queue_position"], bobs["started_at"]) == ("queued", 1, None)
-    assert (check.json()["starts"], check.json()["queue_position"]) == ("queued", 1)
+    # Another of Bob's would wait behind his first.
+    assert (check.json()["starts"], check.json()["queue_position"]) == ("queued", 2)
     worker.gate.set()
     assert ada.ended(adas["id"])["backtest"]["status"] == "finished"
     ended = bob.ended(bobs["id"])
