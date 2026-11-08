@@ -24,7 +24,7 @@ import { durationText, periodText } from './format';
 import { PublicPill, PublishActions } from './PublishActions';
 
 // What every field of the downloaded file means, on the main website.
-export const RESULT_DOCS = 'https://candlestack.tech/docs/backtest-json';
+export const RESULT_DOCS = 'https://candlestack.tech/docs/backtest-json/';
 
 const BACK =
   'mb-3.5 inline-flex items-center gap-1.5 text-[13px] text-muted-foreground outline-none hover:text-foreground focus-visible:text-foreground focus-visible:underline';

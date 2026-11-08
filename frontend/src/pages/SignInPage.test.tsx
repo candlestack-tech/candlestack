@@ -3,7 +3,7 @@ import { cleanup, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { session, stubApi } from '@/test/api';
+import { problem, session, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 
 // The page on its own; how the route skips it with a session and asks who was denied is in
@@ -15,6 +15,14 @@ afterEach(() => {
 });
 
 const heading = () => screen.getByRole('heading', { level: 1 }).textContent;
+const REQUEST_ID = 'Zx9_aB3cD4eF5gH6iJ7kL8mN9oP0qR1s';
+const CONSENT = `/oauth/consent?request=${REQUEST_ID}`;
+const REQUEST_PATH = `/api/v1/oauth/requests/${REQUEST_ID}`;
+const CLAUDE_REQUEST = {
+  client: { name: 'Claude', logo_uri: null, client_uri: null, redirect_host: 'claude.ai', document_host: null },
+  scopes: [{ scope: 'read', description: 'See your backtests, models and market data' }],
+  expires_at: '2026-11-08T12:10:00Z',
+};
 const DENIED = {
   'GET /api/v1/auth/denied': { status: 200, body: { email: 'someone@example.com', provider: 'google' } },
 };
@@ -50,6 +58,26 @@ describe('SignInPage', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: 'Use another account' }));
     expect(router.state.location.href).toBe('/signin');
     expect(await startWith('Continue with GitHub')).toBe('/api/v1/auth/github/start');
+  });
+
+  it('turned away on the way to the consent page of an app, names it and goes back to that page', async () => {
+    stubApi({ ...session(null), ...DENIED, [`GET ${REQUEST_PATH}`]: { status: 200, body: CLAUDE_REQUEST } });
+    const { router } = await renderApp(`/signin?next=${encodeURIComponent(CONSENT)}&error=denied`);
+    await vi.waitFor(() => expect(screen.getByText(/so Claude cannot connect/)).toBeTruthy());
+    expect(heading()).toBe('You are not on the beta list yet');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Use another account' }));
+    await vi.waitFor(() => expect(router.state.location.href).toBe(CONSENT));
+  });
+
+  it('turned away from a consent request that is gone, shows the plain card', async () => {
+    stubApi({
+      ...session(null),
+      ...DENIED,
+      [`GET ${REQUEST_PATH}`]: problem(404, 'authorization-request-not-found', 'Gone.'),
+    });
+    await renderApp(`/signin?next=${encodeURIComponent(CONSENT)}&error=denied`);
+    await vi.waitFor(() => expect(screen.getByText(/cannot sign in during the beta\. Ask/)).toBeTruthy());
+    expect(screen.queryByText(/cannot connect/)).toBeNull();
   });
 
   it('drops a next that leads off the app', async () => {

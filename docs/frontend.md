@@ -163,7 +163,8 @@ Sign-in is GitHub or Google only (#208), designed in the design repository: the 
   sets it to `null`).
 - Signing in is a full page navigation to `/api/v1/auth/{github|google}/start?next=<path>`. The
   API sends the browser to the provider, and from there back to `next` (default `/dashboard`),
-  to `/signin?error=denied` or to `/signin?error=failed`.
+  to `/signin?error=denied` or to `/signin?error=failed`, both with `next` when the sign-in had
+  one other than the default.
 - `GET /api/v1/auth/denied` names the account the beta list just turned away.
 - `POST /api/v1/auth/sign-out` ends the session. The avatar menu's Sign out then sets the user
   to `null` and goes to the home page; a 401 (the session had already ended) counts the same.
@@ -176,7 +177,10 @@ names the layout: `useSearch({ from: '/_app/instruments' })`.
 
 - `/signin?next=&error=` shows the start (GitHub, Google, the beta note) or, after
   `error=denied`, who was turned away with Use another account (back to the start, `next`
-  kept) and Contact the team. A clicked button stays busy ("Opening GitHub", a spinner) while
+  kept) and Contact the team. When `next` is an app's consent page, the loader also reads that
+  request (`GET /api/v1/oauth/requests/{id}`) and the page shows the consent page's
+  not-on-the-beta-list card naming the app, whose Use another account goes back to the consent
+  page; a request that is gone (404) gets the plain card. A clicked button stays busy ("Opening GitHub", a spinner) while
   the browser leaves; Back from the provider offers the buttons again. An open session skips
   the page and goes to `next` or `/dashboard`.
 - `/dashboard`, `/backtests`, `/experiments`, `/models`, `/upload/$token`, `/instruments`,
@@ -308,8 +312,9 @@ The two sections with the account's preferences load them in the route's loader
   how to connect one. The app's tile (`src/components/AppTile.tsx`) draws the mark of a known app
   (claude.ai, chatgpt.com) by the host that vouches for it: for an app named by a client ID
   metadata document that document's host (`document_host`; a document elsewhere that returns to
-  claude.ai gets no mark), else the host it returns to (the API checks that host against the
-  registered redirect URIs, so a name cannot borrow it); else, for an app named by a metadata
+  claude.ai gets no mark), else the host it returns to (the API answers the host the browser
+  really returned to at the consent, one of the redirect URIs the app registered, so neither a
+  name nor a second registered URI can borrow it); else, for an app named by a metadata
   document, the `logo_uri` it gave (sent without a referrer); else its initial. An app that
   registered itself never shows its `logo_uri`, which could be a picture of anyone's mark; a logo
   that does not load falls back to the initial.
@@ -555,7 +560,7 @@ so its back link returns there (else "← Backtests").
   link while it exists),
   the period's first and last UTC day, when it ran and how long. A finished one has
   `[Download JSON | ?]` (the download is `GET /api/v1/backtests/{id}/download`, which the browser
-  saves as `candlestack-backtest-<N>.json`; `?` opens https://candlestack.tech/docs/backtest-json)
+  saves as `candlestack-backtest-<N>.json`; `?` opens https://candlestack.tech/docs/backtest-json/)
   and Add to compare. Rename (any status) names it with `PATCH /api/v1/backtests/{id}`: the name
   replaces the title, with the number beside it, and shows under the number in the lists.
 - Queued (#400): the badge says how many are ahead ("Queued · 2 ahead", the running one and

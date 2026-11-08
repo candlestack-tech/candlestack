@@ -24,6 +24,7 @@ pytestmark = pytest.mark.integration
 PROBLEMS = "https://candlestack.tech/problems/"
 ORIGIN = {"Origin": "http://testserver"}
 REDIRECT = "https://claude.ai/api/mcp/auth_callback"
+OTHER_REDIRECT = "https://claude.ai/api/mcp/other_callback"
 RESOURCE = "http://testserver/mcp"
 ISSUER = "http://testserver/api/v1/oauth"
 VERIFIER = "the-verifier-of-this-sign-in-" + "x" * 30
@@ -323,6 +324,21 @@ def test_a_native_client_may_return_to_any_loopback_port(browser, app_client) ->
     problem(other_path, 400, "invalid-authorization-request")
 
 
+def test_a_loopback_redirect_uri_longer_than_allowed_is_refused(browser, app_client) -> None:
+    # Another port can make a registered loopback URI of 512 characters longer than that.
+    browser.sign_in("github")
+    base = "http://127.0.0.1:1/"
+    registered = base + "a" * (512 - len(base))
+    client_id = app_client.register(redirect_uris=[registered])["client_id"]
+
+    same_port = authorize(browser, client_id, redirect_uri=registered)
+    longer = authorize(browser, client_id, redirect_uri=registered.replace(":1/", ":65535/"))
+
+    assert same_port.headers["location"].startswith("/oauth/consent?")
+    problem(longer, 400, "invalid-authorization-request")
+    assert "location" not in longer.headers
+
+
 # --- Authorize ----------------------------------------------------------------------------------
 
 
@@ -490,6 +506,36 @@ def test_deny_sends_access_denied_back(browser, app_client, sql) -> None:
     assert "code" not in query
     assert sql("SELECT id FROM connected_apps") == []
     problem(decide(browser, rid), 404, "authorization-request-not-found")
+
+
+@pytest.mark.parametrize("decision", ["allow", "deny"])
+def test_the_decision_returns_only_to_the_request_s_redirect_uri(
+    browser, app_client, decision
+) -> None:
+    browser.sign_in("github")
+    client_id = app_client.register(redirect_uris=[REDIRECT, OTHER_REDIRECT])["client_id"]
+    rid = request_id(authorize(browser, client_id, redirect_uri=OTHER_REDIRECT))
+
+    answer = decide(browser, rid, decision)
+
+    assert answer.status_code == 200, answer.text
+    redirect = answer.json()["redirect_to"]
+    assert redirect.startswith(OTHER_REDIRECT + "?")
+    assert query_of(redirect)["state"] == "the-state"
+
+
+def test_a_redirect_uri_the_app_dropped_meanwhile_is_not_followed(browser, app_client, sql) -> None:
+    browser.sign_in("github")
+    client_id = app_client.register()["client_id"]
+    rid = request_id(authorize(browser, client_id))
+    sql("UPDATE oauth_clients SET redirect_uris = ARRAY['https://claude.ai/new']")
+
+    shown = browser.get(f"/api/v1/oauth/requests/{rid}")
+    decided = decide(browser, rid)
+
+    problem(shown, 404, "authorization-request-not-found")
+    problem(decided, 404, "authorization-request-not-found")
+    assert "redirect_to" not in decided.json()
 
 
 def test_a_request_is_decided_once(browser, app_client) -> None:
@@ -868,6 +914,24 @@ def test_disconnecting_an_app_revokes_its_tokens(browser, app_client, sql) -> No
     oauth_error(app_client.refresh(client_id, tokens["refresh_token"]), 400, "invalid_grant")
     again = browser.delete(f"/api/v1/me/connected-apps/{app['id']}", headers=ORIGIN)
     problem(again, 404, "not-found")
+
+
+def test_connected_apps_name_the_host_the_consent_returned_to(browser, app_client, sql) -> None:
+    # Anyone can register any redirect URIs: the first one must not lend its host to an app
+    # that returned somewhere else.
+    browser.sign_in("github")
+    evil = "https://evil.example/cb"
+    client_id = app_client.register(redirect_uris=[REDIRECT, evil])["client_id"]
+    allowed = decide(browser, request_id(authorize(browser, client_id, redirect_uri=evil)))
+    code = query_of(allowed.json()["redirect_to"])["code"]
+    assert app_client.exchange(client_id, code, redirect_uri=evil).status_code == 200
+
+    [app] = browser.get("/api/v1/me/connected-apps").json()["items"]
+    sql("UPDATE connected_apps SET redirect_uri = NULL")  # connected before it was kept
+    [earlier] = browser.get("/api/v1/me/connected-apps").json()["items"]
+
+    assert app["client"]["redirect_host"] == "evil.example"
+    assert earlier["client"]["redirect_host"] == "claude.ai"
 
 
 def test_connected_apps_need_the_session(browser, app_client) -> None:

@@ -14,17 +14,16 @@ from candlestack.mcp.docs import DOCS_TEXT, INSTRUCTIONS, MANIFEST_DOCS, MCP_DOC
 from candlestack.mcp.server import build_server
 
 TOOLS_PAGE = "https://candlestack.tech/docs/mcp/tools/"
-# The pages that exist. The manifest and the result document are the docs module's links, so
-# a description that names another page for them fails here when those links move to the
-# website's pages (candlestack-tech/website#63, #64).
+# The pages that exist. The manifest and the result document are the website's pages
+# (candlestack-tech/website#63, #64).
 KNOWN = {
     "https://candlestack.tech/docs/agents/",
     "https://candlestack.tech/docs/mcp/",
     TOOLS_PAGE,
     "https://candlestack.tech/problems/",
     "https://app.candlestack.tech/api/v1/docs",
-    MANIFEST_DOCS,
-    RESULT_DOCS,
+    "https://candlestack.tech/docs/manifest/",
+    "https://candlestack.tech/docs/backtest-json/",
     "https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/manifest.schema.json",
     "https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/backtest.schema.json",
 }
@@ -77,8 +76,8 @@ def test_the_manifest_and_result_links_are_named(named: tuple[set[str], set[str]
     urls, _ = named
 
     assert {MANIFEST_DOCS, RESULT_DOCS} <= urls
-    assert not [url for url in urls if url.startswith("https://candlestack.tech/docs/manifest")]
-    assert not [url for url in urls if "backtest-json" in url]
+    # The repository's Markdown is not where an agent reads the formats any more.
+    assert not [url for url in urls if url.startswith("https://github.com/")]
 
 
 def test_the_catalog_links_the_manifest_docs() -> None:

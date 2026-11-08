@@ -118,7 +118,7 @@ describe("a finished backtest's page", () => {
     expect(saved).toEqual(['candlestack-backtest-12.json']);
     click.mockRestore();
     const docs = screen.getByRole('link', { name: 'About the JSON format' });
-    expect(docs.getAttribute('href')).toBe('https://candlestack.tech/docs/backtest-json');
+    expect(docs.getAttribute('href')).toBe('https://candlestack.tech/docs/backtest-json/');
     expect(docs.getAttribute('target')).toBe('_blank');
     expect(screen.queryByRole('button', { name: /run again/i })).toBeNull();
   });
