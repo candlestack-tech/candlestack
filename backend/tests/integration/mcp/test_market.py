@@ -64,7 +64,13 @@ def test_the_backtest_defaults_and_preferences_the_user_saved(mcp, keys, ada) ->
     preferences = mcp(tool("get_preferences"), key)
 
     assert not defaults.is_error, defaults.content
-    assert defaults.structured_content == DEFAULTS
+    answer = defaults.structured_content
+    assert {name: answer[name] for name in DEFAULTS} == DEFAULTS
+    # And the same in start_backtest's units.
+    assert answer["execution"]["stop_loss"] == 0.05
+    assert (answer["execution"]["fee_bps"], answer["execution"]["slippage_bps"]) == (5.0, 1.0)
+    assert answer["decision"]["long_only"] is False
+    assert answer["benchmark_instrument"] == "stock:SPY"
     assert preferences.structured_content == {
         "time_zone": "local",
         "date_format": "dmy",

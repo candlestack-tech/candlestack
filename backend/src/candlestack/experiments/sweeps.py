@@ -215,7 +215,9 @@ class SweepRanking(BaseModel):
     metric: SweepMetric
     label: str = Field(description="What the app calls it", examples=["Sharpe"])
     better: Literal["higher", "lower"] = Field(
-        description="Which way is better: `lower` for a fall by its size and for the fees"
+        description="Which way is better: `lower` for the fees, and for the max drawdown by the "
+        "size of the fall: its values are 0 or below and a smaller fall is better, so -0.05 "
+        "beats -0.20 and ranks first"
     )
     backtests: list[SweepRanked]
 

@@ -12,6 +12,7 @@ from mcp import Client
 
 from candlestack.data import InstrumentId, InstrumentNotFound
 from candlestack.experiments import BacktestCheck, BacktestHeader
+from candlestack.experiments.compare import CompareMetric
 from candlestack.experiments.errors import BacktestNotFound, NoDocument, QueueFull
 from candlestack.mcp import run
 
@@ -442,8 +443,23 @@ def test_compare_backtests_answers_the_comparison(mcp, runs) -> None:
     assert not result.is_error, result.content
     answer = result.structured_content
     assert [item["id"] for item in answer["backtests"]] == ["bt_aaaaaaaaaa", "bt_bbbbbbbbbb"]
+    # Each backtest's page, as get_backtest answers it, so the agent can show the user.
+    assert [item["url"] for item in answer["backtests"]] == [
+        "http://testserver/backtests/bt_aaaaaaaaaa",
+        "http://testserver/backtests/bt_bbbbbbbbbb",
+    ]
     assert answer["metrics"][0]["key"] == "total_return"
     assert len(answer["times"]) <= 200
+
+
+def test_compare_says_how_to_read_the_max_drawdown() -> None:
+    """Its values are 0 or below and `better` says lower: the description says the smaller fall
+    is the better one, as the marks count it."""
+    [spec] = [spec for spec in run.TOOLS if spec.name == "compare_backtests"]
+    better = CompareMetric.model_fields["better"].description or ""
+
+    assert "a smaller fall is better: -0.05 is better than -0.20" in spec.description
+    assert "-0.05 beats -0.20 and its best is the highest value" in better
 
 
 @pytest.mark.parametrize(

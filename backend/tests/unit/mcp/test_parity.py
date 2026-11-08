@@ -10,8 +10,9 @@ from candlestack.main import create_app
 from candlestack.mcp.parity import PARITY, Planned, Tools, WebOnly, endpoints_of, web_only
 from candlestack.mcp.server import build_server
 
-# The tasks that add the tools still missing (epic #367).
-TOOL_TASKS = {399, 402, 403, 404, 405}
+# The open tasks that add tools still missing: none, every endpoint has its tools or stays web
+# only. An endpoint whose tools come later is Planned with its task, listed here.
+TOOL_TASKS: set[int] = set()
 
 
 @pytest.fixture(scope="module")

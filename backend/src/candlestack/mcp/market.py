@@ -10,7 +10,7 @@ backtest defaults needs the scope ``backtests``, as its route does.
 """
 
 import time
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Literal
 
 from mcp.server.mcpserver import Context
@@ -43,6 +43,7 @@ from candlestack.data import (
     client_rate_limit,
     data_problems,
 )
+from candlestack.experiments import Decision, Execution, Period
 from candlestack.mcp.convention import Example, ToolCall, ToolSpec, changes, reads, tool_call
 from candlestack.preprocessing import BlockOut, Step, describe_catalog
 
@@ -460,7 +461,8 @@ async def preprocessing_catalog(
     model sees), the features (its columns, in order), their normalization and the window
     (rows to samples), each with its versioned ID, what it does, its warm-up and its parameters
     with types, ranges and defaults. Use it to write or check a manifest, or to explain what
-    a model's input is made of; the manifest format is on https://candlestack.tech/docs/manifest."""
+    a model's input is made of. The manifest format:
+    https://github.com/candlestack-tech/candlestack/blob/main/docs/preprocessing.md#the-manifest."""
     tool_call(ctx)
     return Catalog(
         blocks=[CatalogBlock.of(block) for block in _CATALOG.blocks if step in (None, block.step)]
@@ -478,21 +480,94 @@ def _accounts(call: ToolCall, db: AsyncSession) -> AccountsService:
     )
 
 
-async def get_backtest_defaults(ctx: Context) -> BacktestDefaults:
+class BacktestDefaultsOut(BacktestDefaults):
+    """The backtest defaults twice: as Settings shows them, in percent (`stop_loss_pct`,
+    `fees_pct`, `slippage_pct`) and days, and in the units start_backtest takes (`period`,
+    `decision`, `execution`, `benchmark_instrument`)."""
+
+    period: Period = Field(
+        description="`period_start` to `period_end` as start_backtest's `data.period`: UTC epoch "
+        "seconds from the first day's midnight to the midnight after the last day (excluded); "
+        "end it now at the latest, as there are no candles after"
+    )
+    decision: Decision = Field(
+        description="`threshold` and `direction` as start_backtest's `decision`: the threshold "
+        "rule with `limit` the threshold, `long_only` for the direction long"
+    )
+    execution: Execution = Field(
+        description="`stop_loss_pct`, `fees_pct` and `slippage_pct` as start_backtest's "
+        "`execution`: `stop_loss` a fraction (7 % is 0.07), `fee_bps` and `slippage_bps` in basis "
+        "points (0.1 % is 10)"
+    )
+    benchmark_instrument: str | None = Field(
+        description="`benchmark` as the `instrument` of start_backtest's `benchmarks` item "
+        "(`kind` buy_and_hold): null for the backtest's own instrument, else stock:SPY, "
+        "stock:QQQ or stock:DIA, for a stock backtest only",
+        examples=[None],
+    )
+
+
+def _midnight(day: date) -> int:
+    return int(datetime(day.year, day.month, day.day, tzinfo=UTC).timestamp())
+
+
+def _bps(pct: float) -> float:
+    """Percent as basis points, without the float's tail (0.07 % is 7, not 7.000000000000001)."""
+    return round(pct * 100, 4)
+
+
+def defaults_out(defaults: BacktestDefaults) -> BacktestDefaultsOut:
+    """The defaults with the same settings in start_backtest's units, as the app's builder
+    starts a backtest from them (the next candle's open, the whole capital, no drawdown stop)."""
+    return BacktestDefaultsOut(
+        **defaults.model_dump(),
+        period=Period(
+            start=_midnight(defaults.period_start),
+            end=_midnight(defaults.period_end + timedelta(days=1)),
+        ),
+        decision=Decision.model_validate(
+            {
+                "rule": {"name": "threshold", "limit": defaults.threshold},
+                "long_only": defaults.direction == "long",
+            }
+        ),
+        execution=Execution(
+            stop_loss=defaults.stop_loss_pct / 100,
+            fee_bps=_bps(defaults.fees_pct),
+            slippage_bps=_bps(defaults.slippage_pct),
+        ),
+        benchmark_instrument=None
+        if defaults.benchmark == "bh"
+        else f"stock:{defaults.benchmark.value}",
+    )
+
+
+async def get_backtest_defaults(ctx: Context) -> BacktestDefaultsOut:
     """How the user's new backtests start, as saved in Settings, Backtest defaults (or the
     app's defaults): timeframe, period, direction (long only or both), the signal threshold,
     stop loss, fees, slippage and the benchmark. Use these for every setting of a backtest
-    the user does not name, so it runs as the app would start it."""
+    the user does not name, so it runs as the app would start it.
+
+    The settings come twice. As Settings shows them: `stop_loss_pct`, `fees_pct` and
+    `slippage_pct` in percent, the period in days. And in the units start_backtest takes, to
+    pass through unchanged: `period` (data.period, UTC epoch seconds), `decision`, `execution`
+    (stop_loss a fraction, fee_bps and slippage_bps in basis points) and `benchmark_instrument`
+    (the instrument of the buy and hold benchmark; null for the backtest's own). The timeframe
+    is not an argument of start_backtest: a backtest runs at its model's."""
     call = tool_call(ctx)
     async with call.db() as db:
         preferences = await _accounts(call, db).preferences(call.user)
-    return preferences.backtest_defaults
+    return defaults_out(preferences.backtest_defaults)
 
 
 async def update_backtest_defaults(
     defaults: Annotated[
         BacktestDefaultsIn,
-        Field(description="Every setting, as get_backtest_defaults answers them"),
+        Field(
+            description="Every setting in Settings' units, as get_backtest_defaults answers "
+            "them in percent and days: timeframe, period_start, period_end, direction, "
+            "threshold, stop_loss_pct, fees_pct, slippage_pct and benchmark, nothing else"
+        ),
     ],
     ctx: Context,
 ) -> BacktestDefaults:
@@ -646,7 +721,7 @@ TOOLS = (
         title="Backtest defaults",
         scopes=(Scope.read,),
         annotations=reads(),
-        example=Example(arguments={}, result=BacktestDefaults()),
+        example=Example(arguments={}, result=defaults_out(BacktestDefaults())),
     ),
     ToolSpec(
         update_backtest_defaults,

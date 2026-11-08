@@ -46,7 +46,15 @@ from candlestack.experiments import (
     get_backtests_service,
     update_problems,
 )
-from candlestack.mcp.convention import Example, ToolSpec, changes, reads, tool_call
+from candlestack.mcp.convention import (
+    Example,
+    ToolCall,
+    ToolSpec,
+    backtest_url,
+    changes,
+    reads,
+    tool_call,
+)
 
 # --- Arguments ------------------------------------------------------------------------------
 
@@ -92,12 +100,16 @@ class BacktestSummary(BaseModel):
     total_return: float | None = Field(description="Return of the strategy")
     buy_and_hold_return: float | None = Field(description="Return of holding the instruments")
     sharpe: float | None = Field(description="Sharpe ratio, per year")
-    max_drawdown: float | None = Field(description="Largest fall from a peak, negative")
+    max_drawdown: float | None = Field(
+        description="Largest fall from a peak, 0 or below: the smaller the fall the better, so "
+        "-0.05 is better than -0.20"
+    )
     win_rate: float | None = Field(description="Share of the trades that made money")
     num_trades: int | None
     starred: bool
     public: bool = Field(description="Published in Experiments, visible to every beta account")
     created_at: datetime = Field(description="When it was started (UTC)")
+    url: str = Field(description="The backtest's page in the app, to show the user")
 
 
 class BacktestList(BaseModel):
@@ -173,7 +185,7 @@ class ExperimentList(BaseModel):
 
 class BestBacktests(BaseModel):
     """The 5 best finished backtests by each result, the best first (for `max_drawdown` the
-    smallest fall)."""
+    smallest fall, the value nearest 0)."""
 
     sharpe: list[BacktestSummary]
     total_return: list[BacktestSummary]
@@ -194,9 +206,14 @@ class Dashboard(BaseModel):
     )
 
 
-def summary(backtest: BacktestOut) -> BacktestSummary:
-    fields = backtest.model_dump(include=set(BacktestSummary.model_fields) - {"model"})
-    return BacktestSummary(**fields, model=backtest.model.name, model_id=backtest.model.id)
+def summary(call: ToolCall, backtest: BacktestOut) -> BacktestSummary:
+    fields = backtest.model_dump(include=set(BacktestSummary.model_fields) - {"model", "url"})
+    return BacktestSummary(
+        **fields,
+        model=backtest.model.name,
+        model_id=backtest.model.id,
+        url=backtest_url(call, backtest.id),
+    )
 
 
 def experiment_summary(experiment: ExperimentOut) -> ExperimentSummary:
@@ -245,13 +262,14 @@ async def list_backtests(  # noqa: PLR0913 (one argument per filter, as GET /bac
     or published ones, one model's, sort by a result, 10 a page. Use it to find a backtest's ID
     by its name, number, instrument or model, or the best ones by a result. Answers the page,
     how many match, the counts of all, starred, failed and published backtests and the models
-    used. A page past the last one is empty."""
+    used; each backtest has its `url`, the page to show the user. A page past the last one is
+    empty."""
     call = tool_call(ctx)
     list_query = ListQuery(query=query, show=show, model=model, sort=sort, order=order, page=page)
     async with call.db() as db:
         found = await get_backtests_service(db).backtests(call.user.id, list_query)
     return BacktestList(
-        backtests=[summary(backtest) for backtest in found.backtests],
+        backtests=[summary(call, backtest) for backtest in found.backtests],
         total=found.total,
         page=found.page,
         pages=found.pages,
@@ -387,22 +405,23 @@ async def unpublish_backtest(backtest_id: BacktestId, ctx: Context) -> BacktestS
 async def get_dashboard(ctx: Context) -> Dashboard:
     """The user's Dashboard in one call: the counts of all, starred, failed and published
     backtests, the 6 newest that ended, the 5 best finished ones by Sharpe ratio, return,
-    drawdown and win rate, and the 4 best starred ones. Call it for an overview before
-    digging in with list_backtests."""
+    drawdown (the smallest fall) and win rate, and the 4 best starred ones, each with its
+    `url`, the page to show the user. Call it for an overview before digging in with
+    list_backtests."""
     call = tool_call(ctx)
     async with call.db() as db:
         found = await get_backtests_service(db).dashboard(call.user.id)
     best = found.best
     return Dashboard(
         counts=found.counts,
-        newest=[summary(backtest) for backtest in found.last],
+        newest=[summary(call, backtest) for backtest in found.last],
         best=BestBacktests(
-            sharpe=[summary(backtest) for backtest in best.sharpe],
-            total_return=[summary(backtest) for backtest in best.total_return],
-            max_drawdown=[summary(backtest) for backtest in best.max_drawdown],
-            win_rate=[summary(backtest) for backtest in best.win_rate],
+            sharpe=[summary(call, backtest) for backtest in best.sharpe],
+            total_return=[summary(call, backtest) for backtest in best.total_return],
+            max_drawdown=[summary(call, backtest) for backtest in best.max_drawdown],
+            win_rate=[summary(call, backtest) for backtest in best.win_rate],
         ),
-        starred=[summary(backtest) for backtest in found.starred.backtests],
+        starred=[summary(call, backtest) for backtest in found.starred.backtests],
     )
 
 
@@ -443,6 +462,7 @@ _ORION = BacktestSummary(
     starred=True,
     public=False,
     created_at=datetime(2026, 10, 24, 9, 30, tzinfo=UTC),
+    url="https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
 )
 _COUNTS = BacktestCounts(all=15, starred=5, failed=2, public=3)
 _ORION_STATE = BacktestState(
