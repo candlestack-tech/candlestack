@@ -200,9 +200,10 @@ async def _session_user(
     return session.user
 
 
-async def _key_caller(token: str, keys: ApiKeys, limiter: RateLimiter) -> Caller:
+async def _key_caller(token: str, keys: ApiKeys, limiter: RateLimiter, cost: int = 1) -> Caller:
     """The caller of a request with the API key `token`: 401 ``invalid-api-key`` unless it
-    signs in, 429 ``rate-limited`` beyond ``API_KEY_RATE_LIMIT`` requests a minute."""
+    signs in, 429 ``rate-limited`` beyond ``API_KEY_RATE_LIMIT`` requests a minute, where the
+    request counts `cost` (0 for one that does not count)."""
     signed_in = await keys.sign_in(token)
     if signed_in is None:
         raise ProblemError(
@@ -213,7 +214,7 @@ async def _key_caller(token: str, keys: ApiKeys, limiter: RateLimiter) -> Caller
             "list. Create a new key in Settings, API and MCP.",
             headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
         )
-    wait = await limiter.hit(f"accounts:key-rl:{signed_in.key.id}", API_KEY_RATE_LIMIT)
+    wait = await _hit(limiter, f"accounts:key-rl:{signed_in.key.id}", cost)
     if wait > 0:
         raise _rate_limited(wait, "API key")
     await keys.mark_used(signed_in.key)
@@ -221,16 +222,23 @@ async def _key_caller(token: str, keys: ApiKeys, limiter: RateLimiter) -> Caller
 
 
 async def key_caller(
-    token: str, *, settings: Settings, db: AsyncSession, limiter: RateLimiter
+    token: str, *, settings: Settings, db: AsyncSession, limiter: RateLimiter, cost: int = 1
 ) -> Caller:
     """The caller of a request with the API key `token`, for what signs requests in outside the
     routes' dependencies (the MCP server): the same checks, rate limit and last use as a route's,
-    on the session `db`. Scopes are not checked here.
+    on the session `db`; the request counts `cost` against the rate limit, 0 for one that does
+    not count. Scopes are not checked here.
 
     Raises:
         ProblemError: 401 ``invalid-api-key`` or 429 ``rate-limited``.
     """
-    return await _key_caller(token, ApiKeys(settings, AccountStore(db)), limiter)
+    return await _key_caller(token, ApiKeys(settings, AccountStore(db)), limiter, cost)
+
+
+async def _hit(limiter: RateLimiter, key: str, cost: int) -> float:
+    """The wait the rate limit of `key` asks for after a request of `cost`; one of cost 0 is
+    not counted, nor refused once the limit is reached."""
+    return await limiter.hit(key, API_KEY_RATE_LIMIT, cost) if cost > 0 else 0.0
 
 
 def _rate_limited(wait: float, what: str) -> ProblemError:
@@ -242,16 +250,23 @@ def _rate_limited(wait: float, what: str) -> ProblemError:
         f"More than {API_KEY_RATE_LIMIT} requests in one minute with this {what}. Retry in "
         f"{seconds} seconds.",
         headers={"Retry-After": str(seconds)},
-        extensions={"limit": API_KEY_RATE_LIMIT},
+        extensions={"limit": API_KEY_RATE_LIMIT, "retry_after_s": seconds},
     )
 
 
 async def token_caller(
-    token: str, *, resource: str, settings: Settings, db: AsyncSession, limiter: RateLimiter
+    token: str,
+    *,
+    resource: str,
+    settings: Settings,
+    db: AsyncSession,
+    limiter: RateLimiter,
+    cost: int = 1,
 ) -> Caller:
     """The caller of a request to `resource` (the MCP server) with the OAuth access token
-    `token`: its user and scopes, ``API_KEY_RATE_LIMIT`` requests a minute per connected app,
-    and the app's last use, on the session `db`. Scopes are not checked here.
+    `token`: its user and scopes, ``API_KEY_RATE_LIMIT`` requests a minute per connected app
+    (the request counts `cost`, 0 for one that does not count), and the app's last use, on the
+    session `db`. Scopes are not checked here.
 
     Raises:
         ProblemError: 401 ``invalid-access-token`` or 429 ``rate-limited``.
@@ -267,7 +282,7 @@ async def token_caller(
             "the beta list. Sign in again from the app.",
             headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
         )
-    wait = await limiter.hit(f"accounts:app-rl:{signed_in.app.id}", API_KEY_RATE_LIMIT)
+    wait = await _hit(limiter, f"accounts:app-rl:{signed_in.app.id}", cost)
     if wait > 0:
         raise _rate_limited(wait, "connected app")
     await tokens.mark_used(signed_in.app)

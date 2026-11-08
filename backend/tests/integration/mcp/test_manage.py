@@ -249,6 +249,15 @@ def test_get_dashboard(mcp, keys, ada, sql) -> None:
     dashboard = mcp(tool("get_dashboard"), keys("read")).structured_content
 
     assert dashboard["counts"] == {"all": 9, "starred": 2, "failed": 0, "public": 0}
-    assert [item["number"] for item in dashboard["newest"]] == [8, 7, 6, 5, 4, 3]
-    assert [item["number"] for item in dashboard["best"]["sharpe"]] == [8, 7, 6, 5, 4]
-    assert [item["number"] for item in dashboard["starred"]] == [5, 2]
+    backtests = dashboard["backtests"]
+
+    def numbers(ids: list[str]) -> list[int]:
+        return [backtests[backtest_id]["number"] for backtest_id in ids]
+
+    assert numbers(dashboard["newest"]) == [8, 7, 6, 5, 4, 3]
+    sharpe = dashboard["best"]["sharpe"]
+    assert numbers([item["id"] for item in sharpe]) == [8, 7, 6, 5, 4]
+    assert [item["value"] for item in sharpe] == [8.0, 7.0, 6.0, 5.0, 4.0]
+    assert numbers(dashboard["starred"]) == [5, 2]
+    # Each backtest once, however many lists name it.
+    assert sorted(item["number"] for item in backtests.values()) == [2, 3, 4, 5, 6, 7, 8]

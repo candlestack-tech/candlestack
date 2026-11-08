@@ -42,6 +42,7 @@ from candlestack.ml.problems import (
 )
 from candlestack.ml.schemas import (
     MANIFEST_MAX_BYTES,
+    MODELS_MAX,
     NAME_MAX,
     UPLOAD_LINK_MINUTES,
     Framework,
@@ -67,6 +68,7 @@ from candlestack.ml.usage import ModelUsage, ModelUsageStats, no_usage
 __all__ = [
     "LINK_REFUSALS",
     "MANIFEST_MAX_BYTES",
+    "MODELS_MAX",
     "NAME_MAX",
     "UPLOAD_LINK_MINUTES",
     "Framework",

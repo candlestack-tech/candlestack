@@ -29,8 +29,9 @@ The scopes of that sign-in decide which tools work: read (everything that only r
 backtests, models and publish. Call get_me first to see who you act for and what you may do. \
 A tool that changes data says so in its annotations.
 
-A failed tool call answers a problem as JSON: its type (https://candlestack.tech/problems/<slug>) \
-names what went wrong and its detail says what to do.
+A tool answers JSON; its text leaves out the fields that are null. A failed tool call answers a \
+problem as JSON: its type (https://candlestack.tech/problems/<slug>) names what went wrong and its \
+detail says what to do; rate-limited also gives retry_after_s, the seconds to wait.
 
 Docs for agents: {AGENTS_DOCS} and for this server: {MCP_DOCS}. The resource {DOCS_URI} lists \
 every docs page and reference."""

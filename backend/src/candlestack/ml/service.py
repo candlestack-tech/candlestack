@@ -440,6 +440,15 @@ def _texts_with_nul(value: object, where: str) -> list[tuple[str, str]]:
     return []
 
 
+@dataclass(frozen=True, slots=True)
+class ModelsPage:
+    """A page of the user's models, how many there are and the storage they take."""
+
+    models: list[ModelOut]
+    total: int
+    usage: StorageUsage
+
+
 class ModelsService:
     def __init__(self, store: ModelStore, storage: ModelStorage, uploads: UploadLocks) -> None:
         self._store = store
@@ -448,16 +457,39 @@ class ModelsService:
 
     async def models(self, user_id: str) -> ModelsOut:
         """The user's models, oldest first, and the storage they take."""
+        listed = await self.models_page(user_id)
+        return ModelsOut(models=listed.models, usage=listed.usage)
+
+    async def models_page(
+        self, user_id: str, *, offset: int = 0, limit: int | None = None
+    ) -> ModelsPage:
+        """The user's models, oldest first, from `offset` and at most `limit` of them (all by
+        default); how many there are and the storage all of them take. Only the models of the
+        page are counted in the backtests."""
         models = await self._store.models(user_id)
-        usage = await self._store.backtest_usage(user_id, [model.id for model in models])
-        return ModelsOut(
-            models=[_out(model, usage.get(model.id, UNUSED), _spec(model)) for model in models],
+        shown = models[offset:] if limit is None else models[offset : offset + limit]
+        usage = await self._store.backtest_usage(user_id, [model.id for model in shown])
+        return ModelsPage(
+            models=[_out(model, usage.get(model.id, UNUSED), _spec(model)) for model in shown],
+            total=len(models),
             usage=StorageUsage(
                 used_bytes=sum(model.size_bytes for model in models),
                 quota_bytes=QUOTA_BYTES,
                 file_max_bytes=FILE_MAX_BYTES,
             ),
         )
+
+    async def model(self, user_id: str, model_id: str) -> ModelOut:
+        """The user's model with the ID, as the list shows it.
+
+        Raises:
+            ModelNotFound: The user has no model with the ID.
+        """
+        model = await self._store.model(user_id, model_id)
+        if model is None:
+            raise ModelNotFound
+        usage = await self._store.backtest_usage(user_id, [model.id])
+        return _out(model, usage.get(model.id, UNUSED), _spec(model))
 
     async def upload(
         self,

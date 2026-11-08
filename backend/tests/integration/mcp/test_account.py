@@ -6,6 +6,9 @@ import json
 import pytest
 from mcp import Client
 
+from candlestack.accounts import dependencies
+from candlestack.core import ratelimit
+
 pytestmark = pytest.mark.integration
 
 PROBLEMS = "https://candlestack.tech/problems/"
@@ -72,3 +75,30 @@ def test_someone_off_the_beta_list_is_refused(client, account, sql) -> None:
 
     assert response.status_code == 401
     assert sql("SELECT last_used_at FROM api_keys") == [(None,)]
+
+
+def test_a_tool_call_over_the_rate_limit_is_the_tool_s_error(
+    mcp, keys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(dependencies, "API_KEY_RATE_LIMIT", 2)
+    # Every call in one window of the limit, 55 s before its end.
+    monkeypatch.setattr(ratelimit, "_time", lambda: 1790372345.0)
+    key = keys("read")
+
+    async def calls(session: Client):
+        # Connecting and listing the tools do not count: the two calls fit, the third not.
+        await session.list_tools()
+        answers = [await get_me(session) for _ in range(3)]
+        await session.list_tools()
+        return answers
+
+    first, second, third = mcp(calls, key)
+
+    assert not first.is_error, first.content
+    assert not second.is_error, second.content
+    assert third.is_error
+    problem = json.loads(third.content[0].text)
+    assert problem["type"] == PROBLEMS + "rate-limited"
+    assert problem["limit"] == 2
+    assert problem["retry_after_s"] == 55
+    assert "Retry in 55 seconds" in problem["detail"]

@@ -822,7 +822,7 @@ The engine's worked example ([Worked example](#worked-example)) with `next_open`
     "id": "bt_7f3k2m9qx4",
     "name": "Silent Orion", "generated_name": "Silent Orion",     // the user's own name, else the generated one
     "number": 12,
-    "author": {"id": "usr_7f3k2m9qx4", "name": "Tymur Tkach", "mine": true},   // never the email
+    "author": {"id": "usr_7f3k2m9qx4", "name": "Ada Lovelace", "mine": true},   // never the email
     "public": false, "published_at": null,                        // published in Experiments, and when
     "status": "finished",                                         // queued, running, finished or failed
     "queue_position": null,                                       // 1 starts next, while it is queued

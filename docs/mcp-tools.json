@@ -9,7 +9,7 @@
     }
   ],
   "server": {
-    "instructions": "CandleStack is a lab for experiments on financial time series: a user uploads a trading model (Keras or ONNX), describes its input in a manifest and backtests it on market data, crypto from Binance and US stocks from Alpaca, then compares the results and publishes the good ones.\n\nYou act as the user who signed you in, with an API key or by allowing you on CandleStack (OAuth). The scopes of that sign-in decide which tools work: read (everything that only reads), backtests, models and publish. Call get_me first to see who you act for and what you may do. A tool that changes data says so in its annotations.\n\nA failed tool call answers a problem as JSON: its type (https://candlestack.tech/problems/<slug>) names what went wrong and its detail says what to do.\n\nDocs for agents: https://candlestack.tech/docs/agents/ and for this server: https://candlestack.tech/docs/mcp/. The resource candlestack://docs lists every docs page and reference.",
+    "instructions": "CandleStack is a lab for experiments on financial time series: a user uploads a trading model (Keras or ONNX), describes its input in a manifest and backtests it on market data, crypto from Binance and US stocks from Alpaca, then compares the results and publishes the good ones.\n\nYou act as the user who signed you in, with an API key or by allowing you on CandleStack (OAuth). The scopes of that sign-in decide which tools work: read (everything that only reads), backtests, models and publish. Call get_me first to see who you act for and what you may do. A tool that changes data says so in its annotations.\n\nA tool answers JSON; its text leaves out the fields that are null. A failed tool call answers a problem as JSON: its type (https://candlestack.tech/problems/<slug>) names what went wrong and its detail says what to do; rate-limited also gives retry_after_s, the seconds to wait.\n\nDocs for agents: https://candlestack.tech/docs/agents/ and for this server: https://candlestack.tech/docs/mcp/. The resource candlestack://docs lists every docs page and reference.",
     "name": "candlestack",
     "title": "CandleStack"
   },
@@ -2188,7 +2188,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "The user's uploaded models, oldest first, in short: ID, name, format, state, star, the timeframe and session of the manifest, how many backtests used each and the best Sharpe ratio; and the storage they take of the user's quota.\n\nA model's state says what it can do: `needs_setup` has no manifest yet, so it cannot run (set_manifest gives it one); `ready` passed the manifest's checks and can be backtested; `verified` also gave the output of the manifest's example in a trial run. Use get_model for one model in full.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_models",
+      "description": "The user's uploaded models, oldest first, in short: ID, name, format, state, star, the timeframe and session of the manifest, how many backtests used each and the best Sharpe ratio; and the storage they take of the user's quota. All of them unless per_page asks for a page; `total` counts them all.\n\nA model's state says what it can do: `needs_setup` has no manifest yet, so it cannot run (set_manifest gives it one); `ready` passed the manifest's checks and can be backtested; `verified` also gave the output of the manifest's example in a trial run. Use get_model for one model in full.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_models",
       "endpoints": [
         "GET /api/v1/models"
       ],
@@ -2211,11 +2211,35 @@
             }
           ],
           "quota_bytes": 104857600,
+          "total": 1,
           "used_bytes": 1489779
         }
       },
       "inputSchema": {
-        "properties": {},
+        "properties": {
+          "page": {
+            "default": 1,
+            "description": "The page, from 1, when per_page is given",
+            "minimum": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "anyOf": [
+              {
+                "maximum": 100,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Models per page; all of them (at most 100) when left out",
+            "title": "Per Page"
+          }
+        },
         "title": "list_modelsArguments",
         "type": "object"
       },
@@ -2349,7 +2373,7 @@
             "type": "integer"
           },
           "models": {
-            "description": "Oldest first",
+            "description": "Oldest first; the page asked for, else all",
             "items": {
               "$ref": "#/$defs/ModelBrief"
             },
@@ -2361,6 +2385,11 @@
             "title": "Quota Bytes",
             "type": "integer"
           },
+          "total": {
+            "description": "All the user's models",
+            "title": "Total",
+            "type": "integer"
+          },
           "used_bytes": {
             "description": "Bytes the models take",
             "title": "Used Bytes",
@@ -2369,6 +2398,7 @@
         },
         "required": [
           "models",
+          "total",
           "used_bytes",
           "quota_bytes",
           "file_max_bytes"
@@ -8519,7 +8549,7 @@
               "name": {
                 "description": "The account's display name",
                 "examples": [
-                  "Tymur Tkach"
+                  "Grace Hopper"
                 ],
                 "title": "Name",
                 "type": "string"
@@ -9569,7 +9599,7 @@
               "author": {
                 "id": "usr_7f3k2m9qx4",
                 "mine": false,
-                "name": "Tymur Tkach"
+                "name": "Grace Hopper"
               },
               "benchmark_return": 0.682,
               "buy_and_hold_return": 0.682,
@@ -9815,7 +9845,7 @@
               "name": {
                 "description": "The account's display name",
                 "examples": [
-                  "Tymur Tkach"
+                  "Grace Hopper"
                 ],
                 "title": "Name",
                 "type": "string"
@@ -10499,172 +10529,76 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "The user's Dashboard in one call: the counts of all, starred, failed and published backtests, the 6 newest that ended, the 5 best finished ones by Sharpe ratio, return, drawdown (the smallest fall) and win rate, and the 4 best starred ones, each with its `url`, the page to show the user. Call it for an overview before digging in with list_backtests.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_dashboard",
+      "description": "The user's Dashboard in one call: the counts of all, starred, failed and published backtests, the 6 newest that ended, the 5 best finished ones by Sharpe ratio, return, drawdown (the smallest fall) and win rate with the value, and the 4 best starred ones. Each list gives IDs; `backtests` has each backtest once, by ID, with its `url`, the page to show the user. Call it for an overview before digging in with list_backtests.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_dashboard",
       "endpoints": [
         "GET /api/v1/dashboard"
       ],
       "example": {
         "arguments": {},
         "result": {
+          "backtests": {
+            "bt_7f3k2m9qx4": {
+              "buy_and_hold_return": 0.682,
+              "created_at": "2026-10-24T09:30:00Z",
+              "error": null,
+              "id": "bt_7f3k2m9qx4",
+              "instruments": [
+                {
+                  "market": "stock",
+                  "symbol": "AAPL"
+                }
+              ],
+              "max_drawdown": -0.197,
+              "model": "blesk-novol-8.keras",
+              "model_id": "mdl_k2m9qx47f3",
+              "name": "Silent Orion",
+              "num_trades": 1712,
+              "number": 12,
+              "public": false,
+              "queue_position": null,
+              "representation": "renko",
+              "setup": {
+                "benchmark": "bh",
+                "direction": "long",
+                "fees_pct": 0.1,
+                "period_end": "2025-12-31",
+                "period_start": "2023-01-02",
+                "slippage_pct": 0.02,
+                "stop_loss_pct": 7,
+                "threshold": 0.05,
+                "timeframe": "1h"
+              },
+              "sharpe": 0.79,
+              "starred": true,
+              "status": "finished",
+              "total_return": 0.246,
+              "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
+              "win_rate": 0.512
+            }
+          },
           "best": {
             "max_drawdown": [
               {
-                "buy_and_hold_return": 0.682,
-                "created_at": "2026-10-24T09:30:00Z",
-                "error": null,
                 "id": "bt_7f3k2m9qx4",
-                "instruments": [
-                  {
-                    "market": "stock",
-                    "symbol": "AAPL"
-                  }
-                ],
-                "max_drawdown": -0.197,
-                "model": "blesk-novol-8.keras",
-                "model_id": "mdl_k2m9qx47f3",
-                "name": "Silent Orion",
-                "num_trades": 1712,
-                "number": 12,
-                "public": false,
-                "queue_position": null,
-                "representation": "renko",
-                "setup": {
-                  "benchmark": "bh",
-                  "direction": "long",
-                  "fees_pct": 0.1,
-                  "period_end": "2025-12-31",
-                  "period_start": "2023-01-02",
-                  "slippage_pct": 0.02,
-                  "stop_loss_pct": 7,
-                  "threshold": 0.05,
-                  "timeframe": "1h"
-                },
-                "sharpe": 0.79,
-                "starred": true,
-                "status": "finished",
-                "total_return": 0.246,
-                "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
-                "win_rate": 0.512
+                "value": -0.197
               }
             ],
             "sharpe": [
               {
-                "buy_and_hold_return": 0.682,
-                "created_at": "2026-10-24T09:30:00Z",
-                "error": null,
                 "id": "bt_7f3k2m9qx4",
-                "instruments": [
-                  {
-                    "market": "stock",
-                    "symbol": "AAPL"
-                  }
-                ],
-                "max_drawdown": -0.197,
-                "model": "blesk-novol-8.keras",
-                "model_id": "mdl_k2m9qx47f3",
-                "name": "Silent Orion",
-                "num_trades": 1712,
-                "number": 12,
-                "public": false,
-                "queue_position": null,
-                "representation": "renko",
-                "setup": {
-                  "benchmark": "bh",
-                  "direction": "long",
-                  "fees_pct": 0.1,
-                  "period_end": "2025-12-31",
-                  "period_start": "2023-01-02",
-                  "slippage_pct": 0.02,
-                  "stop_loss_pct": 7,
-                  "threshold": 0.05,
-                  "timeframe": "1h"
-                },
-                "sharpe": 0.79,
-                "starred": true,
-                "status": "finished",
-                "total_return": 0.246,
-                "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
-                "win_rate": 0.512
+                "value": 0.79
               }
             ],
             "total_return": [
               {
-                "buy_and_hold_return": 0.682,
-                "created_at": "2026-10-24T09:30:00Z",
-                "error": null,
                 "id": "bt_7f3k2m9qx4",
-                "instruments": [
-                  {
-                    "market": "stock",
-                    "symbol": "AAPL"
-                  }
-                ],
-                "max_drawdown": -0.197,
-                "model": "blesk-novol-8.keras",
-                "model_id": "mdl_k2m9qx47f3",
-                "name": "Silent Orion",
-                "num_trades": 1712,
-                "number": 12,
-                "public": false,
-                "queue_position": null,
-                "representation": "renko",
-                "setup": {
-                  "benchmark": "bh",
-                  "direction": "long",
-                  "fees_pct": 0.1,
-                  "period_end": "2025-12-31",
-                  "period_start": "2023-01-02",
-                  "slippage_pct": 0.02,
-                  "stop_loss_pct": 7,
-                  "threshold": 0.05,
-                  "timeframe": "1h"
-                },
-                "sharpe": 0.79,
-                "starred": true,
-                "status": "finished",
-                "total_return": 0.246,
-                "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
-                "win_rate": 0.512
+                "value": 0.246
               }
             ],
             "win_rate": [
               {
-                "buy_and_hold_return": 0.682,
-                "created_at": "2026-10-24T09:30:00Z",
-                "error": null,
                 "id": "bt_7f3k2m9qx4",
-                "instruments": [
-                  {
-                    "market": "stock",
-                    "symbol": "AAPL"
-                  }
-                ],
-                "max_drawdown": -0.197,
-                "model": "blesk-novol-8.keras",
-                "model_id": "mdl_k2m9qx47f3",
-                "name": "Silent Orion",
-                "num_trades": 1712,
-                "number": 12,
-                "public": false,
-                "queue_position": null,
-                "representation": "renko",
-                "setup": {
-                  "benchmark": "bh",
-                  "direction": "long",
-                  "fees_pct": 0.1,
-                  "period_end": "2025-12-31",
-                  "period_start": "2023-01-02",
-                  "slippage_pct": 0.02,
-                  "stop_loss_pct": 7,
-                  "threshold": 0.05,
-                  "timeframe": "1h"
-                },
-                "sharpe": 0.79,
-                "starred": true,
-                "status": "finished",
-                "total_return": 0.246,
-                "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
-                "win_rate": 0.512
+                "value": 0.512
               }
             ]
           },
@@ -10675,84 +10609,10 @@
             "starred": 5
           },
           "newest": [
-            {
-              "buy_and_hold_return": 0.682,
-              "created_at": "2026-10-24T09:30:00Z",
-              "error": null,
-              "id": "bt_7f3k2m9qx4",
-              "instruments": [
-                {
-                  "market": "stock",
-                  "symbol": "AAPL"
-                }
-              ],
-              "max_drawdown": -0.197,
-              "model": "blesk-novol-8.keras",
-              "model_id": "mdl_k2m9qx47f3",
-              "name": "Silent Orion",
-              "num_trades": 1712,
-              "number": 12,
-              "public": false,
-              "queue_position": null,
-              "representation": "renko",
-              "setup": {
-                "benchmark": "bh",
-                "direction": "long",
-                "fees_pct": 0.1,
-                "period_end": "2025-12-31",
-                "period_start": "2023-01-02",
-                "slippage_pct": 0.02,
-                "stop_loss_pct": 7,
-                "threshold": 0.05,
-                "timeframe": "1h"
-              },
-              "sharpe": 0.79,
-              "starred": true,
-              "status": "finished",
-              "total_return": 0.246,
-              "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
-              "win_rate": 0.512
-            }
+            "bt_7f3k2m9qx4"
           ],
           "starred": [
-            {
-              "buy_and_hold_return": 0.682,
-              "created_at": "2026-10-24T09:30:00Z",
-              "error": null,
-              "id": "bt_7f3k2m9qx4",
-              "instruments": [
-                {
-                  "market": "stock",
-                  "symbol": "AAPL"
-                }
-              ],
-              "max_drawdown": -0.197,
-              "model": "blesk-novol-8.keras",
-              "model_id": "mdl_k2m9qx47f3",
-              "name": "Silent Orion",
-              "num_trades": 1712,
-              "number": 12,
-              "public": false,
-              "queue_position": null,
-              "representation": "renko",
-              "setup": {
-                "benchmark": "bh",
-                "direction": "long",
-                "fees_pct": 0.1,
-                "period_end": "2025-12-31",
-                "period_start": "2023-01-02",
-                "slippage_pct": 0.02,
-                "stop_loss_pct": 7,
-                "threshold": 0.05,
-                "timeframe": "1h"
-              },
-              "sharpe": 0.79,
-              "starred": true,
-              "status": "finished",
-              "total_return": 0.246,
-              "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
-              "win_rate": 0.512
-            }
+            "bt_7f3k2m9qx4"
           ]
         }
       },
@@ -11096,28 +10956,28 @@
             "properties": {
               "max_drawdown": {
                 "items": {
-                  "$ref": "#/$defs/BacktestSummary"
+                  "$ref": "#/$defs/RankedBacktest"
                 },
                 "title": "Max Drawdown",
                 "type": "array"
               },
               "sharpe": {
                 "items": {
-                  "$ref": "#/$defs/BacktestSummary"
+                  "$ref": "#/$defs/RankedBacktest"
                 },
                 "title": "Sharpe",
                 "type": "array"
               },
               "total_return": {
                 "items": {
-                  "$ref": "#/$defs/BacktestSummary"
+                  "$ref": "#/$defs/RankedBacktest"
                 },
                 "title": "Total Return",
                 "type": "array"
               },
               "win_rate": {
                 "items": {
-                  "$ref": "#/$defs/BacktestSummary"
+                  "$ref": "#/$defs/RankedBacktest"
                 },
                 "title": "Win Rate",
                 "type": "array"
@@ -11140,6 +11000,27 @@
             ],
             "title": "InstrumentMarket",
             "type": "string"
+          },
+          "RankedBacktest": {
+            "description": "A backtest in a ranking of the Dashboard and the value it is ranked by.",
+            "properties": {
+              "id": {
+                "description": "Public ID of the backtest, a key of `backtests`",
+                "title": "Id",
+                "type": "string"
+              },
+              "value": {
+                "description": "Its result the ranking orders by",
+                "title": "Value",
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "value"
+            ],
+            "title": "RankedBacktest",
+            "type": "object"
           },
           "Representation": {
             "description": "What the model reads: Renko bricks, a Kagi line or time windows of candles.",
@@ -11185,8 +11066,16 @@
             "type": "string"
           }
         },
-        "description": "The Dashboard of the user's backtests.",
+        "description": "The Dashboard of the user's backtests: each backtest once in `backtests`, and the lists\nof the Dashboard as their IDs.",
         "properties": {
+          "backtests": {
+            "additionalProperties": {
+              "$ref": "#/$defs/BacktestSummary"
+            },
+            "description": "Every backtest the lists below name, by its ID",
+            "title": "Backtests",
+            "type": "object"
+          },
           "best": {
             "$ref": "#/$defs/BestBacktests"
           },
@@ -11194,17 +11083,17 @@
             "$ref": "#/$defs/BacktestCounts"
           },
           "newest": {
-            "description": "The 6 newest backtests that ended, failed ones included",
+            "description": "IDs of the 6 newest backtests that ended, failed ones included, newest first",
             "items": {
-              "$ref": "#/$defs/BacktestSummary"
+              "type": "string"
             },
             "title": "Newest",
             "type": "array"
           },
           "starred": {
-            "description": "The 4 starred backtests with the best Sharpe ratio",
+            "description": "IDs of the 4 starred backtests with the best Sharpe ratio",
             "items": {
-              "$ref": "#/$defs/BacktestSummary"
+              "type": "string"
             },
             "title": "Starred",
             "type": "array"
@@ -11212,6 +11101,7 @@
         },
         "required": [
           "counts",
+          "backtests",
           "newest",
           "best",
           "starred"

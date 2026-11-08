@@ -2,6 +2,8 @@
 the SDK sees it, the 401 the MCP authorization spec asks for, and the protected resource
 metadata it points to."""
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -165,3 +167,111 @@ def test_an_access_token_that_does_not_sign_in_is_an_invalid_token(
         f'Bearer error="invalid_token", resource_metadata="{METADATA}"'
     )
     assert response.json()["type"] == PROBLEMS + "invalid-access-token"
+
+
+def _limited_beyond(seen: list[int]):
+    """A ``key_caller`` that records each request's cost and refuses one that counts, as a key
+    over its rate limit does."""
+
+    async def key_caller(_token: str, *, cost: int = 1, **_clients: object) -> Caller:
+        seen.append(cost)
+        if cost > 0:
+            raise ProblemError(
+                429,
+                "rate-limited",
+                "Too many requests",
+                "Retry in 7 seconds.",
+                headers={"Retry-After": "7"},
+                extensions={"limit": 120, "retry_after_s": 7},
+            )
+        return Caller(ADA, frozenset({Scope.read}))
+
+    return key_caller
+
+
+def test_a_tool_call_over_the_rate_limit_is_the_tool_s_error(
+    mcp_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[int] = []
+    monkeypatch.setattr(http, "key_caller", _limited_beyond(seen))
+    call = {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "get_me"}}
+
+    response = mcp_client.post(
+        "/mcp", json=call, headers={**ACCEPT, "Authorization": "Bearer cs_x"}
+    )
+
+    # An answer the model reads, with the problem and when to try again; not an HTTP 429.
+    assert response.status_code == 200
+    answer = response.json()
+    assert (answer["jsonrpc"], answer["id"]) == ("2.0", 7)
+    assert answer["result"]["isError"] is True
+    [content] = answer["result"]["content"]
+    assert json.loads(content["text"]) == {
+        "type": PROBLEMS + "rate-limited",
+        "title": "Too many requests",
+        "status": 429,
+        "detail": "Retry in 7 seconds.",
+        "limit": 120,
+        "retry_after_s": 7,
+    }
+    assert seen == [1]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        INITIALIZE,
+        {"jsonrpc": "2.0", "id": 2, "method": "server/discover"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 2, "method": "ping"},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+    ],
+)
+def test_connecting_and_listing_do_not_count_against_the_rate_limit(
+    mcp_client: TestClient, monkeypatch: pytest.MonkeyPatch, message: dict[str, object]
+) -> None:
+    seen: list[int] = []
+    monkeypatch.setattr(http, "key_caller", _limited_beyond(seen))
+
+    response = mcp_client.post(
+        "/mcp", json=message, headers={**ACCEPT, "Authorization": "Bearer cs_x"}
+    )
+
+    assert response.status_code != 429
+    assert seen == [0]
+
+
+def test_other_requests_over_the_rate_limit_stay_a_429(
+    mcp_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[int] = []
+    monkeypatch.setattr(http, "key_caller", _limited_beyond(seen))
+    read = {"jsonrpc": "2.0", "id": 3, "method": "resources/read", "params": {"uri": "x"}}
+
+    response = mcp_client.post(
+        "/mcp", json=read, headers={**ACCEPT, "Authorization": "Bearer cs_x"}
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "7"
+    assert response.json()["retry_after_s"] == 7
+    assert seen == [1]
+
+
+def test_the_request_reaches_the_server_whole_after_its_method_was_read(
+    mcp_client: TestClient, keys
+) -> None:
+    listed = {"jsonrpc": "2.0", "id": 4, "method": "tools/list"}
+
+    response = mcp_client.post(
+        "/mcp",
+        json=listed,
+        headers={
+            **ACCEPT,
+            "Authorization": f"Bearer {keys.read_key}",
+            "MCP-Protocol-Version": "2025-11-25",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "get_me" in [tool["name"] for tool in response.json()["result"]["tools"]]

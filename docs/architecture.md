@@ -257,7 +257,7 @@ flowchart LR
   list, checked on every request, so taking someone off the list stops their keys at once
   (the dev user's keys work where the dev sign-in does). A request with a key ignores any
   cookie; a wrong key is 401 `invalid-api-key`, whatever is wrong with it. Each key has 120
-  requests a minute (Redis, 429 `rate-limited` with `Retry-After`), and its `last_used_at`
+  requests a minute (Redis, 429 `rate-limited` with `Retry-After` and `retry_after_s`), and its `last_used_at`
   is written at most once a minute, in a transaction of its own on another connection: best
   effort, a failed write is a warning and the request goes on. At most 10 keys of a user are
   neither revoked nor expired; creating one locks the user's row, so two at once cannot pass
@@ -1009,8 +1009,14 @@ call, as the routes' dependencies do), never the API over HTTP.
 - **Sign-in**: an API key in `Authorization: Bearer`, checked by `accounts.key_caller` as on a
   route (the hash, revoked, expired, the beta list, 120 requests a minute, the last use), or an
   OAuth access token (`csa_...`, [OAuth](#oauth)), checked by `accounts.token_caller` the same
-  way, per connected app, and only for this resource; every HTTP request counts, `initialize`
-  and `tools/list` included. Without either: `401 not-signed-in` with `WWW-Authenticate: Bearer resource_metadata="<PUBLIC_URL>/.well-known/oauth-protected-resource/mcp"`,
+  way, per connected app, and only for this resource. The rate limit counts the requests that
+  do work: `initialize`, `server/discover`, `ping`, the lists (`tools/list`, `resources/list`,
+  `resources/templates/list`, `prompts/list`) and notifications do not count, so a client over
+  the limit still connects. A `tools/call` over the limit is answered `200` as the tool's error
+  (`isError`) with the problem `rate-limited` and its `retry_after_s`, which the model reads;
+  any other request over it stays `429` with `Retry-After`, as on a route. The endpoint reads
+  the request's JSON-RPC method before it signs the request in and hands the body on to the
+  SDK. Without either: `401 not-signed-in` with `WWW-Authenticate: Bearer resource_metadata="<PUBLIC_URL>/.well-known/oauth-protected-resource/mcp"`,
   as the MCP authorization spec asks; a key or token that does not sign in: `401
   invalid-api-key` or `401 invalid-access-token` with `error="invalid_token"` and the same URL.
   The metadata (RFC 9728) names the resource (`<PUBLIC_URL>/mcp`), its authorization server
@@ -1025,6 +1031,10 @@ call, as the routes' dependencies do), never the API over HTTP.
   `readOnlyHint`, `destructiveHint` and `idempotentHint` always set (`openWorldHint` false), and
   an example call for the tool reference. A tool that only reads needs `read` alone, one that
   changes data the scope of what it changes.
+- **Answers**: a tool's `structuredContent` is its output model whole, nulls included, so it
+  fits the output schema; its text, which a model reads, is the same as compact JSON without
+  the null fields (`server.compact_text`, once for every tool, in place of the SDK's indented
+  JSON): about 40 % fewer bytes for `get_backtest`, `list_backtests` and `get_sweep`.
 - **Errors**: a failed tool call is a tool error (`isError`) whose text is the API's problem as
   JSON (`type`, `title`, `status`, `detail` and the extensions): the `ProblemError` the tool
   raised, `validation` (422, with `errors`, never the values) for arguments that do not fit the
@@ -1078,9 +1088,10 @@ call, as the routes' dependencies do), never the API over HTTP.
     the data terms (Alpaca's data for the user's personal, noncommercial use only).
   - `models` (#403), on the models service and its problems (`ml.problems`):
     `list_models` (the models in short: ID, name, format, state, star, the manifest's
-    timeframe and session, backtests, best Sharpe; and the storage), `get_model` (one in
-    full, as `GET /api/v1/models` shows it, with `backtest_count`, not the list of its
-    backtests), `get_manifest` (the manifest with its defaults,
+    timeframe and session, backtests, best Sharpe; and the storage; all of them, or a page
+    with `page` and `per_page`, and the `total`), `get_model` (one in full, as
+    `GET /api/v1/models` shows it, with `backtest_count`, not the list of its backtests; it
+    reads that model and its usage alone, `ModelsService.model`), `get_manifest` (the manifest with its defaults,
     its example left out unless `include_example`, with `example_samples`) and
     `validate_manifest` (the dry run of `POST .../manifest/check`), all `read`;
     `set_manifest` (destructive, as it replaces the manifest; starts the trial run as the
@@ -1137,7 +1148,9 @@ call, as the routes' dependencies do), never the API over HTTP.
     sort, order and page as `GET /experiments`), `publish_backtest` and `unpublish_backtest`
     (`publish`; destructive, the description says the backtest becomes visible to every account
     of the beta and asks the agent to check with the user first) and `get_dashboard` (`read`;
-    the counts, the 6 newest that ended, the 5 best by each result and the 4 best starred). They
+    the counts, the 6 newest that ended, the 5 best by each result with the value and the 4
+    best starred: each backtest once in `backtests` by ID and the lists as IDs, on
+    `BacktestsService.own_dashboard`, which skips the Dashboard's queries of Experiments). They
     answer a compact backtest with its page's `url`: no equity series, generated name, duration or other fields only
     the app's cards and charts use, the model by its name and ID; Experiments the same, `url`
     included, with the author, never the model file. The Dashboard's newest published backtests are left out, as

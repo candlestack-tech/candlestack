@@ -4,14 +4,19 @@
 a tool error with the API's problem (``convention.problem_result``): the ``ProblemError`` a tool
 raised, ``validation`` for arguments that do not fit the input schema, ``not-found`` for an
 unknown tool and ``internal-error`` for a crash, which is logged for a developer.
+
+A result's text is its structured content as compact JSON without the null fields
+(``compact_text``): what a model reads costs tokens, and the SDK writes it indented. The
+structured content itself stays whole, nulls included, so it fits the output schema.
 """
 
 import logging
 from typing import Any, override
 
+import orjson
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
-from mcp.types import CallToolResult, Icon, InputRequiredResult
+from mcp.types import CallToolResult, Icon, InputRequiredResult, TextContent
 from pydantic import ValidationError
 
 from candlestack.core import ProblemError
@@ -61,6 +66,22 @@ def _unknown_tool(name: str) -> ProblemError:
     return ProblemError(
         404, "not-found", "Not found", f"There is no tool {name!r}. tools/list names every tool."
     )
+
+
+def _without_nulls(value: Any) -> Any:
+    """`value` without the null fields of its objects, at any depth; a null in a list stays,
+    as its place there means something."""
+    if isinstance(value, dict):
+        return {key: _without_nulls(item) for key, item in value.items() if item is not None}
+    if isinstance(value, list):
+        return [_without_nulls(item) for item in value]
+    return value
+
+
+def compact_text(structured: dict[str, Any]) -> str:
+    """The text of a tool result: its structured content as compact JSON, null fields left
+    out (a model reads a missing field as null)."""
+    return orjson.dumps(_without_nulls(structured)).decode()
 
 
 def _internal_error() -> ProblemError:
@@ -113,11 +134,15 @@ class CandleStackMCP(MCPServer):
         try:
             if context is not None:
                 tool_call(context).caller.require(*spec.scopes)
-            return await super().call_tool(name, arguments, context)
+            result = await super().call_tool(name, arguments, context)
         except ProblemError as problem:
             return problem_result(problem)
         except ToolError as error:
             return problem_result(self._problem(name, error))
+        if not isinstance(result, CallToolResult) or result.structured_content is None:
+            return result
+        text = compact_text(result.structured_content)
+        return result.model_copy(update={"content": [TextContent(type="text", text=text)]})
 
     @staticmethod
     def _problem(name: str, error: ToolError) -> ProblemError:

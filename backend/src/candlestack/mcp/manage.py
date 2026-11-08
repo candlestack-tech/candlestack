@@ -184,26 +184,37 @@ class ExperimentList(BaseModel):
     )
 
 
+class RankedBacktest(BaseModel):
+    """A backtest in a ranking of the Dashboard and the value it is ranked by."""
+
+    id: str = Field(description="Public ID of the backtest, a key of `backtests`")
+    value: float = Field(description="Its result the ranking orders by")
+
+
 class BestBacktests(BaseModel):
     """The 5 best finished backtests by each result, the best first (for `max_drawdown` the
     smallest fall, the value nearest 0)."""
 
-    sharpe: list[BacktestSummary]
-    total_return: list[BacktestSummary]
-    max_drawdown: list[BacktestSummary]
-    win_rate: list[BacktestSummary]
+    sharpe: list[RankedBacktest]
+    total_return: list[RankedBacktest]
+    max_drawdown: list[RankedBacktest]
+    win_rate: list[RankedBacktest]
 
 
 class Dashboard(BaseModel):
-    """The Dashboard of the user's backtests."""
+    """The Dashboard of the user's backtests: each backtest once in `backtests`, and the lists
+    of the Dashboard as their IDs."""
 
     counts: BacktestCounts
-    newest: list[BacktestSummary] = Field(
-        description="The 6 newest backtests that ended, failed ones included"
+    backtests: dict[str, BacktestSummary] = Field(
+        description="Every backtest the lists below name, by its ID"
+    )
+    newest: list[str] = Field(
+        description="IDs of the 6 newest backtests that ended, failed ones included, newest first"
     )
     best: BestBacktests
-    starred: list[BacktestSummary] = Field(
-        description="The 4 starred backtests with the best Sharpe ratio"
+    starred: list[str] = Field(
+        description="IDs of the 4 starred backtests with the best Sharpe ratio"
     )
 
 
@@ -406,26 +417,41 @@ async def unpublish_backtest(backtest_id: BacktestId, ctx: Context) -> BacktestS
     return await _update(ctx, backtest_id, BacktestUpdate(public=False))
 
 
+def _ranked(backtests: list[BacktestOut], result: str) -> list[RankedBacktest]:
+    return [
+        RankedBacktest(id=backtest.id, value=getattr(backtest, result)) for backtest in backtests
+    ]
+
+
 async def get_dashboard(ctx: Context) -> Dashboard:
     """The user's Dashboard in one call: the counts of all, starred, failed and published
     backtests, the 6 newest that ended, the 5 best finished ones by Sharpe ratio, return,
-    drawdown (the smallest fall) and win rate, and the 4 best starred ones, each with its
-    `url`, the page to show the user. Call it for an overview before digging in with
-    list_backtests."""
+    drawdown (the smallest fall) and win rate with the value, and the 4 best starred ones.
+    Each list gives IDs; `backtests` has each backtest once, by ID, with its `url`, the page to
+    show the user. Call it for an overview before digging in with list_backtests."""
     call = tool_call(ctx)
     async with call.db() as db:
-        found = await get_backtests_service(db).dashboard(call.user.id)
+        found = await get_backtests_service(db).own_dashboard(call.user.id)
     best = found.best
+    listed = [
+        *found.last,
+        *best.sharpe,
+        *best.total_return,
+        *best.max_drawdown,
+        *best.win_rate,
+        *found.starred,
+    ]
     return Dashboard(
         counts=found.counts,
-        newest=[summary(call, backtest) for backtest in found.last],
+        backtests={backtest.id: summary(call, backtest) for backtest in listed},
+        newest=[backtest.id for backtest in found.last],
         best=BestBacktests(
-            sharpe=[summary(call, backtest) for backtest in best.sharpe],
-            total_return=[summary(call, backtest) for backtest in best.total_return],
-            max_drawdown=[summary(call, backtest) for backtest in best.max_drawdown],
-            win_rate=[summary(call, backtest) for backtest in best.win_rate],
+            sharpe=_ranked(best.sharpe, "sharpe"),
+            total_return=_ranked(best.total_return, "total_return"),
+            max_drawdown=_ranked(best.max_drawdown, "max_drawdown"),
+            win_rate=_ranked(best.win_rate, "win_rate"),
         ),
-        starred=[summary(call, backtest) for backtest in found.starred.backtests],
+        starred=[backtest.id for backtest in found.starred],
     )
 
 
@@ -547,7 +573,7 @@ TOOLS = (
                         id="bt_7f3k2m9qx4",
                         number=12,
                         name="Silent Orion",
-                        author=Author(id="usr_7f3k2m9qx4", name="Tymur Tkach", mine=False),
+                        author=Author(id="usr_7f3k2m9qx4", name="Grace Hopper", mine=False),
                         model="blesk-novol-8.keras",
                         instruments=[_AAPL],
                         representation=Representation.renko,
@@ -607,11 +633,15 @@ TOOLS = (
             arguments={},
             result=Dashboard(
                 counts=_COUNTS,
-                newest=[_ORION],
+                backtests={_ORION.id: _ORION},
+                newest=[_ORION.id],
                 best=BestBacktests(
-                    sharpe=[_ORION], total_return=[_ORION], max_drawdown=[_ORION], win_rate=[_ORION]
+                    sharpe=[RankedBacktest(id=_ORION.id, value=0.79)],
+                    total_return=[RankedBacktest(id=_ORION.id, value=0.246)],
+                    max_drawdown=[RankedBacktest(id=_ORION.id, value=-0.197)],
+                    win_rate=[RankedBacktest(id=_ORION.id, value=0.512)],
                 ),
-                starred=[_ORION],
+                starred=[_ORION.id],
             ),
         ),
     ),

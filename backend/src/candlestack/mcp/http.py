@@ -11,6 +11,12 @@ MCP authorization spec asks: the URL of the protected resource metadata (RFC 972
 its scopes and docs. A request from a browser page of another origin is refused, against DNS
 rebinding.
 
+The rate limit of the key or the connected app counts the requests that do work: a request that
+sets up a session or lists what the server offers (``_FREE``) does not count. A ``tools/call``
+over the limit is answered as the tool's error with the problem ``rate-limited`` and its
+``retry_after_s``, which the model reads, rather than as an HTTP 429, which a client may only
+show as a failed connection.
+
 The transport is stateless with JSON answers: every request stands alone, so any process can
 answer it and a deploy breaks no session. ``serving_mcp`` runs the SDK's session manager with
 the app (its lifespan); ``mount_mcp`` adds the routes.
@@ -19,23 +25,39 @@ the app (its lifespan); ``mount_mcp`` adds the routes.
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
+import orjson
 from fastapi import FastAPI
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import JSONRPCResponse
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
-from starlette.types import Receive, Scope, Send
+from starlette.types import Message, Receive, Scope, Send
 
 from candlestack.accounts import Scope as KeyScope
 from candlestack.accounts import is_access_token, key_caller, oauth_issuer, token_caller
 from candlestack.core import ProblemError, Settings, bearer_token
-from candlestack.mcp.convention import CALLER_STATE
+from candlestack.mcp.convention import CALLER_STATE, problem_result
 from candlestack.mcp.docs import MCP_DOCS
 from candlestack.mcp.server import TITLE, build_server
 
 MCP_PATH = "/mcp"
 METADATA_PATH = "/.well-known/oauth-protected-resource" + MCP_PATH
+# The methods that set up a session or list what the server offers, which a client sends when
+# it connects: they do not count against the rate limit, nor do notifications.
+_FREE = frozenset(
+    {
+        "initialize",
+        "server/discover",
+        "ping",
+        "tools/list",
+        "resources/list",
+        "resources/templates/list",
+        "prompts/list",
+    }
+)
 
 
 def resource_url(settings: Settings) -> str:
@@ -49,8 +71,9 @@ def _challenge(settings: Settings, error: str | None = None) -> str:
     return f'Bearer {error_param}resource_metadata="{settings.public_url}{METADATA_PATH}"'
 
 
-async def _sign_in(request: Request, settings: Settings) -> None:
-    """Puts the caller of the request on ``request.state``; raises the problem that refuses it."""
+def _token(request: Request, settings: Settings) -> str:
+    """The request's bearer token; raises the problem that refuses a request without one or
+    from a page of another site."""
     origin = request.headers.get("origin")
     if origin is not None and origin != settings.public_url:
         raise ProblemError(
@@ -69,6 +92,12 @@ async def _sign_in(request: Request, settings: Settings) -> None:
             "API key as Authorization: Bearer cs_... Create a key in Settings, API and MCP.",
             headers={"WWW-Authenticate": _challenge(settings)},
         )
+    return token
+
+
+async def _sign_in(request: Request, settings: Settings, token: str, cost: int) -> None:
+    """Puts the caller of the request with `token` on ``request.state``, the request counting
+    `cost` against the rate limit; raises the problem that refuses it."""
     state = request.app.state
     async with state.db.sessions() as db:
         try:
@@ -79,10 +108,11 @@ async def _sign_in(request: Request, settings: Settings) -> None:
                     settings=settings,
                     db=db,
                     limiter=state.rate_limiter,
+                    cost=cost,
                 )
             else:
                 caller = await key_caller(
-                    token, settings=settings, db=db, limiter=state.rate_limiter
+                    token, settings=settings, db=db, limiter=state.rate_limiter, cost=cost
                 )
         except ProblemError as problem:
             if problem.status == 401:
@@ -91,13 +121,68 @@ async def _sign_in(request: Request, settings: Settings) -> None:
     setattr(request.state, CALLER_STATE, caller)
 
 
+def _message(body: bytes) -> dict[str, Any] | None:
+    """The JSON-RPC message a POST carries; None for a body that is not one, which the SDK
+    refuses."""
+    try:
+        message = orjson.loads(body)
+    except orjson.JSONDecodeError:
+        return None
+    return message if isinstance(message, dict) else None
+
+
+def _cost(message: dict[str, Any] | None) -> int:
+    """What the request with `message` counts against the rate limit: 0 for a notification and
+    the methods of ``_FREE``, else 1."""
+    method = None if message is None else message.get("method")
+    if isinstance(method, str) and (method in _FREE or method.startswith("notifications/")):
+        return 0
+    return 1
+
+
+def _replayed(body: bytes, receive: Receive) -> Receive:
+    """`receive` with the body that was read from it given again first, for the SDK."""
+    pending = True
+
+    async def replay() -> Message:
+        nonlocal pending
+        if pending:
+            pending = False
+            return {"type": "http.request", "body": body, "more_body": False}
+        return await receive()
+
+    return replay
+
+
+def _tool_error(message: dict[str, Any], problem: ProblemError) -> Response:
+    """The answer to the tools/call `message` as the tool's error with `problem`."""
+    result = problem_result(problem).model_dump(mode="json", by_alias=True, exclude_none=True)
+    answer = JSONRPCResponse(jsonrpc="2.0", id=message["id"], result=result)
+    return Response(
+        answer.model_dump_json(by_alias=True, exclude_unset=True), media_type="application/json"
+    )
+
+
 class _McpEndpoint:
     """The ``/mcp`` endpoint, an ASGI app for the SDK: signs the request in, then hands it on."""
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         request = Request(scope, receive)
         state = request.app.state
-        await _sign_in(request, state.settings)
+        token = _token(request, state.settings)
+        message = None
+        if request.method == "POST":
+            body = await request.body()
+            message = _message(body)
+            receive = _replayed(body, receive)
+        try:
+            await _sign_in(request, state.settings, token, _cost(message))
+        except ProblemError as problem:
+            calls_a_tool = message is not None and message.get("method") == "tools/call"
+            if problem.slug != "rate-limited" or not calls_a_tool or "id" not in message:
+                raise
+            await _tool_error(message, problem)(scope, receive, send)
+            return
         await state.mcp_sessions.handle_request(scope, receive, send)
 
 
