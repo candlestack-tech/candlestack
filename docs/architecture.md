@@ -1072,7 +1072,21 @@ call, as the routes' dependencies do), never the API over HTTP.
     first, the last and the deepest fall included, six decimals). `compare_backtests` (`read`)
     answers `GET /api/v1/compare` for a list of 1 to 20 IDs, as it is. The access is that of the
     routes: the user's own backtests and other accounts' while they are published.
-  - The tools of the other areas come with #399, #402 and #405.
+  - `manage` (#405): listing, managing and publishing backtests, on `BacktestsService` and
+    `BacktestRuns` with the routes' problems (`experiments.update_problems`,
+    `backtest_problems`): `list_backtests` (`read`; search, show, model, sort, order and page as
+    `GET /backtests`), `rename_backtest` and `star_backtest` (`backtests`; idempotent),
+    `cancel_backtest` (`backtests`; queued ones only, else `backtest-not-queued`; destructive),
+    `list_experiments` (`read`; search, mine, author, market, symbol, representation, timeframe,
+    sort, order and page as `GET /experiments`), `publish_backtest` and `unpublish_backtest`
+    (`publish`; destructive, the description says the backtest becomes visible to every account
+    of the beta and asks the agent to check with the user first) and `get_dashboard` (`read`;
+    the counts, the 6 newest that ended, the 5 best by each result and the 4 best starred). They
+    answer a compact backtest: no equity series, generated name, duration or other fields only
+    the app's cards and charts use, the model by its name and ID; Experiments the same with the
+    author, never the model file. The Dashboard's newest published backtests are left out, as
+    `list_experiments` lists them.
+  - The tools of the other areas come with #399 and #402.
 - **Parity table** (`mcp/parity.py`): every endpoint of the API reference, by method and path,
   maps to the tools that do the same, to `Planned` with the task that adds them, or to
   `WebOnly` with the reason (sign-in, sessions, the keys themselves, deleting the account,
