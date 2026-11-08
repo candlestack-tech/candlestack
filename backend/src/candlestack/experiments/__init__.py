@@ -16,7 +16,9 @@ tables (``backend/migrations`` relies on it).
 
 The MCP tools (``candlestack.mcp``) build the same services as the routes (``backtest_runs``),
 take the same setup (``BacktestIn`` and its groups) and raise the same problems
-(``backtest_problems``).
+(``backtest_problems``); their starts keep idempotency keys as the routes do (``idempotent``),
+and their waits learn from ``app.state.backtest_runner`` (``BacktestRunner.watch``) when a
+backtest changed.
 
 ``python -m candlestack.experiments.seed --email <email>`` fills an account with test backtests
 (stage and local only).
@@ -44,6 +46,9 @@ from candlestack.experiments.document import (
     Period,
     Stats,
 )
+from candlestack.experiments.idempotency import KEY_MAX as IDEMPOTENCY_KEY_MAX
+from candlestack.experiments.idempotency import KEY_PATTERN as IDEMPOTENCY_KEY_PATTERN
+from candlestack.experiments.idempotency import once as idempotent
 from candlestack.experiments.runner import BacktestRunner
 from candlestack.experiments.runs import BacktestRuns
 from candlestack.experiments.schemas import (
@@ -73,12 +78,22 @@ from candlestack.experiments.schemas import (
 )
 from candlestack.experiments.service import ExperimentsQuery, ListQuery
 from candlestack.experiments.store import model_usage
-from candlestack.experiments.sweeps import SweepIn, SweepMetric, SweepOut, SweepPlan, SweepVary
+from candlestack.experiments.sweeps import (
+    SweepIn,
+    SweepMetric,
+    SweepOut,
+    SweepPlan,
+    SweepProgress,
+    SweepRanking,
+    SweepVary,
+)
 
 __all__ = [
     "BACKTEST_NAME_MAX",
     "COMPARE_MAX",
     "EXPERIMENTS_PAGE_SIZE",
+    "IDEMPOTENCY_KEY_MAX",
+    "IDEMPOTENCY_KEY_PATTERN",
     "MODEL_NAME_MAX",
     "PAGE_MAX",
     "PAGE_SIZE",
@@ -121,6 +136,8 @@ __all__ = [
     "SweepMetric",
     "SweepOut",
     "SweepPlan",
+    "SweepProgress",
+    "SweepRanking",
     "SweepVary",
     "backtest_problems",
     "backtest_runs",
@@ -129,6 +146,7 @@ __all__ = [
     "check_ids",
     "compare_backtests",
     "get_backtests_service",
+    "idempotent",
     "model_usage",
     "sweep_problems",
     "update_problems",

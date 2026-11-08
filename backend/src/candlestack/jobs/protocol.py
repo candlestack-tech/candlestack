@@ -37,9 +37,14 @@ Reason = Literal[
     "internal",  # a bug of ours: logged as an error
 ]
 
-# What the backend waits for at most by default: the queue, the start of the job's process
-# (Keras' import, about 2 s) and the run.
+# What the backend waits for a job's result at most by default once a worker took it: the
+# start of the job's process (Keras' import, about 2 s) and the run.
 DEFAULT_WAIT = 180.0
+# How long a job may wait in the queue for a worker by default: past it the worker fails it as
+# ``expired`` without running it, and the backend stops waiting. The backtests' runner hands the
+# worker as many jobs at once as it has run slots, and the models' checks one per user, so a job
+# waits for a few runs at most; it waits this long only when no worker runs.
+QUEUE_WAIT = 600.0
 # The output of the manifest's example must be within this of the expected one.
 EXAMPLE_TOLERANCE = 1e-4
 
@@ -76,9 +81,12 @@ class _Frozen(BaseModel):
 class Job(_Frozen):
     """One job for the worker.
 
-    ``deadline`` is when the backend stops waiting (epoch seconds): a job still in the queue
-    then is failed as ``expired`` without running, so a backlog after an outage costs no
-    runs nobody reads.
+    ``deadline`` is when the backend stops waiting for a worker to take it (epoch seconds): a
+    job still in the queue then is failed as ``expired`` without running, so a backlog after an
+    outage costs no runs nobody reads. ``wait`` is how long the backend waits for the result
+    from the claim on, in seconds, so the time a job waited in the queue does not shorten its
+    run: the worker stops the job's process then, unless its time limit came first. A job
+    without ``wait`` (of an older backend) runs until ``deadline`` at most.
     """
 
     version: Literal[1] = 1
@@ -91,6 +99,7 @@ class Job(_Frozen):
     manifest: dict[str, Any]
     enqueued_at: float = Field(default_factory=time.time)
     deadline: float
+    wait: Annotated[float, Field(gt=0)] | None = None
 
 
 class Runner(_Frozen):

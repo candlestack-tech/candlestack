@@ -51,6 +51,13 @@ NOUNS = (
 
 NAMES = tuple(f"{adjective} {noun}" for adjective in ADJECTIVES for noun in NOUNS)
 _LOWERED = tuple(name.lower() for name in NAMES)
+_RANDOM = secrets.SystemRandom()
+
+
+def candidates(count: int) -> list[str]:
+    """``count`` different names of ``NAMES`` at random: what a new backtest tries first, as an
+    account with even 2,000 names has the ten of them all with a chance of about 1 in 10^9."""
+    return _RANDOM.sample(NAMES, count)
 
 
 def generated_name(taken: Set[str], choose: Callable[[Sequence[str]], str] = secrets.choice) -> str:

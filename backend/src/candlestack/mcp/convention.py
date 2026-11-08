@@ -18,17 +18,18 @@ import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Annotated, Any
 
 from mcp.server.mcpserver import Context
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import State
 from starlette.requests import Request
 
 from candlestack.accounts import Caller, Scope, User
 from candlestack.core import PROBLEM_TYPE_BASE, ProblemError, Settings
+from candlestack.experiments import IDEMPOTENCY_KEY_MAX, IDEMPOTENCY_KEY_PATTERN, BacktestRunner
 from candlestack.mcp.docs import TOOLS_DOCS
 
 # A verb and what it acts on, lowercase: get_me, start_backtest, list_models.
@@ -36,6 +37,24 @@ _NAME = re.compile(r"[a-z]+(_[a-z0-9]+){1,3}")
 _NAME_MAX = 32
 # Where the HTTP layer leaves the caller of a request (``request.state``), for the tools.
 CALLER_STATE = "mcp_caller"
+# The longest wait of one call of a wait tool: clients give up on a call after a minute or so,
+# and the transport answers JSON at the end of the call, so the agent calls again.
+WAIT_MAX_S = 60
+WAIT_DEFAULT_S = 50
+# How often a wait reads the backtests' rows again when nothing told it of a change: the runner
+# tells it when one starts, ends or is cancelled (``BacktestRunner.watch``).
+POLL_S = 2.5
+
+# The idempotency key of a tool that starts something (``experiments.idempotent``).
+IdempotencyKey = Annotated[
+    str | None,
+    Field(
+        max_length=IDEMPOTENCY_KEY_MAX,
+        pattern=IDEMPOTENCY_KEY_PATTERN,
+        description="A key you make, such as a UUID: the same call again with it within 24 "
+        "hours answers the first one instead of starting again",
+    ),
+]
 
 
 def reads() -> ToolAnnotations:
@@ -127,6 +146,11 @@ class ToolCall:
         """A Postgres session for the call, as a route gets one per request."""
         async with self.state.db.sessions() as session:
             yield session
+
+
+def runner_of(call: ToolCall) -> BacktestRunner:
+    """The app's backtest runner, which tells a wait when a backtest changed."""
+    return call.state.backtest_runner
 
 
 def tool_call(ctx: Context) -> ToolCall:

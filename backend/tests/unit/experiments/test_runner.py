@@ -1,7 +1,7 @@
 """The backtest runner when Postgres fails it: the start of the process goes on, a run that
 cannot even be read is a bug that is reported, and a queue that cannot be moved on is a
-warning, moved on later. The runs and the queues themselves are integration tests
-(tests/integration/experiments/test_runs.py)."""
+warning, moved on later; the run slots and the waits on its word. The runs and the queues
+themselves are integration tests (tests/integration/experiments/test_runs.py)."""
 
 import asyncio
 import json
@@ -45,12 +45,11 @@ async def test_without_postgres_the_queues_wait_for_the_next_check(
     runs = runner(fake_database)
 
     await runs.resume()
-    await runs._advance("bt_7f3k2m9qx4")
-    await runs._next("usr_7f3k2m9qx4")
+    runs.wake()
+    await asyncio.gather(*runs._wakeups)
 
-    assert "The backtest queues were not checked" in caplog.text
-    assert "The queue of backtest bt_7f3k2m9qx4 was not moved on" in caplog.text
-    assert "The next backtest of a queue was not started" in caplog.text
+    assert caplog.text.count("The backtest queues were not checked") == 2
+    assert runs._tasks == {}
 
 
 async def test_the_queues_are_checked_until_the_runner_closes(
@@ -156,9 +155,109 @@ async def test_a_closed_runner_takes_no_queued_backtest() -> None:
     runs = runner(_NoDatabase())
     await runs.close()
 
-    await runs._next("usr_7f3k2m9qx4")
+    await runs.fill()
+    runs.wake()
 
     assert runs._tasks == {}
+    assert runs._wakeups == set()
+
+
+async def test_a_fill_that_fails_on_a_bug_is_reported(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs = runner(_NoDatabase())
+
+    async def broken() -> None:
+        raise RuntimeError("a bug")
+
+    monkeypatch.setattr(runs, "_take_turn", broken)
+    runs.wake()
+    await asyncio.gather(*runs._wakeups)
+
+    errors = [record for record in caplog.records if record.levelno == logging.ERROR]
+    assert errors[0].getMessage() == "The backtest slots could not be filled"
+
+
+ORDER = ["a1", "b1", "e1", "a2", "b2", "a3"]
+
+
+class _Turns:
+    """Stands in for the queues in Postgres: each user's queued backtests, the users in the
+    order ``waiting`` gives them (the oldest wait first), one running backtest per user."""
+
+    def __init__(self, queues: dict[str, list[str]]) -> None:
+        self.queues = queues
+        self.running: set[str] = set()
+
+    def take(self, served: dict[str, int]) -> str | None:
+        waiting = [
+            user for user, queue in self.queues.items() if queue and user not in self.running
+        ]
+        for user in sorted(waiting, key=lambda each: served.get(each, 0)):
+            self.running.add(user)
+            return self.queues[user].pop(0)
+        return None
+
+
+async def test_the_slots_go_to_the_users_in_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    runs = BacktestRunner(
+        _NoDatabase(),  # ty: ignore[invalid-argument-type]
+        data=None,  # ty: ignore[invalid-argument-type]
+        jobs=None,  # ty: ignore[invalid-argument-type]
+        slots=2,
+    )
+    turns = _Turns({"ada": ["a1", "a2", "a3"], "bob": ["b1", "b2"], "eve": ["e1"]})
+    started: list[str] = []
+    # Each run tells when it began, and holds its slot until the test ends it.
+    began = {backtest_id: asyncio.Event() for backtest_id in ORDER}
+    ends = {backtest_id: asyncio.Event() for backtest_id in ORDER}
+
+    async def take_turn() -> str | None:
+        backtest_id = turns.take(runs._served)
+        if backtest_id is not None:
+            user = {"a": "ada", "b": "bob", "e": "eve"}[backtest_id[0]]
+            runs._turns += 1
+            runs._served[user] = runs._turns
+        return backtest_id
+
+    async def run(backtest_id: str) -> None:
+        started.append(backtest_id)
+        began[backtest_id].set()
+        await ends[backtest_id].wait()
+        turns.running.discard({"a": "ada", "b": "bob", "e": "eve"}[backtest_id[0]])
+
+    monkeypatch.setattr(runs, "_take_turn", take_turn)
+    monkeypatch.setattr(runs, "_run", run)
+
+    await runs.fill()
+    await began["a1"].wait()
+    await began["b1"].wait()
+    assert started == ["a1", "b1"]  # two slots, one run per user
+    assert not runs.free
+    for backtest_id in ORDER:
+        await asyncio.wait_for(began[backtest_id].wait(), timeout=5)
+        ends[backtest_id].set()
+    await asyncio.gather(*list(runs._tasks))
+    await runs.close()
+
+    # Eve, never served, before Ada's second; then each in turn.
+    assert started == ORDER
+
+
+async def test_a_wait_is_told_when_its_backtest_changes() -> None:
+    runs = runner(_NoDatabase())
+
+    with (
+        runs.watch(["bt_aaaaaaaaaa", "bt_bbbbbbbbbb"]) as changed,
+        runs.watch(["bt_bbbbbbbbbb"]) as other,
+    ):
+        runs.changed("bt_aaaaaaaaaa")
+        runs.changed("bt_cccccccccc")
+        assert (changed.is_set(), other.is_set()) == (True, False)
+        runs.changed("bt_bbbbbbbbbb")
+        assert other.is_set()
+
+    assert runs._watchers == {}
 
 
 async def test_a_backtest_handed_to_a_closed_runner_goes_back_to_its_queue(

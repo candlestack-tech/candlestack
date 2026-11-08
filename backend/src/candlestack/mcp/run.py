@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from candlestack import experiments
 from candlestack.accounts import Scope
+from candlestack.core import ProblemError
 from candlestack.experiments import (
     COMPARE_MAX,
     BacktestCheck,
@@ -36,23 +37,25 @@ from candlestack.experiments import (
     backtest_problems,
     backtest_runs,
     check_ids,
+    idempotent,
 )
 from candlestack.mcp.convention import (
+    POLL_S,
+    WAIT_DEFAULT_S,
+    WAIT_MAX_S,
     Example,
+    IdempotencyKey,
     ToolCall,
     ToolSpec,
     backtest_url,
     changes,
     reads,
+    runner_of,
     tool_call,
 )
 
-# The longest wait of one call of wait_for_backtest: clients give up on a call after a minute
-# or so, and the transport answers JSON at the end of the call, so the agent calls again.
-WAIT_MAX_S = 60
-WAIT_DEFAULT_S = 50
-# How often a wait reads the backtest's row again.
-POLL_S = 1.0
+# The most backtests one wait follows.
+WAIT_IDS_MAX = 20
 # The most points of the equity get_backtest answers: enough to see its shape.
 EQUITY_POINTS = 200
 TRADES_PER_PAGE_MAX = 500
@@ -92,12 +95,14 @@ class BacktestStatusResult(BaseModel):
     number: int = Field(description="The author's own number, shown as #N")
     name: str
     status: Status = Field(
-        description="queued (waits for the user's running backtest), running, finished (has "
+        description="queued (waits for the user's running backtest or a free run slot), "
+        "running, finished (has "
         "results) or failed (has an error, also when cancelled before it ran)"
     )
     ended: bool = Field(description="finished or failed: it will not change any more")
     queue_position: int | None = Field(
-        description="While queued: 1 starts next, when the running one ends"
+        description="While queued: 1 starts next of the user's backtests, when their running "
+        "one ended and a run slot is free"
     )
     error: str | None = Field(description="What went wrong and what to do, for a failed one")
     created_at: datetime
@@ -105,7 +110,27 @@ class BacktestStatusResult(BaseModel):
     finished_at: datetime | None
     duration_s: float | None = Field(description="Seconds it ran, the wait in the queue left out")
     steps: list[StepOut]
+    eta_s: float | None = Field(
+        description="About how many seconds until it ends: its place in the queue and its run, "
+        "each run as long as the median of the user's recent runs, the wait for a free run "
+        "slot left out; null once ended, for another account's backtest, and before any of "
+        "the user's backtests finished"
+    )
     url: str = Field(description="The backtest's page in the app, to show the user")
+
+
+class BacktestWaitResult(BacktestStatusResult):
+    """Where the backtest waited for stands; with `ids`, the one that decided the answer (the
+    first that ended for `until` any, the first still going for `until` all, else the first),
+    and each one in `backtests`."""
+
+    done: bool = Field(
+        description="The wait is over: the backtest ended, or with `ids` any or all of them "
+        "(`until`); false when `timeout_s` passed first"
+    )
+    backtests: list[BacktestStatusResult] | None = Field(
+        description="With `ids`: where each stands, in the order given; null with `backtest_id`"
+    )
 
 
 class Author(BaseModel):
@@ -240,7 +265,9 @@ async def _runs(call: ToolCall) -> AsyncIterator[BacktestRuns]:
             yield backtest_runs(call.state, db)
 
 
-def _status(call: ToolCall, header: BacktestHeader) -> BacktestStatusResult:
+def _status(
+    call: ToolCall, header: BacktestHeader, eta_s: float | None = None
+) -> BacktestStatusResult:
     return BacktestStatusResult(
         id=header.id,
         number=header.number,
@@ -264,6 +291,7 @@ def _status(call: ToolCall, header: BacktestHeader) -> BacktestStatusResult:
             )
             for step in header.steps
         ],
+        eta_s=eta_s,
         url=backtest_url(call, header.id),
     )
 
@@ -271,6 +299,36 @@ def _status(call: ToolCall, header: BacktestHeader) -> BacktestStatusResult:
 async def _header(call: ToolCall, backtest_id: str) -> BacktestHeader:
     async with _runs(call) as runs:
         return await runs.header(call.user.id, backtest_id)
+
+
+async def _statuses(call: ToolCall, ids: Sequence[str]) -> list[BacktestStatusResult]:
+    """Where each of the backtests stands, from their rows alone, in a session of its own."""
+    async with _runs(call) as runs:
+        standings = await runs.statuses(call.user.id, ids)
+    return [_status(call, standing.header, standing.eta_s) for standing in standings]
+
+
+def _wanted(backtest_id: str | None, ids: list[str] | None) -> list[str]:
+    """The backtests to wait for: ``backtest_id`` or ``ids`` (once each), not both."""
+    if (backtest_id is None) == (ids is None):
+        raise ProblemError(
+            422,
+            "validation",
+            "Invalid request",
+            "Give either backtest_id or ids, the backtests to wait for.",
+        )
+    return [backtest_id] if backtest_id is not None else list(dict.fromkeys(ids or []))
+
+
+def _decided(
+    statuses: Sequence[BacktestStatusResult], until: Literal["any", "all"]
+) -> tuple[BacktestStatusResult, bool]:
+    """The backtest the answer is about, and whether the wait is over."""
+    if until == "any":
+        ended = [status for status in statuses if status.ended]
+        return (ended[0], True) if ended else (statuses[0], False)
+    going = [status for status in statuses if not status.ended]
+    return (going[0], False) if going else (statuses[0], True)
 
 
 def equity_rows(drawdown: Sequence[float], points: int = EQUITY_POINTS) -> list[int]:
@@ -420,7 +478,7 @@ async def validate_backtest(
         return await runs.check(call.user.id, body)
 
 
-async def start_backtest(
+async def start_backtest(  # noqa: PLR0913 (the setup's groups)
     model: ModelRef,
     data: DataIn,
     *,
@@ -428,10 +486,12 @@ async def start_backtest(
     decision: Decisions,
     execution: Executions,
     benchmarks: Benchmarks,
+    idempotency_key: IdempotencyKey = None,
 ) -> BacktestStatusResult:
     """Starts a backtest of one of the user's models on one instrument and period. One
-    backtest of a user runs at a time and up to 20 more wait in the queue, so it starts
-    running at once or waits (queued, with its place).
+    backtest of a user runs at a time and up to 20 more wait in the queue, and a few run at
+    once over all users, taking turns; so it starts running at once or waits (queued, with
+    its place and `eta_s`).
 
     The arguments are the body of POST /api/v1/backtests: model.id (one of the user's models
     with a manifest), data.instrument.id (<market>:<symbol>: a stock for a model of US trading
@@ -447,16 +507,34 @@ async def start_backtest(
     `decision`, `execution`, `benchmark_instrument`): pass them through for every setting the
     user does not name.
 
+    Pass an `idempotency_key` (a UUID you make) to call it again safely after a timeout: the
+    same call with the same key within 24 hours answers the first backtest instead of starting
+    another.
+
     Answers its ID and status at once; the run takes from seconds to minutes. Then call
     wait_for_backtest with the ID until it has ended, and get_backtest for the results."""
     call = tool_call(ctx)
     body = BacktestIn(
         model=model, data=data, decision=decision, execution=execution, benchmarks=benchmarks
     )
-    async with _runs(call) as runs:
-        _, content = await runs.start(call.user.id, body)
-    header = BacktestHeader.model_validate(json.loads(content)["backtest"])
-    return _status(call, header)
+
+    async def started() -> bytes:
+        async with _runs(call) as runs:
+            _, content = await runs.start(call.user.id, body)
+            backtest_id = json.loads(content)["backtest"]["id"]
+            (standing,) = await runs.statuses(call.user.id, [backtest_id])
+        return _status(call, standing.header, standing.eta_s).model_dump_json().encode()
+
+    with backtest_problems():
+        content, _ = await idempotent(
+            call.state.redis,
+            user_id=call.user.id,
+            kind="start_backtest",
+            key=idempotency_key,
+            body=body.model_dump_json().encode(),
+            answer=started,
+        )
+    return BacktestStatusResult.model_validate_json(content)
 
 
 async def get_backtest_status(
@@ -472,7 +550,10 @@ async def get_backtest_status(
 
 
 async def wait_for_backtest(
-    backtest_id: BacktestId,
+    backtest_id: Annotated[
+        str | None,
+        Field(description="Public ID of the backtest; or give `ids`", examples=["bt_7f3k2m9qx4"]),
+    ] = None,
     timeout_s: Annotated[
         int,
         Field(
@@ -481,20 +562,43 @@ async def wait_for_backtest(
             description=f"How long to wait at most, in seconds (up to {WAIT_MAX_S})",
         ),
     ] = WAIT_DEFAULT_S,
+    ids: Annotated[
+        list[str] | None,
+        Field(
+            min_length=1,
+            max_length=WAIT_IDS_MAX,
+            description=f"Instead of `backtest_id`: up to {WAIT_IDS_MAX} backtest IDs to wait "
+            "for at once",
+        ),
+    ] = None,
+    until: Annotated[
+        Literal["any", "all"],
+        Field(description="With `ids`: wait until any of them ended, or all of them"),
+    ] = "all",
     *,
     ctx: Context,
-) -> BacktestStatusResult:
+) -> BacktestWaitResult:
     """Waits until a backtest has ended (finished or failed) or `timeout_s` seconds passed,
-    then answers where it stands. When `ended` is false, call it again: a backtest can wait in
-    the queue and run for several minutes. Once it finished, read it with get_backtest."""
+    then answers where it stands. Give `ids` instead of `backtest_id` to wait for several at
+    once, until any or all of them ended (`until`); `backtests` then has each one. When `done`
+    is false, call it again: a backtest can wait in the queue and run for several minutes, and
+    `eta_s` says about how long. Once it finished, read it with get_backtest."""
     call = tool_call(ctx)
+    wanted = _wanted(backtest_id, ids)
     deadline = anyio.current_time() + timeout_s
-    while True:
-        header = await _header(call, backtest_id)
-        left = deadline - anyio.current_time()
-        if header.status.value in _ENDED or left <= 0:
-            return _status(call, header)
-        await anyio.sleep(min(POLL_S, left))
+    with runner_of(call).watch(wanted) as changed:
+        while True:
+            changed.clear()
+            statuses = await _statuses(call, wanted)
+            shown, done = _decided(statuses, until)
+            left = deadline - anyio.current_time()
+            if done or left <= 0:
+                break
+            with anyio.move_on_after(min(POLL_S, left)):
+                await changed.wait()
+    return BacktestWaitResult(
+        **shown.model_dump(), done=done, backtests=None if ids is None else statuses
+    )
 
 
 async def get_backtest(
@@ -596,6 +700,7 @@ _QUEUED = BacktestStatusResult(
     finished_at=None,
     duration_s=None,
     steps=_steps("pending", "pending", "pending", "pending"),
+    eta_s=324.0,
     url=_URL,
 )
 _FINISHED = _QUEUED.model_copy(
@@ -606,6 +711,7 @@ _FINISHED = _QUEUED.model_copy(
         "started_at": datetime(2026, 11, 2, 9, 31, tzinfo=UTC),
         "finished_at": datetime(2026, 11, 2, 9, 33, 42, tzinfo=UTC),
         "duration_s": 162.0,
+        "eta_s": None,
         "steps": [
             step.model_copy(update={"duration_s": seconds})
             for step, seconds in zip(
@@ -619,6 +725,7 @@ _RUNNING = _QUEUED.model_copy(
         "status": "running",
         "queue_position": None,
         "started_at": datetime(2026, 11, 2, 9, 31, tzinfo=UTC),
+        "eta_s": 150.0,
         "steps": [
             StepOut(
                 id="candles",
@@ -812,7 +919,10 @@ TOOLS = (
         title="Wait for a backtest",
         scopes=(Scope.read,),
         annotations=reads(),
-        example=Example(arguments={"backtest_id": _ID, "timeout_s": 50}, result=_FINISHED),
+        example=Example(
+            arguments={"backtest_id": _ID, "timeout_s": 50},
+            result=BacktestWaitResult(**_FINISHED.model_dump(), done=True, backtests=None),
+        ),
     ),
     ToolSpec(
         get_backtest_status,

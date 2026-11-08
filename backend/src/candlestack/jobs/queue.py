@@ -117,21 +117,32 @@ class JobQueue:
         job_id: str,
         wait: float,
         *,
+        claim_by: float | None = None,
         claimed: Callable[[], Awaitable[None]] | None = None,
     ) -> JobResult | None:
-        """The job's result, waiting up to ``wait`` seconds for it; None when none came.
-        ``claimed`` is awaited once, at most ``_WAIT_STEP`` after a worker took the job (it
-        holds its lease), when that is seen before the result."""
-        deadline = time.monotonic() + wait
-        while (left := deadline - time.monotonic()) > 0:
+        """The job's result, waiting up to ``wait`` seconds for it; None when none came. With
+        ``claim_by`` (epoch seconds: the job's deadline) the wait starts once a worker is seen
+        to have taken the job (it holds its lease), and until then it waits for that up to
+        ``claim_by``. ``claimed`` is awaited once, at most ``_WAIT_STEP`` after a worker took
+        the job, when that is seen before the result."""
+        taken = claim_by is None
+        if claim_by is None:
+            end = time.monotonic() + wait
+        else:
+            end = time.monotonic() + max(claim_by - time.time(), 0)
+        while (left := end - time.monotonic()) > 0:
             popped = await self._redis.blpop(
                 [RESULT_PREFIX + job_id], timeout=min(left, _WAIT_STEP)
             )
             if popped is not None:
                 return JobResult.model_validate_json(popped[1])
-            if claimed is not None and await self.taken(job_id):
-                await claimed()
-                claimed = None
+            if (not taken or claimed is not None) and await self.taken(job_id):
+                if not taken:
+                    taken = True
+                    end = time.monotonic() + wait
+                if claimed is not None:
+                    await claimed()
+                    claimed = None
         return None
 
     async def taken(self, job_id: str) -> bool:

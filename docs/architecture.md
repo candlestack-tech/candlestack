@@ -107,7 +107,7 @@ flowchart LR
 | `GET /api/v1/models/{model_id}/manifest` | the model's manifest as it was given (`404 no-manifest` without one) |
 | `POST /api/v1/models/{model_id}/manifest/check` | a dry run of the PUT: the same checks on the manifest (the body), nothing kept; 200 with `valid`, the `problems` (each with its `field`, `detail` and `allowed` values), `more_problems` and `unknown_blocks`; a key needs `read` only ([Models](#models)) |
 | `GET /api/v1/preprocessing/catalog` | the blocks a model's manifest can name, by step: id, description, the display group of a feature (`Candle`, `Bands`, `Momentum`, `Trend`, `Volume`, `Brick`, `Line`), warm-up and parameters (type, range, default, `tunable`); public, served by `ml` ([preprocessing.md](preprocessing.md#the-blocks)) |
-| `POST /api/v1/backtests` | starts a backtest of one of the user's models: the body is the setup groups of the result document (`model`, `data`, `decision`, `execution`, `benchmarks`); checked first, then stored `running` and run after the response, or `queued` while another backtest of the user runs (1 runs and up to 20 wait per user, `409 queue-full` beyond); 201 with its result document ([Backtests](#backtests)) |
+| `POST /api/v1/backtests` | starts a backtest of one of the user's models: the body is the setup groups of the result document (`model`, `data`, `decision`, `execution`, `benchmarks`); checked first, then stored and run after the response when a run slot is its user's turn (`running`), else `queued` (1 runs and up to 20 wait per user, `409 queue-full` with `retry_after_s` beyond; `BACKTEST_SLOTS` run at once over all users); an optional `Idempotency-Key` header answers a repeated request with the first answer (`Idempotent-Replayed: true`) for 24 hours; 201 with its result document ([Backtests](#backtests)) |
 | `POST /api/v1/backtests/check` | checks a new backtest as `POST /api/v1/backtests` does, with the same body and the same problems, and stores nothing: 200 with what would run (the model, the instrument as the catalog has it, the model's timeframe and session, the warm-up and where the load starts, the benchmarks) and whether it would wait (`starts` `now` or `queued`, `queue_position`); a key needs only `read` ([Backtests](#backtests)) |
 | `POST /api/v1/backtests/{backtest_id}/cancel` | cancels the user's queued backtest: it fails as cancelled and never runs; 200 with its result document, `409 backtest-not-queued` for one that runs or has ended ([Backtests](#backtests)) |
 | `GET /api/v1/backtests/{backtest_id}` | the result document in the light view of the user's backtest, whatever its status, or of another account's while it is published ([engine.md](engine.md#the-result-document)) |
@@ -116,7 +116,7 @@ flowchart LR
 | `PATCH /api/v1/backtests/{backtest_id}` | stars, unstars, renames (`409 name-taken`; a name of null goes back to the generated one), publishes or unpublishes the user's backtest |
 | `GET /api/v1/experiments` | a page of 12 of the backtests every account published ([Experiments](#experiments)): search `q` (the backtest's name, symbol, model name or author's name), `mine` or `author` (a user ID), `market`, `symbol`, `representation`, `timeframe`, `sort` and `order`, `page`; with the total, the pages, the counts (all published, the user's, the accounts that published) and what the filters offer |
 | `GET /api/v1/compare?ids=<id>,<id>` | 1 to 20 backtests side by side, the user's own and others' published ones, as the Compare page shows them ([Compare](#compare)) |
-| `POST /api/v1/sweeps` | starts a backtest for every combination of a base setup and the lists in `vary` (models, instruments, periods, decision rules), 2 to 20, all in the user's queue or none; 201 with the sweep and `Location`, or with `validate_only` 200 with the count and each setup and nothing started ([Sweeps](#sweeps)) |
+| `POST /api/v1/sweeps` | starts a backtest for every combination of a base setup and the lists in `vary` (models, instruments, periods, decision rules), 2 to 20, all in the user's queue or none; 201 with the sweep and `Location`, or with `validate_only` 200 with the count and each setup and nothing started; the `Idempotency-Key` header as for `POST /api/v1/backtests` ([Sweeps](#sweeps)) |
 | `GET /api/v1/sweeps/{sweep_id}` | the user's sweep: progress, each backtest's ID, status and setup, and once all ended the ranking by `metric` (the sweep's own unless the query names another) ([Sweeps](#sweeps)) |
 | `GET /api/v1/dashboard` | everything the Dashboard shows in one response: the counts, the 6 newest backtests, the 5 best finished ones by Sharpe ratio, return, drawdown and win rate, the 4 best starred ones, and the 4 newest published backtests of anyone with how many are published |
 | `POST /mcp` (and `GET`, `DELETE`) | the MCP server, Streamable HTTP, signed in with an API key or an OAuth access token ([MCP](#mcp)); not in the API reference |
@@ -168,7 +168,11 @@ flowchart LR
   module adds `model-needs-setup` (409: the model has no manifest),
   `instrument-not-for-model` (422: a model of US trading hours on a crypto pair or the other
   way round, with `session` and `market`), `queue-full` (409: 20 backtests of the user wait
-  already, with `limit`), `backtest-not-queued` (409: cancelling a backtest that runs or has
+  already, with `limit` and `retry_after_s`, also as `Retry-After`: about when one of them has
+  started, the median of the user's last 20 runs, a minute before any finished),
+  `idempotency-key-reused` (422: an `Idempotency-Key` the user sent with another body in the
+  last 24 hours), `idempotency-key-in-use` (409: the first request with the key is still being
+  answered, with `retry_after_s` 2, also as `Retry-After`), `backtest-not-queued` (409: cancelling a backtest that runs or has
   ended), `backtests-unavailable` (503: the worker's queue cannot be reached),
   `backtest-not-finished` (409: a download of a queued, running or failed backtest, or
   publishing one),
@@ -180,7 +184,8 @@ flowchart LR
   `validation` (422, also a benchmark of
   another instrument, or of SPY, QQQ or DIA on a crypto backtest, and a sweep of fewer than 2 or
   more than 20 backtests, the latter with `count` and `limit`), `queue-full` for a sweep too
-  (409: the queue has room for fewer than its backtests, with `limit`, `count` and `room`), a
+  (409: the queue has room for fewer than its backtests, with `limit`, `count`, `room` and
+  `retry_after_s`, the median run for each place missing), a
   sweep's setup that fails a check with that check's problem and `setup` (the setup's place in
   the grid, from 1), and the data module's
   `warm-up-out-of-range`, `period-out-of-range`, `too-many-candles`, `instrument-not-found`,
@@ -535,8 +540,14 @@ sequenceDiagram
 - **A job** (`jobs.Job`): `version` (1), `id` (32 hex), `kind` (`predict` or `check`), `model`
   (the file in the model storage, `<user_id>/<model_id>.keras` or `.onnx`: no absolute path, no
   `..`, no other extension; the extension says how the worker runs it),
-  `sha256` (of the upload), `manifest` (the model's manifest, as data), `enqueued_at` and
-  `deadline` (epoch seconds: when the backend stops waiting). The candles of a `predict` are
+  `sha256` (of the upload), `manifest` (the model's manifest, as data; a `predict` leaves
+  out its `example` and `about`, which it does not use, so a job stays small in the queue's
+  Redis of 16 MB without eviction), `enqueued_at`, `deadline` (epoch seconds: when the backend
+  stops waiting for a worker to take it; `QUEUE_WAIT`, 10 minutes) and `wait` (seconds the
+  backend waits for the result from the claim on, 180 by default: the time in the queue does
+  not shorten the run; a job without it, of an older backend, runs until `deadline`). The
+  backend's wait (`JobQueue.result` with `claim_by`) first waits for the claim, which it sees
+  by the lease, then `wait` for the result. The candles of a `predict` are
   `<job_id>/candles.parquet` in the jobs' volume (`ts`, open, high, low, close, volume, and
   for stocks `session_last`, the mark of each session's last candle from the calendar:
   [data.md](data.md#last-candle-of-a-session)), and its
@@ -558,8 +569,8 @@ sequenceDiagram
   `example`, `time-limit`,
   `stopped` (the job's process was killed, mostly at the memory limit, or an allocation
   larger than the memory failed), `worker-stopped`, `expired` (the backend no longer waits: a
-  job past its deadline does not run, a running one stops at it, a job without an answer
-  within the wait fails at the backend) and `internal` (a bug of ours).
+  job no worker took by its deadline does not run, a running one stops after its `wait`, a job
+  without an answer within the wait fails at the backend) and `internal` (a bug of ours).
 - **A `check`** builds the input from built-in candles (a seeded random walk, enough for the
   manifest's warm-up and 64 samples; for the regular session the last candle of every
   session's worth of them is marked, every 13th for 30m), runs the model, wants one finite
@@ -778,26 +789,34 @@ checked at the next start.
   `queue_position`, with `Location`. `POST /api/v1/backtests/check` runs the same checks up to
   the lock (`BacktestRuns.check`) and answers what would run and where it would wait, so an
   agent can fix a setup before it starts anything.
-- **The queue**: a user's backtests run one at a time. A new backtest is stored `queued`, at
-  the end of the user's queue, and in the same transaction, under the lock of the user, the
-  oldest queued one (lowest number) becomes `running` with `started_at` when none of theirs
-  runs: the new one itself when nothing else waits. At most 20 wait (`store.QUEUE_MAX`): a start
-  beyond is `409 queue-full` with `limit`, checked before the slower checks and again under
-  the lock. When a run ends, finished or failed for any reason (the worker stopped or failed
-  the job, the candles, a bug), the runner starts the oldest queued backtest of its user under
-  the same lock (`BacktestRunner._next`). Queued backtests outlive a stop of the API process:
-  the stop fails only the runs it stops, and the next start, after failing those left
-  running, starts the first of every queue (`resume`), which it also does every 30 seconds
-  for a queue that stood still (its next could not be started, Postgres out of reach); a new
-  start of the user moves such a queue on too, unless 20 wait already. With Postgres out of
-  reach at the start, failing those left running is tried again at each check; it fails only
-  backtests that began to run before the process started. A backtest the runner is handed
-  after its shutdown began goes back to the head of its queue. Fairness comes from the one run per user: each
-  user has at most one job in the worker's queue, which takes the oldest job first, so one
-  user's 20 queued backtests never hold back another user's backtest. `queue_position` (in
-  `BacktestOut` and the document's `backtest`, null for any other status) is 1 for the next to
-  start, counted on request over the partial index `ix_backtests_queued` (`user_id`, `number`
-  of the queued rows). `POST /api/v1/backtests/{id}/cancel` fails a queued backtest under the
+- **The queue**: the runner has `BACKTEST_SLOTS` run slots (2 by default, 1 to 32) over all
+  users, and a user's backtests run one at a time. A new backtest is stored `queued`, at the
+  end of the user's queue, and after its commit the request fills the free slots
+  (`BacktestRunner.fill`, which the start's answer waits for, so it says `running` when the
+  new one got a slot): while a slot is free, of the users with a queued backtest and none
+  running (`store.waiting`, over the partial indexes `ix_backtests_queued` and
+  `ix_backtests_running`), the one the runner served longest ago (never first; ties to the one
+  whose oldest queued backtest waits longest) gets it, and under the lock of the user its
+  oldest queued one (lowest number) becomes `running` with `started_at`. The users so take
+  turns at the slots (round robin), and everyone else waits in Postgres at no cost: no task
+  and no candles in memory until its run. The turns live in the process (one process runs the
+  API); after a restart every user starts even. At most 20 wait (`store.QUEUE_MAX`): a start
+  beyond is `409 queue-full` with `limit` and `retry_after_s`, checked before the slower
+  checks and again under the lock. When a run ends, finished or failed for any reason (the
+  worker stopped or failed the job, the candles, a bug), its slot is freed and filled again in
+  a task of its own (`wake`). Queued backtests outlive a stop of the API process: the stop
+  fails only the runs it stops, and the next start, after failing those left running, fills
+  the slots (`resume`), which it also does every 30 seconds for queues that stood still
+  (Postgres out of reach); a new start fills them too. With Postgres out of reach at the
+  start, failing those left running is tried again at each check; it fails only backtests
+  that began to run before the process started. A backtest the runner is handed after its
+  shutdown began goes back to the head of its queue. As each running backtest has at most one
+  job in the worker's queue, which takes the oldest job first, the worker's queue holds as
+  many jobs as there are slots: one user's 20 queued backtests never hold back another user's
+  backtest, and a job waits for the worker a few runs at most. `queue_position` (in
+  `BacktestOut` and the document's `backtest`, null for any other status) is 1 for the next of
+  the user's to start, counted on request over the partial index `ix_backtests_queued`
+  (`user_id`, `number` of the queued rows); a backtest at 1 may still wait for a free slot. `POST /api/v1/backtests/{id}/cancel` fails a queued backtest under the
   same lock with the error "You cancelled the backtest before it ran.", `finished_at` set, its
   steps left `pending`, no `started_at` or duration; a running backtest cannot be cancelled
   (`409 backtest-not-queued`), nor one that ended. A queued backtest has no download
@@ -1105,19 +1124,34 @@ call, as the routes' dependencies do), never the API over HTTP.
     the dry run, the start and the progress and ranking of a sweep, on the service of
     `POST /api/v1/sweeps` and `GET /api/v1/sweeps/{sweep_id}` (`experiments.build_sweeps`, its
     errors as problems through `experiments.sweep_problems`), answering what the routes answer
-    ([Sweeps](#sweeps)).
+    ([Sweeps](#sweeps)); `run_sweep` adds `eta_s` (the latest of its backtests') and takes an
+    optional `idempotency_key`, kept as the route's `Idempotency-Key`. `wait_for_sweep`
+    (`read`) waits as `wait_for_backtest` does, on the runner's word for any of the sweep's
+    backtests, reading only their statuses (`Sweeps.progress`), until none is queued or
+    running or `timeout_s` passed, and answers `done`, `progress`, `eta_s` and, once done, the
+    ranking `get_sweep` gives.
   - `run` (#404): running and reading backtests, on `experiments.backtest_runs` and the problems
     of the routes (`experiments.backtest_problems`): `validate_backtest` (`read`,
     `POST /api/v1/backtests/check`) and `start_backtest` (`backtests`, not idempotent) take the
     body of `POST /api/v1/backtests` as their arguments (`model`, `data`, and `decision`,
     `execution` and `benchmarks` with the API's defaults); `start_backtest` answers the status:
-    `running`, or `queued` with `queue_position`. `get_backtest_status` (`read`) answers the
-    status from the backtest's row alone (`BacktestRuns.header`, no candles): `ended`, the queue
-    position, the steps with the progress of the candles' load, the error and the link to the
-    backtest's page (`<PUBLIC_URL>/backtests/<id>`). `wait_for_backtest` (`read`) reads the row
-    again every second until the backtest has ended or `timeout_s` passed (50 by default, 60 at
-    most: the transport answers JSON at the end of the call, so a call never outlasts a client's
-    timeout) and answers the same status, so the agent calls it again while `ended` is false.
+    `running`, or `queued` with `queue_position`, and takes an optional `idempotency_key`
+    (kept as the route's `Idempotency-Key`, its answer the status it gave first).
+    `get_backtest_status` (`read`) answers the status from the backtest's row alone
+    (`BacktestRuns.header` over `store.statuses`, which reads no setup, report, statistics or
+    curves): `ended`, the queue position, the steps with the progress of the candles' load, the
+    error and the link to the backtest's page (`<PUBLIC_URL>/backtests/<id>`). Every status
+    has `eta_s`, about how many seconds until the backtest ends, each run as long as the median
+    of the user's last 20 finished runs: a running one what is left of it, a queued one its
+    place, the user's running one and its own run (the wait for a free slot left out); null
+    once ended, for another account's, and before any finished. `wait_for_backtest` (`read`)
+    takes `backtest_id`, or `ids` (up to 20) with `until` `any` or `all` (the default), and
+    waits until that holds or `timeout_s` passed (50 by default, 60 at most: the transport
+    answers JSON at the end of the call, so a call never outlasts a client's timeout). It reads
+    the statuses again when the runner says one of them started, ended or was cancelled
+    (`BacktestRunner.watch`, an asyncio event in the one API process), and every 2.5 seconds
+    besides; it answers the status of the backtest that decided (`done`, and with `ids` each
+    one in `backtests`), so the agent calls it again while `done` is false.
     `get_backtest` (`read`) answers the light result document cut down: the summary with the
     link, the setup in the shape of `start_backtest`'s arguments (so it runs again as it is, or
     changed), the candles it ran on, the 12 statistics, each benchmark's return, one page of

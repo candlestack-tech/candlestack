@@ -209,6 +209,15 @@ if check.status_code == 200:
     started = api.post("/api/v1/backtests", json=setup).json()
 ```
 
+A start may time out on your side after the backtest was stored. Send an `Idempotency-Key`
+header (any 1 to 255 visible ASCII characters, such as a UUID) with `POST /api/v1/backtests`
+and `POST /api/v1/sweeps`, and send the same request again with the same key: within 24 hours
+it answers the first answer again, with `Idempotent-Replayed: true`, instead of starting a
+second one. The same key with another body is 422 `idempotency-key-reused`; while the first
+request is still being answered it is 409 `idempotency-key-in-use`: wait `retry_after_s`. A
+start your queue has no room for is 409 `queue-full` with `retry_after_s` (and `Retry-After`),
+about when one of your queued backtests has started.
+
 ## Compare backtests
 
 `GET /api/v1/compare?ids=bt_7f3k2m9qx4,bt_t9n8v7d6a5` compares 1 to 20 of your backtests and
@@ -258,8 +267,9 @@ still needs a model and an instrument when you vary them. An unknown field, such
 `done` the `ranking` by the metric, best first, marked as Compare marks it. Ask with
 `?metric=max_drawdown` for another order. The backtests are ordinary ones with `sweep_id`, so
 `GET /api/v1/compare` with their IDs compares them in full. In an MCP client the same is
-`validate_sweep`, `run_sweep` and `get_sweep`. `validate_sweep` needs only the scope `read`,
-while the HTTP dry run needs `backtests`. The fields:
+`validate_sweep`, `run_sweep`, `get_sweep` and `wait_for_sweep`, which waits until every
+backtest of the sweep ended and answers the ranking. `validate_sweep` needs only the scope
+`read`, while the HTTP dry run needs `backtests`. The fields:
 [architecture.md](architecture.md#sweeps).
 
 ## Upload a model through a link
@@ -340,10 +350,13 @@ change. Some add fields, such as `errors` of a 422 `validation`:
 | 403 | `missing-scope` | the key lacks the scope `scope` names: create a key with it |
 | 403 | `session-required` | keys cannot do this: do it in the app |
 | 404 | `instrument-not-found` | check the id with the instrument search |
+| 409 | `queue-full` | your queue holds 20 waiting backtests: try again in `retry_after_s` seconds, or cancel one |
+| 409 | `idempotency-key-in-use` | the first request with this `Idempotency-Key` is still being answered: send it again in `retry_after_s` seconds |
 | 404 | `upload-link-not-found` | no upload link has the token: copy the whole link or ask for a new one |
 | 410 | `upload-link-gone` | the upload link was used or expired: ask for a new one |
 | 413 | `larger-than-link` | the file is larger than the upload link's `size_bytes`: ask for a new link with its size |
 | 422 | `validation` | fix the parameters `errors` names |
+| 422 | `idempotency-key-reused` | the `Idempotency-Key` came with another body in the last 24 hours: use a new key for a new request |
 | 422 | `period-out-of-range` | `start` before the first candle, `end` at or before it (paging past the start of the data) or `end` in the future: `available_from` and `available_to` say what fits |
 | 422 | `too-many-candles` | a shorter period, a longer timeframe or paging (`suggestion`) |
 | 429 | `rate-limited` | wait `Retry-After` seconds |
