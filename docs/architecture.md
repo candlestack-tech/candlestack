@@ -893,62 +893,6 @@ a single backtest that way while it asks for one more.
   curves out. About 22 KB (4 KB gzipped) for four backtests over their whole axes; the four
   light documents the page loaded before were 5 to 6 MB (1.6 to 2.1 MB gzipped).
 
-## MCP
-
-The `mcp` module serves a remote MCP server at `/mcp` inside the app, on the official Python SDK
-(`mcp`), so Claude, ChatGPT, Cursor and any MCP client use CandleStack. Its tools call the same
-services as the routes (the module builds them from `app.state` and a Postgres session per
-call, as the routes' dependencies do), never the API over HTTP.
-
-- **Transport**: Streamable HTTP, stateless, answers as JSON (`json_response`). Every request
-  stands alone, so any process answers it and a deploy breaks no session; the SDK answers both
-  the 2026-07-28 protocol and the initialize handshake of the earlier ones. `main` adds the
-  routes (`mount_mcp`) and runs the SDK's session manager in the lifespan (`serving_mcp`), last,
-  so it stops first. The SDK's Host check is off (the edge sets the host); a request with an
-  `Origin` other than `PUBLIC_URL` is `403 cross-origin-request`, against DNS rebinding.
-- **Sign-in**: an API key in `Authorization: Bearer`, checked by `accounts.key_caller` as on a
-  route (the hash, revoked, expired, the beta list, 120 requests a minute, the last use); every
-  HTTP request counts, `initialize` and `tools/list` included. Without a key: `401
-  not-signed-in` with `WWW-Authenticate: Bearer resource_metadata="<PUBLIC_URL>/.well-known/oauth-protected-resource/mcp"`,
-  as the MCP authorization spec asks; a key that does not sign in: `401 invalid-api-key` with
-  `error="invalid_token"` and the same URL. The metadata (RFC 9728) names the resource
-  (`<PUBLIC_URL>/mcp`), the scopes and the docs and lists no authorization server until OAuth
-  comes (#408). Cookies play no part.
-- **Scopes per tool**: each tool names the scopes a key needs (`read` for the tools that only
-  read); the server checks them before the tool runs and answers `missing-scope` as the
-  routes do.
-- **Tool convention** (`mcp/convention.py`, checked when the server is built): a `verb_noun`
-  name of at most 32 characters, a title, the docstring as the description a model reads (what
-  it does, when to use it, what it answers; the link to its docs page is added), typed
-  arguments and a Pydantic output model (the input and output schemas), the annotations
-  `readOnlyHint`, `destructiveHint` and `idempotentHint` always set (`openWorldHint` false), and
-  an example call for the tool reference. A tool that only reads needs `read` alone, one that
-  changes data the scope of what it changes.
-- **Errors**: a failed tool call is a tool error (`isError`) whose text is the API's problem as
-  JSON (`type`, `title`, `status`, `detail` and the extensions): the `ProblemError` the tool
-  raised, `validation` (422, with `errors`, never the values) for arguments that do not fit the
-  input schema, `not-found` for an unknown tool, `missing-scope`, and `internal-error` for a
-  crash, which is logged with its traceback (a Sentry issue) and tells the model nothing more.
-- **Instructions and docs**: the server's `instructions` say what CandleStack is, how keys and
-  scopes work, how errors read and link `https://candlestack.tech/docs/agents/` and
-  `https://candlestack.tech/docs/mcp/`; the resource `candlestack://docs` (Markdown) lists the
-  docs pages, the tool reference, the manifest and backtest result references with their JSON
-  Schemas, the problem pages and the API reference.
-- **Tools**: `get_me` (scope `read`): the key's user (ID, name, email, created) and the key's
-  scopes. The tools of the other areas come with #399 and #402 to #405.
-- **Parity table** (`mcp/parity.py`): every endpoint of the API reference, by method and path,
-  maps to the tools that do the same, to `Planned` with the task that adds them, or to
-  `WebOnly` with the reason (sign-in, sessions, the keys themselves, deleting the account,
-  sign-in methods, the theme, health, icons, the file download). A unit test fails when an
-  endpoint has no entry, an entry names an endpoint or tool that does not exist, or a planned
-  tool exists already.
-- **Tool reference**: `uv run python -m candlestack.mcp.reference > ../docs/mcp-tools.json`
-  writes each tool as `tools/list` sends it (name, title, description, annotations, input and
-  output schemas) with its scopes, example and endpoints, the instructions and resources, and
-  the web only endpoints with their reasons. The file is committed, a unit test fails when it
-  is stale (like `openapi.json`), and the website builds `candlestack.tech/docs/mcp/tools/` from
-  it (website#76).
-
 ## Sweeps
 
 `POST /api/v1/sweeps` (`experiments/sweeps.py`) runs a grid of setups in one request, and
@@ -992,6 +936,67 @@ backtests itself.
   marks them. Failed backtests, and a statistic that is undefined, come last without a rank.
   The ranking has the IDs, so `GET /api/v1/compare` gives every statistic, the setups and the
   curves.
+
+## MCP
+
+The `mcp` module serves a remote MCP server at `/mcp` inside the app, on the official Python SDK
+(`mcp`), so Claude, ChatGPT, Cursor and any MCP client use CandleStack. Its tools call the same
+services as the routes (the module builds them from `app.state` and a Postgres session per
+call, as the routes' dependencies do), never the API over HTTP.
+
+- **Transport**: Streamable HTTP, stateless, answers as JSON (`json_response`). Every request
+  stands alone, so any process answers it and a deploy breaks no session; the SDK answers both
+  the 2026-07-28 protocol and the initialize handshake of the earlier ones. `main` adds the
+  routes (`mount_mcp`) and runs the SDK's session manager in the lifespan (`serving_mcp`), last,
+  so it stops first. The SDK's Host check is off (the edge sets the host); a request with an
+  `Origin` other than `PUBLIC_URL` is `403 cross-origin-request`, against DNS rebinding.
+- **Sign-in**: an API key in `Authorization: Bearer`, checked by `accounts.key_caller` as on a
+  route (the hash, revoked, expired, the beta list, 120 requests a minute, the last use); every
+  HTTP request counts, `initialize` and `tools/list` included. Without a key: `401
+  not-signed-in` with `WWW-Authenticate: Bearer resource_metadata="<PUBLIC_URL>/.well-known/oauth-protected-resource/mcp"`,
+  as the MCP authorization spec asks; a key that does not sign in: `401 invalid-api-key` with
+  `error="invalid_token"` and the same URL. The metadata (RFC 9728) names the resource
+  (`<PUBLIC_URL>/mcp`), the scopes and the docs and lists no authorization server until OAuth
+  comes (#408). Cookies play no part.
+- **Scopes per tool**: each tool names the scopes a key needs (`read` for the tools that only
+  read); the server checks them before the tool runs and answers `missing-scope` as the
+  routes do.
+- **Tool convention** (`mcp/convention.py`, checked when the server is built): a `verb_noun`
+  name of at most 32 characters, a title, the docstring as the description a model reads (what
+  it does, when to use it, what it answers; the link to its docs page is added), typed
+  arguments and a Pydantic output model (the input and output schemas), the annotations
+  `readOnlyHint`, `destructiveHint` and `idempotentHint` always set (`openWorldHint` false), and
+  an example call for the tool reference. A tool that only reads needs `read` alone, one that
+  changes data the scope of what it changes.
+- **Errors**: a failed tool call is a tool error (`isError`) whose text is the API's problem as
+  JSON (`type`, `title`, `status`, `detail` and the extensions): the `ProblemError` the tool
+  raised, `validation` (422, with `errors`, never the values) for arguments that do not fit the
+  input schema, `not-found` for an unknown tool, `missing-scope`, and `internal-error` for a
+  crash, which is logged with its traceback (a Sentry issue) and tells the model nothing more.
+- **Instructions and docs**: the server's `instructions` say what CandleStack is, how keys and
+  scopes work, how errors read and link `https://candlestack.tech/docs/agents/` and
+  `https://candlestack.tech/docs/mcp/`; the resource `candlestack://docs` (Markdown) lists the
+  docs pages, the tool reference, the manifest and backtest result references with their JSON
+  Schemas, the problem pages and the API reference.
+- **Tools**: `get_me` (scope `read`): the key's user (ID, name, email, created) and the key's
+  scopes. `validate_sweep` (scope `read`: it changes nothing), `run_sweep` (scope `backtests`)
+  and `get_sweep` (scope `read`): the dry run, the start and the progress and ranking of a
+  sweep, on the service of `POST /api/v1/sweeps` and `GET /api/v1/sweeps/{sweep_id}`
+  (`experiments.build_sweeps`, its errors as problems through `experiments.sweep_problems`),
+  answering what the routes answer ([Sweeps](#sweeps)). The tools of the other areas come
+  with #399 and #402 to #405.
+- **Parity table** (`mcp/parity.py`): every endpoint of the API reference, by method and path,
+  maps to the tools that do the same, to `Planned` with the task that adds them, or to
+  `WebOnly` with the reason (sign-in, sessions, the keys themselves, deleting the account,
+  sign-in methods, the theme, health, icons, the file download). A unit test fails when an
+  endpoint has no entry, an entry names an endpoint or tool that does not exist, or a planned
+  tool exists already.
+- **Tool reference**: `uv run python -m candlestack.mcp.reference > ../docs/mcp-tools.json`
+  writes each tool as `tools/list` sends it (name, title, description, annotations, input and
+  output schemas) with its scopes, example and endpoints, the instructions and resources, and
+  the web only endpoints with their reasons. The file is committed, a unit test fails when it
+  is stale (like `openapi.json`), and the website builds `candlestack.tech/docs/mcp/tools/` from
+  it (website#76).
 
 ## Modules
 

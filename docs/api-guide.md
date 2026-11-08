@@ -228,7 +228,8 @@ To vary what a model reads or its timeframe, list models whose manifests read th
 `GET /api/v1/sweeps/<id>` has the `progress`, each backtest's ID, status and setup, and once
 `done` the `ranking` by the metric, best first, marked as Compare marks it. Ask with
 `?metric=max_drawdown` for another order. The backtests are ordinary ones with `sweep_id`, so
-`GET /api/v1/compare` with their IDs compares them in full. The fields:
+`GET /api/v1/compare` with their IDs compares them in full. In an MCP client the same is
+`validate_sweep`, `run_sweep` and `get_sweep`. The fields:
 [architecture.md](architecture.md#sweeps).
 
 ## Upload a model through a link

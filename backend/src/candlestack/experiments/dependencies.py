@@ -5,6 +5,8 @@ app keeps (``app.state.data_service``, ``app.state.backtest_runner``)."""
 from typing import Annotated
 
 from fastapi import Depends, Request
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.datastructures import State
 
 from candlestack.core import DbSessionDep, SettingsDep
 from candlestack.experiments.runs import BacktestRuns
@@ -30,11 +32,16 @@ def get_backtest_runs(request: Request, db: DbSessionDep, settings: SettingsDep)
 BacktestRunsDep = Annotated[BacktestRuns, Depends(get_backtest_runs)]
 
 
-def get_sweeps(request: Request, db: DbSessionDep, settings: SettingsDep) -> Sweeps:
-    state = request.app.state
+def build_sweeps(state: State, db: AsyncSession, app_version: str) -> Sweeps:
+    """The sweeps of the app with ``state`` on the Postgres session ``db``: for the routes and
+    the MCP tools alike."""
     store = BacktestStore(db)
-    runs = BacktestRuns(store, state.data_service, state.backtest_runner, settings.app_version)
+    runs = BacktestRuns(store, state.data_service, state.backtest_runner, app_version)
     return Sweeps(store, runs)
+
+
+def get_sweeps(request: Request, db: DbSessionDep, settings: SettingsDep) -> Sweeps:
+    return build_sweeps(request.app.state, db, settings.app_version)
 
 
 SweepsDep = Annotated[Sweeps, Depends(get_sweeps)]

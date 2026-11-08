@@ -637,7 +637,7 @@ def _setup_problem(failed: SetupFailed) -> ProblemError:
 
 
 @contextmanager
-def _sweep_problems() -> Iterator[None]:
+def sweep_problems() -> Iterator[None]:
     """Raises the errors of a sweep, of its setups and of the market data as problem details."""
     with _problems():
         try:
@@ -695,7 +695,7 @@ async def start_sweep(
     with its `sweep_id`. `GET /api/v1/sweeps/{sweep_id}` follows them and ranks them once all
     ended."""
     response.headers.update(NO_STORE)
-    with _sweep_problems():
+    with sweep_problems():
         if body.validate_only:
             plan = await sweeps.plan(user.id, body)
             return _json(plan.model_dump_json().encode(), response)
@@ -722,5 +722,5 @@ async def get_sweep(
     each backtest's ID, status and setup, and once none is queued or running (`done`) the
     ranking by the metric, with the marking rules of `GET /api/v1/compare`."""
     response.headers.update(NO_STORE)
-    with _sweep_problems():
+    with sweep_problems():
         return await sweeps.sweep(user.id, sweep_id, metric)
