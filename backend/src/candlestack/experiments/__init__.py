@@ -4,7 +4,8 @@ Backtests page and summed up on the Dashboard. A backtest's run puts together th
 ``metrics``, in a task of the API process (``BacktestRunner``).
 
 Other modules import only from here (``from candlestack.experiments import backtests_router``),
-never from the submodules. ``candlestack.main`` puts a ``BacktestRunner`` on
+never from the submodules; the MCP tools take the services, their queries, bodies and enums and
+the problems of their errors from here too. ``candlestack.main`` puts a ``BacktestRunner`` on
 ``app.state.backtest_runner`` (and ``recover`` and ``close`` it with the app), and
 ``model_usage`` on ``app.state.model_usage``,
 so the models list of ``ml``, which cannot import this module, shows how the backtests used
@@ -13,28 +14,119 @@ errors as problems with ``sweep_problems``, as the routes do. A user's backtests
 with the account by the foreign keys' cascade: no hook. Importing the module declares its
 tables (``backend/migrations`` relies on it).
 
+The MCP tools (``candlestack.mcp``) build the same services as the routes (``backtest_runs``),
+take the same setup (``BacktestIn`` and its groups) and raise the same problems
+(``backtest_problems``).
+
 ``python -m candlestack.experiments.seed --email <email>`` fills an account with test backtests
 (stage and local only).
 """
 
+from candlestack.experiments.api import (
+    PAGE_MAX,
+    backtest_problems,
+    sweep_problems,
+    update_problems,
+)
 from candlestack.experiments.api import router as backtests_router
-from candlestack.experiments.api import sweep_problems
-from candlestack.experiments.dependencies import build_sweeps
-from candlestack.experiments.document import BacktestIn
+from candlestack.experiments.compare import COMPARE_MAX, CompareOut, check_ids
+from candlestack.experiments.compare import compare as compare_backtests
+from candlestack.experiments.dependencies import backtest_runs, build_sweeps, get_backtests_service
+from candlestack.experiments.document import (
+    BacktestCheck,
+    BacktestHeader,
+    BacktestIn,
+    BenchmarkIn,
+    DataIn,
+    Decision,
+    Execution,
+    ModelRef,
+    Stats,
+)
 from candlestack.experiments.runner import BacktestRunner
+from candlestack.experiments.runs import BacktestRuns
+from candlestack.experiments.schemas import (
+    BACKTEST_NAME_MAX,
+    EXPERIMENTS_PAGE_SIZE,
+    MODEL_NAME_MAX,
+    PAGE_SIZE,
+    QUERY_MAX,
+    Author,
+    BacktestCounts,
+    BacktestInstrument,
+    BacktestOut,
+    BacktestSetup,
+    BacktestShow,
+    BacktestSort,
+    BacktestStatus,
+    BacktestUpdate,
+    ExperimentCounts,
+    ExperimentFacets,
+    ExperimentOut,
+    ExperimentSort,
+    InstrumentMarket,
+    ModelCount,
+    Representation,
+    SetupTimeframe,
+    SortOrder,
+)
+from candlestack.experiments.service import ExperimentsQuery, ListQuery
 from candlestack.experiments.store import model_usage
 from candlestack.experiments.sweeps import SweepIn, SweepMetric, SweepOut, SweepPlan, SweepVary
 
 __all__ = [
+    "BACKTEST_NAME_MAX",
+    "COMPARE_MAX",
+    "EXPERIMENTS_PAGE_SIZE",
+    "MODEL_NAME_MAX",
+    "PAGE_MAX",
+    "PAGE_SIZE",
+    "QUERY_MAX",
+    "Author",
+    "BacktestCheck",
+    "BacktestCounts",
+    "BacktestHeader",
     "BacktestIn",
+    "BacktestInstrument",
+    "BacktestOut",
     "BacktestRunner",
+    "BacktestRuns",
+    "BacktestSetup",
+    "BacktestShow",
+    "BacktestSort",
+    "BacktestStatus",
+    "BacktestUpdate",
+    "BenchmarkIn",
+    "CompareOut",
+    "DataIn",
+    "Decision",
+    "Execution",
+    "ExperimentCounts",
+    "ExperimentFacets",
+    "ExperimentOut",
+    "ExperimentSort",
+    "ExperimentsQuery",
+    "InstrumentMarket",
+    "ListQuery",
+    "ModelCount",
+    "ModelRef",
+    "Representation",
+    "SetupTimeframe",
+    "SortOrder",
+    "Stats",
     "SweepIn",
     "SweepMetric",
     "SweepOut",
     "SweepPlan",
     "SweepVary",
+    "backtest_problems",
+    "backtest_runs",
     "backtests_router",
     "build_sweeps",
+    "check_ids",
+    "compare_backtests",
+    "get_backtests_service",
     "model_usage",
     "sweep_problems",
+    "update_problems",
 ]

@@ -51,6 +51,8 @@ runs:
     # Pinned and checked against its SHA-256: this job holds the deploy key and the secrets.
     # To update, take a release of github.com/cloudflare/cloudflared and the sha256 digest that
     # GitHub lists for its cloudflared-linux-amd64.deb. Later deploy steps of a job reuse it.
+    # When GitHub's release downloads fail, the same file comes from Cloudflare's own package
+    # repository, under the same checksum.
     - name: Install cloudflared
       shell: bash
       env:
@@ -61,8 +63,10 @@ runs:
           exit 0
         fi
         deb=$RUNNER_TEMP/cloudflared.deb
-        curl -fsSL -o "$deb" \
-          "https://github.com/cloudflare/cloudflared/releases/download/$VERSION/cloudflared-linux-amd64.deb"
+        curl -fsSL --retry 2 -o "$deb" \
+          "https://github.com/cloudflare/cloudflared/releases/download/$VERSION/cloudflared-linux-amd64.deb" ||
+          curl -fsSL --retry 2 -o "$deb" \
+            "https://pkg.cloudflare.com/cloudflared/pool/main/c/cloudflared/cloudflared_${VERSION}_amd64.deb"
         echo "$SHA256  $deb" | sha256sum --check --quiet
         sudo dpkg -i "$deb" >/dev/null
 

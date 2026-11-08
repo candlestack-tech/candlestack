@@ -628,6 +628,14 @@ Checks 1 to 3 read the files only and run on upload; 4 and 5 run the model in th
    is then `verified`. This is the only check that catches columns in the wrong order, which
    the shape cannot.
 
+Each thing checks 2 and 3 find wrong is a `Finding`: a sentence, the field it is about (a path
+such as `input.features[2].id`) and, when the check knows it, what fits there (the blocks of
+the step, the fields or parameters of the object, the options of a choice, the shape to give),
+so a person or an agent fixes the manifest from it. The API and the MCP tools answer them as
+`problems` ([architecture.md](architecture.md#models));
+`POST /api/v1/models/{model_id}/manifest/check` and the tool `validate_manifest` run checks 2
+and 3 without keeping the manifest.
+
 ## Tests
 
 - Unit tests by hand on a few candles for every block.

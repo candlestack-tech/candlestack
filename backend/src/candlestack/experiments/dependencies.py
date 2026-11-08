@@ -22,11 +22,16 @@ def get_backtests_service(db: DbSessionDep) -> BacktestsService:
 BacktestsServiceDep = Annotated[BacktestsService, Depends(get_backtests_service)]
 
 
-def get_backtest_runs(request: Request, db: DbSessionDep, settings: SettingsDep) -> BacktestRuns:
-    state = request.app.state
+def backtest_runs(state: State, db: AsyncSession) -> BacktestRuns:
+    """The runs on `db` with the clients the app keeps on `state`: what a route depends on, and
+    what an MCP tool builds for its call."""
     return BacktestRuns(
-        BacktestStore(db), state.data_service, state.backtest_runner, settings.app_version
+        BacktestStore(db), state.data_service, state.backtest_runner, state.settings.app_version
     )
+
+
+def get_backtest_runs(request: Request, db: DbSessionDep) -> BacktestRuns:
+    return backtest_runs(request.app.state, db)
 
 
 BacktestRunsDep = Annotated[BacktestRuns, Depends(get_backtest_runs)]

@@ -70,33 +70,35 @@ PARITY: dict[str, Entry] = {
     ),
     "GET /api/v1/data/top-instruments": Tools(("top_instruments",)),
     "GET /api/v1/preprocessing/catalog": Tools(("preprocessing_catalog",)),
-    "GET /api/v1/models": Planned(403, ("list_models", "get_model")),
-    "POST /api/v1/models": Planned(403, ("create_model_upload", "get_model_upload")),
-    "POST /api/v1/models/uploads": Planned(403, ("create_model_upload",)),
-    "GET /api/v1/models/uploads/{upload_id}": Planned(403, ("get_model_upload",)),
+    "GET /api/v1/models": Tools(("list_models", "get_model")),
+    "POST /api/v1/models": Tools(("create_model_upload", "get_model_upload")),
+    "POST /api/v1/models/uploads": Tools(("create_model_upload",)),
+    "GET /api/v1/models/uploads/{upload_id}": Tools(("get_model_upload",)),
     "PUT /api/v1/uploads/{token}": WebOnly(
         "The file goes to the one-time link with curl or the upload page, not through a tool."
     ),
-    "PATCH /api/v1/models/{model_id}": Planned(403, ("rename_model", "star_model")),
-    "DELETE /api/v1/models/{model_id}": Planned(403, ("delete_model",)),
-    "GET /api/v1/models/{model_id}/manifest": Planned(403, ("get_manifest",)),
-    "PUT /api/v1/models/{model_id}/manifest": Planned(403, ("validate_manifest", "set_manifest")),
-    "POST /api/v1/backtests": Planned(404, ("validate_backtest", "start_backtest")),
-    "GET /api/v1/backtests/{backtest_id}": Planned(
-        404, ("get_backtest", "get_backtest_status", "wait_for_backtest")
+    "PATCH /api/v1/models/{model_id}": Tools(("rename_model", "star_model")),
+    "DELETE /api/v1/models/{model_id}": Tools(("delete_model",)),
+    "GET /api/v1/models/{model_id}/manifest": Tools(("get_manifest",)),
+    "PUT /api/v1/models/{model_id}/manifest": Tools(("set_manifest",)),
+    "POST /api/v1/models/{model_id}/manifest/check": Tools(("validate_manifest",)),
+    "POST /api/v1/backtests": Tools(("start_backtest",)),
+    "POST /api/v1/backtests/check": Tools(("validate_backtest",)),
+    "GET /api/v1/backtests/{backtest_id}": Tools(
+        ("get_backtest", "get_backtest_status", "wait_for_backtest")
     ),
     "GET /api/v1/backtests/{backtest_id}/download": WebOnly(
         "The whole result document as a file to save; an agent reads the same result in pages "
         "with get_backtest."
     ),
-    "GET /api/v1/compare": Planned(404, ("compare_backtests",)),
-    "GET /api/v1/backtests": Planned(405, ("list_backtests",)),
-    "PATCH /api/v1/backtests/{backtest_id}": Planned(
-        405, ("rename_backtest", "star_backtest", "publish_backtest", "unpublish_backtest")
+    "GET /api/v1/compare": Tools(("compare_backtests",)),
+    "GET /api/v1/backtests": Tools(("list_backtests",)),
+    "PATCH /api/v1/backtests/{backtest_id}": Tools(
+        ("rename_backtest", "star_backtest", "publish_backtest", "unpublish_backtest")
     ),
-    "POST /api/v1/backtests/{backtest_id}/cancel": Planned(405, ("cancel_backtest",)),
-    "GET /api/v1/experiments": Planned(405, ("list_experiments",)),
-    "GET /api/v1/dashboard": Planned(405, ("get_dashboard",)),
+    "POST /api/v1/backtests/{backtest_id}/cancel": Tools(("cancel_backtest",)),
+    "GET /api/v1/experiments": Tools(("list_experiments",)),
+    "GET /api/v1/dashboard": Tools(("get_dashboard",)),
     "POST /api/v1/sweeps": Tools(("validate_sweep", "run_sweep")),
     "GET /api/v1/sweeps/{sweep_id}": Tools(("get_sweep",)),
 }
