@@ -71,7 +71,12 @@ PARITY: dict[str, Entry] = {
     "GET /api/v1/data/top-instruments": Planned(402, ("top_instruments",)),
     "GET /api/v1/preprocessing/catalog": Planned(402, ("preprocessing_catalog",)),
     "GET /api/v1/models": Planned(403, ("list_models", "get_model")),
-    "POST /api/v1/models": Planned(399, ("create_model_upload", "get_model_upload")),
+    "POST /api/v1/models": Planned(403, ("create_model_upload", "get_model_upload")),
+    "POST /api/v1/models/uploads": Planned(403, ("create_model_upload",)),
+    "GET /api/v1/models/uploads/{upload_id}": Planned(403, ("get_model_upload",)),
+    "PUT /api/v1/uploads/{token}": WebOnly(
+        "The file goes to the one-time link with curl or the upload page, not through a tool."
+    ),
     "PATCH /api/v1/models/{model_id}": Planned(403, ("rename_model", "star_model")),
     "DELETE /api/v1/models/{model_id}": Planned(403, ("delete_model",)),
     "GET /api/v1/models/{model_id}/manifest": Planned(403, ("get_manifest",)),

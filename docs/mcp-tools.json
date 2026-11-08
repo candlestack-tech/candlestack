@@ -165,6 +165,10 @@
       "reason": "An image for the app's lists, which an agent does not need."
     },
     {
+      "endpoint": "PUT /api/v1/uploads/{token}",
+      "reason": "The file goes to the one-time link with curl or the upload page, not through a tool."
+    },
+    {
       "endpoint": "GET /api/v1/backtests/{backtest_id}/download",
       "reason": "The whole result document as a file to save; an agent reads the same result in pages with get_backtest."
     }
