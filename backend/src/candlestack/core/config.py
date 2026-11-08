@@ -107,6 +107,8 @@ class Settings(BaseSettings):
     job_files_dir: Path = Path("var/jobs")
     # How long the worker lets one job run before it stops it, in seconds.
     job_time_limit: float = Field(default=120, gt=0, le=3600)
+    # How many backtests run at once, over all users (one per user): the others wait queued.
+    backtest_slots: int = Field(default=2, ge=1, le=32)
 
     candles_max: int = Field(default=50_000, gt=0)
     # The most backtests an account keeps, failed ones counted: a start or a sweep beyond it

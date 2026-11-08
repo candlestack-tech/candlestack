@@ -278,3 +278,52 @@ def test_the_check_needs_a_key_with_read(ada, client) -> None:
 
     assert response.status_code == 403
     assert response.json()["scope"] == "read"
+
+
+@pytest.mark.usefixtures("market")
+def test_a_start_sent_again_with_its_key_answers_the_first_backtest(ada, mcp, sql) -> None:
+    model_id = ada.runnable_model()
+    secret = key(ada, "read", "backtests")
+    arguments = {**setup(model_id), "idempotency_key": "retry-of-start-two"}
+
+    first = answer(mcp(secret, "start_backtest", arguments))
+    again = answer(mcp(secret, "start_backtest", arguments))
+    changed = arguments | {"execution": {"fee_bps": 9.0}}
+    other = problem(mcp(secret, "start_backtest", changed))
+    new = answer(mcp(secret, "start_backtest", {**changed, "idempotency_key": "another"}))
+
+    assert again == first
+    assert other["type"] == PROBLEMS + "idempotency-key-reused"
+    assert other["status"] == 422
+    assert new["id"] != first["id"]
+    assert sql("SELECT count(*) FROM backtests") == [(2,)]
+
+
+@pytest.mark.usefixtures("worker")
+def test_an_agent_waits_for_several_backtests_at_once(ada, mcp) -> None:
+    model_id = ada.runnable_model()
+    secret = key(ada, "read", "backtests")
+    ids = [answer(mcp(secret, "start_backtest", setup(model_id)))["id"] for _ in range(2)]
+
+    waited = None
+    for _ in range(5):
+        waited = answer(mcp(secret, "wait_for_backtest", {"ids": ids, "until": "all"}))
+        if waited["done"]:
+            break
+
+    assert waited is not None
+    assert waited["done"] is True
+    assert [b["id"] for b in waited["backtests"]] == ids
+    assert [b["status"] for b in waited["backtests"]] == ["finished", "finished"]
+    assert all(b["eta_s"] is None for b in waited["backtests"])
+
+
+@pytest.mark.usefixtures("market")
+def test_a_wait_for_ids_names_one_nobody_can_read(ada, bob, mcp) -> None:
+    secret = key(ada, "read", "backtests")
+    bobs = answer(mcp(key(bob, "read", "backtests"), "start_backtest", setup(bob.runnable_model())))
+
+    body = problem(mcp(secret, "wait_for_backtest", {"ids": [bobs["id"]], "timeout_s": 1}))
+
+    assert body["type"] == PROBLEMS + "not-found"
+    assert body["id"] == bobs["id"]

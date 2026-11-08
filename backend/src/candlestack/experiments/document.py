@@ -319,8 +319,8 @@ class BacktestHeader(BaseModel):
     queue_position: int | None = Field(
         ge=1,
         description=(
-            "Where a queued backtest is in its author's queue: 1 starts next, when the running "
-            "one ends; null for any other status"
+            "Where a queued backtest is in its author's queue: 1 starts next, when their "
+            "running one ended and a run slot is free; null for any other status"
         ),
     )
     sweep_id: str | None = Field(

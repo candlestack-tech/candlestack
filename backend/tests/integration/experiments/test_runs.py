@@ -8,11 +8,12 @@ import json
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
+import anyio
 import numpy as np
 import pytest
 import redis
@@ -28,7 +29,7 @@ from candlestack.data import (
     WarmUpOutOfRange,
 )
 from candlestack.engine import ENGINE_VERSION
-from candlestack.experiments import BacktestRunner
+from candlestack.experiments import BacktestIn, BacktestRunner, backtest_runs
 from candlestack.experiments import names as names_module
 from candlestack.experiments import runner as runner_module
 from candlestack.experiments import store as store_module
@@ -648,7 +649,7 @@ def test_candles_of_the_index_fund_that_fail_fail_the_backtest_naming_it(
 
 @pytest.mark.usefixtures("market")
 def test_a_worker_that_does_not_answer_fails_the_backtest(ada, app) -> None:
-    app.state.backtest_runner._wait = 1
+    app.state.backtest_runner._queue_wait = 1
     model_id = ada.runnable_model()
 
     document = ada.ended(ada.start(body(model_id)).json()["backtest"]["id"])
@@ -849,7 +850,69 @@ def test_twenty_backtests_wait_at_most(ada) -> None:
     assert refused.status_code == 409
     assert refused.json()["type"] == PROBLEMS + "queue-full"
     assert refused.json()["limit"] == 20
+    # No run of the user finished yet: a minute a run.
+    assert refused.json()["retry_after_s"] == 60
+    assert refused.headers["retry-after"] == "60"
     assert ada.backtests().json()["total"] == 21
+
+
+@pytest.mark.usefixtures("market")
+def test_a_full_queue_says_when_to_try_again_from_the_users_runs(ada) -> None:
+    for number, seconds in enumerate([100.0, 20.0, 30.0], start=1):
+        backtest_id = ada.backtest(number)
+        ada.sql("UPDATE backtests SET duration_s = :s WHERE id = :id", s=seconds, id=backtest_id)
+    model_id = ada.runnable_model()
+    for _ in range(21):
+        ada.start(body(model_id))  # no worker answers: the first keeps running
+
+    refused = ada.start(body(model_id)).json()
+
+    assert refused["retry_after_s"] == 30
+    assert "in about 30 s" in refused["detail"]
+
+
+@pytest.mark.usefixtures("market")
+def test_a_start_sent_again_with_its_idempotency_key_answers_the_first(ada, bob, sql) -> None:
+    model_id = ada.runnable_model()
+    headers = {"Idempotency-Key": "retry-of-start-one"}
+
+    first = ada.start(body(model_id), headers=headers)
+    again = ada.start(body(model_id), headers=headers)
+    other = ada.start(body(model_id, execution={"fee_bps": 9.0}), headers=headers)
+    bobs = bob.start(body(bob.runnable_model()), headers=headers)
+    bad = ada.start(body(model_id), headers={"Idempotency-Key": "with space"})
+
+    assert (first.status_code, again.status_code) == (201, 201)
+    assert again.json() == first.json()
+    assert again.headers["location"] == first.headers["location"]
+    assert again.headers["idempotent-replayed"] == "true"
+    assert "idempotent-replayed" not in first.headers
+    assert other.status_code == 422
+    assert other.json()["type"] == PROBLEMS + "idempotency-key-reused"
+    # Another user's key is their own.
+    assert bobs.status_code == 201
+    assert bad.status_code == 422
+    assert bad.json()["type"] == PROBLEMS + "validation"
+    assert sql("SELECT user_id, count(*) FROM backtests GROUP BY user_id ORDER BY 1") == [
+        (ada.id, 1),
+        (bob.id, 1),
+    ]
+
+
+@pytest.mark.usefixtures("market")
+def test_a_refused_start_keeps_no_idempotency_key(ada) -> None:
+    model_id = ada.runnable_model()
+    headers = {"Idempotency-Key": "k-full"}
+    for _ in range(21):
+        ada.start(body(model_id))
+
+    refused = ada.start(body(model_id), headers=headers)
+    ada.cancel(ada.backtests().json()["backtests"][0]["id"])
+    started = ada.start(body(model_id), headers=headers)
+
+    assert refused.status_code == 409
+    assert started.status_code == 201
+    assert "idempotent-replayed" not in started.headers
 
 
 @pytest.mark.usefixtures("market")
@@ -1023,6 +1086,130 @@ def test_one_users_queue_does_not_hold_back_another_users_backtest(
     assert owners[:2] == [ada.id, bob.id]
 
 
+def test_backtests_run_in_as_many_slots_as_the_runner_has(ada, bob, app, worker) -> None:
+    worker.gate.clear()  # every run holds its slot
+    app.state.backtest_runner._slots = 1
+
+    adas = ada.start(body(ada.runnable_model())).json()["backtest"]
+    bobs = bob.start(body(bob.runnable_model())).json()["backtest"]
+    check = bob.request(
+        "POST", "/api/v1/backtests/check", json=body(bob.runnable_model(name="b.keras"))
+    )
+
+    assert adas["status"] == "running"
+    # Bob has none running, yet waits for the one slot.
+    assert (bobs["status"], bobs["queue_position"], bobs["started_at"]) == ("queued", 1, None)
+    # Another of Bob's would wait behind his first.
+    assert (check.json()["starts"], check.json()["queue_position"]) == ("queued", 2)
+    worker.gate.set()
+    assert ada.ended(adas["id"])["backtest"]["status"] == "finished"
+    ended = bob.ended(bobs["id"])
+    assert ended["backtest"]["status"] == "finished"
+    assert at(ended, "started_at") >= at(ada.document(adas["id"]).json(), "finished_at")
+
+
+def test_the_users_take_turns_at_the_slots(ada, bob, app, worker) -> None:
+    worker.gate.clear()
+    app.state.backtest_runner._slots = 1
+    adas_model, bobs_model = ada.runnable_model(), bob.runnable_model()
+    adas = [ada.start(body(adas_model)).json()["backtest"]["id"] for _ in range(3)]
+    bobs = [bob.start(body(bobs_model)).json()["backtest"]["id"] for _ in range(2)]
+
+    worker.gate.set()
+    ended = [ada.ended(backtest_id) for backtest_id in adas] + [
+        bob.ended(backtest_id) for backtest_id in bobs
+    ]
+
+    starts = sorted(
+        zip((at(document, "started_at") for document in ended), adas + bobs, strict=True)
+    )
+    # Ada's first held the slot when Bob came; then one each in turn, Ada's last at the end.
+    assert [backtest_id for _, backtest_id in starts] == [
+        adas[0],
+        bobs[0],
+        adas[1],
+        bobs[1],
+        adas[2],
+    ]
+
+
+@pytest.mark.usefixtures("market")
+def test_a_start_whose_request_goes_away_after_its_commit_still_gets_its_run(
+    ada, app, client
+) -> None:
+    setup = BacktestIn.model_validate(body(ada.runnable_model()))
+    stored: list[str] = []
+
+    async def start_and_go_away() -> None:
+        async with app.state.db.sessions() as db, anyio.create_task_group() as group:
+
+            async def committed(backtest_id: str) -> None:
+                stored.append(backtest_id)
+                group.cancel_scope.cancel()  # the client went away
+
+            group.start_soon(backtest_runs(app.state, db).start, ada.id, setup, committed)
+
+    client.portal.call(start_and_go_away)
+    (backtest_id,) = stored
+
+    assert ada.document(backtest_id).json()["backtest"]["status"] == "running"
+    assert backtest_id in app.state.backtest_runner._tasks.values()
+
+
+@pytest.mark.usefixtures("market")
+def test_a_backtest_running_without_a_run_is_queued_again_and_run(ada, app, client) -> None:
+    model_id = ada.runnable_model()
+    orphan = ada.start(body(model_id)).json()["backtest"]["id"]  # no worker answers
+    runner = app.state.backtest_runner
+    # As a turn whose run was never started: running in the table, no task here.
+    client.portal.call(runner.close)
+    restarted = BacktestRunner(app.state.db, runner._data, runner._jobs)
+    app.state.backtest_runner = restarted
+    ada.sql(
+        "UPDATE backtests SET status = 'running', error = NULL, finished_at = NULL, "
+        "started_at = now() - interval '2 minutes' WHERE id = :id",
+        id=orphan,
+    )
+    restarted._recovered = True  # its start found nothing left by a stopped process
+    try:
+        client.portal.call(restarted._check)
+        again = ada.document(orphan).json()["backtest"]
+        ours = set(restarted._tasks.values())
+    finally:
+        client.portal.call(restarted.close)
+
+    assert again["status"] == "running"
+    assert at({"backtest": again}, "started_at") > datetime.now(UTC) - timedelta(minutes=1)
+    assert orphan in ours
+
+
+@pytest.mark.usefixtures("market")
+def test_queued_backtests_of_several_users_fill_the_slots_after_a_restart(
+    ada, bob, app, client, market
+) -> None:
+    adas_model, bobs_model = ada.runnable_model(), bob.runnable_model()
+    adas = [ada.start(body(adas_model)).json()["backtest"]["id"] for _ in range(2)]
+    bobs = [bob.start(body(bobs_model)).json()["backtest"]["id"] for _ in range(2)]
+    stopping = app.state.backtest_runner
+    client.portal.call(stopping.close)
+    restarted = BacktestRunner(app.state.db, market, stopping._jobs, slots=2)
+    app.state.backtest_runner = restarted
+    try:
+        client.portal.call(restarted.recover)
+        statuses = {
+            backtest_id: ada.document(backtest_id).json()["backtest"]["status"]
+            for backtest_id in adas[1:]
+        } | {
+            backtest_id: bob.document(backtest_id).json()["backtest"]["status"]
+            for backtest_id in bobs[1:]
+        }
+    finally:
+        client.portal.call(restarted.close)
+
+    # The runs the stop ended failed; the next of each user took the two slots.
+    assert statuses == {adas[1]: "running", bobs[1]: "running"}
+
+
 # --- The name it gets --------------------------------------------------------------------------
 
 
@@ -1042,6 +1229,20 @@ def test_a_new_backtest_gets_a_name_of_the_word_lists(ada, sql) -> None:
 def test_a_new_name_is_none_the_account_has(ada, bob, monkeypatch) -> None:
     ada.backtest(1, generated_name="Silent Orion", name="Half Size", status="failed")
     bob.backtest(1, generated_name="Bright Vega", status="failed")
+    # The account's own and generated names are taken in any case; never another account's.
+    tried = ["SILENT ORION", "half size", "Bright Vega", "Quiet Vega"]
+    monkeypatch.setattr(store_module, "candidates", lambda count: tried[:count])
+
+    started = ada.start(body(ada.runnable_model())).json()["backtest"]
+
+    assert started["number"] == 2
+    assert started["name"] == "Bright Vega"
+
+
+@pytest.mark.usefixtures("market")
+def test_a_new_name_reads_every_name_only_when_every_one_tried_is_taken(ada, monkeypatch) -> None:
+    ada.backtest(1, generated_name="Silent Orion", status="failed")
+    monkeypatch.setattr(store_module, "candidates", lambda _count: ["Silent Orion"])
     seen: list[set[str]] = []
 
     def generated_name(taken: set[str]) -> str:
@@ -1052,10 +1253,12 @@ def test_a_new_name_is_none_the_account_has(ada, bob, monkeypatch) -> None:
 
     started = ada.start(body(ada.runnable_model())).json()["backtest"]
 
-    # The account's names, its own and generated, lowercased; never another account's.
-    assert seen == [{"silent orion", "half size"}]
-    assert started["number"] == 2
-    assert started["name"].lower() not in seen[0]
+    assert seen == [{"silent orion"}]
+    assert started["name"] != "Silent Orion"
+
+
+async def _drawn(names: Any, _store: Any, _user_id: str) -> str:
+    return next(names)
 
 
 @pytest.mark.usefixtures("market")
@@ -1063,7 +1266,9 @@ def test_a_name_the_index_refuses_is_drawn_again(ada, sql, monkeypatch) -> None:
     ada.backtest(1, generated_name="Silent Orion", status="failed")
     # As a writer without the lock could: a name the account has, then a free one.
     drawn = iter(["SILENT ORION", "Bright Vega"])
-    monkeypatch.setattr(store_module, "generated_name", lambda _taken: next(drawn))
+    monkeypatch.setattr(
+        store_module.BacktestStore, "free_name", lambda store, user: _drawn(drawn, store, user)
+    )
 
     started = ada.start(body(ada.runnable_model()))
 
@@ -1078,13 +1283,13 @@ def test_a_name_the_index_refuses_is_drawn_again(ada, sql, monkeypatch) -> None:
 @pytest.mark.usefixtures("market")
 def test_no_backtest_is_stored_when_every_draw_is_refused(ada, sql, monkeypatch) -> None:
     ada.backtest(1, generated_name="Silent Orion", status="failed")
-    drawn: list[set[str]] = []
+    drawn: list[str] = []
 
-    def taken_name(taken: set[str]) -> str:
-        drawn.append(taken)
+    async def taken_name(_store: Any, user_id: str) -> str:
+        drawn.append(user_id)
         return "Silent Orion"
 
-    monkeypatch.setattr(store_module, "generated_name", taken_name)
+    monkeypatch.setattr(store_module.BacktestStore, "free_name", taken_name)
 
     started = ada.start(body(ada.runnable_model()))
 

@@ -5,12 +5,13 @@ its download, deleting them), the backtests every account published under
 backtests under ``/api/v1/sweeps`` and the Dashboard under ``/api/v1/dashboard``.
 """
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Path, Query, Response
+from fastapi import APIRouter, Depends, Header, Path, Query, Response
 from pydantic import AfterValidator
 
 from candlestack.accounts import (
@@ -23,7 +24,7 @@ from candlestack.accounts import (
     heavy,
     heavy_unless,
 )
-from candlestack.core import NO_STORE, ProblemError, problem_doc, require_same_origin
+from candlestack.core import NO_STORE, ProblemError, RedisDep, problem_doc, require_same_origin
 from candlestack.data import data_problems
 from candlestack.experiments.compare import (
     COMPARE_MAX,
@@ -50,6 +51,8 @@ from candlestack.experiments.errors import (
     BacktestNotQueued,
     BacktestsUnavailable,
     CountMismatch,
+    IdempotencyKeyInUse,
+    IdempotencyKeyReused,
     InstrumentNotForModel,
     InvalidBacktest,
     ModelNeedsSetup,
@@ -63,6 +66,7 @@ from candlestack.experiments.errors import (
     SweepQueueFull,
     SweepTooLarge,
 )
+from candlestack.experiments.idempotency import KEY_MAX, KEY_PATTERN, Committed, once
 from candlestack.experiments.schemas import (
     EXPERIMENTS_PAGE_SIZE,
     MODEL_NAME_MAX,
@@ -105,6 +109,22 @@ PAGE_MAX = 100_000
 BacktestId = Annotated[
     str, Path(description="Public ID of the backtest", examples=["bt_7f3k2m9qx4"])
 ]
+IdempotencyKey = Annotated[
+    str | None,
+    Header(
+        alias="Idempotency-Key",
+        max_length=KEY_MAX,
+        pattern=KEY_PATTERN,
+        description=(
+            "Any 1 to 255 visible ASCII characters, such as a UUID: the same request sent "
+            "again with it within 24 hours gets the first answer (with `Idempotent-Replayed: "
+            "true`) instead of a second start"
+        ),
+    ),
+]
+# How long a request should wait before it asks again while the first one with its
+# idempotency key is still being answered, in seconds.
+IN_USE_RETRY_S = 2
 
 
 _NOT_SIGNED_IN = problem_doc(401, "Not signed in (`not-signed-in`).")
@@ -468,8 +488,28 @@ def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911, P
                 "queue-full",
                 "Queue full",
                 f"You have {QUEUE_MAX} backtests waiting already. Start this one when one of "
-                "them has started, or cancel one.",
-                extensions={"limit": QUEUE_MAX},
+                f"them has started, in about {error.retry_after_s} s, or cancel one.",
+                headers={"Retry-After": str(error.retry_after_s)},
+                extensions={"limit": QUEUE_MAX, "retry_after_s": error.retry_after_s},
+            )
+        case IdempotencyKeyReused():
+            return ProblemError(
+                422,
+                "idempotency-key-reused",
+                "Idempotency key reused",
+                "This idempotency key came with another request in the last 24 hours. Use a "
+                "new key for a new request, and the same key only to send the same request "
+                "again.",
+            )
+        case IdempotencyKeyInUse():
+            return ProblemError(
+                409,
+                "idempotency-key-in-use",
+                "Idempotency key in use",
+                "The first request with this idempotency key is still being answered. Send it "
+                f"again in {IN_USE_RETRY_S} s to get its answer.",
+                headers={"Retry-After": str(IN_USE_RETRY_S)},
+                extensions={"retry_after_s": IN_USE_RETRY_S},
             )
         case BacktestLimitReached():
             return _limit_problem(error)
@@ -595,15 +635,18 @@ def _json(
         **problem_doc(
             409,
             "The model has no manifest (`model-needs-setup`), the user has "
-            f"{QUEUE_MAX} backtests waiting already (`queue-full`, with `limit`), or as many "
-            "backtests as an account keeps (`backtest-limit`, with `limit` and `count`).",
+            f"{QUEUE_MAX} backtests waiting already (`queue-full`, with `limit` and "
+            "`retry_after_s`), as many backtests as an account keeps (`backtest-limit`, with "
+            "`limit` and `count`), or the first request with the `Idempotency-Key` is still "
+            "being answered (`idempotency-key-in-use`, with `retry_after_s`).",
         ),
         **problem_doc(
             422,
             "An invalid setup (`validation`), a model of another market "
             "(`instrument-not-for-model`), a period outside the data (`period-out-of-range`), "
-            "without the candles the model needs before it (`warm-up-out-of-range`), or with "
-            "more candles than allowed (`too-many-candles`).",
+            "without the candles the model needs before it (`warm-up-out-of-range`), with "
+            "more candles than allowed (`too-many-candles`), or an `Idempotency-Key` sent "
+            "before with another body (`idempotency-key-reused`).",
         ),
         **_SOURCE_ERRORS,
     },
@@ -611,7 +654,13 @@ def _json(
 )
 @heavy
 async def start_backtest(
-    body: BacktestIn, user: BacktestsUserDep, runs: BacktestRunsDep, response: Response
+    body: BacktestIn,
+    user: BacktestsUserDep,
+    runs: BacktestRunsDep,
+    response: Response,
+    *,
+    redis: RedisDep,
+    idempotency_key: IdempotencyKey = None,
 ) -> Response:
     """Starts a backtest of one of the user's models on one instrument and period and returns
     its document with its number: `running`, or `queued` with its `queue_position` while
@@ -620,10 +669,36 @@ async def start_backtest(
     has a manifest, the instrument fits the model, the period with the candles the model needs
     before it fits the data and the candle limit, the user's queue has room, and the worker
     that runs the models can be reached. The run goes on after the response; the document
-    (`GET /api/v1/backtests/{backtest_id}`) has the results once it finished."""
+    (`GET /api/v1/backtests/{backtest_id}`) has the results once it finished. With an
+    `Idempotency-Key`, the same request sent again within 24 hours answers the first document
+    again instead of starting another backtest."""
+
+    async def started(committed: Committed) -> bytes:
+        _, content = await runs.start(user.id, body, committed)
+        return content
+
+    async def again(backtest_id: str) -> bytes:
+        _, content = await runs.document(user.id, backtest_id, light=True)
+        return content
+
     with backtest_problems():
-        backtest, content = await runs.start(user.id, body)
-    return _json(content, response, 201, {"Location": f"/api/v1/backtests/{backtest.id}"})
+        content, replayed = await once(
+            redis,
+            user_id=user.id,
+            kind="POST /api/v1/backtests",
+            key=idempotency_key,
+            body=body.model_dump_json().encode(),
+            answer=started,
+            rebuild=again,
+        )
+    backtest_id = json.loads(content)["backtest"]["id"]
+    headers = {"Location": f"/api/v1/backtests/{backtest_id}", **_replayed(replayed=replayed)}
+    return _json(content, response, 201, headers)
+
+
+def _replayed(*, replayed: bool) -> dict[str, str]:
+    """The header of an answer given again for a repeated idempotency key."""
+    return {"Idempotent-Replayed": "true"} if replayed else {}
 
 
 @router.post(
@@ -902,8 +977,14 @@ def _sweep_problem(error: Exception) -> ProblemError | None:
                 "Queue full",
                 f"The sweep has {error.count} backtests and your queue has room for "
                 f"{error.room} (up to {QUEUE_MAX} wait). Start it when more of them have "
-                "started, cancel some, or vary fewer values.",
-                extensions={"limit": QUEUE_MAX, "count": error.count, "room": error.room},
+                f"started, in about {error.retry_after_s} s, cancel some, or vary fewer values.",
+                headers={"Retry-After": str(error.retry_after_s)},
+                extensions={
+                    "limit": QUEUE_MAX,
+                    "count": error.count,
+                    "room": error.room,
+                    "retry_after_s": error.retry_after_s,
+                },
             )
         case SweepNotFound():
             return ProblemError(404, "not-found", "Not Found", "You have no sweep with this ID.")
@@ -954,16 +1035,20 @@ def sweep_problems() -> Iterator[None]:
         **problem_doc(
             409,
             "A model has no manifest (`model-needs-setup`, with `setup`), the user's queue has "
-            "room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count` "
-            "and `room`), or the account cannot keep that many more backtests (`backtest-limit`, "
-            "with `limit`, `count` and `adding`).",
+            "room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count`, "
+            "`room` and `retry_after_s`), the account cannot keep that many more backtests "
+            "(`backtest-limit`, with `limit`, `count` and `adding`), or the first request with "
+            "the `Idempotency-Key` is still being answered (`idempotency-key-in-use`, with "
+            "`retry_after_s`).",
         ),
         **problem_doc(
             422,
             f"An invalid body or fewer than {SWEEP_MIN} or more than {SWEEP_MAX} backtests "
-            "(`validation`, the latter with `count` and `limit`), or a setup that fails a check "
+            "(`validation`, the latter with `count` and `limit`), a setup that fails a check "
             "of `POST /api/v1/backtests` (`instrument-not-for-model`, `period-out-of-range`, "
-            "`warm-up-out-of-range`, `too-many-candles`, `validation`; `setup` names it, from 1).",
+            "`warm-up-out-of-range`, `too-many-candles`, `validation`; `setup` names it, from "
+            "1), or an `Idempotency-Key` sent before with another body "
+            "(`idempotency-key-reused`).",
         ),
         **_SOURCE_ERRORS,
     },
@@ -971,7 +1056,13 @@ def sweep_problems() -> Iterator[None]:
 )
 @heavy
 async def start_sweep(
-    body: SweepIn, user: BacktestsUserDep, sweeps: SweepsDep, response: Response
+    body: SweepIn,
+    user: BacktestsUserDep,
+    sweeps: SweepsDep,
+    response: Response,
+    *,
+    redis: RedisDep,
+    idempotency_key: IdempotencyKey = None,
 ) -> SweepOut | Response:
     """Starts a backtest for every combination of the values in `vary` over the `base` setup
     (the body of `POST /api/v1/backtests`): models, instruments, periods and decision rules,
@@ -980,15 +1071,32 @@ async def start_sweep(
     all go to the end of the queue, or none does. With `validate_only` nothing starts: the
     answer is 200 with the count and each setup. The sweep's backtests are ordinary backtests
     with its `sweep_id`. `GET /api/v1/sweeps/{sweep_id}` follows them and ranks them once all
-    ended."""
+    ended. With an `Idempotency-Key`, the same request sent again within 24 hours answers the
+    first sweep again instead of starting another."""
     response.headers.update(NO_STORE)
+
+    async def started(committed: Committed) -> bytes:
+        return (await sweeps.start(user.id, body, committed)).model_dump_json().encode()
+
+    async def again(sweep_id: str) -> bytes:
+        return (await sweeps.sweep(user.id, sweep_id)).model_dump_json().encode()
+
     with sweep_problems():
         if body.validate_only:
             plan = await sweeps.plan(user.id, body)
             return _json(plan.model_dump_json().encode(), response)
-        sweep = await sweeps.start(user.id, body)
-    response.headers["Location"] = f"/api/v1/sweeps/{sweep.id}"
-    return sweep
+        content, replayed = await once(
+            redis,
+            user_id=user.id,
+            kind="POST /api/v1/sweeps",
+            key=idempotency_key,
+            body=body.model_dump_json().encode(),
+            answer=started,
+            rebuild=again,
+        )
+    sweep_id = json.loads(content)["id"]
+    headers = {"Location": f"/api/v1/sweeps/{sweep_id}", **_replayed(replayed=replayed)}
+    return _json(content, response, 201, headers)
 
 
 @router.get("/api/v1/sweeps", responses=_NOT_SIGNED_IN)

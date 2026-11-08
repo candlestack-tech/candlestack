@@ -193,8 +193,8 @@ class BacktestOut(BaseModel):
     queue_position: int | None = Field(
         ge=1,
         description=(
-            "Where a queued backtest is in the user's queue: 1 starts next, when the running "
-            "one ends; null for any other status"
+            "Where a queued backtest is in the user's queue: 1 starts next, when their running "
+            "one ended and a run slot is free; null for any other status"
         ),
         examples=[None],
     )

@@ -199,6 +199,14 @@ Index(
     func.lower(Backtest.generated_name),
     unique=True,
 )
+# A new backtest's name must differ from the custom names too, which few backtests have: what
+# ``BacktestStore.free_name`` looks a few names up in, beside the unique index.
+Index(
+    "ix_backtests_user_id_name",
+    Backtest.user_id,
+    func.lower(Backtest.name),
+    postgresql_where=Backtest.name.is_not(None),
+)
 # The queue of a user is their queued backtests, oldest (lowest number) first: a few among all
 # the rows.
 Index(
@@ -206,6 +214,12 @@ Index(
     Backtest.user_id,
     Backtest.number,
     postgresql_where=Backtest.status == "queued",
+)
+# Whether a user has a backtest running, which the scheduler asks of every queue: a few rows.
+Index(
+    "ix_backtests_running",
+    Backtest.user_id,
+    postgresql_where=Backtest.status == "running",
 )
 # A sweep reads its backtests: a few among all the rows.
 Index(

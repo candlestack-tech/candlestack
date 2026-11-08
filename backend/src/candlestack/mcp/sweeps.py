@@ -1,29 +1,88 @@
 """The tools of sweeps: a grid of backtests from one call, checked first or started,
 followed until it is ranked, and the list of the user's sweeps. They call the service of
-``POST /api/v1/sweeps``, ``GET /api/v1/sweeps`` and ``GET /api/v1/sweeps/{sweep_id}``."""
+``POST /api/v1/sweeps``, ``GET /api/v1/sweeps`` and ``GET /api/v1/sweeps/{sweep_id}``;
+``wait_for_sweep`` waits on the runner's word that one of its backtests changed, as
+``wait_for_backtest`` does."""
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Annotated
 
+import anyio
 from mcp.server.mcpserver import Context
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from candlestack.accounts import HEAVY, Scope
+from candlestack.core import DATABASE_ERRORS
 from candlestack.experiments import (
     PAGE_MAX,
     PAGE_SIZE,
     PER_PAGE_MAX,
     BacktestIn,
+    Committed,
     SweepIn,
     SweepMetric,
     SweepOut,
     SweepPlan,
+    SweepProgress,
+    SweepRanking,
     SweepsPage,
     SweepVary,
+    backtest_runs,
     build_sweeps,
+    idempotent,
     sweep_problems,
 )
-from candlestack.mcp.convention import Example, ToolSpec, changes, reads, tool_call
+from candlestack.mcp.convention import (
+    POLL_S,
+    WAIT_DEFAULT_S,
+    WAIT_MAX_S,
+    Example,
+    IdempotencyKey,
+    ToolCall,
+    ToolSpec,
+    changes,
+    reads,
+    runner_of,
+    tool_call,
+)
+
+_ETA = Field(
+    description="About how many seconds until its last backtest ends, as wait_for_backtest "
+    "estimates each; null once done and before any of the user's backtests finished"
+)
+
+
+class SweepStarted(SweepOut):
+    """The sweep just started."""
+
+    eta_s: float | None = _ETA
+
+
+class SweepWaitResult(BaseModel):
+    """Where a sweep stands after a wait: its progress, and its ranking once done."""
+
+    id: str = Field(description="Public ID of the sweep", examples=["sw_7f3k2m9qx4"])
+    count: int = Field(description="Its backtests")
+    done: bool = Field(
+        description="None of its backtests is queued or running any more: `ranking` is set; "
+        "false when `timeout_s` passed first"
+    )
+    progress: SweepProgress
+    eta_s: float | None = _ETA
+    ranking: SweepRanking | None = Field(
+        description="Once done: as get_sweep ranks them, by the sweep's own metric"
+    )
+
+
+async def _eta(call: ToolCall, ids: Sequence[str]) -> float | None:
+    """The latest end of the backtests that have not ended (``BacktestRuns.statuses``)."""
+    async with call.db() as db:
+        with sweep_problems():
+            standings = await backtest_runs(call.state, db).statuses(call.user.id, ids)
+    etas = [standing.eta_s for standing in standings if standing.eta_s is not None]
+    return max(etas) if etas else None
+
 
 _MODEL = "mdl_k2m9qx47f3"
 _PERIOD = {"start": 1704067200, "end": 1735689600}
@@ -61,22 +120,52 @@ async def run_sweep(
     ctx: Context,
     vary: SweepVary | None = None,
     metric: SweepMetric = SweepMetric.sharpe,
-) -> SweepOut:
+    idempotency_key: IdempotencyKey = None,
+) -> SweepStarted:
     """Starts a backtest for every combination of `base` (the setup of one backtest) and the
     values in `vary`: models (each model's manifest sets what it reads and its timeframe, so
     list models to vary those), instruments, periods and decision rules, 2 to 20 backtests. All
     go to the end of the user's queue, which runs one at a time, or none does. `metric` is the
-    statistic the ranking orders by.
+    statistic the ranking orders by. Pass an `idempotency_key` (a UUID you make) to call it
+    again safely after a timeout: the same call with the same key within 24 hours answers the
+    first sweep instead of starting another.
 
-    Answers the sweep: its ID, each backtest's ID, status and setup, and the progress. Follow it
-    with get_sweep until `done`. The backtests are ordinary ones, with the sweep's ID."""
+    Answers the sweep: its ID, each backtest's ID, status and setup, the progress and `eta_s`.
+    Follow it with wait_for_sweep until `done`. The backtests are ordinary ones, with the
+    sweep's ID."""
     call = tool_call(ctx)
     body = SweepIn(base=base, vary=vary or SweepVary(), metric=metric)
-    async with call.db() as db:
-        with sweep_problems():
-            return await build_sweeps(call.state, db, call.settings.app_version).start(
-                call.user.id, body
+
+    async def started(committed: Committed) -> bytes:
+        async with call.db() as db:
+            sweep = await build_sweeps(call.state, db, call.settings.app_version).start(
+                call.user.id, body, committed
             )
+        try:
+            eta = await _eta(call, [backtest.id for backtest in sweep.backtests])
+        except DATABASE_ERRORS:
+            eta = None  # started already: answered without the estimate
+        return SweepStarted(**sweep.model_dump(), eta_s=eta).model_dump_json().encode()
+
+    async def again(sweep_id: str) -> bytes:
+        async with call.db() as db:
+            sweep = await build_sweeps(call.state, db, call.settings.app_version).sweep(
+                call.user.id, sweep_id
+            )
+        eta = await _eta(call, [backtest.id for backtest in sweep.backtests])
+        return SweepStarted(**sweep.model_dump(), eta_s=eta).model_dump_json().encode()
+
+    with sweep_problems():
+        content, _ = await idempotent(
+            call.state.redis,
+            user_id=call.user.id,
+            kind="run_sweep",
+            key=idempotency_key,
+            body=body.model_dump_json().encode(),
+            answer=started,
+            rebuild=again,
+        )
+    return SweepStarted.model_validate_json(content)
 
 
 async def get_sweep(sweep_id: str, ctx: Context, metric: SweepMetric | None = None) -> SweepOut:
@@ -85,8 +174,8 @@ async def get_sweep(sweep_id: str, ctx: Context, metric: SweepMetric | None = No
     ranking, best first, by `metric` or else the sweep's own. Values that read the same in the
     app share a rank, and the best and the worst are marked as the Compare page marks them.
 
-    Call it again while it runs; a backtest takes a minute or a few. For every statistic of the
-    backtests, compare them with their IDs."""
+    To wait for it to end, call wait_for_sweep. For every statistic of the backtests, compare
+    them with their IDs."""
     call = tool_call(ctx)
     async with call.db() as db:
         with sweep_problems():
@@ -112,6 +201,63 @@ async def list_sweeps(
         return await build_sweeps(call.state, db, call.settings.app_version).sweeps(
             call.user.id, page, per_page
         )
+
+
+async def wait_for_sweep(
+    sweep_id: Annotated[
+        str, Field(description="Public ID of the sweep", examples=["sw_7f3k2m9qx4"])
+    ],
+    ctx: Context,
+    timeout_s: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=WAIT_MAX_S,
+            description=f"How long to wait at most, in seconds (up to {WAIT_MAX_S})",
+        ),
+    ] = WAIT_DEFAULT_S,
+) -> SweepWaitResult:
+    """Waits until every backtest of a sweep of the user has ended or `timeout_s` seconds
+    passed, then answers how many are queued, running, finished and failed, `eta_s`, and once
+    `done` the ranking get_sweep gives. When `done` is false, call it again: a sweep's
+    backtests run one after another."""
+    call = tool_call(ctx)
+    deadline = anyio.current_time() + timeout_s
+    ids, _ = await _progress(call, sweep_id)
+    with runner_of(call).watch(ids) as changed:
+        while True:
+            changed.clear()
+            ids, progress = await _progress(call, sweep_id)
+            done = not progress.queued and not progress.running
+            left = deadline - anyio.current_time()
+            if done or left <= 0:
+                break
+            with anyio.move_on_after(min(POLL_S, left)):
+                await changed.wait()
+    ranking = None
+    if done:
+        async with call.db() as db:
+            with sweep_problems():
+                sweep = await build_sweeps(call.state, db, call.settings.app_version).sweep(
+                    call.user.id, sweep_id
+                )
+        ranking, progress = sweep.ranking, sweep.progress
+    return SweepWaitResult(
+        id=sweep_id,
+        count=len(ids),
+        done=done,
+        progress=progress,
+        eta_s=None if done else await _eta(call, ids),
+        ranking=ranking,
+    )
+
+
+async def _progress(call: ToolCall, sweep_id: str) -> tuple[list[str], SweepProgress]:
+    async with call.db() as db:
+        with sweep_problems():
+            return await build_sweeps(call.state, db, call.settings.app_version).progress(
+                call.user.id, sweep_id
+            )
 
 
 def _setups() -> list[dict[str, object]]:
@@ -179,7 +325,7 @@ _SWEEP = SweepOut.model_validate(
         },
     }
 )
-_STARTED = SweepOut.model_validate(
+_STARTED = SweepStarted.model_validate(
     {
         **_SWEEP.model_dump(),
         "done": False,
@@ -189,7 +335,16 @@ _STARTED = SweepOut.model_validate(
             {**_SWEEP.backtests[0].model_dump(), "status": "running"},
             {**_SWEEP.backtests[1].model_dump(), "status": "queued", "queue_position": 1},
         ],
+        "eta_s": 312.0,
     }
+)
+_WAITED = SweepWaitResult(
+    id=_SWEEP.id,
+    count=_SWEEP.count,
+    done=True,
+    progress=_SWEEP.progress,
+    eta_s=None,
+    ranking=_SWEEP.ranking,
 )
 
 _LISTED = SweepsPage.model_validate(
@@ -246,5 +401,13 @@ TOOLS = (
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(arguments={}, result=_LISTED),
+    ),
+    ToolSpec(
+        wait_for_sweep,
+        name="wait_for_sweep",
+        title="Wait for a sweep",
+        scopes=(Scope.read,),
+        annotations=reads(),
+        example=Example(arguments={"sweep_id": "sw_7f3k2m9qx4", "timeout_s": 50}, result=_WAITED),
     ),
 )

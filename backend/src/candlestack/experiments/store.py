@@ -42,7 +42,7 @@ from sqlalchemy.sql import visitors
 
 from candlestack.accounts import User
 from candlestack.experiments.models import Backtest, Sweep
-from candlestack.experiments.names import generated_name
+from candlestack.experiments.names import candidates, generated_name
 from candlestack.experiments.schemas import (
     BacktestShow,
     BacktestSort,
@@ -64,6 +64,8 @@ MODEL_NAME = func.coalesce(Model.name, Backtest.model_name)
 SHOWN_NAME = func.coalesce(Backtest.name, Backtest.generated_name)
 # How often a new backtest draws its generated name again when the unique index refuses it.
 NAME_ATTEMPTS = 3
+# How many random names a new backtest looks up at once for a free one (``free_name``).
+NAME_CANDIDATES = 10
 _NAME_INDEX = "uq_backtests_user_id_generated_name"
 
 _FINISHED = Backtest.status == BacktestStatus.finished.value
@@ -72,6 +74,8 @@ _RUNNING = Backtest.status == BacktestStatus.running.value
 _QUEUED = Backtest.status == BacktestStatus.queued.value
 # The most backtests a user can have waiting in their queue, besides the one running.
 QUEUE_MAX = 20
+# How many of a user's last finished runs an estimate of a wait counts with (``run_seconds``).
+RECENT_RUNS = 20
 # Only a finished backtest can be published, and it stays finished; the status is checked
 # anyway, so nothing else can ever show in Experiments.
 PUBLISHED = Backtest.published_at.is_not(None) & _FINISHED
@@ -197,6 +201,31 @@ class Doomed(NamedTuple):
     id: str
     status: str
     sweep_id: str | None
+
+
+class StatusRow(NamedTuple):
+    """Where a backtest stands (``BacktestStore.statuses``): its row without what its run
+    stored, its author's display name, its place in the queue while queued, and the timings
+    of its report only when it has no steps."""
+
+    id: str
+    number: int
+    name: str
+    generated_name: str
+    user_id: str
+    author: str
+    published_at: datetime | None
+    sweep_id: str | None
+    status: str
+    queue_position: int | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    duration_s: float | None
+    error: str | None
+    steps: list[dict[str, Any]] | None
+    timings: dict[str, float | None] | None
+    has_spec: bool
 
 
 class UserModel(NamedTuple):
@@ -573,6 +602,27 @@ class BacktestStore:
         )
         return {name for row in rows for name in row if name is not None}
 
+    async def free_name(self, user_id: str) -> str:
+        """A generated name none of the user's backtests has, as its own or its generated name:
+        the first of ``NAME_CANDIDATES`` random names that is free, looked up by the unique
+        index of the generated names and ``ix_backtests_user_id_name``, so a new backtest never
+        reads every name of the account
+        (a sweep names 20); only when all of them are taken, from every name (``names``)."""
+        tried = candidates(NAME_CANDIDATES)
+        lowered = [name.lower() for name in tried]
+        rows = await self._db.execute(
+            select(func.lower(Backtest.generated_name), func.lower(Backtest.name)).where(
+                Backtest.user_id == user_id,
+                func.lower(Backtest.generated_name).in_(lowered)
+                | func.lower(Backtest.name).in_(lowered),
+            )
+        )
+        taken = {name for row in rows for name in row if name is not None}
+        free = [name for name, low in zip(tried, lowered, strict=True) if low not in taken]
+        if free:
+            return free[0]
+        return generated_name(await self.names(user_id))
+
     async def namesakes(self, user_id: str, name: str) -> list[Namesake]:
         """The user's backtests whose custom or generated name is `name`, in any case, the
         oldest first."""
@@ -686,7 +736,7 @@ class BacktestStore:
         """
         attempt = 1
         while True:
-            backtest.generated_name = generated_name(await self.names(backtest.user_id))
+            backtest.generated_name = await self.free_name(backtest.user_id)
             try:
                 async with self._db.begin_nested():
                     self._db.add(backtest)
@@ -752,7 +802,8 @@ class BacktestStore:
         return [Listed(*row) for row in rows]
 
     async def running(self, user_id: str) -> bool:
-        """Whether a backtest of the user is running."""
+        """Whether a backtest of the user is running (the partial index
+        ``ix_backtests_running``)."""
         found = await self._db.scalar(
             select(Backtest.id).where(Backtest.user_id == user_id, _RUNNING).limit(1)
         )
@@ -788,6 +839,13 @@ class BacktestStore:
             backtest.started_at = now
         return backtest
 
+    async def running_since(self, before: datetime) -> list[str]:
+        """The IDs of the backtests of any user that began to run before ``before`` and
+        still run (``ix_backtests_running``)."""
+        began = func.coalesce(Backtest.started_at, Backtest.created_at)
+        rows = await self._db.scalars(select(Backtest.id).where(_RUNNING, began < before))
+        return list(rows)
+
     async def requeue(self, backtest_id: str) -> None:
         """Puts the running backtest that never began back in its queue, where its number
         keeps it first."""
@@ -798,18 +856,85 @@ class BacktestStore:
         )
 
     async def waiting(self) -> list[str]:
-        """The users with a queued backtest and none running: whose queue should move on."""
+        """The users with a queued backtest and none running, whose queue may take a run slot:
+        the one whose oldest queued backtest waits longest first."""
         running = select(literal(1)).where(
             _AHEAD.user_id == Backtest.user_id, _AHEAD.status == BacktestStatus.running.value
         )
         rows = await self._db.scalars(
-            select(Backtest.user_id).where(_QUEUED, ~exists(running)).distinct()
+            select(Backtest.user_id)
+            .where(_QUEUED, ~exists(running))
+            .group_by(Backtest.user_id)
+            .order_by(func.min(Backtest.created_at), Backtest.user_id)
         )
         return list(rows)
 
-    async def user_of(self, backtest_id: str) -> str | None:
-        """The ID of the backtest's user; None once it is gone (the account was deleted)."""
-        return await self._db.scalar(select(Backtest.user_id).where(Backtest.id == backtest_id))
+    async def statuses(self, user_id: str, backtest_ids: Sequence[str]) -> list[StatusRow]:
+        """Where each of the backtests stands, the user's own or another account's published
+        ones, from their rows alone: no setup, report, statistics or curves are read (the
+        report's timings only for a backtest stored before its steps were). What a wait polls;
+        in no particular order, and without the IDs nobody can read."""
+        mine = Backtest.user_id == user_id
+        rows = await self._db.execute(
+            select(
+                Backtest.id,
+                Backtest.number,
+                SHOWN_NAME,
+                Backtest.generated_name,
+                Backtest.user_id,
+                User.display_name,
+                Backtest.published_at,
+                Backtest.sweep_id,
+                Backtest.status,
+                QUEUE_POSITION,
+                Backtest.created_at,
+                Backtest.started_at,
+                Backtest.finished_at,
+                Backtest.duration_s,
+                Backtest.error,
+                Backtest.steps,
+                case((Backtest.steps.is_(None), Backtest.report["timings"]), else_=None),
+                Backtest.spec.is_not(None),
+            )
+            .join(User, User.id == Backtest.user_id)
+            .where(Backtest.id.in_(backtest_ids), mine | PUBLISHED)
+        )
+        return [StatusRow(*row) for row in rows]
+
+    async def run_seconds(self, user_id: str) -> float | None:
+        """The median of how long the user's last ``RECENT_RUNS`` finished backtests ran, in
+        seconds: what an estimate of a wait counts with; None before any finished."""
+        recent = (
+            select(Backtest.duration_s.label("seconds"))
+            .where(Backtest.user_id == user_id, _FINISHED, Backtest.duration_s.is_not(None))
+            .order_by(Backtest.number.desc())
+            .limit(RECENT_RUNS)
+            .subquery()
+        )
+        median = await self._db.scalar(
+            select(func.percentile_cont(0.5).within_group(recent.c.seconds))
+        )
+        return None if median is None else float(median)
+
+    async def sweep_statuses(self, user_id: str, sweep_id: str) -> list[tuple[str, str]] | None:
+        """The ID and status of each backtest of the user's sweep, from their rows alone; None
+        when the user has no such sweep."""
+        found = await self._db.scalar(
+            select(Sweep.id).where(Sweep.id == sweep_id, Sweep.user_id == user_id)
+        )
+        if found is None:
+            return None
+        rows = await self._db.execute(
+            select(Backtest.id, Backtest.status)
+            .where(Backtest.user_id == user_id, Backtest.sweep_id == sweep_id)
+            .order_by(Backtest.number)
+        )
+        return [(backtest_id, status) for backtest_id, status in rows]
+
+    async def refresh_status(self, backtest: Backtest) -> None:
+        """Reads the backtest's status and start again: the runner may have started it in a
+        session of its own."""
+        await self._db.refresh(backtest, ["status", "started_at"])
 
     async def cancel(self, backtest: Backtest, error: str, now: datetime) -> None:
         """Fails the queued backtest with ``error``: it never ran, so its steps stay pending

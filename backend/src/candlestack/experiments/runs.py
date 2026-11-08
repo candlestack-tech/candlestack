@@ -3,8 +3,9 @@ before it accepts a run, the document ``GET /api/v1/backtests/{id}`` builds from
 stored (docs/engine.md, "The result document"), and cancelling a queued backtest.
 
 A user's backtests run one at a time: a new one waits in the user's queue (``queued``, at most
-``store.QUEUE_MAX``) while another of theirs runs, and the runner starts the oldest when that
-one ends (``BacktestRunner``).
+``store.QUEUE_MAX``) while another of theirs runs or no run slot is free, and the runner starts
+the oldest when its turn comes (``BacktestRunner``). Where a backtest stands is read from its
+row alone (``statuses``), with an estimate of when it ends from the user's recent runs.
 
 The light view (``light``) is what the run stored: the statistics, and its light series and
 trades as zstd Parquet (``assembly.stored_results``), so reading it loads no candles and runs no
@@ -15,6 +16,8 @@ run's (a source adjusted old prices), ``data.changed`` says so and the results c
 candles as they are now.
 """
 
+import logging
+import math
 from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
 from functools import partial
@@ -25,6 +28,7 @@ import orjson
 import polars as pl
 from redis.exceptions import RedisError
 
+from candlestack.core import DATABASE_ERRORS
 from candlestack.data import (
     CandleSet,
     DataService,
@@ -84,8 +88,10 @@ from candlestack.experiments.errors import (
     ModelNeedsSetup,
     ModelNotFound,
     NoDocument,
+    NotComparable,
     QueueFull,
 )
+from candlestack.experiments.idempotency import Committed
 from candlestack.experiments.models import Backtest, new_backtest_id
 from candlestack.experiments.runner import BacktestRunner
 from candlestack.experiments.schemas import (
@@ -105,7 +111,7 @@ from candlestack.experiments.spec import (
     run_manifest,
 )
 from candlestack.experiments.steps import pending, shown_steps
-from candlestack.experiments.store import QUEUE_MAX, BacktestStore, Compared
+from candlestack.experiments.store import QUEUE_MAX, BacktestStore, Compared, StatusRow
 from candlestack.ml import Model
 from candlestack.preprocessing import Manifest, warm_up
 
@@ -116,6 +122,20 @@ _SESSIONS = {"stock": "regular", "crypto": "24/7"}
 # candles (candles@1) for any other.
 _REPRESENTATIONS = {"renko": Representation.renko, "kagi": Representation.kagi}
 CANCELLED = "You cancelled the backtest before it ran."
+logger = logging.getLogger(__name__)
+# What an estimate counts a run of a user without a finished one as, in seconds.
+RUN_SECONDS = 60.0
+_ENDED = {BacktestStatus.finished, BacktestStatus.failed}
+
+
+class Standing(NamedTuple):
+    """Where a backtest stands (``BacktestRuns.statuses``): the ``backtest`` group of its
+    document and ``eta_s``, about how many seconds until it ends, from its place in its user's
+    queue and the median of their recent runs; None once it ended, for another account's, and
+    before the user had a run finish."""
+
+    header: BacktestHeader
+    eta_s: float | None
 
 
 class Prepared(NamedTuple):
@@ -161,12 +181,12 @@ class BacktestRuns:
         model = prepared.model
         # As in ``start``, before the slower checks.
         if await self._store.queued(user_id) >= QUEUE_MAX:
-            raise QueueFull
+            raise QueueFull(await self.retry_after(user_id))
         await self.fits(user_id, 1)
         await self.ready()
         spec = await self.spec(prepared)
         queued = await self._store.queued(user_id)
-        waits = queued > 0 or await self._store.running(user_id)
+        waits = queued > 0 or not self._runner.free or await self._store.running(user_id)
         data = spec.data
         return BacktestCheck(
             model=CheckedModel(id=model.id, name=model.name, framework=model.framework),
@@ -186,10 +206,17 @@ class BacktestRuns:
             queue_position=queued + 1 if waits else None,
         )
 
-    async def start(self, user_id: str, body: BacktestIn) -> tuple[Backtest, bytes]:
+    async def start(
+        self, user_id: str, body: BacktestIn, committed: Committed | None = None
+    ) -> tuple[Backtest, bytes]:
         """Checks a new backtest of the user, stores it, and returns it with its document: it
-        runs at once when no other backtest of the user runs or waits, else it waits at the
-        end of their queue (``queued``).
+        runs at once when no other backtest of the user runs or waits and a run slot is free,
+        else it waits at the end of their queue (``queued``). ``committed`` is awaited with its
+        ID once it is stored (an idempotency key keeps it, ``idempotency.once``).
+
+        From its commit on nothing cancels the start (a client that went away): the new
+        backtest gets its slot or stays queued, never running without a run. A read that fails
+        after the commit answers it as stored, queued and without its place.
 
         Raises:
             InvalidBacktest, ModelNotFound, ModelNeedsSetup, InstrumentNotForModel, QueueFull,
@@ -200,13 +227,13 @@ class BacktestRuns:
         author = DocumentAuthor(id=user_id, name=await self._store.author_name(user_id), mine=True)
         # Before the slower checks; again under the lock below, where it counts.
         if await self._store.queued(user_id) >= QUEUE_MAX:
-            raise QueueFull
+            raise QueueFull(await self.retry_after(user_id))
         await self.fits(user_id, 1)
         await self.ready()
         spec = await self.spec(prepared)
         await self._store.lock_user(user_id)
         if await self._store.queued(user_id) >= QUEUE_MAX:
-            raise QueueFull
+            raise QueueFull(await self.retry_after(user_id))
         await self.fits(user_id, 1)
         # The model may have been deleted meanwhile; held now until the backtest is stored.
         if not await self._store.hold_model(user_id, prepared.model.id):
@@ -215,10 +242,12 @@ class BacktestRuns:
             user_id, prepared, spec, number=await self._store.last_number(user_id) + 1
         )
         await self._store.add_named(backtest)
-        started = await self.take_next(user_id)
-        position = await self._store.queue_position(backtest.id)
-        await self._store.commit()
-        self.run(started)
+        with anyio.CancelScope(shield=True):
+            await self._store.commit()
+            if committed is not None:
+                await committed(backtest.id)
+            await self.schedule()
+            position = await self._stored_place(backtest)
         document = _document(backtest, spec, author=author, queue_position=position)
         return backtest, dumps(document)
 
@@ -231,6 +260,21 @@ class BacktestRuns:
         count = await self._store.count(user_id, [])
         if count + adding > self._limit:
             raise BacktestLimitReached(self._limit, count, adding)
+
+    async def _stored_place(self, backtest: Backtest) -> int | None:
+        """Reads the new backtest's status again (running now when a slot was free for it)
+        and its place in the queue. Postgres out of reach is a warning: it is answered queued,
+        as stored, without its place."""
+        try:
+            await self._store.refresh_status(backtest)
+            position = await self._store.queue_position(backtest.id)
+            await self._store.commit()
+        except DATABASE_ERRORS as error:
+            logger.warning(
+                "Backtest %s was answered as stored (%s)", backtest.id, type(error).__name__
+            )
+            return None
+        return position
 
     async def prepare(self, user_id: str, body: BacktestIn) -> Prepared:
         """The reads of a new backtest's checks: its benchmarks, and the user's model with the
@@ -291,16 +335,17 @@ class BacktestRuns:
             created_at=datetime.now(UTC),
         )
 
-    async def take_next(self, user_id: str) -> Backtest | None:
-        """Marks the user's oldest queued backtest running, under ``lock_user``, while none of
-        theirs runs: the one just stored, or an older one should the queue have stood still
-        (``BacktestRunner.resume``). Hand it to ``run`` once committed."""
-        return await self._store.take_next(user_id, datetime.now(UTC))
+    async def schedule(self) -> None:
+        """Gives the free run slots to the queues in turn (``BacktestRunner.fill``), once the
+        new backtests are committed: the new one starts when it is its turn."""
+        await self._runner.fill()
 
-    def run(self, started: Backtest | None) -> None:
-        """Runs the backtest ``take_next`` started, once its transaction committed."""
-        if started is not None:
-            self._runner.start(started.id)
+    async def retry_after(self, user_id: str, places: int = 1) -> int:
+        """About how many seconds until ``places`` more backtests fit in the user's queue: one
+        frees a place when it starts, about each run of theirs (the median of their recent
+        runs, else ``RUN_SECONDS``)."""
+        seconds = await self._store.run_seconds(user_id)
+        return max(1, math.ceil(places * (RUN_SECONDS if seconds is None else seconds)))
 
     async def cancel(self, user_id: str, backtest_id: str) -> bytes:
         """Cancels the user's queued backtest: it fails, as cancelled, and never runs. Returns
@@ -319,6 +364,7 @@ class BacktestRuns:
             raise BacktestNotQueued(backtest.status)
         await self._store.cancel(backtest, CANCELLED, datetime.now(UTC))
         await self._store.commit()
+        self._runner.changed(backtest_id)
         _, content = await self.document(user_id, backtest_id, light=True)
         return content
 
@@ -518,23 +564,79 @@ class BacktestRuns:
         Raises:
             BacktestNotFound, NoDocument.
         """
-        found = await self._store.with_run(user_id, backtest_id)
-        if found is None:
+        rows = await self._store.statuses(user_id, [backtest_id])
+        if not rows:
             raise BacktestNotFound
-        backtest = found.backtest
-        if backtest.spec is None:
+        if not rows[0].has_spec:
             raise NoDocument
-        author = _author(backtest, found.author, user_id)
-        report = None if backtest.report is None else RunReport.model_validate(backtest.report)
-        position = None
-        if backtest.status == BacktestStatus.queued.value:
-            position = await self._store.queue_position(backtest.id)
-        return _header(backtest, report, author=author, queue_position=position)
+        return _status_header(rows[0], user_id)
+
+    async def statuses(self, user_id: str, backtest_ids: Sequence[str]) -> list[Standing]:
+        """Where each of the backtests stands, in the order given: the user's own or other
+        accounts' published ones, from their rows alone (``BacktestStore.statuses``), with the
+        estimate of when the user's own end. What a wait reads again and again.
+
+        Raises:
+            NotComparable: Neither the user nor a published backtest has one of the IDs.
+        """
+        rows = {row.id: row for row in await self._store.statuses(user_id, backtest_ids)}
+        for backtest_id in backtest_ids:
+            if backtest_id not in rows:
+                raise NotComparable(backtest_id, found=False)
+        headers = [_status_header(rows[backtest_id], user_id) for backtest_id in backtest_ids]
+        going = [h for h in headers if h.author.mine and h.status not in _ENDED]
+        run = await self._store.run_seconds(user_id) if going else None
+        if run is None:
+            return [Standing(header, None) for header in headers]
+        running = any(h.status is BacktestStatus.running for h in going)
+        if not running and any(h.status is BacktestStatus.queued for h in going):
+            running = await self._store.running(user_id)
+        now = datetime.now(UTC)
+        return [Standing(header, _eta(header, run, running=running, now=now)) for header in headers]
 
 
 def _author(backtest: Backtest, name: str, user_id: str) -> DocumentAuthor:
     """The document's author: only the account's display name and public ID, never its email."""
     return DocumentAuthor(id=backtest.user_id, name=name, mine=backtest.user_id == user_id)
+
+
+def _status_header(row: StatusRow, user_id: str) -> BacktestHeader:
+    """The ``backtest`` group of a document from where the backtest stands."""
+    mine = row.user_id == user_id
+    return BacktestHeader(
+        id=row.id,
+        name=row.name,
+        generated_name=row.generated_name,
+        number=row.number,
+        author=DocumentAuthor(id=row.user_id, name=row.author, mine=mine),
+        public=row.published_at is not None,
+        published_at=row.published_at,
+        status=BacktestStatus(row.status),
+        queue_position=row.queue_position,
+        # Only the author can open the sweep: others see that there was none.
+        sweep_id=row.sweep_id if mine else None,
+        created_at=row.created_at,
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+        duration_s=row.duration_s,
+        error=row.error,
+        steps=shown_steps(row.steps, row.timings),
+    )
+
+
+def _eta(header: BacktestHeader, run: float, *, running: bool, now: datetime) -> float | None:
+    """About how many seconds until the user's backtest ends, each run taking ``run`` seconds:
+    a running one what is left of its run (0 once past it); a queued one the backtests ahead of
+    it in the queue, the user's running one (``running``) and its own run. The wait for a free
+    run slot while many users run is left out. None for another account's or an ended one."""
+    if not header.author.mine:
+        return None
+    if header.status is BacktestStatus.running:
+        began = header.started_at or header.created_at
+        return round(max(run - (now - began).total_seconds(), 0.0), 1)
+    if header.status is BacktestStatus.queued and header.queue_position is not None:
+        return round((header.queue_position + running) * run, 1)
+    return None
 
 
 def _returns(benchmarks: Mapping[str, float | None]) -> dict[str, dict[str, float | None]]:

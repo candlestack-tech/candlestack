@@ -397,7 +397,7 @@ layers = [
     "dependencies",
     "compare",
     "service | runs",
-    "runner",
+    "runner | idempotency",
     "store | assembly",
     "models | errors | spec",
     "document",

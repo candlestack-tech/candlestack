@@ -7,13 +7,13 @@ Experiments with it, and its page and other people's comparisons answer 404. A s
 deleted backtests from its list and ranking; a sweep without any left is deleted too.
 
 A queued backtest is taken out of its user's queue. A running one is stopped: its row goes, the
-runner cancels its task (``BacktestRunner.stop``) and the user's next queued backtest starts in
-the same transaction. A run the runner cannot cancel (between its steps on another process)
-finds its row gone when it ends and stores nothing.
+runner cancels its task (``BacktestRunner.stop``) and its slot goes to the next queue in turn
+(``BacktestRunner.fill``), which may be the user's next queued backtest. A run the runner
+cannot cancel (between its steps on another process) finds its row gone when it ends and stores
+nothing.
 """
 
 from collections.abc import Sequence
-from datetime import UTC, datetime
 from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -104,13 +104,12 @@ class BacktestDeletes:
         ]
         await self._store.delete(sorted(found))
         await self._store.delete_empty_sweeps(user_id, sorted(filter(None, sweeps)))
-        # The user's queue moves on, as when a run ends; also when none ran (a queue that stood
-        # still starts now instead of at the runner's next check).
-        started = await self._store.take_next(user_id, datetime.now(UTC))
         await self._store.commit()
         self._runner.stop(running)
-        if started is not None:
-            self._runner.start(started.id)
+        # The free slots go to the queues in turn, as when a run ends; also when none ran (a
+        # queue that stood still starts now instead of at the runner's next check). The slot of
+        # a stopped run is given once its task has ended.
+        await self._runner.fill()
         if sweep_id is not None:
             deleted = [backtest.id for backtest in doomed]
         else:

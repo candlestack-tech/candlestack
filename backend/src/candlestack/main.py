@@ -113,7 +113,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.http = http
             data_service = build_data_service(settings, app.state.redis, http)
             app.state.data_service = data_service
-            runner = BacktestRunner(app.state.db, data_service, jobs)
+            runner = BacktestRunner(app.state.db, data_service, jobs, slots=settings.backtest_slots)
             app.state.backtest_runner = runner
             await runner.recover()
             async with (
