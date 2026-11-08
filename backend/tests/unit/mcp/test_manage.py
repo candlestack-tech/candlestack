@@ -24,24 +24,29 @@ from candlestack.experiments.schemas import (
     BacktestOut,
     BacktestShow,
     BacktestSort,
-    BacktestsPage,
+    BacktestStatus,
     BacktestUpdate,
     BestBacktests,
-    DashboardOut,
     ExperimentCounts,
     ExperimentFacets,
     ExperimentOut,
     ExperimentSort,
-    ExperimentsPage,
     InstrumentMarket,
     ModelCount,
-    NewExperiments,
     Representation,
     SetupTimeframe,
     SortOrder,
-    StarredBacktests,
 )
-from candlestack.experiments.service import ExperimentsQuery, ListQuery
+from candlestack.experiments.service import (
+    BacktestFacets,
+    ExperimentFacetsFound,
+    ExperimentsQuery,
+    FoundBacktests,
+    FoundExperiments,
+    ListQuery,
+    OwnDashboard,
+)
+from candlestack.experiments.store import BacktestFilters
 from candlestack.mcp import http, manage
 
 PROBLEMS = "https://candlestack.tech/problems/"
@@ -147,15 +152,14 @@ class FakeService:
         self.calls: list[tuple[str, str, Any]] = []
         self.refuse: Exception | None = None
 
-    async def backtests(self, user_id: str, query: ListQuery) -> BacktestsPage:
+    async def find(self, user_id: str, query: ListQuery) -> FoundBacktests:
         self.calls.append(("backtests", user_id, query))
-        return BacktestsPage(
-            backtests=[backtest()],
-            total=1,
-            page=query.page,
-            pages=1,
-            counts=COUNTS,
-            models=[ModelCount(name="blesk.keras", framework="keras", count=1)],
+        return FoundBacktests(backtests=[backtest()], total=1, page=query.page, pages=1)
+
+    async def facets(self, user_id: str) -> BacktestFacets:
+        self.calls.append(("facets", user_id, None))
+        return BacktestFacets(
+            counts=COUNTS, models=[ModelCount(name="blesk.keras", framework="keras", count=1)]
         )
 
     async def update(self, user_id: str, backtest_id: str, changes: BacktestUpdate) -> BacktestOut:
@@ -165,30 +169,32 @@ class FakeService:
         fields = changes.model_dump(include=changes.model_fields_set, exclude={"name"})
         return backtest(**fields, name=changes.name or "Silent Orion")
 
-    async def experiments(self, user_id: str, query: ExperimentsQuery) -> ExperimentsPage:
+    async def find_experiments(self, user_id: str, query: ExperimentsQuery) -> FoundExperiments:
         self.calls.append(("experiments", user_id, query))
-        return ExperimentsPage(
-            experiments=[EXPERIMENT],
-            total=1,
-            page=query.page,
-            pages=1,
-            counts=ExperimentCounts(all=1, mine=0, people=1),
-            facets=FACETS,
+        return FoundExperiments(experiments=[EXPERIMENT], total=1, page=query.page, pages=1)
+
+    async def experiment_facets(
+        self, user_id: str, query: ExperimentsQuery
+    ) -> ExperimentFacetsFound:
+        self.calls.append(("experiment_facets", user_id, query))
+        return ExperimentFacetsFound(
+            counts=ExperimentCounts(all=1, mine=0, people=1), facets=FACETS
         )
 
-    async def dashboard(self, user_id: str) -> DashboardOut:
-        self.calls.append(("dashboard", user_id, None))
-        return DashboardOut(
+    async def own_dashboard(self, user_id: str) -> OwnDashboard:
+        self.calls.append(("own_dashboard", user_id, None))
+        # The best by Sharpe ratio is also the best by return and starred: listed once.
+        best = backtest(3, sharpe=1.4, starred=True)
+        return OwnDashboard(
             counts=COUNTS,
             last=[backtest(1), backtest(2)],
             best=BestBacktests(
-                sharpe=[backtest(3)],
-                total_return=[backtest(4)],
+                sharpe=[best, backtest(4, sharpe=0.9)],
+                total_return=[best],
                 max_drawdown=[],
-                win_rate=[backtest(5)],
+                win_rate=[backtest(5, win_rate=0.7)],
             ),
-            starred=StarredBacktests(backtests=[backtest(6, starred=True)], total=5),
-            experiments=NewExperiments(backtests=[EXPERIMENT], total=1),
+            starred=[best, backtest(6, starred=True, sharpe=None)],
         )
 
 
@@ -266,7 +272,9 @@ def test_the_tools_and_their_annotations(mcp) -> None:
 def test_list_backtests_passes_the_search_filters_sort_and_page(mcp, service) -> None:
     arguments = {"query": "aapl", "show": "starred", "model": "blesk.keras", "sort": "return"}
 
-    result = call(mcp, "list_backtests", {**arguments, "order": "asc", "page": 2}, READ)
+    more = {"order": "asc", "page": 2, "include_facets": True}
+
+    result = call(mcp, "list_backtests", {**arguments, **more}, READ)
 
     assert not result.is_error, result.content
     assert service.calls == [
@@ -281,7 +289,8 @@ def test_list_backtests_passes_the_search_filters_sort_and_page(mcp, service) ->
                 order=SortOrder.asc,
                 page=2,
             ),
-        )
+        ),
+        ("facets", ADA.id, None),
     ]
     page = result.structured_content
     assert page["total"] == 1
@@ -294,6 +303,7 @@ def test_list_backtests_passes_the_search_filters_sort_and_page(mcp, service) ->
     assert listed["model_id"] == "mdl_k2m9qx47f3"
     assert listed["setup"]["timeframe"] == "1h"
     assert listed["url"] == "http://testserver/backtests/bt_0000000012"
+    assert listed["sweep_id"] is None
     for left_out in ("equity", "generated_name", "seeded", "duration_s", "finished_at"):
         assert left_out not in listed
 
@@ -301,11 +311,85 @@ def test_list_backtests_passes_the_search_filters_sort_and_page(mcp, service) ->
 def test_list_backtests_defaults_to_the_first_page_newest_first(mcp, service) -> None:
     assert not call(mcp, "list_backtests", {}, READ).is_error
 
-    assert service.calls == [("backtests", ADA.id, ListQuery())]
+    assert service.calls == [("backtests", ADA.id, ListQuery()), ("facets", ADA.id, None)]
+
+
+def test_list_backtests_passes_the_filters_of_the_api(mcp, service) -> None:
+    arguments = {
+        "status": ["finished", "failed"],
+        "sweep_id": "sw_7f3k2m9qx4",
+        "model_id": "mdl_k2m9qx47f3",
+        "instrument": " Stock:aapl ",
+        "timeframe": "1h",
+        "representation": "kagi",
+        "created_after": "2026-10-01T00:00:00",
+        "created_before": "2026-11-01T00:00:00+01:00",
+        "min_sharpe": 1,
+        "min_total_return": 0.1,
+        "min_max_drawdown": -0.2,
+        "starred": False,
+        "public": True,
+        "sort": "sortino",
+        "per_page": 100,
+    }
+
+    result = call(mcp, "list_backtests", arguments, READ)
+
+    assert not result.is_error, result.content
+    [(_, _, query), facets] = service.calls
+    assert facets == ("facets", ADA.id, None)
+    assert (query.sort, query.per_page) == (BacktestSort.sortino, 100)
+    assert query.more == BacktestFilters(
+        statuses=(BacktestStatus.finished, BacktestStatus.failed),
+        sweep_id="sw_7f3k2m9qx4",
+        model_id="mdl_k2m9qx47f3",
+        instrument="stock:AAPL",
+        timeframe=SetupTimeframe.h1,
+        representation=Representation.kagi,
+        created_after=datetime(2026, 10, 1, tzinfo=UTC),
+        created_before=datetime(2026, 10, 31, 23, tzinfo=UTC),
+        min_sharpe=1,
+        min_total_return=0.1,
+        min_max_drawdown=-0.2,
+        starred=False,
+        public=True,
+    )
 
 
 @pytest.mark.parametrize(
-    "arguments", [{"page": 0}, {"show": "deleted"}, {"query": "x" * 101}, {"sort": "luck"}]
+    ("arguments", "facets"),
+    [
+        ({"page": 2}, False),
+        ({"include_facets": False}, False),
+        ({"page": 3, "include_facets": True}, True),
+    ],
+)
+def test_list_backtests_answers_the_counts_on_page_1_or_when_asked(
+    mcp, service, arguments: dict[str, Any], facets: bool
+) -> None:
+    page = call(mcp, "list_backtests", arguments, READ).structured_content
+
+    assert (page["counts"] is not None, page["models"] is not None) == (facets, facets)
+    assert ("facets", ADA.id, None) in service.calls if facets else len(service.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"page": 0},
+        {"show": "deleted"},
+        {"query": "x" * 101},
+        {"sort": "luck"},
+        {"per_page": 101},
+        {"per_page": 0},
+        {"instrument": "AAPL"},
+        {"instrument": "bonds:AAPL"},
+        {"min_max_drawdown": 0.1},
+        {"min_sharpe": "nan"},
+        {"min_total_return": "inf"},
+        {"min_max_drawdown": "-inf"},
+        {"status": ["lost"]},
+    ],
 )
 def test_list_backtests_refuses_arguments_the_page_would(mcp, service, arguments) -> None:
     body = problem(call(mcp, "list_backtests", arguments, READ))
@@ -438,26 +522,24 @@ def test_list_experiments_passes_the_search_scope_filters_sort_and_page(mcp, ser
         "page": 3,
     }
 
-    result = call(mcp, "list_experiments", arguments, READ)
+    result = call(mcp, "list_experiments", {**arguments, "include_facets": True}, READ)
 
     assert not result.is_error, result.content
+    query = ExperimentsQuery(
+        query="btc",
+        mine=True,
+        author="usr_bobbbbbbbb",
+        market=InstrumentMarket.crypto,
+        symbol="BTCUSDT",
+        representation=Representation.kagi,
+        timeframe=SetupTimeframe.h1,
+        sort=ExperimentSort.sharpe,
+        order=SortOrder.asc,
+        page=3,
+    )
     assert service.calls == [
-        (
-            "experiments",
-            ADA.id,
-            ExperimentsQuery(
-                query="btc",
-                mine=True,
-                author="usr_bobbbbbbbb",
-                market=InstrumentMarket.crypto,
-                symbol="BTCUSDT",
-                representation=Representation.kagi,
-                timeframe=SetupTimeframe.h1,
-                sort=ExperimentSort.sharpe,
-                order=SortOrder.asc,
-                page=3,
-            ),
-        )
+        ("experiments", ADA.id, query),
+        ("experiment_facets", ADA.id, query),
     ]
     page = result.structured_content
     assert page["counts"] == {"all": 1, "mine": 0, "people": 1}
@@ -479,7 +561,20 @@ def test_list_experiments_gives_each_backtest_s_page(mcp, service) -> None:
 def test_list_experiments_defaults_to_everyones_newest(mcp, service) -> None:
     assert not call(mcp, "list_experiments", {}, READ).is_error
 
-    assert service.calls == [("experiments", ADA.id, ExperimentsQuery())]
+    assert service.calls == [
+        ("experiments", ADA.id, ExperimentsQuery()),
+        ("experiment_facets", ADA.id, ExperimentsQuery()),
+    ]
+
+
+@pytest.mark.parametrize("arguments", [{"page": 2}, {"include_facets": False}])
+def test_list_experiments_leaves_the_facets_out_past_page_1_or_when_asked(
+    mcp, service, arguments: dict[str, Any]
+) -> None:
+    page = call(mcp, "list_experiments", arguments, READ).structured_content
+
+    assert (page["counts"], page["facets"]) == (None, None)
+    assert [name for name, _, _ in service.calls] == ["experiments"]
 
 
 @pytest.mark.parametrize(
@@ -527,30 +622,29 @@ def test_reading_needs_the_scope_read(mcp, service, tool: str) -> None:
     assert service.calls == []
 
 
-def test_get_dashboard(mcp, service) -> None:
+def test_get_dashboard_lists_each_backtest_once(mcp, service) -> None:
     result = call(mcp, "get_dashboard", {}, READ)
 
     assert not result.is_error, result.content
-    assert service.calls == [("dashboard", ADA.id, None)]
+    # The user's own backtests only: not the queries of the published ones of anyone.
+    assert service.calls == [("own_dashboard", ADA.id, None)]
     dashboard = result.structured_content
-    assert set(dashboard) == {"counts", "newest", "best", "starred"}
+    assert set(dashboard) == {"counts", "backtests", "newest", "best", "starred"}
     assert dashboard["counts"]["all"] == 15
-    assert [item["number"] for item in dashboard["newest"]] == [1, 2]
-    assert {
-        name: [item["number"] for item in items] for name, items in dashboard["best"].items()
-    } == {
-        "sharpe": [3],
-        "total_return": [4],
+    assert dashboard["newest"] == ["bt_0000000001", "bt_0000000002"]
+    assert dashboard["best"] == {
+        "sharpe": [{"id": "bt_0000000003", "value": 1.4}, {"id": "bt_0000000004", "value": 0.9}],
+        "total_return": [{"id": "bt_0000000003", "value": 0.246}],
         "max_drawdown": [],
-        "win_rate": [5],
+        "win_rate": [{"id": "bt_0000000005", "value": 0.7}],
     }
-    [starred] = dashboard["starred"]
-    assert starred["starred"] is True
-    assert "equity" not in starred
+    assert dashboard["starred"] == ["bt_0000000003", "bt_0000000006"]
+    backtests = dashboard["backtests"]
+    assert sorted(backtests) == [f"bt_{number:010d}" for number in range(1, 7)]
+    best = backtests["bt_0000000003"]
+    assert (best["id"], best["starred"], best["sharpe"]) == ("bt_0000000003", True, 1.4)
+    assert "equity" not in best
     # Every backtest it names has its page, to show the user.
-    listed = [*dashboard["newest"], *dashboard["starred"]]
-    listed += [item for items in dashboard["best"].values() for item in items]
-    assert len(listed) == 6
-    assert [item["url"] for item in listed] == [
-        f"http://testserver/backtests/{item['id']}" for item in listed
+    assert [item["url"] for item in backtests.values()] == [
+        f"http://testserver/backtests/{backtest_id}" for backtest_id in backtests
     ]

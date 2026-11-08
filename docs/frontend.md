@@ -483,6 +483,22 @@ the longest of every date and time format. Trades is left out: with it the model
 at 1200 px, When at 800 (and from 980 to 1080 px), Model at 720, Sharpe at 560, Instruments at
 480.
 
+A checkbox before each row (the app's 18 px box, `src/components/Tick.tsx`, 26 px wide with the
+star's cell after it) and one in the header for the page choose backtests to delete. The header's
+box shows a dash while only some rows are chosen and chooses none once all are. Only the rows of
+the page shown count, so another page or search never deletes what is out of sight. While any
+are chosen, Delete with their count ("Delete 3", the page's Delete button) sits at the right of
+the search and Filters. It opens the backtest page's dialog for all of them: "Delete 3
+backtests?", that they go with their results and trades, that running ones are stopped, queued
+ones leave the queue and published ones also leave Experiments and the Compare of anyone who
+added them when any chosen one is such, and "This cannot be undone." Delete sends
+`POST /api/v1/backtests/delete` with their `ids` (one chosen row goes as
+`DELETE /api/v1/backtests/{id}`), and IDs in `not_found` count as deleted. Then the choice is
+cleared, the deleted ones leave Compare, the same queries as after a single delete are asked for
+again and a toast says "3 backtests were deleted" ("Bright Vega was deleted" for one). An error
+stays in the dialog with the choice kept. With the checkboxes the backtest's name keeps 120 px at
+the page's full width, not 150.
+
 A backtest without results has its badge in the Return column: Running, Failed, or Queued with
 its place in the user's queue (`queue_position`, 1 starts next), "Queued · 2", with "2 backtests
 ahead of it" in the title (the column has no room for more). While a list or the dashboard shows
@@ -573,6 +589,16 @@ so its back link returns there (else "← Backtests").
   dialog shows the API's sentence (`409 backtest-not-queued`) and the page is asked for again.
   The dialog cannot be closed while the request runs. Where the 2 s poll finds it running while
   the dialog is open, the dialog says it has left the queue and Cancel backtest turns off.
+- Delete (the user's own, any status, last in the header, `DeleteBacktest.tsx`): an outline button
+  with a bin, red on hover, that asks first in the dialog the list's bulk delete shares
+  (`src/features/backtests/DeleteDialog.tsx`): Delete Bright Vega?, a sentence by status (a
+  queued one leaves the queue, a running one is stopped), that a published one also leaves
+  Experiments and the Compare of anyone who added it, and "This cannot be undone.", then Cancel or
+  Delete. It sends `DELETE /api/v1/backtests/{id}`. Then the backtest leaves Compare, the lists,
+  the dashboard, Experiments and the models are asked for again, the page goes to Backtests and
+  the backtest's document leaves the cache, so going back says it is not found. A 404 (deleted in
+  another tab) counts as deleted. Any other error shows its detail in the dialog, which cannot be
+  closed while the request runs.
 - Finished: the six first results in a strip (`src/components/FactsStrip.tsx`, the model page's
   too), then the charts and the trades beside every metric of the engine and the setup (one column
   up to 980 px). Running: a moving bar and the setup. Failed: the error and the setup. A 404 says
@@ -641,7 +667,7 @@ so its back link returns there (else "← Backtests").
   setup, no model file; the line under the title starts with the author (initials and name) and
   ends with "Published today"; the model is its name in ink, never a link, and the setup says the
   model file stays with the author. On top of the right column the author card: the 40 px
-  initials, the name, "Published 2 Nov 2026 at 10:14" and "More by Tymur →" to
+  initials, the name, "Published 2 Nov 2026 at 10:14" and "More by Grace →" to
   `/experiments?author=<id>`. The back link goes to Experiments (back through the history when it
   was opened there, so its search stays). Once its author unpublished it, the page answers 404
   and says it is not found.
@@ -659,7 +685,7 @@ so its back link returns there (else "← Backtests").
   name. The panel asks for their documents (not on the compare page, whose comparison tells the
   same), and one that now answers 404 was unpublished: it leaves the comparison but keeps its slot, dashed in the
   warning colour, "#57 was unpublished" with the author's initials, until the user dismisses it
-  (the compare page says "Vladyslav Shudiehov unpublished #57, so it left your Compare."). The
+  (the compare page says "Alan Turing unpublished #57, so it left your Compare."). The
   user's own that answers 404 was deleted and leaves at once (`leaveCompare`).
 - Whose: another account's backtest has its author's initials (16 px) in the panel and the charts'
   legends, the initials and the name (20 px) in the table's head, and the Setup gets an Author
@@ -702,7 +728,7 @@ author is their display name with the initials the app draws (`AuthorAvatar.tsx`
 - Beside the title All · Mine with their counts (`counts`) and Cards · Table, both the app's
   segmented control at 34 px. Cards is the default; the view is the browser's (`localStorage`,
   `view.ts`, like the compare selection), not the URL's, and stays as it was left.
-- The toolbar: the search (instrument, model or author), the author chip of "More by Tymur" (the
+- The toolbar: the search (instrument, model or author), the author chip of "More by Grace" (the
   initials, the name and a cross that shows everyone), then Market (All markets, Stocks, Crypto,
   then under "Instrument" each published one), Representation (Any, Renko, Kagi, Candles) and
   Timeframe (Any and those published), each a 34 px chip with a 236 px list of one choice
@@ -731,7 +757,7 @@ author is their display name with the initials the app draws (`AuthorAvatar.tsx`
   backtest's page ([Backtest page](#backtest-page)), whose back link returns here as it was.
 - The dashboard has New in Experiments on top of the right column once anything is published:
   the four newest (`dashboard.experiments`) in the rows of Starred backtests with the author's
-  initials, "Tymur Tkach · today", and "Open Experiments … 25 published →".
+  initials, "Grace Hopper · today", and "Open Experiments … 25 published →".
 
 ## Instrument icons
 

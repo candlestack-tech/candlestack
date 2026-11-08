@@ -2,10 +2,13 @@
 one, the backtests everyone published (Experiments), and the Dashboard."""
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from math import ceil
+from typing import NamedTuple
+
+from sqlalchemy import ColumnElement
 
 from candlestack.experiments.errors import (
     BacktestNotFinished,
@@ -50,6 +53,7 @@ from candlestack.experiments.schemas import (
 )
 from candlestack.experiments.store import (
     Authored,
+    BacktestFilters,
     BacktestStore,
     Facets,
     Listed,
@@ -70,7 +74,8 @@ _MARKETS = (InstrumentMarket.stock, InstrumentMarket.crypto)
 
 @dataclass(frozen=True)
 class ListQuery:
-    """The search, filters, sort and page of the Backtests page."""
+    """The search, filters, sort and page of the Backtests page, and the filters and page size
+    only the API and the agents ask for (``more``, ``per_page``)."""
 
     query: str = ""
     show: BacktestShow = BacktestShow.all
@@ -78,6 +83,40 @@ class ListQuery:
     sort: BacktestSort = BacktestSort.default
     order: SortOrder = SortOrder.desc
     page: int = 1
+    more: BacktestFilters = field(default_factory=BacktestFilters)
+    per_page: int = PAGE_SIZE
+
+
+class FoundBacktests(NamedTuple):
+    """A page of the list without what the filter panel shows (``BacktestFacets``)."""
+
+    backtests: list[BacktestOut]
+    total: int
+    page: int
+    pages: int
+
+
+class BacktestFacets(NamedTuple):
+    """What the filter panel shows, whatever the filters: two queries."""
+
+    counts: BacktestCounts
+    models: list[ModelCount]
+
+
+class FoundExperiments(NamedTuple):
+    """A page of Experiments without the counts and what the filters offer."""
+
+    experiments: list[ExperimentOut]
+    total: int
+    page: int
+    pages: int
+
+
+class ExperimentFacetsFound(NamedTuple):
+    """The counts of Experiments and what its filters offer: five queries."""
+
+    counts: ExperimentCounts
+    facets: ExperimentFacets
 
 
 @dataclass(frozen=True)
@@ -94,6 +133,16 @@ class ExperimentsQuery:
     sort: ExperimentSort = ExperimentSort.newest
     order: SortOrder = SortOrder.desc
     page: int = 1
+
+
+@dataclass(frozen=True)
+class OwnDashboard:
+    """What the Dashboard shows of the user's own backtests."""
+
+    counts: BacktestCounts
+    last: list[BacktestOut]
+    best: BestBacktests
+    starred: list[BacktestOut]
 
 
 def _equity(backtest: Backtest) -> EquitySeries | None:
@@ -189,6 +238,10 @@ def _in_order(counts: Mapping[str, int], order: Sequence[StrEnum]) -> list[Facet
     ]
 
 
+def _experiment_scope(user_id: str, query: ExperimentsQuery) -> list[ColumnElement[bool]]:
+    return experiment_scope(user_id, query=query.query, mine=query.mine, author=query.author)
+
+
 def pages(total: int, size: int = PAGE_SIZE) -> int:
     """The pages `total` backtests fill, `size` a page; 1 when there are none."""
     return max(1, ceil(total / size))
@@ -207,21 +260,32 @@ class BacktestsService:
     async def backtests(self, user_id: str, query: ListQuery) -> BacktestsPage:
         """A page of the user's backtests that match the query, with what the filter panel
         shows: the counts of all, starred and failed ones and the models used."""
-        conditions = filters(query=query.query, show=query.show, model=query.model)
+        found = await self.find(user_id, query)
+        facets = await self.facets(user_id)
+        return BacktestsPage(**found._asdict(), **facets._asdict())
+
+    async def find(self, user_id: str, query: ListQuery) -> FoundBacktests:
+        """A page of the user's backtests that match the query: two queries."""
+        conditions = filters(query=query.query, show=query.show, model=query.model, more=query.more)
         total = await self._store.count(user_id, conditions)
         rows = await self._store.backtests(
             user_id,
             conditions,
             ordering(query.sort, query.order),
-            limit=PAGE_SIZE,
-            offset=(query.page - 1) * PAGE_SIZE,
+            limit=query.per_page,
+            offset=(query.page - 1) * query.per_page,
         )
-        models = await self._store.model_counts(user_id)
-        return BacktestsPage(
+        return FoundBacktests(
             backtests=[backtest_out(row) for row in rows],
             total=total,
             page=query.page,
-            pages=pages(total),
+            pages=pages(total, query.per_page),
+        )
+
+    async def facets(self, user_id: str) -> BacktestFacets:
+        """The counts of all, starred, failed and published backtests and the models used."""
+        models = await self._store.model_counts(user_id)
+        return BacktestFacets(
             counts=await self._counts(user_id),
             models=[
                 ModelCount(name=model.name, framework=model.framework, count=model.count)
@@ -297,9 +361,14 @@ class BacktestsService:
     async def experiments(self, user_id: str, query: ExperimentsQuery) -> ExperimentsPage:
         """A page of the published backtests that match the query, with the counts and what
         the filters offer (over the scope and the search, whatever the filters)."""
-        scope = experiment_scope(user_id, query=query.query, mine=query.mine, author=query.author)
+        found = await self.find_experiments(user_id, query)
+        facets = await self.experiment_facets(user_id, query)
+        return ExperimentsPage(**found._asdict(), **facets._asdict())
+
+    async def find_experiments(self, user_id: str, query: ExperimentsQuery) -> FoundExperiments:
+        """A page of the published backtests that match the query: two queries."""
         conditions = [
-            *scope,
+            *_experiment_scope(user_id, query),
             *experiment_filters(
                 market=query.market,
                 symbol=query.symbol,
@@ -314,19 +383,47 @@ class BacktestsService:
             limit=EXPERIMENTS_PAGE_SIZE,
             offset=(query.page - 1) * EXPERIMENTS_PAGE_SIZE,
         )
-        counts = await self._store.experiment_counts(user_id)
-        return ExperimentsPage(
+        return FoundExperiments(
             experiments=[experiment_out(row, user_id) for row in rows],
             total=total,
             page=query.page,
             pages=pages(total, EXPERIMENTS_PAGE_SIZE),
+        )
+
+    async def experiment_facets(
+        self, user_id: str, query: ExperimentsQuery
+    ) -> ExperimentFacetsFound:
+        """The counts of Experiments and what the filters offer over the query's scope and
+        search, whatever its filters."""
+        counts = await self._store.experiment_counts(user_id)
+        return ExperimentFacetsFound(
             counts=ExperimentCounts(all=counts.all, mine=counts.mine, people=counts.people),
-            facets=facets_out(await self._store.facets(scope)),
+            facets=facets_out(await self._store.facets(_experiment_scope(user_id, query))),
         )
 
     async def dashboard(self, user_id: str) -> DashboardOut:
         """What the Dashboard shows of the user's backtests, and the newest published ones of
         anyone."""
+        own = await self.own_dashboard(user_id)
+        published = await self._store.experiments(
+            experiment_scope(user_id),
+            experiment_ordering(ExperimentSort.newest, SortOrder.desc),
+            limit=DASHBOARD_EXPERIMENTS,
+        )
+        everyone = await self._store.experiment_counts(user_id)
+        return DashboardOut(
+            counts=own.counts,
+            last=own.last,
+            best=own.best,
+            starred=StarredBacktests(backtests=own.starred, total=own.counts.starred),
+            experiments=NewExperiments(
+                backtests=[experiment_out(row, user_id) for row in published], total=everyone.all
+            ),
+        )
+
+    async def own_dashboard(self, user_id: str) -> OwnDashboard:
+        """What the Dashboard shows of the user's own backtests, without the queries of the
+        published ones of anyone (the MCP server's Dashboard)."""
         counts = await self._counts(user_id)
         # The newest that ended: a queued or running one has nothing to show there yet.
         last = await self._store.backtests(
@@ -353,20 +450,9 @@ class BacktestsService:
             ordering(BacktestSort.sharpe, SortOrder.desc),
             limit=DASHBOARD_STARRED,
         )
-        published = await self._store.experiments(
-            experiment_scope(user_id),
-            experiment_ordering(ExperimentSort.newest, SortOrder.desc),
-            limit=DASHBOARD_EXPERIMENTS,
-        )
-        everyone = await self._store.experiment_counts(user_id)
-        return DashboardOut(
+        return OwnDashboard(
             counts=counts,
             last=[backtest_out(row) for row in last],
             best=BestBacktests(**best),
-            starred=StarredBacktests(
-                backtests=[backtest_out(row) for row in starred], total=counts.starred
-            ),
-            experiments=NewExperiments(
-                backtests=[experiment_out(row, user_id) for row in published], total=everyone.all
-            ),
+            starred=[backtest_out(row) for row in starred],
         )

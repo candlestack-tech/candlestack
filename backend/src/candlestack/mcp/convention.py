@@ -5,7 +5,9 @@ A tool is an async function that takes its arguments, typed, and ``ctx: Context`
 a Pydantic model, which becomes its output schema. Its docstring is the description a model
 reads: what the tool does, when to use it and what it answers. ``ToolSpec`` adds a short
 ``verb_noun`` name, a title for people, the scopes an API key needs, the annotations (read-only,
-destructive, idempotent, always all three) and an example call for the tool reference.
+destructive, idempotent, always all three), an example call for the tool reference, and what a
+call costs of the rate limits (``cost``: 1, or ``HEAVY`` for one that builds or reruns much,
+or what works it out from the arguments).
 
 A tool raises ``ProblemError`` for what the agent should see, as a route does; the server turns
 it and every other failure into a tool error whose text is the problem as JSON
@@ -18,17 +20,18 @@ import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Annotated, Any
 
 from mcp.server.mcpserver import Context
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import State
 from starlette.requests import Request
 
 from candlestack.accounts import Caller, Scope, User
 from candlestack.core import PROBLEM_TYPE_BASE, ProblemError, Settings
+from candlestack.experiments import IDEMPOTENCY_KEY_MAX, IDEMPOTENCY_KEY_PATTERN, BacktestRunner
 from candlestack.mcp.docs import TOOLS_DOCS
 
 # A verb and what it acts on, lowercase: get_me, start_backtest, list_models.
@@ -36,6 +39,24 @@ _NAME = re.compile(r"[a-z]+(_[a-z0-9]+){1,3}")
 _NAME_MAX = 32
 # Where the HTTP layer leaves the caller of a request (``request.state``), for the tools.
 CALLER_STATE = "mcp_caller"
+# The longest wait of one call of a wait tool: clients give up on a call after a minute or so,
+# and the transport answers JSON at the end of the call, so the agent calls again.
+WAIT_MAX_S = 60
+WAIT_DEFAULT_S = 50
+# How often a wait reads the backtests' rows again when nothing told it of a change: the runner
+# tells it when one starts, ends or is cancelled (``BacktestRunner.watch``).
+POLL_S = 2.5
+
+# The idempotency key of a tool that starts something (``experiments.idempotent``).
+IdempotencyKey = Annotated[
+    str | None,
+    Field(
+        max_length=IDEMPOTENCY_KEY_MAX,
+        pattern=IDEMPOTENCY_KEY_PATTERN,
+        description="A key you make, such as a UUID: the same call again with it within 24 "
+        "hours answers the first one instead of starting again",
+    ),
+]
 
 
 def reads() -> ToolAnnotations:
@@ -76,6 +97,9 @@ class ToolSpec:
     scopes: tuple[Scope, ...]
     annotations: ToolAnnotations
     example: Example
+    # What a call costs of the caller's rate limits (``accounts.charge_rate``), or what works
+    # it out from the call's arguments (a short answer from stored data costs less).
+    cost: int | Callable[[dict[str, Any]], int] = 1
     description: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -98,6 +122,10 @@ class ToolSpec:
         paragraphs = [" ".join(part.split()) for part in doc.split("\n\n")]
         paragraphs.append(f"Docs: {TOOLS_DOCS}#{self.name}")
         object.__setattr__(self, "description", "\n\n".join(paragraphs))
+
+    def cost_of(self, arguments: dict[str, Any]) -> int:
+        """What the call with `arguments` costs of the caller's rate limits."""
+        return self.cost if isinstance(self.cost, int) else self.cost(arguments)
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +157,11 @@ class ToolCall:
             yield session
 
 
+def runner_of(call: ToolCall) -> BacktestRunner:
+    """The app's backtest runner, which tells a wait when a backtest changed."""
+    return call.state.backtest_runner
+
+
 def tool_call(ctx: Context) -> ToolCall:
     """The call `ctx` belongs to; the HTTP layer signed its request in before any tool runs."""
     request = ctx.request_context.request
@@ -155,5 +188,5 @@ def problem_body(problem: ProblemError) -> dict[str, Any]:
 
 def problem_result(problem: ProblemError) -> CallToolResult:
     """A tool error whose text is the problem as JSON, so a model reads the type and detail."""
-    text = json.dumps(problem_body(problem), ensure_ascii=False)
+    text = json.dumps(problem_body(problem), ensure_ascii=False, separators=(",", ":"))
     return CallToolResult(content=[TextContent(type="text", text=text)], is_error=True)

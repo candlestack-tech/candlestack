@@ -1,15 +1,18 @@
 """HTTP API of the experiments module: the signed-in user's backtests under
 ``/api/v1/backtests`` (the list, starting one, cancelling a queued one, its result document and
-its download), the backtests every account published under ``/api/v1/experiments``, the
-comparison of backtests under ``/api/v1/compare``, sweeps of many backtests under
-``/api/v1/sweeps`` and the Dashboard under ``/api/v1/dashboard``.
+its download, deleting them), the backtests every account published under
+``/api/v1/experiments``, the comparison of backtests under ``/api/v1/compare``, sweeps of many
+backtests under ``/api/v1/sweeps`` and the Dashboard under ``/api/v1/dashboard``.
 """
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Annotated
+from datetime import datetime
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Path, Query, Response
+from fastapi import APIRouter, Depends, Header, Path, Query, Response
+from pydantic import AfterValidator
 
 from candlestack.accounts import (
     API_KEY_SCHEME,
@@ -18,24 +21,38 @@ from candlestack.accounts import (
     CurrentUserDep,
     ReaderDep,
     Scope,
+    heavy,
+    heavy_unless,
 )
-from candlestack.core import NO_STORE, ProblemError, problem_doc, require_same_origin
+from candlestack.core import NO_STORE, ProblemError, RedisDep, problem_doc, require_same_origin
 from candlestack.data import data_problems
 from candlestack.experiments.compare import (
     COMPARE_MAX,
     COMPARE_MIN,
+    CURVE_POINTS,
     IDS_MAX_LENGTH,
     CompareOut,
+    SetupMode,
     compare,
     parse_ids,
 )
-from candlestack.experiments.dependencies import BacktestRunsDep, BacktestsServiceDep, SweepsDep
+from candlestack.experiments.deletes import DELETE_MAX, BacktestsDeleted, BacktestsDeleteIn
+from candlestack.experiments.dependencies import (
+    BacktestRunsDep,
+    BacktestsServiceDep,
+    DeletesDep,
+    SweepsDep,
+)
 from candlestack.experiments.document import BacktestCheck, BacktestDocument, BacktestIn
 from candlestack.experiments.errors import (
+    BacktestLimitReached,
     BacktestNotFinished,
     BacktestNotFound,
     BacktestNotQueued,
     BacktestsUnavailable,
+    CountMismatch,
+    IdempotencyKeyInUse,
+    IdempotencyKeyReused,
     InstrumentNotForModel,
     InvalidBacktest,
     ModelNeedsSetup,
@@ -49,15 +66,18 @@ from candlestack.experiments.errors import (
     SweepQueueFull,
     SweepTooLarge,
 )
+from candlestack.experiments.idempotency import KEY_MAX, KEY_PATTERN, Committed, once
 from candlestack.experiments.schemas import (
     EXPERIMENTS_PAGE_SIZE,
     MODEL_NAME_MAX,
     PAGE_SIZE,
+    PER_PAGE_MAX,
     QUERY_MAX,
     BacktestOut,
     BacktestShow,
     BacktestSort,
     BacktestsPage,
+    BacktestStatus,
     BacktestUpdate,
     DashboardOut,
     ExperimentSort,
@@ -66,9 +86,11 @@ from candlestack.experiments.schemas import (
     Representation,
     SetupTimeframe,
     SortOrder,
+    as_utc,
+    instrument_filter,
 )
 from candlestack.experiments.service import ExperimentsQuery, ListQuery
-from candlestack.experiments.store import QUEUE_MAX
+from candlestack.experiments.store import QUEUE_MAX, BacktestFilters
 from candlestack.experiments.sweeps import (
     SWEEP_MAX,
     SWEEP_MIN,
@@ -76,6 +98,7 @@ from candlestack.experiments.sweeps import (
     SweepMetric,
     SweepOut,
     SweepPlan,
+    SweepsPage,
 )
 
 router = APIRouter(tags=["backtests"])
@@ -86,12 +109,59 @@ PAGE_MAX = 100_000
 BacktestId = Annotated[
     str, Path(description="Public ID of the backtest", examples=["bt_7f3k2m9qx4"])
 ]
+IdempotencyKey = Annotated[
+    str | None,
+    Header(
+        alias="Idempotency-Key",
+        max_length=KEY_MAX,
+        pattern=KEY_PATTERN,
+        description=(
+            "Any 1 to 255 visible ASCII characters, such as a UUID: the same request sent "
+            "again with it within 24 hours gets the first answer (with `Idempotent-Replayed: "
+            "true`) instead of a second start"
+        ),
+    ),
+]
+# How long a request should wait before it asks again while the first one with its
+# idempotency key is still being answered, in seconds.
+IN_USE_RETRY_S = 2
 
 
 _NOT_SIGNED_IN = problem_doc(401, "Not signed in (`not-signed-in`).")
 
 
-def list_query(
+# The query parameters of the list's filters for the API and the agents (``BacktestFilters``).
+Statuses = Annotated[
+    list[BacktestStatus] | None,
+    Query(description="Only backtests with one of these statuses (repeat the parameter)"),
+]
+SweepFilter = Annotated[
+    str | None,
+    Query(
+        max_length=32, description="Only the backtests of this sweep", examples=["sw_7f3k2m9qx4"]
+    ),
+]
+ModelIdFilter = Annotated[
+    str | None,
+    Query(
+        max_length=32,
+        description="Only the backtests of the model with this ID",
+        examples=["mdl_k2m9qx47f3"],
+    ),
+]
+InstrumentFilter = Annotated[
+    str | None,
+    Query(
+        max_length=64,
+        description="Only the backtests of this instrument, `<market>:<symbol>`",
+        examples=["stock:AAPL"],
+    ),
+    AfterValidator(instrument_filter),
+]
+CreatedFilter = Annotated[datetime | None, AfterValidator(as_utc)]
+
+
+def list_query(  # noqa: PLR0913 (one argument per query parameter)
     *,
     q: Annotated[
         str,
@@ -115,13 +185,77 @@ def list_query(
             examples=["blesk-novol-8.keras"],
         ),
     ] = None,
+    status: Statuses = None,
+    sweep_id: SweepFilter = None,
+    model_id: ModelIdFilter = None,
+    instrument: InstrumentFilter = None,
+    timeframe: Annotated[SetupTimeframe | None, Query(description="Only this timeframe")] = None,
+    representation: Annotated[
+        Representation | None, Query(description="Only models that read this")
+    ] = None,
+    created_after: Annotated[
+        CreatedFilter, Query(description="Only those started at or after this time (UTC)")
+    ] = None,
+    created_before: Annotated[
+        CreatedFilter, Query(description="Only those started before this time (UTC)")
+    ] = None,
+    min_sharpe: Annotated[
+        float | None,
+        Query(allow_inf_nan=False, description="Only those with at least this Sharpe ratio"),
+    ] = None,
+    min_total_return: Annotated[
+        float | None,
+        Query(allow_inf_nan=False, description="Only those with at least this return, a fraction"),
+    ] = None,
+    min_max_drawdown: Annotated[
+        float | None,
+        Query(
+            le=0,
+            allow_inf_nan=False,
+            description="Only those whose largest fall is no deeper than this, 0 or below: "
+            "-0.2 keeps falls of up to 20 percent",
+        ),
+    ] = None,
+    starred: Annotated[
+        bool | None, Query(description="Only the starred (true) or the unstarred (false)")
+    ] = None,
+    public: Annotated[
+        bool | None, Query(description="Only the published (true) or the unpublished (false)")
+    ] = None,
     sort: Annotated[BacktestSort, Query(description="What to sort by")] = BacktestSort.default,
     order: Annotated[SortOrder, Query(description="Direction of the sort")] = SortOrder.desc,
     page: Annotated[
-        int, Query(ge=1, le=PAGE_MAX, description=f"The page, from 1, of {PAGE_SIZE} backtests")
+        int, Query(ge=1, le=PAGE_MAX, description="The page, from 1, of `per_page` backtests")
     ] = 1,
+    per_page: Annotated[
+        int, Query(ge=1, le=PER_PAGE_MAX, description="Backtests per page")
+    ] = PAGE_SIZE,
 ) -> ListQuery:
-    return ListQuery(query=q, show=show, model=model, sort=sort, order=order, page=page)
+    more = BacktestFilters(
+        statuses=tuple(status or ()),
+        sweep_id=sweep_id,
+        model_id=model_id,
+        instrument=instrument,
+        timeframe=timeframe,
+        representation=representation,
+        created_after=created_after,
+        created_before=created_before,
+        min_sharpe=min_sharpe,
+        min_total_return=min_total_return,
+        min_max_drawdown=min_max_drawdown,
+        starred=starred,
+        public=public,
+    )
+    return ListQuery(
+        query=q,
+        show=show,
+        model=model,
+        sort=sort,
+        order=order,
+        page=page,
+        more=more,
+        per_page=per_page,
+    )
 
 
 @router.get("/api/v1/backtests", responses=_NOT_SIGNED_IN)
@@ -131,9 +265,9 @@ async def list_backtests(
     service: BacktestsServiceDep,
     response: Response,
 ) -> BacktestsPage:
-    """A page of the user's backtests that match the search and the filters, and what the
+    """A page of the user's backtests that match the search and every filter, and what the
     filter panel shows: the counts of all, starred and failed backtests and every model the
-    backtests used. A page past the last one is empty."""
+    backtests used, whatever the filters. A page past the last one is empty."""
     response.headers.update(NO_STORE)
     return await service.backtests(user.id, query)
 
@@ -354,8 +488,39 @@ def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911, P
                 "queue-full",
                 "Queue full",
                 f"You have {QUEUE_MAX} backtests waiting already. Start this one when one of "
-                "them has started, or cancel one.",
-                extensions={"limit": QUEUE_MAX},
+                f"them has started, in about {error.retry_after_s} s, or cancel one.",
+                headers={"Retry-After": str(error.retry_after_s)},
+                extensions={"limit": QUEUE_MAX, "retry_after_s": error.retry_after_s},
+            )
+        case IdempotencyKeyReused():
+            return ProblemError(
+                422,
+                "idempotency-key-reused",
+                "Idempotency key reused",
+                "This idempotency key came with another request in the last 24 hours. Use a "
+                "new key for a new request, and the same key only to send the same request "
+                "again.",
+            )
+        case IdempotencyKeyInUse():
+            return ProblemError(
+                409,
+                "idempotency-key-in-use",
+                "Idempotency key in use",
+                "The first request with this idempotency key is still being answered. Send it "
+                f"again in {IN_USE_RETRY_S} s to get its answer.",
+                headers={"Retry-After": str(IN_USE_RETRY_S)},
+                extensions={"retry_after_s": IN_USE_RETRY_S},
+            )
+        case BacktestLimitReached():
+            return _limit_problem(error)
+        case CountMismatch():
+            return ProblemError(
+                409,
+                "confirmation-mismatch",
+                "Confirmation mismatch",
+                f"{error.count} backtests match, which is not the count confirmed, so nothing was "
+                "deleted. Check what you are deleting with the user, then confirm that count.",
+                extensions={"count": error.count},
             )
         case BacktestNotQueued():
             detail = (
@@ -406,6 +571,25 @@ def _problem(error: Exception) -> ProblemError | None:  # noqa: C901, PLR0911, P
     return None
 
 
+def _limit_problem(error: BacktestLimitReached) -> ProblemError:
+    """``backtest-limit``: the account keeps ``limit`` backtests at most."""
+    have = f"You have {error.count:,} backtests, and an account keeps at most {error.limit:,}."
+    if error.adding == 1:
+        detail = f"{have} Delete old backtests you no longer need, then start this one."
+    else:
+        over = error.count + error.adding - error.limit
+        detail = (
+            f"The sweep has {error.adding} backtests. {have} Delete at least {over:,} old "
+            "backtests you no longer need, or vary fewer values."
+        )
+    extensions = {"limit": error.limit, "count": error.count}
+    if error.adding != 1:
+        extensions["adding"] = error.adding
+    return ProblemError(
+        409, "backtest-limit", "Backtest limit reached", detail, extensions=extensions
+    )
+
+
 @contextmanager
 def backtest_problems() -> Iterator[None]:
     """Raises the errors of starting or cancelling a backtest, of its document, of a comparison
@@ -450,34 +634,71 @@ def _json(
         ),
         **problem_doc(
             409,
-            "The model has no manifest (`model-needs-setup`), or the user has "
-            f"{QUEUE_MAX} backtests waiting already (`queue-full`, with `limit`).",
+            "The model has no manifest (`model-needs-setup`), the user has "
+            f"{QUEUE_MAX} backtests waiting already (`queue-full`, with `limit` and "
+            "`retry_after_s`), as many backtests as an account keeps (`backtest-limit`, with "
+            "`limit` and `count`), or the first request with the `Idempotency-Key` is still "
+            "being answered (`idempotency-key-in-use`, with `retry_after_s`).",
         ),
         **problem_doc(
             422,
             "An invalid setup (`validation`), a model of another market "
             "(`instrument-not-for-model`), a period outside the data (`period-out-of-range`), "
-            "without the candles the model needs before it (`warm-up-out-of-range`), or with "
-            "more candles than allowed (`too-many-candles`).",
+            "without the candles the model needs before it (`warm-up-out-of-range`), with "
+            "more candles than allowed (`too-many-candles`), or an `Idempotency-Key` sent "
+            "before with another body (`idempotency-key-reused`).",
         ),
         **_SOURCE_ERRORS,
     },
     dependencies=[Depends(require_same_origin)],
 )
+@heavy
 async def start_backtest(
-    body: BacktestIn, user: BacktestsUserDep, runs: BacktestRunsDep, response: Response
+    body: BacktestIn,
+    user: BacktestsUserDep,
+    runs: BacktestRunsDep,
+    response: Response,
+    *,
+    redis: RedisDep,
+    idempotency_key: IdempotencyKey = None,
 ) -> Response:
     """Starts a backtest of one of the user's models on one instrument and period and returns
-    its document with its number: `running`, or `queued` with its `queue_position` while
-    another backtest of the user runs (one runs at a time per user, up to 20 more wait, and
-    the oldest starts when the running one ends). Checked first: the model is the user's and
-    has a manifest, the instrument fits the model, the period with the candles the model needs
-    before it fits the data and the candle limit, the user's queue has room, and the worker
-    that runs the models can be reached. The run goes on after the response; the document
-    (`GET /api/v1/backtests/{backtest_id}`) has the results once it finished."""
+    its document with its number: `running`, or `queued` with its `queue_position` until one
+    of the run slots shared by all users frees and it is the user's turn (users take turns;
+    one of a user's backtests runs at a time, up to 20 more wait, oldest first). Checked first:
+    the model is the user's and has a manifest, the instrument fits the model, the period with
+    the candles the model needs before it fits the data and the candle limit, the user's queue
+    has room, and the worker that runs the models can be reached. The run goes on after the
+    response; the document (`GET /api/v1/backtests/{backtest_id}`) has the results once it
+    finished. With an `Idempotency-Key`, the same request sent again within 24 hours answers
+    the first document again instead of starting another backtest."""
+
+    async def started(committed: Committed) -> bytes:
+        _, content = await runs.start(user.id, body, committed)
+        return content
+
+    async def again(backtest_id: str) -> bytes:
+        _, content = await runs.document(user.id, backtest_id, light=True)
+        return content
+
     with backtest_problems():
-        backtest, content = await runs.start(user.id, body)
-    return _json(content, response, 201, {"Location": f"/api/v1/backtests/{backtest.id}"})
+        content, replayed = await once(
+            redis,
+            user_id=user.id,
+            kind="POST /api/v1/backtests",
+            key=idempotency_key,
+            body=body.model_dump_json().encode(),
+            answer=started,
+            rebuild=again,
+        )
+    backtest_id = json.loads(content)["backtest"]["id"]
+    headers = {"Location": f"/api/v1/backtests/{backtest_id}", **_replayed(replayed=replayed)}
+    return _json(content, response, 201, headers)
+
+
+def _replayed(*, replayed: bool) -> dict[str, str]:
+    """The header of an answer given again for a repeated idempotency key."""
+    return {"Idempotent-Replayed": "true"} if replayed else {}
 
 
 @router.post(
@@ -494,8 +715,10 @@ async def start_backtest(
         ),
         **problem_doc(
             409,
-            "The model has no manifest (`model-needs-setup`), or the user has "
-            f"{QUEUE_MAX} backtests waiting already (`queue-full`, with `limit`).",
+            "The model has no manifest (`model-needs-setup`), the user has "
+            f"{QUEUE_MAX} backtests waiting already (`queue-full`, with `limit` and "
+            "`retry_after_s`), or as many backtests as an account keeps (`backtest-limit`, with "
+            "`limit` and `count`).",
         ),
         **problem_doc(
             422,
@@ -546,6 +769,59 @@ async def cancel_backtest(
     return _json(content, response)
 
 
+@router.delete(
+    "/api/v1/backtests/{backtest_id}",
+    status_code=204,
+    responses={
+        **_NOT_SIGNED_IN,
+        **problem_doc(
+            403, "The request does not come from the app's own pages (`cross-origin-request`)."
+        ),
+        **problem_doc(404, "The user has no backtest with this ID (`not-found`)."),
+    },
+    dependencies=[Depends(require_same_origin)],
+)
+async def delete_backtest(
+    backtest_id: BacktestId, user: BacktestsUserDep, deletes: DeletesDep
+) -> None:
+    """Deletes the user's backtest for good, with everything its run stored. A queued one
+    leaves the queue, a running one is stopped first. A published one leaves Experiments, and
+    its page answers 404 to everyone. Its sweep no longer lists it, and a sweep without any
+    backtest left is deleted too."""
+    deleted = await deletes.delete(user.id, ids=[backtest_id])
+    if not deleted.count:
+        with backtest_problems():
+            raise BacktestNotFound
+
+
+@router.post(
+    "/api/v1/backtests/delete",
+    responses={
+        **_NOT_SIGNED_IN,
+        **problem_doc(
+            403, "The request does not come from the app's own pages (`cross-origin-request`)."
+        ),
+        **problem_doc(404, "The user has no sweep with `sweep_id` (`not-found`)."),
+        **problem_doc(
+            422,
+            f"Neither or both of `ids` and `sweep_id`, or more than {DELETE_MAX} IDs "
+            "(`validation`).",
+        ),
+    },
+    dependencies=[Depends(require_same_origin)],
+)
+async def delete_backtests(
+    body: BacktestsDeleteIn, user: BacktestsUserDep, deletes: DeletesDep, response: Response
+) -> BacktestsDeleted:
+    """Deletes the user's backtests for good, as `DELETE /api/v1/backtests/{backtest_id}` does
+    one: up to 100 by their `ids`, or every backtest of a sweep with `sweep_id`, which deletes
+    the sweep too. IDs the user has no backtest with are listed in `not_found` and change
+    nothing, so sending the same request again is safe."""
+    response.headers.update(NO_STORE)
+    with sweep_problems():
+        return await deletes.delete(user.id, ids=body.ids or (), sweep_id=body.sweep_id)
+
+
 @router.get(
     "/api/v1/backtests/{backtest_id}",
     response_model=BacktestDocument,
@@ -558,15 +834,32 @@ async def cancel_backtest(
         **_SOURCE_ERRORS,
     },
 )
+# The summary is the setup and the statistics the run stored (only a backtest from before the
+# light results were stored is built again, once): a plain request.
+@heavy_unless(lambda request: request.query_params.get("view") == "summary")
 async def get_backtest(
-    backtest_id: BacktestId, user: CurrentUserDep, runs: BacktestRunsDep, response: Response
+    backtest_id: BacktestId,
+    user: CurrentUserDep,
+    runs: BacktestRunsDep,
+    response: Response,
+    view: Annotated[
+        Literal["light", "summary"],
+        Query(
+            description="`light`: the light view. `summary`: the setup and the statistics only, "
+            "`results.series` and `results.trades` left empty (`count` 0, `trades.total` still "
+            "the trades the run had)"
+        ),
+    ] = "light",
 ) -> Response:
     """The result document of the user's backtest, whatever its status (`results` is null until
     it finished), or of another account's while it is published (`backtest.author`, read only,
     `model.id` null), in the light view: a series of more than 10,000 rows has one point per
-    UTC day, and only the newest 10,000 trades are in it (`trades.complete` false)."""
+    UTC day, and only the newest 10,000 trades are in it (`trades.complete` false). It is what
+    the run stored, so `data.changed` is null: the download compares the candles again."""
     with backtest_problems():
-        _, content = await runs.document(user.id, backtest_id, light=True)
+        _, content = await runs.document(
+            user.id, backtest_id, light=True, summary=view == "summary"
+        )
     return _json(content, response)
 
 
@@ -584,6 +877,7 @@ async def get_backtest(
         **_SOURCE_ERRORS,
     },
 )
+@heavy
 async def download_backtest(
     backtest_id: BacktestId, user: CurrentUserDep, runs: BacktestRunsDep, response: Response
 ) -> Response:
@@ -614,6 +908,7 @@ async def download_backtest(
         ),
     },
 )
+@heavy
 async def compare_backtests(
     ids: Annotated[
         str,
@@ -629,6 +924,22 @@ async def compare_backtests(
     user: CurrentUserDep,
     runs: BacktestRunsDep,
     response: Response,
+    *,
+    curve_points: Annotated[
+        int,
+        Query(
+            ge=0,
+            le=CURVE_POINTS,
+            description="The most times of the curves; 0 for none (`times` empty, the curves null)",
+        ),
+    ] = CURVE_POINTS,
+    setup_mode: Annotated[
+        SetupMode,
+        Query(
+            description="`full`: each backtest's whole setup. `diff`: what all share once in "
+            "`shared_setup`, each backtest's `setup` only its fields of `differs`"
+        ),
+    ] = "full",
 ) -> CompareOut:
     """Backtests side by side, as the Compare page shows them: each statistic of each with the
     best and the worst marked, the setups and which of their fields differ, and the equity and
@@ -639,7 +950,9 @@ async def compare_backtests(
     backtest stored when it ran, so it loads no candles from a data source."""
     response.headers.update(NO_STORE)
     with backtest_problems():
-        return await compare(runs, user.id, parse_ids(ids))
+        return await compare(
+            runs, user.id, parse_ids(ids), curve_points=curve_points, setup_mode=setup_mode
+        )
 
 
 # --- Sweeps -----------------------------------------------------------------------------------
@@ -665,8 +978,14 @@ def _sweep_problem(error: Exception) -> ProblemError | None:
                 "Queue full",
                 f"The sweep has {error.count} backtests and your queue has room for "
                 f"{error.room} (up to {QUEUE_MAX} wait). Start it when more of them have "
-                "started, cancel some, or vary fewer values.",
-                extensions={"limit": QUEUE_MAX, "count": error.count, "room": error.room},
+                f"started, in about {error.retry_after_s} s, cancel some, or vary fewer values.",
+                headers={"Retry-After": str(error.retry_after_s)},
+                extensions={
+                    "limit": QUEUE_MAX,
+                    "count": error.count,
+                    "room": error.room,
+                    "retry_after_s": error.retry_after_s,
+                },
             )
         case SweepNotFound():
             return ProblemError(404, "not-found", "Not Found", "You have no sweep with this ID.")
@@ -716,23 +1035,35 @@ def sweep_problems() -> Iterator[None]:
         ),
         **problem_doc(
             409,
-            "A model has no manifest (`model-needs-setup`, with `setup`), or the user's queue has "
-            "room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count` "
-            "and `room`).",
+            "A model has no manifest (`model-needs-setup`, with `setup`), the user's queue has "
+            "room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count`, "
+            "`room` and `retry_after_s`), the account cannot keep that many more backtests "
+            "(`backtest-limit`, with `limit`, `count` and `adding`), or the first request with "
+            "the `Idempotency-Key` is still being answered (`idempotency-key-in-use`, with "
+            "`retry_after_s`).",
         ),
         **problem_doc(
             422,
             f"An invalid body or fewer than {SWEEP_MIN} or more than {SWEEP_MAX} backtests "
-            "(`validation`, the latter with `count` and `limit`), or a setup that fails a check "
+            "(`validation`, the latter with `count` and `limit`), a setup that fails a check "
             "of `POST /api/v1/backtests` (`instrument-not-for-model`, `period-out-of-range`, "
-            "`warm-up-out-of-range`, `too-many-candles`, `validation`; `setup` names it, from 1).",
+            "`warm-up-out-of-range`, `too-many-candles`, `validation`; `setup` names it, from "
+            "1), or an `Idempotency-Key` sent before with another body "
+            "(`idempotency-key-reused`).",
         ),
         **_SOURCE_ERRORS,
     },
     dependencies=[Depends(require_same_origin)],
 )
+@heavy
 async def start_sweep(
-    body: SweepIn, user: BacktestsUserDep, sweeps: SweepsDep, response: Response
+    body: SweepIn,
+    user: BacktestsUserDep,
+    sweeps: SweepsDep,
+    response: Response,
+    *,
+    redis: RedisDep,
+    idempotency_key: IdempotencyKey = None,
 ) -> SweepOut | Response:
     """Starts a backtest for every combination of the values in `vary` over the `base` setup
     (the body of `POST /api/v1/backtests`): models, instruments, periods and decision rules,
@@ -741,15 +1072,49 @@ async def start_sweep(
     all go to the end of the queue, or none does. With `validate_only` nothing starts: the
     answer is 200 with the count and each setup. The sweep's backtests are ordinary backtests
     with its `sweep_id`. `GET /api/v1/sweeps/{sweep_id}` follows them and ranks them once all
-    ended."""
+    ended. With an `Idempotency-Key`, the same request sent again within 24 hours answers the
+    first sweep again instead of starting another."""
     response.headers.update(NO_STORE)
+
+    async def started(committed: Committed) -> bytes:
+        return (await sweeps.start(user.id, body, committed)).model_dump_json().encode()
+
+    async def again(sweep_id: str) -> bytes:
+        return (await sweeps.sweep(user.id, sweep_id)).model_dump_json().encode()
+
     with sweep_problems():
         if body.validate_only:
             plan = await sweeps.plan(user.id, body)
             return _json(plan.model_dump_json().encode(), response)
-        sweep = await sweeps.start(user.id, body)
-    response.headers["Location"] = f"/api/v1/sweeps/{sweep.id}"
-    return sweep
+        content, replayed = await once(
+            redis,
+            user_id=user.id,
+            kind="POST /api/v1/sweeps",
+            key=idempotency_key,
+            body=body.model_dump_json().encode(),
+            answer=started,
+            rebuild=again,
+        )
+    sweep_id = json.loads(content)["id"]
+    headers = {"Location": f"/api/v1/sweeps/{sweep_id}", **_replayed(replayed=replayed)}
+    return _json(content, response, 201, headers)
+
+
+@router.get("/api/v1/sweeps", responses=_NOT_SIGNED_IN)
+async def list_sweeps(
+    user: CurrentUserDep,
+    sweeps: SweepsDep,
+    response: Response,
+    page: Annotated[int, Query(ge=1, le=PAGE_MAX, description="The page, from 1")] = 1,
+    per_page: Annotated[
+        int, Query(ge=1, le=PER_PAGE_MAX, description="Sweeps per page")
+    ] = PAGE_SIZE,
+) -> SweepsPage:
+    """A page of the user's sweeps, newest first: each one's metric, how many of its backtests
+    are queued, running, finished and failed, and its best finished backtest so far by the
+    metric. A page past the last one is empty."""
+    response.headers.update(NO_STORE)
+    return await sweeps.sweeps(user.id, page, per_page)
 
 
 @router.get(

@@ -9,7 +9,7 @@
     }
   ],
   "server": {
-    "instructions": "CandleStack is a lab for experiments on financial time series: a user uploads a trading model (Keras or ONNX), describes its input in a manifest and backtests it on market data, crypto from Binance and US stocks from Alpaca, then compares the results and publishes the good ones.\n\nYou act as the user who signed you in, with an API key or by allowing you on CandleStack (OAuth). The scopes of that sign-in decide which tools work: read (everything that only reads), backtests, models and publish. Call get_me first to see who you act for and what you may do. A tool that changes data says so in its annotations.\n\nA failed tool call answers a problem as JSON: its type (https://candlestack.tech/problems/<slug>) names what went wrong and its detail says what to do.\n\nDocs for agents: https://candlestack.tech/docs/agents/ and for this server: https://candlestack.tech/docs/mcp/. The resource candlestack://docs lists every docs page and reference.",
+    "instructions": "CandleStack is a lab for experiments on financial time series: a user uploads a trading model (Keras or ONNX), describes its input in a manifest and backtests it on market data, crypto from Binance and US stocks from Alpaca, then compares the results and publishes the good ones.\n\nYou act as the user who signed you in, with an API key or by allowing you on CandleStack (OAuth). The scopes of that sign-in decide which tools work: read (everything that only reads), backtests, models and publish. Call get_me first to see who you act for and what you may do. A tool that changes data says so in its annotations.\n\nA tool answers JSON; its text leaves out the fields that are null. A failed tool call answers a problem as JSON: its type (https://candlestack.tech/problems/<slug>) names what went wrong and its detail says what to do; rate-limited also gives retry_after_s, the seconds to wait.\n\nDocs for agents: https://candlestack.tech/docs/agents/ and for this server: https://candlestack.tech/docs/mcp/. The resource candlestack://docs lists every docs page and reference.",
     "name": "candlestack",
     "title": "CandleStack"
   },
@@ -2188,7 +2188,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "The user's uploaded models, oldest first, in short: ID, name, format, state, star, the timeframe and session of the manifest, how many backtests used each and the best Sharpe ratio; and the storage they take of the user's quota.\n\nA model's state says what it can do: `needs_setup` has no manifest yet, so it cannot run (set_manifest gives it one); `ready` passed the manifest's checks and can be backtested; `verified` also gave the output of the manifest's example in a trial run. Use get_model for one model in full.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_models",
+      "description": "The user's uploaded models, oldest first, in short: ID, name, format, state, star, the timeframe and session of the manifest, how many backtests used each and the best Sharpe ratio; and the storage they take of the user's quota. All of them unless per_page asks for a page; `total` counts them all.\n\nA model's state says what it can do: `needs_setup` has no manifest yet, so it cannot run (set_manifest gives it one); `ready` passed the manifest's checks and can be backtested; `verified` also gave the output of the manifest's example in a trial run. Use get_model for one model in full.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_models",
       "endpoints": [
         "GET /api/v1/models"
       ],
@@ -2211,11 +2211,35 @@
             }
           ],
           "quota_bytes": 104857600,
+          "total": 1,
           "used_bytes": 1489779
         }
       },
       "inputSchema": {
-        "properties": {},
+        "properties": {
+          "page": {
+            "default": 1,
+            "description": "The page, from 1, when per_page is given",
+            "minimum": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "anyOf": [
+              {
+                "maximum": 100,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Models per page; all of them (at most 100) when left out",
+            "title": "Per Page"
+          }
+        },
         "title": "list_modelsArguments",
         "type": "object"
       },
@@ -2349,7 +2373,7 @@
             "type": "integer"
           },
           "models": {
-            "description": "Oldest first",
+            "description": "Oldest first; the page asked for, else all",
             "items": {
               "$ref": "#/$defs/ModelBrief"
             },
@@ -2361,6 +2385,11 @@
             "title": "Quota Bytes",
             "type": "integer"
           },
+          "total": {
+            "description": "All the user's models",
+            "title": "Total",
+            "type": "integer"
+          },
           "used_bytes": {
             "description": "Bytes the models take",
             "title": "Used Bytes",
@@ -2369,6 +2398,7 @@
         },
         "required": [
           "models",
+          "total",
           "used_bytes",
           "quota_bytes",
           "file_max_bytes"
@@ -5518,7 +5548,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Starts a backtest of one of the user's models on one instrument and period. One backtest of a user runs at a time and up to 20 more wait in the queue, so it starts running at once or waits (queued, with its place).\n\nThe arguments are the body of POST /api/v1/backtests: model.id (one of the user's models with a manifest), data.instrument.id (<market>:<symbol>: a stock for a model of US trading hours, a crypto pair for one of 24/7) and data.period ([start, end) in UTC epoch seconds), and optionally decision (how the predictions become a signal: threshold 0 by default), execution (fills, stop loss, position size, fees and slippage) and benchmarks (buy and hold of the instrument, or of SPY, QQQ or DIA for a stock). The `setup` get_backtest answers has this shape, so a backtest can be run again with changes.\n\nUnits: execution.stop_loss and position_size are fractions (0.07 is 7 %), fee_bps and slippage_bps basis points (10 is 0.1 %), not the percent of the app's Settings. get_backtest_defaults answers the user's defaults in these units too (`period`, `decision`, `execution`, `benchmark_instrument`): pass them through for every setting the user does not name.\n\nAnswers its ID and status at once; the run takes from seconds to minutes. Then call wait_for_backtest with the ID until it has ended, and get_backtest for the results.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#start_backtest",
+      "description": "Starts a backtest of one of the user's models on one instrument and period. One backtest of a user runs at a time and up to 20 more wait in the queue, and a few run at once over all users, taking turns; so it starts running at once or waits (queued, with its place and `eta_s`).\n\nThe arguments are the body of POST /api/v1/backtests: model.id (one of the user's models with a manifest), data.instrument.id (<market>:<symbol>: a stock for a model of US trading hours, a crypto pair for one of 24/7) and data.period ([start, end) in UTC epoch seconds), and optionally decision (how the predictions become a signal: threshold 0 by default), execution (fills, stop loss, position size, fees and slippage) and benchmarks (buy and hold of the instrument, or of SPY, QQQ or DIA for a stock). The `setup` get_backtest answers has this shape, so a backtest can be run again with changes.\n\nUnits: execution.stop_loss and position_size are fractions (0.07 is 7 %), fee_bps and slippage_bps basis points (10 is 0.1 %), not the percent of the app's Settings. get_backtest_defaults answers the user's defaults in these units too (`period`, `decision`, `execution`, `benchmark_instrument`): pass them through for every setting the user does not name.\n\nPass an `idempotency_key` (a UUID you make) to call it again safely after a timeout: the same call with the same key within 24 hours answers the first backtest instead of starting another.\n\nAnswers its ID and status at once; the run takes from seconds to minutes. Then call wait_for_backtest with the ID until it has ended, and get_backtest for the results.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#start_backtest",
       "endpoints": [
         "POST /api/v1/backtests"
       ],
@@ -5560,6 +5590,7 @@
           "duration_s": null,
           "ended": false,
           "error": null,
+          "eta_s": 324.0,
           "finished_at": null,
           "id": "bt_7f3k2m9qx4",
           "name": "Silent Orion",
@@ -6037,6 +6068,21 @@
           "execution": {
             "$ref": "#/$defs/Execution"
           },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "pattern": "^[!-~]{1,255}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A key you make, such as a UUID: the same call again with it within 24 hours answers the first one instead of starting again",
+            "title": "Idempotency Key"
+          },
           "model": {
             "$ref": "#/$defs/ModelRef"
           }
@@ -6172,6 +6218,18 @@
             "description": "What went wrong and what to do, for a failed one",
             "title": "Error"
           },
+          "eta_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "About how many seconds until it ends: its place in the queue and its run, each run as long as the median of the user's recent runs, the wait for a free run slot left out; null once ended, for another account's backtest, and before any of the user's backtests finished",
+            "title": "Eta S"
+          },
           "finished_at": {
             "anyOf": [
               {
@@ -6210,7 +6268,7 @@
                 "type": "null"
               }
             ],
-            "description": "While queued: 1 starts next, when the running one ends",
+            "description": "While queued: 1 starts next of the user's backtests, when their running one ended and a run slot is free",
             "title": "Queue Position"
           },
           "started_at": {
@@ -6226,7 +6284,7 @@
             "title": "Started At"
           },
           "status": {
-            "description": "queued (waits for the user's running backtest), running, finished (has results) or failed (has an error, also when cancelled before it ran)",
+            "description": "queued (waits for the user's running backtest or a free run slot), running, finished (has results) or failed (has an error, also when cancelled before it ran)",
             "enum": [
               "queued",
               "running",
@@ -6262,6 +6320,7 @@
           "finished_at",
           "duration_s",
           "steps",
+          "eta_s",
           "url"
         ],
         "title": "BacktestStatusResult",
@@ -6279,7 +6338,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Waits until a backtest has ended (finished or failed) or `timeout_s` seconds passed, then answers where it stands. When `ended` is false, call it again: a backtest can wait in the queue and run for several minutes. Once it finished, read it with get_backtest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#wait_for_backtest",
+      "description": "Waits until a backtest has ended (finished or failed) or `timeout_s` seconds passed, then answers where it stands. Give `ids` instead of `backtest_id` to wait for several at once, until any or all of them ended (`until`); `backtests` then has each one. When `done` is false, call it again: a backtest can wait in the queue and run for several minutes, and `eta_s` says about how long. Once it finished, read it with get_backtest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#wait_for_backtest",
       "endpoints": [
         "GET /api/v1/backtests/{backtest_id}"
       ],
@@ -6289,10 +6348,13 @@
           "timeout_s": 50
         },
         "result": {
+          "backtests": null,
           "created_at": "2026-11-02T09:30:00Z",
+          "done": true,
           "duration_s": 162.0,
           "ended": true,
           "error": null,
+          "eta_s": null,
           "finished_at": "2026-11-02T09:33:42Z",
           "id": "bt_7f3k2m9qx4",
           "name": "Silent Orion",
@@ -6340,12 +6402,38 @@
       "inputSchema": {
         "properties": {
           "backtest_id": {
-            "description": "Public ID of the backtest",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Public ID of the backtest; or give `ids`",
             "examples": [
               "bt_7f3k2m9qx4"
             ],
-            "title": "Backtest Id",
-            "type": "string"
+            "title": "Backtest Id"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Instead of `backtest_id`: up to 20 backtest IDs to wait for at once",
+            "title": "Ids"
           },
           "timeout_s": {
             "default": 50,
@@ -6354,17 +6442,169 @@
             "minimum": 1,
             "title": "Timeout S",
             "type": "integer"
+          },
+          "until": {
+            "default": "all",
+            "description": "With `ids`: wait until any of them ended, or all of them",
+            "enum": [
+              "any",
+              "all"
+            ],
+            "title": "Until",
+            "type": "string"
           }
         },
-        "required": [
-          "backtest_id"
-        ],
         "title": "wait_for_backtestArguments",
         "type": "object"
       },
       "name": "wait_for_backtest",
       "outputSchema": {
         "$defs": {
+          "BacktestStatusResult": {
+            "description": "Where a backtest stands.",
+            "properties": {
+              "created_at": {
+                "format": "date-time",
+                "title": "Created At",
+                "type": "string"
+              },
+              "duration_s": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Seconds it ran, the wait in the queue left out",
+                "title": "Duration S"
+              },
+              "ended": {
+                "description": "finished or failed: it will not change any more",
+                "title": "Ended",
+                "type": "boolean"
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "What went wrong and what to do, for a failed one",
+                "title": "Error"
+              },
+              "eta_s": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "About how many seconds until it ends: its place in the queue and its run, each run as long as the median of the user's recent runs, the wait for a free run slot left out; null once ended, for another account's backtest, and before any of the user's backtests finished",
+                "title": "Eta S"
+              },
+              "finished_at": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Finished At"
+              },
+              "id": {
+                "description": "Public ID of the backtest",
+                "examples": [
+                  "bt_7f3k2m9qx4"
+                ],
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "number": {
+                "description": "The author's own number, shown as #N",
+                "title": "Number",
+                "type": "integer"
+              },
+              "queue_position": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "While queued: 1 starts next of the user's backtests, when their running one ended and a run slot is free",
+                "title": "Queue Position"
+              },
+              "started_at": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Started At"
+              },
+              "status": {
+                "description": "queued (waits for the user's running backtest or a free run slot), running, finished (has results) or failed (has an error, also when cancelled before it ran)",
+                "enum": [
+                  "queued",
+                  "running",
+                  "finished",
+                  "failed"
+                ],
+                "title": "Status",
+                "type": "string"
+              },
+              "steps": {
+                "items": {
+                  "$ref": "#/$defs/StepOut"
+                },
+                "title": "Steps",
+                "type": "array"
+              },
+              "url": {
+                "description": "The backtest's page in the app, to show the user",
+                "title": "Url",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "number",
+              "name",
+              "status",
+              "ended",
+              "queue_position",
+              "error",
+              "created_at",
+              "started_at",
+              "finished_at",
+              "duration_s",
+              "steps",
+              "eta_s",
+              "url"
+            ],
+            "title": "BacktestStatusResult",
+            "type": "object"
+          },
           "StepOut": {
             "description": "A step of the run: candles (loads the market data), queue (waits for the worker), model\n(the worker predicts), trades (the engine and the statistics).",
             "properties": {
@@ -6450,12 +6690,32 @@
             "type": "object"
           }
         },
-        "description": "Where a backtest stands.",
+        "description": "Where the backtest waited for stands; with `ids`, the one that decided the answer (the\nfirst that ended for `until` any, the first still going for `until` all, else the first),\nand each one in `backtests`.",
         "properties": {
+          "backtests": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/BacktestStatusResult"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With `ids`: where each stands, in the order given; null with `backtest_id`",
+            "title": "Backtests"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "done": {
+            "description": "The wait is over: the backtest ended, or with `ids` any or all of them (`until`); false when `timeout_s` passed first",
+            "title": "Done",
+            "type": "boolean"
           },
           "duration_s": {
             "anyOf": [
@@ -6485,6 +6745,18 @@
             ],
             "description": "What went wrong and what to do, for a failed one",
             "title": "Error"
+          },
+          "eta_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "About how many seconds until it ends: its place in the queue and its run, each run as long as the median of the user's recent runs, the wait for a free run slot left out; null once ended, for another account's backtest, and before any of the user's backtests finished",
+            "title": "Eta S"
           },
           "finished_at": {
             "anyOf": [
@@ -6524,7 +6796,7 @@
                 "type": "null"
               }
             ],
-            "description": "While queued: 1 starts next, when the running one ends",
+            "description": "While queued: 1 starts next of the user's backtests, when their running one ended and a run slot is free",
             "title": "Queue Position"
           },
           "started_at": {
@@ -6540,7 +6812,7 @@
             "title": "Started At"
           },
           "status": {
-            "description": "queued (waits for the user's running backtest), running, finished (has results) or failed (has an error, also when cancelled before it ran)",
+            "description": "queued (waits for the user's running backtest or a free run slot), running, finished (has results) or failed (has an error, also when cancelled before it ran)",
             "enum": [
               "queued",
               "running",
@@ -6576,9 +6848,12 @@
           "finished_at",
           "duration_s",
           "steps",
-          "url"
+          "eta_s",
+          "url",
+          "done",
+          "backtests"
         ],
-        "title": "BacktestStatusResult",
+        "title": "BacktestWaitResult",
         "type": "object"
       },
       "scopes": [
@@ -6606,6 +6881,7 @@
           "duration_s": null,
           "ended": false,
           "error": null,
+          "eta_s": 150.0,
           "finished_at": null,
           "id": "bt_7f3k2m9qx4",
           "name": "Silent Orion",
@@ -6791,6 +7067,18 @@
             "description": "What went wrong and what to do, for a failed one",
             "title": "Error"
           },
+          "eta_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "About how many seconds until it ends: its place in the queue and its run, each run as long as the median of the user's recent runs, the wait for a free run slot left out; null once ended, for another account's backtest, and before any of the user's backtests finished",
+            "title": "Eta S"
+          },
           "finished_at": {
             "anyOf": [
               {
@@ -6829,7 +7117,7 @@
                 "type": "null"
               }
             ],
-            "description": "While queued: 1 starts next, when the running one ends",
+            "description": "While queued: 1 starts next of the user's backtests, when their running one ended and a run slot is free",
             "title": "Queue Position"
           },
           "started_at": {
@@ -6845,7 +7133,7 @@
             "title": "Started At"
           },
           "status": {
-            "description": "queued (waits for the user's running backtest), running, finished (has results) or failed (has an error, also when cancelled before it ran)",
+            "description": "queued (waits for the user's running backtest or a free run slot), running, finished (has results) or failed (has an error, also when cancelled before it ran)",
             "enum": [
               "queued",
               "running",
@@ -6881,6 +7169,7 @@
           "finished_at",
           "duration_s",
           "steps",
+          "eta_s",
           "url"
         ],
         "title": "BacktestStatusResult",
@@ -6898,13 +7187,15 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Reads a backtest, the user's own or one another account published: its status, its setup (which can be sent to start_backtest again, changed or not) and, once it finished, the 12 statistics, the benchmarks' returns, one page of its trades (oldest first) and the equity curve in at most 200 points, with a link to its page in the app.\n\nCall it after wait_for_backtest answered finished, or for a backtest the user names. A page of trades past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_backtest",
+      "description": "Reads a backtest, the user's own or one another account published: its status, its setup (which can be sent to start_backtest again, changed or not) and, once it finished, the 12 statistics and the benchmarks' returns, with a link to its page in the app.\n\nThat light answer is the default. For its trades (oldest first) pass `trades_per_page` (e.g. 50) and `trades_page`; a page past the last one is empty. For the equity curve pass `equity_points` (up to 200). Call it after wait_for_backtest answered finished, or for a backtest the user names; it reads what the run stored, so it is quick.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_backtest",
       "endpoints": [
         "GET /api/v1/backtests/{backtest_id}"
       ],
       "example": {
         "arguments": {
-          "backtest_id": "bt_7f3k2m9qx4"
+          "backtest_id": "bt_7f3k2m9qx4",
+          "equity_points": 3,
+          "trades_per_page": 50
         },
         "result": {
           "backtest": {
@@ -6923,6 +7214,7 @@
             "public": false,
             "queue_position": null,
             "status": "finished",
+            "sweep_id": null,
             "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4"
           },
           "benchmark_returns": {
@@ -7061,6 +7353,14 @@
             "title": "Backtest Id",
             "type": "string"
           },
+          "equity_points": {
+            "default": 0,
+            "description": "Points of the equity curve, up to 200; 0 for no curve",
+            "maximum": 200,
+            "minimum": 0,
+            "title": "Equity Points",
+            "type": "integer"
+          },
           "trades_page": {
             "default": 1,
             "description": "The page of trades, from 1",
@@ -7069,10 +7369,10 @@
             "type": "integer"
           },
           "trades_per_page": {
-            "default": 50,
-            "description": "Trades per page",
+            "default": 0,
+            "description": "Trades per page, up to 500; 0 for no trades",
             "maximum": 500,
-            "minimum": 1,
+            "minimum": 0,
             "title": "Trades Per Page",
             "type": "integer"
           }
@@ -7194,6 +7494,18 @@
                 "title": "Status",
                 "type": "string"
               },
+              "sweep_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The sweep it was started in (get_sweep); null for one started alone and for another account's",
+                "title": "Sweep Id"
+              },
               "url": {
                 "description": "The backtest's page in the app, to show the user",
                 "title": "Url",
@@ -7209,6 +7521,7 @@
               "public",
               "queue_position",
               "error",
+              "sweep_id",
               "created_at",
               "finished_at",
               "duration_s",
@@ -8056,7 +8369,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Its equity curve, once finished and asked for (`equity_points`)"
           },
           "metrics": {
             "anyOf": [
@@ -8080,7 +8394,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "A page of its trades, once finished and asked for (`trades_per_page`)"
           }
         },
         "required": [
@@ -8108,12 +8423,13 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Compares backtests side by side, as the app's Compare page does: each of the 12 statistics of each with the best and the worst marked (values that read the same count as equal), their setups and which setup fields differ, and the equity, drawdown and buy and hold of each on one time axis of at most 200 times. Use it to pick the best of several runs; it reads only what each stored, so it is quick. A running or failed backtest is listed with its status and no values. Each backtest has its `url`, the page to show the user.\n\nmax_drawdown is 0 or below and a smaller fall is better: -0.05 is better than -0.20, so its best value is the highest one; its `better` says `lower` as in a lower fall, by its size. The marks already account for it.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#compare_backtests",
+      "description": "Compares backtests side by side, as the app's Compare page does: each of the 12 statistics of each with the best and the worst marked (values that read the same count as equal), their setups and which setup fields differ. Use it to pick the best of several runs; it reads only what each stored, so it is quick. A running or failed backtest is listed with its status and no values. Each backtest has its `url`, the page to show the user.\n\nFor the equity, drawdown and buy and hold of each on one time axis pass `curve_points` (up to 200); without it the curves are null and `times` empty. With many similar backtests pass `setup_mode=\"diff\"` to read the shared setup once.\n\nmax_drawdown is 0 or below and a smaller fall is better: -0.05 is better than -0.20, so its best value is the highest one; its `better` says `lower` as in a lower fall, by its size. The marks already account for it.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#compare_backtests",
       "endpoints": [
         "GET /api/v1/compare"
       ],
       "example": {
         "arguments": {
+          "curve_points": 2,
           "ids": [
             "bt_7f3k2m9qx4",
             "bt_t9n8v7d6a5"
@@ -8210,6 +8526,7 @@
               ]
             }
           ],
+          "shared_setup": null,
           "times": [
             1717372800,
             1725147000
@@ -8218,6 +8535,14 @@
       },
       "inputSchema": {
         "properties": {
+          "curve_points": {
+            "default": 0,
+            "description": "Times of the curves, up to 200; 0 for none",
+            "maximum": 200,
+            "minimum": 0,
+            "title": "Curve Points",
+            "type": "integer"
+          },
           "ids": {
             "description": "1 to 20 backtest IDs: the user's own and published ones",
             "examples": [
@@ -8233,6 +8558,16 @@
             "minItems": 1,
             "title": "Ids",
             "type": "array"
+          },
+          "setup_mode": {
+            "default": "full",
+            "description": "full: each backtest's whole setup. diff: what all share once in `shared_setup`, each backtest's `setup` only its fields of `differs`",
+            "enum": [
+              "full",
+              "diff"
+            ],
+            "title": "Setup Mode",
+            "type": "string"
           }
         },
         "required": [
@@ -8424,7 +8759,7 @@
                     "type": "null"
                   }
                 ],
-                "description": "Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results. A long backtest's series has a point per day, so its line begins at the end of its first day. One that finished before its curves were stored is drawn from its short series of at most 60 points, with buy and hold only when its benchmark held its own instrument",
+                "description": "Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results and with `curve_points` 0. A long backtest's series has a point per day, so its line begins at the end of its first day, and its stored curve has at most 1,000 points. One that finished before its curves were stored is drawn from its short series of at most 60 points, with buy and hold only when its benchmark held its own instrument",
                 "title": "Equity"
               },
               "error": {
@@ -8468,7 +8803,7 @@
               },
               "setup": {
                 "additionalProperties": true,
-                "description": "What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `input` (the model's input, rows by features, from its manifest's signature), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document",
+                "description": "What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `input` (the model's input, rows by features, from its manifest's signature), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document. With `setup_mode=diff` only its fields of `differs`, the rest once in `shared_setup`",
                 "title": "Setup",
                 "type": "object"
               },
@@ -8519,7 +8854,7 @@
               "name": {
                 "description": "The account's display name",
                 "examples": [
-                  "Tymur Tkach"
+                  "Grace Hopper"
                 ],
                 "title": "Name",
                 "type": "string"
@@ -8565,8 +8900,22 @@
             "title": "Metrics",
             "type": "array"
           },
+          "shared_setup": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "With `setup_mode=diff`, the setup fields every backtest has alike, once; each backtest's `setup` then has only its fields of `differs`. Null otherwise",
+            "title": "Shared Setup"
+          },
           "times": {
-            "description": "The common time axis of the curves, at most 200 UTC epoch seconds: the first and the last time of each backtest's series and times evenly spaced between the earliest and the latest",
+            "description": "The common time axis of the curves, at most 200 UTC epoch seconds (`curve_points`; none with 0): the first and the last time of each backtest's series and times evenly spaced between the earliest and the latest",
             "items": {
               "type": "integer"
             },
@@ -8595,7 +8944,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Lists the user's backtests as the Backtests page does: search, show the starred, failed or published ones, one model's, sort by a result, 10 a page. Use it to find a backtest's ID by its name, number, instrument or model, or the best ones by a result. Answers the page, how many match, the counts of all, starred, failed and published backtests and the models used; each backtest has its `url`, the page to show the user. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_backtests",
+      "description": "Lists the user's backtests: search, filters (status, sweep, model, instrument, timeframe, representation, start time, least Sharpe ratio or return, deepest drawdown, starred, published; all must hold), sort by a result, 10 a page or up to 100. Use it to find a backtest's ID by its name, number, instrument or model, a sweep's backtests, or the best ones by a result. Answers the page and how many match, and on page 1 the counts of all, starred, failed and published backtests and the models used; each backtest has its `url`, the page to show the user. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_backtests",
       "endpoints": [
         "GET /api/v1/backtests"
       ],
@@ -8640,6 +8989,7 @@
               "sharpe": 0.79,
               "starred": true,
               "status": "finished",
+              "sweep_id": null,
               "total_return": 0.246,
               "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
               "win_rate": 0.512
@@ -8677,7 +9027,7 @@
             "type": "string"
           },
           "BacktestSort": {
-            "description": "What the list is sorted by. `default` is newest first (`order` does not apply); `when`\nsorts like `number`; `name` by the name, in any case. Backtests without the value (failed\nones) come last either way, and ties go by number, newest first.",
+            "description": "What the list is sorted by. `default` is newest first (`order` does not apply); `when`\nsorts like `number`; `name` by the name, in any case; `sortino` by the Sortino ratio of\n`results.stats`. Backtests without the value (failed ones) come last either way, and ties\ngo by number, newest first.",
             "enum": [
               "default",
               "number",
@@ -8687,9 +9037,46 @@
               "sharpe",
               "max_drawdown",
               "trades",
-              "when"
+              "when",
+              "win_rate",
+              "sortino"
             ],
             "title": "BacktestSort",
+            "type": "string"
+          },
+          "BacktestStatus": {
+            "description": "`queued` (it waits for the user's running backtest to end), `running`, `finished` (it\nhas results) or `failed` (it has an error, also when it was cancelled before it ran).",
+            "enum": [
+              "queued",
+              "running",
+              "finished",
+              "failed"
+            ],
+            "title": "BacktestStatus",
+            "type": "string"
+          },
+          "Representation": {
+            "description": "What the model reads: Renko bricks, a Kagi line or time windows of candles.",
+            "enum": [
+              "renko",
+              "kagi",
+              "windows"
+            ],
+            "title": "Representation",
+            "type": "string"
+          },
+          "SetupTimeframe": {
+            "description": "Timeframes a backtest runs on: those of the data.",
+            "enum": [
+              "1m",
+              "5m",
+              "15m",
+              "30m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "SetupTimeframe",
             "type": "string"
           },
           "SortOrder": {
@@ -8702,6 +9089,101 @@
           }
         },
         "properties": {
+          "created_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only those started at or after this time (UTC)",
+            "title": "Created After"
+          },
+          "created_before": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only those started before this time (UTC)",
+            "title": "Created Before"
+          },
+          "include_facets": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Answer the counts and the values the filters offer: true on every page, false never; left out, only on page 1",
+            "title": "Include Facets"
+          },
+          "instrument": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only this instrument's, <market>:<symbol>",
+            "title": "Instrument"
+          },
+          "min_max_drawdown": {
+            "anyOf": [
+              {
+                "maximum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Largest fall no deeper than this, 0 or below: -0.2 keeps falls of up to 20 percent",
+            "title": "Min Max Drawdown"
+          },
+          "min_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Sharpe ratio at least this",
+            "title": "Min Sharpe"
+          },
+          "min_total_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Return at least this, a fraction",
+            "title": "Min Total Return"
+          },
           "model": {
             "anyOf": [
               {
@@ -8716,6 +9198,20 @@
             "description": "Only the backtests of the model with this name (one of `models`)",
             "title": "Model"
           },
+          "model_id": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only the backtests of this model's ID",
+            "title": "Model Id"
+          },
           "order": {
             "$ref": "#/$defs/SortOrder",
             "default": "desc",
@@ -8729,12 +9225,45 @@
             "title": "Page",
             "type": "integer"
           },
+          "per_page": {
+            "default": 10,
+            "description": "Backtests per page",
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "public": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only published (true) or not",
+            "title": "Public"
+          },
           "query": {
             "default": "",
             "description": "Search: part of the name, of the number (#12 or 12), of an instrument's symbol or of the model's name, in any case",
             "maxLength": 100,
             "title": "Query",
             "type": "string"
+          },
+          "representation": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Representation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only models that read this"
           },
           "show": {
             "$ref": "#/$defs/BacktestShow",
@@ -8745,6 +9274,61 @@
             "$ref": "#/$defs/BacktestSort",
             "default": "default",
             "description": "What to sort by; those without the value (failed ones) come last"
+          },
+          "starred": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only starred (true) or not",
+            "title": "Starred"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/BacktestStatus"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only backtests with one of these statuses",
+            "title": "Status"
+          },
+          "sweep_id": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only the backtests of this sweep",
+            "title": "Sweep Id"
+          },
+          "timeframe": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SetupTimeframe"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only this timeframe"
           }
         },
         "title": "list_backtestsArguments",
@@ -9024,6 +9608,18 @@
               "status": {
                 "$ref": "#/$defs/BacktestStatus"
               },
+              "sweep_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The sweep it was started in (get_sweep); null for one started alone",
+                "title": "Sweep Id"
+              },
               "total_return": {
                 "anyOf": [
                   {
@@ -9061,6 +9657,7 @@
               "status",
               "queue_position",
               "error",
+              "sweep_id",
               "model",
               "model_id",
               "instruments",
@@ -9170,7 +9767,7 @@
         "description": "A page of the user's backtests that match, and the filter choices.",
         "properties": {
           "backtests": {
-            "description": "At most 10 backtests",
+            "description": "At most `per_page` backtests",
             "items": {
               "$ref": "#/$defs/BacktestSummary"
             },
@@ -9178,16 +9775,30 @@
             "type": "array"
           },
           "counts": {
-            "$ref": "#/$defs/BacktestCounts",
-            "description": "All the user's backtests, whatever the filters"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BacktestCounts"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "All the user's backtests, whatever the filters; null unless `include_facets` asks (by default on page 1)"
           },
           "models": {
-            "description": "Every model the backtests used, the most used first: the values of `model`",
-            "items": {
-              "$ref": "#/$defs/ModelCount"
-            },
-            "title": "Models",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/ModelCount"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every model the backtests used, the most used first: the values of `model`; null like `counts`",
+            "title": "Models"
           },
           "page": {
             "title": "Page",
@@ -9549,7 +10160,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Lists Experiments: the backtests that accounts of the beta published, which every signed-in account can see, with search, filters (author, market, symbol, representation, timeframe), sort and 12 a page. Use it to find what others tried and how it did, then read one with its ID. Answers the page, how many match, the counts and the values each filter offers; each backtest has its `url`, the page to show the user. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_experiments",
+      "description": "Lists Experiments: the backtests that accounts of the beta published, which every signed-in account can see, with search, filters (author, market, symbol, representation, timeframe), sort and 12 a page. Use it to find what others tried and how it did, then read one with its ID. Answers the page, how many match, and on page 1 the counts and the values each filter offers; each backtest has its `url`, the page to show the user. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_experiments",
       "endpoints": [
         "GET /api/v1/experiments"
       ],
@@ -9569,7 +10180,7 @@
               "author": {
                 "id": "usr_7f3k2m9qx4",
                 "mine": false,
-                "name": "Tymur Tkach"
+                "name": "Grace Hopper"
               },
               "benchmark_return": 0.682,
               "buy_and_hold_return": 0.682,
@@ -9708,6 +10319,19 @@
             "description": "Only this account's (`author.id`, usr_...)",
             "title": "Author"
           },
+          "include_facets": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Answer the counts and the values the filters offer: true on every page, false never; left out, only on page 1",
+            "title": "Include Facets"
+          },
           "market": {
             "anyOf": [
               {
@@ -9815,7 +10439,7 @@
               "name": {
                 "description": "The account's display name",
                 "examples": [
-                  "Tymur Tkach"
+                  "Grace Hopper"
                 ],
                 "title": "Name",
                 "type": "string"
@@ -10247,7 +10871,15 @@
         "description": "A page of Experiments that match, the counts and what the filters offer.",
         "properties": {
           "counts": {
-            "$ref": "#/$defs/ExperimentCounts"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ExperimentCounts"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null unless `include_facets` asks (by default on page 1)"
           },
           "experiments": {
             "description": "At most 12 published backtests",
@@ -10258,8 +10890,15 @@
             "type": "array"
           },
           "facets": {
-            "$ref": "#/$defs/ExperimentFacets",
-            "description": "The values each filter offers, with counts, over the scope and the search"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ExperimentFacets"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The values each filter offers, with counts, over the scope and the search; null like `counts`"
           },
           "page": {
             "title": "Page",
@@ -10499,172 +11138,77 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "The user's Dashboard in one call: the counts of all, starred, failed and published backtests, the 6 newest that ended, the 5 best finished ones by Sharpe ratio, return, drawdown (the smallest fall) and win rate, and the 4 best starred ones, each with its `url`, the page to show the user. Call it for an overview before digging in with list_backtests.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_dashboard",
+      "description": "The user's Dashboard in one call: the counts of all, starred, failed and published backtests, the 6 newest that ended, the 5 best finished ones by Sharpe ratio, return, drawdown (the smallest fall) and win rate with the value, and the 4 best starred ones. Each list gives IDs; `backtests` has each backtest once, by ID, with its `url`, the page to show the user. Call it for an overview before digging in with list_backtests.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_dashboard",
       "endpoints": [
         "GET /api/v1/dashboard"
       ],
       "example": {
         "arguments": {},
         "result": {
+          "backtests": {
+            "bt_7f3k2m9qx4": {
+              "buy_and_hold_return": 0.682,
+              "created_at": "2026-10-24T09:30:00Z",
+              "error": null,
+              "id": "bt_7f3k2m9qx4",
+              "instruments": [
+                {
+                  "market": "stock",
+                  "symbol": "AAPL"
+                }
+              ],
+              "max_drawdown": -0.197,
+              "model": "blesk-novol-8.keras",
+              "model_id": "mdl_k2m9qx47f3",
+              "name": "Silent Orion",
+              "num_trades": 1712,
+              "number": 12,
+              "public": false,
+              "queue_position": null,
+              "representation": "renko",
+              "setup": {
+                "benchmark": "bh",
+                "direction": "long",
+                "fees_pct": 0.1,
+                "period_end": "2025-12-31",
+                "period_start": "2023-01-02",
+                "slippage_pct": 0.02,
+                "stop_loss_pct": 7,
+                "threshold": 0.05,
+                "timeframe": "1h"
+              },
+              "sharpe": 0.79,
+              "starred": true,
+              "status": "finished",
+              "sweep_id": null,
+              "total_return": 0.246,
+              "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
+              "win_rate": 0.512
+            }
+          },
           "best": {
             "max_drawdown": [
               {
-                "buy_and_hold_return": 0.682,
-                "created_at": "2026-10-24T09:30:00Z",
-                "error": null,
                 "id": "bt_7f3k2m9qx4",
-                "instruments": [
-                  {
-                    "market": "stock",
-                    "symbol": "AAPL"
-                  }
-                ],
-                "max_drawdown": -0.197,
-                "model": "blesk-novol-8.keras",
-                "model_id": "mdl_k2m9qx47f3",
-                "name": "Silent Orion",
-                "num_trades": 1712,
-                "number": 12,
-                "public": false,
-                "queue_position": null,
-                "representation": "renko",
-                "setup": {
-                  "benchmark": "bh",
-                  "direction": "long",
-                  "fees_pct": 0.1,
-                  "period_end": "2025-12-31",
-                  "period_start": "2023-01-02",
-                  "slippage_pct": 0.02,
-                  "stop_loss_pct": 7,
-                  "threshold": 0.05,
-                  "timeframe": "1h"
-                },
-                "sharpe": 0.79,
-                "starred": true,
-                "status": "finished",
-                "total_return": 0.246,
-                "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
-                "win_rate": 0.512
+                "value": -0.197
               }
             ],
             "sharpe": [
               {
-                "buy_and_hold_return": 0.682,
-                "created_at": "2026-10-24T09:30:00Z",
-                "error": null,
                 "id": "bt_7f3k2m9qx4",
-                "instruments": [
-                  {
-                    "market": "stock",
-                    "symbol": "AAPL"
-                  }
-                ],
-                "max_drawdown": -0.197,
-                "model": "blesk-novol-8.keras",
-                "model_id": "mdl_k2m9qx47f3",
-                "name": "Silent Orion",
-                "num_trades": 1712,
-                "number": 12,
-                "public": false,
-                "queue_position": null,
-                "representation": "renko",
-                "setup": {
-                  "benchmark": "bh",
-                  "direction": "long",
-                  "fees_pct": 0.1,
-                  "period_end": "2025-12-31",
-                  "period_start": "2023-01-02",
-                  "slippage_pct": 0.02,
-                  "stop_loss_pct": 7,
-                  "threshold": 0.05,
-                  "timeframe": "1h"
-                },
-                "sharpe": 0.79,
-                "starred": true,
-                "status": "finished",
-                "total_return": 0.246,
-                "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
-                "win_rate": 0.512
+                "value": 0.79
               }
             ],
             "total_return": [
               {
-                "buy_and_hold_return": 0.682,
-                "created_at": "2026-10-24T09:30:00Z",
-                "error": null,
                 "id": "bt_7f3k2m9qx4",
-                "instruments": [
-                  {
-                    "market": "stock",
-                    "symbol": "AAPL"
-                  }
-                ],
-                "max_drawdown": -0.197,
-                "model": "blesk-novol-8.keras",
-                "model_id": "mdl_k2m9qx47f3",
-                "name": "Silent Orion",
-                "num_trades": 1712,
-                "number": 12,
-                "public": false,
-                "queue_position": null,
-                "representation": "renko",
-                "setup": {
-                  "benchmark": "bh",
-                  "direction": "long",
-                  "fees_pct": 0.1,
-                  "period_end": "2025-12-31",
-                  "period_start": "2023-01-02",
-                  "slippage_pct": 0.02,
-                  "stop_loss_pct": 7,
-                  "threshold": 0.05,
-                  "timeframe": "1h"
-                },
-                "sharpe": 0.79,
-                "starred": true,
-                "status": "finished",
-                "total_return": 0.246,
-                "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
-                "win_rate": 0.512
+                "value": 0.246
               }
             ],
             "win_rate": [
               {
-                "buy_and_hold_return": 0.682,
-                "created_at": "2026-10-24T09:30:00Z",
-                "error": null,
                 "id": "bt_7f3k2m9qx4",
-                "instruments": [
-                  {
-                    "market": "stock",
-                    "symbol": "AAPL"
-                  }
-                ],
-                "max_drawdown": -0.197,
-                "model": "blesk-novol-8.keras",
-                "model_id": "mdl_k2m9qx47f3",
-                "name": "Silent Orion",
-                "num_trades": 1712,
-                "number": 12,
-                "public": false,
-                "queue_position": null,
-                "representation": "renko",
-                "setup": {
-                  "benchmark": "bh",
-                  "direction": "long",
-                  "fees_pct": 0.1,
-                  "period_end": "2025-12-31",
-                  "period_start": "2023-01-02",
-                  "slippage_pct": 0.02,
-                  "stop_loss_pct": 7,
-                  "threshold": 0.05,
-                  "timeframe": "1h"
-                },
-                "sharpe": 0.79,
-                "starred": true,
-                "status": "finished",
-                "total_return": 0.246,
-                "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
-                "win_rate": 0.512
+                "value": 0.512
               }
             ]
           },
@@ -10675,84 +11219,10 @@
             "starred": 5
           },
           "newest": [
-            {
-              "buy_and_hold_return": 0.682,
-              "created_at": "2026-10-24T09:30:00Z",
-              "error": null,
-              "id": "bt_7f3k2m9qx4",
-              "instruments": [
-                {
-                  "market": "stock",
-                  "symbol": "AAPL"
-                }
-              ],
-              "max_drawdown": -0.197,
-              "model": "blesk-novol-8.keras",
-              "model_id": "mdl_k2m9qx47f3",
-              "name": "Silent Orion",
-              "num_trades": 1712,
-              "number": 12,
-              "public": false,
-              "queue_position": null,
-              "representation": "renko",
-              "setup": {
-                "benchmark": "bh",
-                "direction": "long",
-                "fees_pct": 0.1,
-                "period_end": "2025-12-31",
-                "period_start": "2023-01-02",
-                "slippage_pct": 0.02,
-                "stop_loss_pct": 7,
-                "threshold": 0.05,
-                "timeframe": "1h"
-              },
-              "sharpe": 0.79,
-              "starred": true,
-              "status": "finished",
-              "total_return": 0.246,
-              "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
-              "win_rate": 0.512
-            }
+            "bt_7f3k2m9qx4"
           ],
           "starred": [
-            {
-              "buy_and_hold_return": 0.682,
-              "created_at": "2026-10-24T09:30:00Z",
-              "error": null,
-              "id": "bt_7f3k2m9qx4",
-              "instruments": [
-                {
-                  "market": "stock",
-                  "symbol": "AAPL"
-                }
-              ],
-              "max_drawdown": -0.197,
-              "model": "blesk-novol-8.keras",
-              "model_id": "mdl_k2m9qx47f3",
-              "name": "Silent Orion",
-              "num_trades": 1712,
-              "number": 12,
-              "public": false,
-              "queue_position": null,
-              "representation": "renko",
-              "setup": {
-                "benchmark": "bh",
-                "direction": "long",
-                "fees_pct": 0.1,
-                "period_end": "2025-12-31",
-                "period_start": "2023-01-02",
-                "slippage_pct": 0.02,
-                "stop_loss_pct": 7,
-                "threshold": 0.05,
-                "timeframe": "1h"
-              },
-              "sharpe": 0.79,
-              "starred": true,
-              "status": "finished",
-              "total_return": 0.246,
-              "url": "https://app.candlestack.tech/backtests/bt_7f3k2m9qx4",
-              "win_rate": 0.512
-            }
+            "bt_7f3k2m9qx4"
           ]
         }
       },
@@ -11035,6 +11505,18 @@
               "status": {
                 "$ref": "#/$defs/BacktestStatus"
               },
+              "sweep_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The sweep it was started in (get_sweep); null for one started alone",
+                "title": "Sweep Id"
+              },
               "total_return": {
                 "anyOf": [
                   {
@@ -11072,6 +11554,7 @@
               "status",
               "queue_position",
               "error",
+              "sweep_id",
               "model",
               "model_id",
               "instruments",
@@ -11096,28 +11579,28 @@
             "properties": {
               "max_drawdown": {
                 "items": {
-                  "$ref": "#/$defs/BacktestSummary"
+                  "$ref": "#/$defs/RankedBacktest"
                 },
                 "title": "Max Drawdown",
                 "type": "array"
               },
               "sharpe": {
                 "items": {
-                  "$ref": "#/$defs/BacktestSummary"
+                  "$ref": "#/$defs/RankedBacktest"
                 },
                 "title": "Sharpe",
                 "type": "array"
               },
               "total_return": {
                 "items": {
-                  "$ref": "#/$defs/BacktestSummary"
+                  "$ref": "#/$defs/RankedBacktest"
                 },
                 "title": "Total Return",
                 "type": "array"
               },
               "win_rate": {
                 "items": {
-                  "$ref": "#/$defs/BacktestSummary"
+                  "$ref": "#/$defs/RankedBacktest"
                 },
                 "title": "Win Rate",
                 "type": "array"
@@ -11140,6 +11623,27 @@
             ],
             "title": "InstrumentMarket",
             "type": "string"
+          },
+          "RankedBacktest": {
+            "description": "A backtest in a ranking of the Dashboard and the value it is ranked by.",
+            "properties": {
+              "id": {
+                "description": "Public ID of the backtest, a key of `backtests`",
+                "title": "Id",
+                "type": "string"
+              },
+              "value": {
+                "description": "Its result the ranking orders by",
+                "title": "Value",
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "value"
+            ],
+            "title": "RankedBacktest",
+            "type": "object"
           },
           "Representation": {
             "description": "What the model reads: Renko bricks, a Kagi line or time windows of candles.",
@@ -11185,8 +11689,16 @@
             "type": "string"
           }
         },
-        "description": "The Dashboard of the user's backtests.",
+        "description": "The Dashboard of the user's backtests: each backtest once in `backtests`, and the lists\nof the Dashboard as their IDs.",
         "properties": {
+          "backtests": {
+            "additionalProperties": {
+              "$ref": "#/$defs/BacktestSummary"
+            },
+            "description": "Every backtest the lists below name, by its ID",
+            "title": "Backtests",
+            "type": "object"
+          },
           "best": {
             "$ref": "#/$defs/BestBacktests"
           },
@@ -11194,17 +11706,17 @@
             "$ref": "#/$defs/BacktestCounts"
           },
           "newest": {
-            "description": "The 6 newest backtests that ended, failed ones included",
+            "description": "IDs of the 6 newest backtests that ended, failed ones included, newest first",
             "items": {
-              "$ref": "#/$defs/BacktestSummary"
+              "type": "string"
             },
             "title": "Newest",
             "type": "array"
           },
           "starred": {
-            "description": "The 4 starred backtests with the best Sharpe ratio",
+            "description": "IDs of the 4 starred backtests with the best Sharpe ratio",
             "items": {
-              "$ref": "#/$defs/BacktestSummary"
+              "type": "string"
             },
             "title": "Starred",
             "type": "array"
@@ -11212,6 +11724,7 @@
         },
         "required": [
           "counts",
+          "backtests",
           "newest",
           "best",
           "starred"
@@ -11223,6 +11736,139 @@
         "read"
       ],
       "title": "Dashboard"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Deletes the user's backtests for good, with their results: up to 100 by their ids, or every backtest of a sweep with sweep_id, which deletes the sweep too. A queued one leaves the queue, a running one is stopped, a published one leaves Experiments and its page is gone. It cannot be undone, so ask the user first and give how many backtests you delete in confirm_count: when another number matches (some were deleted already, or the sweep has more), it answers the problem confirmation-mismatch with the real `count` and deletes nothing. IDs the user has no backtest with are listed in `not_found`.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#delete_backtests",
+      "endpoints": [
+        "DELETE /api/v1/backtests/{backtest_id}",
+        "POST /api/v1/backtests/delete"
+      ],
+      "example": {
+        "arguments": {
+          "confirm_count": 2,
+          "ids": [
+            "bt_7f3k2m9qx4",
+            "bt_t9n8v7d6a5"
+          ]
+        },
+        "result": {
+          "count": 2,
+          "deleted": [
+            "bt_7f3k2m9qx4",
+            "bt_t9n8v7d6a5"
+          ],
+          "not_found": []
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm_count": {
+            "description": "How many backtests this deletes, as the user agreed: the IDs given, or the sweep's `count` from get_sweep",
+            "minimum": 1,
+            "title": "Confirm Count",
+            "type": "integer"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "examples": [
+                    "bt_7f3k2m9qx4"
+                  ],
+                  "maxLength": 32,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "1 to 100 IDs of the user's backtests, from list_backtests",
+            "title": "Ids"
+          },
+          "sweep_id": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Every backtest of this sweep and the sweep itself, instead of ids",
+            "title": "Sweep Id"
+          }
+        },
+        "required": [
+          "confirm_count"
+        ],
+        "title": "delete_backtestsArguments",
+        "type": "object"
+      },
+      "name": "delete_backtests",
+      "outputSchema": {
+        "description": "What was deleted.",
+        "properties": {
+          "count": {
+            "description": "How many were deleted",
+            "examples": [
+              2
+            ],
+            "title": "Count",
+            "type": "integer"
+          },
+          "deleted": {
+            "description": "The IDs of the backtests deleted, in the order given (a sweep's in its order)",
+            "examples": [
+              [
+                "bt_7f3k2m9qx4",
+                "bt_t9n8v7d6a5"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Deleted",
+            "type": "array"
+          },
+          "not_found": {
+            "description": "IDs of `ids` the user has no backtest with (deleted already, or another account's): nothing was deleted for them",
+            "examples": [
+              []
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Not Found",
+            "type": "array"
+          }
+        },
+        "required": [
+          "deleted",
+          "count",
+          "not_found"
+        ],
+        "title": "BacktestsDeleted",
+        "type": "object"
+      },
+      "scopes": [
+        "backtests"
+      ],
+      "title": "Delete backtests"
     },
     {
       "annotations": {
@@ -12058,7 +12704,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Starts a backtest for every combination of `base` (the setup of one backtest) and the values in `vary`: models (each model's manifest sets what it reads and its timeframe, so list models to vary those), instruments, periods and decision rules, 2 to 20 backtests. All go to the end of the user's queue, which runs one at a time, or none does. `metric` is the statistic the ranking orders by.\n\nAnswers the sweep: its ID, each backtest's ID, status and setup, and the progress. Follow it with get_sweep until `done`. The backtests are ordinary ones, with the sweep's ID.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#run_sweep",
+      "description": "Starts a backtest for every combination of `base` (the setup of one backtest) and the values in `vary`: models (each model's manifest sets what it reads and its timeframe, so list models to vary those), instruments, periods and decision rules, 2 to 20 backtests. All go to the end of the user's queue, which runs one at a time, or none does. `metric` is the statistic the ranking orders by. Pass an `idempotency_key` (a UUID you make) to call it again safely after a timeout: the same call with the same key within 24 hours answers the first sweep instead of starting another.\n\nAnswers the sweep: its ID, each backtest's ID, status and setup, the progress and `eta_s`. Follow it with wait_for_sweep until `done`. The backtests are ordinary ones, with the sweep's ID.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#run_sweep",
       "endpoints": [
         "POST /api/v1/sweeps"
       ],
@@ -12157,6 +12803,7 @@
           "count": 2,
           "created_at": "2026-11-08T10:00:00Z",
           "done": false,
+          "eta_s": 312.0,
           "id": "sw_7f3k2m9qx4",
           "metric": "sharpe",
           "progress": {
@@ -12743,6 +13390,21 @@
           "base": {
             "$ref": "#/$defs/BacktestIn"
           },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "pattern": "^[!-~]{1,255}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A key you make, such as a UUID: the same call again with it within 24 hours answers the first one instead of starting again",
+            "title": "Idempotency Key"
+          },
           "metric": {
             "$ref": "#/$defs/SweepMetric",
             "default": "sharpe"
@@ -13119,7 +13781,7 @@
             "type": "object"
           }
         },
-        "description": "A sweep: its backtests, how far they are, and once all ended the ranking.",
+        "description": "The sweep just started.",
         "properties": {
           "backtests": {
             "description": "In the grid's order",
@@ -13147,6 +13809,18 @@
             "description": "None of its backtests is queued or running",
             "title": "Done",
             "type": "boolean"
+          },
+          "eta_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "About how many seconds until its last backtest ends, as wait_for_backtest estimates each; null once done and before any of the user's backtests finished",
+            "title": "Eta S"
           },
           "id": {
             "examples": [
@@ -13182,9 +13856,10 @@
           "done",
           "progress",
           "backtests",
-          "ranking"
+          "ranking",
+          "eta_s"
         ],
-        "title": "SweepOut",
+        "title": "SweepStarted",
         "type": "object"
       },
       "scopes": [
@@ -13199,7 +13874,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "A sweep of the user: how many of its backtests are queued, running, finished and failed, each backtest's ID, status and setup, and once none is queued or running (`done`) the ranking, best first, by `metric` or else the sweep's own. Values that read the same in the app share a rank, and the best and the worst are marked as the Compare page marks them.\n\nCall it again while it runs; a backtest takes a minute or a few. For every statistic of the backtests, compare them with their IDs.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_sweep",
+      "description": "A sweep of the user: how many of its backtests are queued, running, finished and failed, each backtest's ID, status and setup, and once none is queued or running (`done`) the ranking, best first, by `metric` or else the sweep's own. Values that read the same in the app share a rank, and the best and the worst are marked as the Compare page marks them.\n\nTo wait for it to end, call wait_for_sweep. For every statistic of the backtests, compare them with their IDs.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_sweep",
       "endpoints": [
         "GET /api/v1/sweeps/{sweep_id}"
       ],
@@ -13760,6 +14435,577 @@
         "read"
       ],
       "title": "Get a sweep"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Lists the user's sweeps, newest first: each one's ID, metric, how many of its backtests are queued, running, finished and failed, whether it is done, and its best finished backtest so far by the metric. Use it to find a sweep again; get_sweep ranks one, and list_backtests with `sweep_id` lists its backtests. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_sweeps",
+      "endpoints": [
+        "GET /api/v1/sweeps"
+      ],
+      "example": {
+        "arguments": {},
+        "result": {
+          "page": 1,
+          "pages": 1,
+          "sweeps": [
+            {
+              "best": {
+                "id": "bt_t9n8v7d6a5",
+                "name": "Bright Vega",
+                "number": 13,
+                "value": 1.42
+              },
+              "count": 2,
+              "created_at": "2026-11-08T10:00:00Z",
+              "done": true,
+              "id": "sw_7f3k2m9qx4",
+              "metric": "sharpe",
+              "progress": {
+                "failed": 0,
+                "finished": 2,
+                "queued": 0,
+                "running": 0
+              }
+            }
+          ],
+          "total": 1
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "page": {
+            "default": 1,
+            "description": "The page, from 1",
+            "maximum": 100000,
+            "minimum": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "default": 10,
+            "description": "Sweeps per page",
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Per Page",
+            "type": "integer"
+          }
+        },
+        "title": "list_sweepsArguments",
+        "type": "object"
+      },
+      "name": "list_sweeps",
+      "outputSchema": {
+        "$defs": {
+          "SweepBest": {
+            "description": "The sweep's best backtest so far by its `metric`, as its ranking would put it first.",
+            "properties": {
+              "id": {
+                "examples": [
+                  "bt_t9n8v7d6a5"
+                ],
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "examples": [
+                  "Bright Vega"
+                ],
+                "title": "Name",
+                "type": "string"
+              },
+              "number": {
+                "examples": [
+                  13
+                ],
+                "title": "Number",
+                "type": "integer"
+              },
+              "value": {
+                "description": "The statistic, as in `results.stats`",
+                "examples": [
+                  1.42
+                ],
+                "title": "Value",
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "number",
+              "name",
+              "value"
+            ],
+            "title": "SweepBest",
+            "type": "object"
+          },
+          "SweepListed": {
+            "description": "A sweep in the list: how far it is and its best backtest so far.",
+            "properties": {
+              "best": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/SweepBest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The finished backtest with the best `metric` so far; null until one has a value. `GET /api/v1/sweeps/{sweep_id}` ranks them all"
+              },
+              "count": {
+                "description": "Its backtests",
+                "examples": [
+                  6
+                ],
+                "title": "Count",
+                "type": "integer"
+              },
+              "created_at": {
+                "description": "When it was started (UTC)",
+                "format": "date-time",
+                "title": "Created At",
+                "type": "string"
+              },
+              "done": {
+                "description": "None of its backtests is queued or running",
+                "title": "Done",
+                "type": "boolean"
+              },
+              "id": {
+                "examples": [
+                  "sw_7f3k2m9qx4"
+                ],
+                "title": "Id",
+                "type": "string"
+              },
+              "metric": {
+                "$ref": "#/$defs/SweepMetric",
+                "description": "What its ranking orders by"
+              },
+              "progress": {
+                "$ref": "#/$defs/SweepProgress"
+              }
+            },
+            "required": [
+              "id",
+              "created_at",
+              "metric",
+              "count",
+              "done",
+              "progress",
+              "best"
+            ],
+            "title": "SweepListed",
+            "type": "object"
+          },
+          "SweepMetric": {
+            "description": "A statistic of `results.stats` the ranking can use: one that is better higher or lower.",
+            "enum": [
+              "total_return",
+              "max_drawdown",
+              "sharpe",
+              "sortino",
+              "win_rate",
+              "avg_trade_return",
+              "best_trade_return",
+              "worst_trade_return",
+              "fees_paid"
+            ],
+            "title": "SweepMetric",
+            "type": "string"
+          },
+          "SweepProgress": {
+            "description": "How many of the sweep's backtests have each status.",
+            "properties": {
+              "failed": {
+                "title": "Failed",
+                "type": "integer"
+              },
+              "finished": {
+                "title": "Finished",
+                "type": "integer"
+              },
+              "queued": {
+                "title": "Queued",
+                "type": "integer"
+              },
+              "running": {
+                "title": "Running",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "queued",
+              "running",
+              "finished",
+              "failed"
+            ],
+            "title": "SweepProgress",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "page": {
+            "description": "The page, from 1",
+            "examples": [
+              1
+            ],
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "description": "Pages of the sweeps, at least 1",
+            "examples": [
+              1
+            ],
+            "title": "Pages",
+            "type": "integer"
+          },
+          "sweeps": {
+            "description": "The page, newest first",
+            "items": {
+              "$ref": "#/$defs/SweepListed"
+            },
+            "title": "Sweeps",
+            "type": "array"
+          },
+          "total": {
+            "description": "The user's sweeps",
+            "examples": [
+              3
+            ],
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sweeps",
+          "total",
+          "page",
+          "pages"
+        ],
+        "title": "SweepsPage",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "List sweeps"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Waits until every backtest of a sweep of the user has ended or `timeout_s` seconds passed, then answers how many are queued, running, finished and failed, `eta_s`, and once `done` the ranking get_sweep gives. When `done` is false, call it again: a sweep's backtests run one after another.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#wait_for_sweep",
+      "endpoints": [
+        "GET /api/v1/sweeps/{sweep_id}"
+      ],
+      "example": {
+        "arguments": {
+          "sweep_id": "sw_7f3k2m9qx4",
+          "timeout_s": 50
+        },
+        "result": {
+          "count": 2,
+          "done": true,
+          "eta_s": null,
+          "id": "sw_7f3k2m9qx4",
+          "progress": {
+            "failed": 0,
+            "finished": 2,
+            "queued": 0,
+            "running": 0
+          },
+          "ranking": {
+            "backtests": [
+              {
+                "id": "bt_t9n8v7d6a5",
+                "mark": "best",
+                "name": "Bright Vega",
+                "number": 13,
+                "rank": 1,
+                "value": 1.42
+              },
+              {
+                "id": "bt_7f3k2m9qx4",
+                "mark": "worst",
+                "name": "Silent Orion",
+                "number": 12,
+                "rank": 2,
+                "value": 0.81
+              }
+            ],
+            "better": "higher",
+            "label": "Sharpe",
+            "metric": "sharpe"
+          }
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "sweep_id": {
+            "description": "Public ID of the sweep",
+            "examples": [
+              "sw_7f3k2m9qx4"
+            ],
+            "title": "Sweep Id",
+            "type": "string"
+          },
+          "timeout_s": {
+            "default": 50,
+            "description": "How long to wait at most, in seconds (up to 60)",
+            "maximum": 60,
+            "minimum": 1,
+            "title": "Timeout S",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sweep_id"
+        ],
+        "title": "wait_for_sweepArguments",
+        "type": "object"
+      },
+      "name": "wait_for_sweep",
+      "outputSchema": {
+        "$defs": {
+          "SweepMetric": {
+            "description": "A statistic of `results.stats` the ranking can use: one that is better higher or lower.",
+            "enum": [
+              "total_return",
+              "max_drawdown",
+              "sharpe",
+              "sortino",
+              "win_rate",
+              "avg_trade_return",
+              "best_trade_return",
+              "worst_trade_return",
+              "fees_paid"
+            ],
+            "title": "SweepMetric",
+            "type": "string"
+          },
+          "SweepProgress": {
+            "description": "How many of the sweep's backtests have each status.",
+            "properties": {
+              "failed": {
+                "title": "Failed",
+                "type": "integer"
+              },
+              "finished": {
+                "title": "Finished",
+                "type": "integer"
+              },
+              "queued": {
+                "title": "Queued",
+                "type": "integer"
+              },
+              "running": {
+                "title": "Running",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "queued",
+              "running",
+              "finished",
+              "failed"
+            ],
+            "title": "SweepProgress",
+            "type": "object"
+          },
+          "SweepRanked": {
+            "properties": {
+              "id": {
+                "examples": [
+                  "bt_7f3k2m9qx4"
+                ],
+                "title": "Id",
+                "type": "string"
+              },
+              "mark": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "best",
+                      "worst"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "`best` or `worst` as `GET /api/v1/compare` marks it, else null",
+                "title": "Mark"
+              },
+              "name": {
+                "examples": [
+                  "Silent Orion"
+                ],
+                "title": "Name",
+                "type": "string"
+              },
+              "number": {
+                "examples": [
+                  12
+                ],
+                "title": "Number",
+                "type": "integer"
+              },
+              "rank": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "1 for the best; values that read the same in the app share a rank (1, 1, 3); null without a value (failed, or the statistic is undefined)",
+                "examples": [
+                  1
+                ],
+                "title": "Rank"
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The statistic, as in `results.stats`",
+                "examples": [
+                  1.42
+                ],
+                "title": "Value"
+              }
+            },
+            "required": [
+              "rank",
+              "id",
+              "number",
+              "name",
+              "value",
+              "mark"
+            ],
+            "title": "SweepRanked",
+            "type": "object"
+          },
+          "SweepRanking": {
+            "description": "The backtests by one statistic, the best first, those without a value last.",
+            "properties": {
+              "backtests": {
+                "items": {
+                  "$ref": "#/$defs/SweepRanked"
+                },
+                "title": "Backtests",
+                "type": "array"
+              },
+              "better": {
+                "description": "Which way is better: `lower` for the fees, and for the max drawdown by the size of the fall: its values are 0 or below and a smaller fall is better, so -0.05 beats -0.20 and ranks first",
+                "enum": [
+                  "higher",
+                  "lower"
+                ],
+                "title": "Better",
+                "type": "string"
+              },
+              "label": {
+                "description": "What the app calls it",
+                "examples": [
+                  "Sharpe"
+                ],
+                "title": "Label",
+                "type": "string"
+              },
+              "metric": {
+                "$ref": "#/$defs/SweepMetric"
+              }
+            },
+            "required": [
+              "metric",
+              "label",
+              "better",
+              "backtests"
+            ],
+            "title": "SweepRanking",
+            "type": "object"
+          }
+        },
+        "description": "Where a sweep stands after a wait: its progress, and its ranking once done.",
+        "properties": {
+          "count": {
+            "description": "Its backtests",
+            "title": "Count",
+            "type": "integer"
+          },
+          "done": {
+            "description": "None of its backtests is queued or running any more: `ranking` is set; false when `timeout_s` passed first",
+            "title": "Done",
+            "type": "boolean"
+          },
+          "eta_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "About how many seconds until its last backtest ends, as wait_for_backtest estimates each; null once done and before any of the user's backtests finished",
+            "title": "Eta S"
+          },
+          "id": {
+            "description": "Public ID of the sweep",
+            "examples": [
+              "sw_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/$defs/SweepProgress"
+          },
+          "ranking": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SweepRanking"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Once done: as get_sweep ranks them, by the sweep's own metric"
+          }
+        },
+        "required": [
+          "id",
+          "count",
+          "done",
+          "progress",
+          "eta_s",
+          "ranking"
+        ],
+        "title": "SweepWaitResult",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Wait for a sweep"
     }
   ],
   "webOnly": [

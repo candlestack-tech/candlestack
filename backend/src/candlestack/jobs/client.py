@@ -14,7 +14,14 @@ import anyio
 import polars as pl
 
 from candlestack.jobs.files import JobFiles
-from candlestack.jobs.protocol import DEFAULT_WAIT, Job, JobKind, JobResult, manifest_sha256
+from candlestack.jobs.protocol import (
+    DEFAULT_WAIT,
+    QUEUE_WAIT,
+    Job,
+    JobKind,
+    JobResult,
+    manifest_sha256,
+)
 from candlestack.jobs.queue import JobQueue
 
 logger = logging.getLogger(__name__)
@@ -23,6 +30,9 @@ NO_ANSWER = (
     "The worker did not answer in time. It may be busy with other models. Try again in a few "
     "minutes."
 )
+# What a ``predict`` does not use of the manifest: the example is for the check, the notes for
+# people. Left out, the job stays small in the queue's Redis, which has 16 MB and evicts nothing.
+_NOT_FOR_PREDICT = frozenset({"example", "about"})
 
 
 class JobClient:
@@ -38,7 +48,7 @@ class JobClient:
         can refuse work at once instead of waiting for a result that cannot come."""
         await self._queue.ping()
 
-    async def predict(
+    async def predict(  # noqa: PLR0913 (what a job is made of)
         self,
         *,
         model: str,
@@ -46,18 +56,29 @@ class JobClient:
         manifest: dict[str, Any],
         candles: pl.DataFrame,
         wait: float = DEFAULT_WAIT,
+        queue_wait: float = QUEUE_WAIT,
         claimed: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[JobResult, pl.DataFrame | None]:
         """Runs the model (``<user_id>/<model_id>.keras`` or ``.onnx`` in the model storage,
         with the SHA-256 it was uploaded with) on ``candles`` (``ts``, open, high, low, close,
-        volume, and for stocks ``session_last``), its input built from ``manifest``. Returns
-        the result and, when it is done, the predictions: ``ts`` and ``prediction``, one row
-        per sample. ``claimed`` is awaited once when a worker is seen to have taken the job
-        before its result came (``JobQueue.result``)."""
-        job = _job("predict", model, sha256, manifest, wait)
+        volume, and for stocks ``session_last``), its input built from ``manifest`` (without its
+        ``example`` and ``about``, which the job does not use). Returns the result and, when it
+        is done, the predictions: ``ts`` and ``prediction``, one row per sample. The job waits
+        up to ``queue_wait`` seconds for a worker, then up to ``wait`` for its result.
+        ``claimed`` is awaited once when a worker is seen to have taken the job before its
+        result came (``JobQueue.result``)."""
+        runnable = {key: value for key, value in manifest.items() if key not in _NOT_FOR_PREDICT}
+        job = _job(
+            "predict",
+            model=model,
+            sha256=sha256,
+            manifest=runnable,
+            wait=wait,
+            queue_wait=queue_wait,
+        )
         try:
             await anyio.to_thread.run_sync(self._files.write_candles, job.id, candles)
-            result = await self._run(job, wait, claimed)
+            result = await self._run(job, claimed)
             predictions = None
             if result.status == "done":
                 predictions = await anyio.to_thread.run_sync(self._files.read_predictions, job.id)
@@ -67,17 +88,27 @@ class JobClient:
                 await anyio.to_thread.run_sync(self._files.discard, job.id)
 
     async def check(
-        self, *, model: str, sha256: str, manifest: dict[str, Any], wait: float = DEFAULT_WAIT
+        self,
+        *,
+        model: str,
+        sha256: str,
+        manifest: dict[str, Any],
+        wait: float = DEFAULT_WAIT,
+        queue_wait: float = QUEUE_WAIT,
     ) -> JobResult:
         """The trial run of the model with its manifest on built-in candles and, when the
         manifest has an ``example``, its comparison (docs/preprocessing.md, checks 4 and 5)."""
-        return await self._run(_job("check", model, sha256, manifest, wait), wait)
+        job = _job(
+            "check", model=model, sha256=sha256, manifest=manifest, wait=wait, queue_wait=queue_wait
+        )
+        return await self._run(job)
 
     async def _run(
-        self, job: Job, wait: float, claimed: Callable[[], Awaitable[None]] | None = None
+        self, job: Job, claimed: Callable[[], Awaitable[None]] | None = None
     ) -> JobResult:
+        assert job.wait is not None  # ``_job`` sets it
         await self._queue.submit(job)
-        result = await self._queue.result(job.id, wait, claimed=claimed)
+        result = await self._queue.result(job.id, job.wait, claim_by=job.deadline, claimed=claimed)
         if result is None:
             result = JobResult.failed(job.id, job.kind, "expired", NO_ANSWER)
         elif result.reason == "internal":
@@ -87,7 +118,20 @@ class JobClient:
         return result.model_copy(update={"manifest_sha256": manifest_sha256(job.manifest)})
 
 
-def _job(kind: JobKind, model: str, sha256: str, manifest: dict[str, Any], wait: float) -> Job:
+def _job(
+    kind: JobKind,
+    *,
+    model: str,
+    sha256: str,
+    manifest: dict[str, Any],
+    wait: float,
+    queue_wait: float,
+) -> Job:
     return Job(
-        kind=kind, model=model, sha256=sha256, manifest=manifest, deadline=time.time() + wait
+        kind=kind,
+        model=model,
+        sha256=sha256,
+        manifest=manifest,
+        deadline=time.time() + queue_wait,
+        wait=wait,
     )

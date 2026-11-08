@@ -23,6 +23,7 @@ from candlestack.mcp.docs import MANIFEST_DOCS, MANIFEST_SCHEMA
 from candlestack.ml import (
     LINK_REFUSALS,
     MANIFEST_MAX_BYTES,
+    MODELS_MAX,
     NAME_MAX,
     Framework,
     ManifestCheckFailed,
@@ -135,26 +136,42 @@ def _brief(model: ModelOut) -> ModelBrief:
 class ModelsResult(BaseModel):
     """The user's models and the storage they take."""
 
-    models: list[ModelBrief] = Field(description="Oldest first")
+    models: list[ModelBrief] = Field(description="Oldest first; the page asked for, else all")
+    total: int = Field(description="All the user's models")
     used_bytes: int = Field(description="Bytes the models take")
     quota_bytes: int = Field(description="Bytes the user's models may take")
     file_max_bytes: int = Field(description="The largest file an upload takes")
 
 
-async def list_models(ctx: Context) -> ModelsResult:
+async def list_models(
+    ctx: Context,
+    *,
+    page: Annotated[int, Field(ge=1, description="The page, from 1, when per_page is given")] = 1,
+    per_page: Annotated[
+        int | None,
+        Field(
+            ge=1,
+            le=MODELS_MAX,
+            description=f"Models per page; all of them (at most {MODELS_MAX}) when left out",
+        ),
+    ] = None,
+) -> ModelsResult:
     """The user's uploaded models, oldest first, in short: ID, name, format, state, star, the
     timeframe and session of the manifest, how many backtests used each and the best Sharpe
-    ratio; and the storage they take of the user's quota.
+    ratio; and the storage they take of the user's quota. All of them unless per_page asks for
+    a page; `total` counts them all.
 
     A model's state says what it can do: `needs_setup` has no manifest yet, so it cannot run
     (set_manifest gives it one); `ready` passed the manifest's checks and can be backtested;
     `verified` also gave the output of the manifest's example in a trial run. Use get_model for
     one model in full."""
     call = tool_call(ctx)
+    offset = 0 if per_page is None else (page - 1) * per_page
     async with call.db() as db:
-        listed = await _service(call, db).models(call.user.id)
+        listed = await _service(call, db).models_page(call.user.id, offset=offset, limit=per_page)
     return ModelsResult(
         models=[_brief(model) for model in listed.models],
+        total=listed.total,
         used_bytes=listed.usage.used_bytes,
         quota_bytes=listed.usage.quota_bytes,
         file_max_bytes=listed.usage.file_max_bytes,
@@ -168,11 +185,10 @@ async def _model(call: ToolCall, model_id: str) -> ModelOut:
         ProblemError: 404 ``not-found``.
     """
     async with call.db() as db:
-        listed = await _service(call, db).models(call.user.id)
-    for model in listed.models:
-        if model.id == model_id:
-            return model
-    raise model_not_found()
+        try:
+            return await _service(call, db).model(call.user.id, model_id)
+        except ModelNotFound:
+            raise model_not_found() from None
 
 
 async def get_model(model_id: ModelId, ctx: Context) -> ModelOut:
@@ -604,6 +620,7 @@ TOOLS = (
             arguments={},
             result=ModelsResult(
                 models=[_LSTM],
+                total=1,
                 used_bytes=1_489_779,
                 quota_bytes=100 * 1024 * 1024,
                 file_max_bytes=50 * 1024 * 1024,

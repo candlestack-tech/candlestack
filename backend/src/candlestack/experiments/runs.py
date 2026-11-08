@@ -3,25 +3,32 @@ before it accepts a run, the document ``GET /api/v1/backtests/{id}`` builds from
 stored (docs/engine.md, "The result document"), and cancelling a queued backtest.
 
 A user's backtests run one at a time: a new one waits in the user's queue (``queued``, at most
-``store.QUEUE_MAX``) while another of theirs runs, and the runner starts the oldest when that
-one ends (``BacktestRunner``).
+``store.QUEUE_MAX``) while another of theirs runs or no run slot is free, and the runner starts
+the oldest when its turn comes (``BacktestRunner``). Where a backtest stands is read from its
+row alone (``statuses``), with an estimate of when it ends from the user's recent runs.
 
-The document is built on request: the stored predictions, the candles from the cache and the
-engine, which is deterministic. When the candles' fingerprint differs from the run's (a source
-adjusted old prices), ``data.changed`` says so and the results come from the candles as they
-are now. The comparison reads only what the run stored (``stored``), so it never loads candles.
+The light view (``light``) is what the run stored: the statistics, and its light series and
+trades as zstd Parquet (``assembly.stored_results``), so reading it loads no candles and runs no
+engine. A backtest that finished before those were stored builds them once from the candles and
+stores them. The download is built on request: the stored predictions, the candles from the
+cache and the engine, which is deterministic. When the candles' fingerprint differs from the
+run's (a source adjusted old prices), ``data.changed`` says so and the results come from the
+candles as they are now.
 """
 
-from collections.abc import Mapping
+import logging
+import math
+from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
 from functools import partial
 from typing import Any, NamedTuple
 
 import anyio
-import numpy as np
+import orjson
 import polars as pl
 from redis.exceptions import RedisError
 
+from candlestack.core import DATABASE_ERRORS
 from candlestack.data import (
     CandleSet,
     DataService,
@@ -33,7 +40,6 @@ from candlestack.data import (
 )
 from candlestack.engine import ENGINE_VERSION
 from candlestack.experiments.assembly import (
-    CURVES,
     PERIODS_PER_YEAR,
     RISK_FREE_RATE,
     NothingToTest,
@@ -41,14 +47,17 @@ from candlestack.experiments.assembly import (
     align_of,
     document,
     dumps,
-    read_curves,
     read_predictions,
+    read_series,
+    read_trades,
     results,
     rows_of,
     run,
+    stored_results,
 )
 from candlestack.experiments.document import (
     BENCHMARK_ETFS,
+    LIGHT_ROWS,
     BacktestCheck,
     BacktestHeader,
     BacktestIn,
@@ -62,11 +71,14 @@ from candlestack.experiments.document import (
     HysteresisRule,
     InstrumentOut,
     MetricsArgs,
+    SeriesColumns,
     Software,
     ThresholdRule,
+    TradeColumns,
     WarmUpReport,
 )
 from candlestack.experiments.errors import (
+    BacktestLimitReached,
     BacktestNotFinished,
     BacktestNotFound,
     BacktestNotQueued,
@@ -76,8 +88,10 @@ from candlestack.experiments.errors import (
     ModelNeedsSetup,
     ModelNotFound,
     NoDocument,
+    NotComparable,
     QueueFull,
 )
+from candlestack.experiments.idempotency import Committed
 from candlestack.experiments.models import Backtest, new_backtest_id
 from candlestack.experiments.runner import BacktestRunner
 from candlestack.experiments.schemas import (
@@ -88,9 +102,16 @@ from candlestack.experiments.schemas import (
     SetupDirection,
     SetupTimeframe,
 )
-from candlestack.experiments.spec import RunReport, RunSpec, SpecData, SpecModel, SpecWarmUp
+from candlestack.experiments.spec import (
+    RunReport,
+    RunSpec,
+    SpecData,
+    SpecModel,
+    SpecWarmUp,
+    run_manifest,
+)
 from candlestack.experiments.steps import pending, shown_steps
-from candlestack.experiments.store import QUEUE_MAX, BacktestStore
+from candlestack.experiments.store import QUEUE_MAX, BacktestStore, Compared, StatusRow
 from candlestack.ml import Model
 from candlestack.preprocessing import Manifest, warm_up
 
@@ -101,6 +122,20 @@ _SESSIONS = {"stock": "regular", "crypto": "24/7"}
 # candles (candles@1) for any other.
 _REPRESENTATIONS = {"renko": Representation.renko, "kagi": Representation.kagi}
 CANCELLED = "You cancelled the backtest before it ran."
+logger = logging.getLogger(__name__)
+# What an estimate counts a run of a user without a finished one as, in seconds.
+RUN_SECONDS = 60.0
+_ENDED = {BacktestStatus.finished, BacktestStatus.failed}
+
+
+class Standing(NamedTuple):
+    """Where a backtest stands (``BacktestRuns.statuses``): the ``backtest`` group of its
+    document and ``eta_s``, about how many seconds until it ends, from its place in its user's
+    queue and the median of their recent runs; None once it ended, for another account's, and
+    before the user had a run finish."""
+
+    header: BacktestHeader
+    eta_s: float | None
 
 
 class Prepared(NamedTuple):
@@ -120,12 +155,20 @@ class Prepared(NamedTuple):
 
 class BacktestRuns:
     def __init__(
-        self, store: BacktestStore, data: DataService, runner: BacktestRunner, app_version: str
+        self,
+        store: BacktestStore,
+        data: DataService,
+        runner: BacktestRunner,
+        app_version: str,
+        *,
+        limit: int,
     ) -> None:
         self._store = store
         self._data = data
         self._runner = runner
         self._app_version = app_version
+        # The most backtests an account keeps (``BACKTEST_LIMIT``).
+        self._limit = limit
 
     async def check(self, user_id: str, body: BacktestIn) -> BacktestCheck:
         """Checks a new backtest of the user as ``start`` does, stores nothing, and says what
@@ -138,11 +181,12 @@ class BacktestRuns:
         model = prepared.model
         # As in ``start``, before the slower checks.
         if await self._store.queued(user_id) >= QUEUE_MAX:
-            raise QueueFull
+            raise QueueFull(await self.retry_after(user_id))
+        await self.fits(user_id, 1)
         await self.ready()
         spec = await self.spec(prepared)
         queued = await self._store.queued(user_id)
-        waits = queued > 0 or await self._store.running(user_id)
+        waits = queued > 0 or not self._runner.free or await self._store.running(user_id)
         data = spec.data
         return BacktestCheck(
             model=CheckedModel(id=model.id, name=model.name, framework=model.framework),
@@ -162,26 +206,35 @@ class BacktestRuns:
             queue_position=queued + 1 if waits else None,
         )
 
-    async def start(self, user_id: str, body: BacktestIn) -> tuple[Backtest, bytes]:
+    async def start(
+        self, user_id: str, body: BacktestIn, committed: Committed | None = None
+    ) -> tuple[Backtest, bytes]:
         """Checks a new backtest of the user, stores it, and returns it with its document: it
-        runs at once when no other backtest of the user runs or waits, else it waits at the
-        end of their queue (``queued``).
+        runs at once when no other backtest of the user runs or waits and a run slot is free,
+        else it waits at the end of their queue (``queued``). ``committed`` is awaited with its
+        ID once it is stored (an idempotency key keeps it, ``idempotency.once``).
+
+        From its commit on nothing cancels the start (a client that went away): the new
+        backtest gets its slot or stays queued, never running without a run. A read that fails
+        after the commit answers it as stored, queued and without its place.
 
         Raises:
             InvalidBacktest, ModelNotFound, ModelNeedsSetup, InstrumentNotForModel, QueueFull,
-            BacktestsUnavailable, and the data module's errors of the instrument and the
-            period (``data.DataError``).
+            BacktestLimitReached, BacktestsUnavailable, and the data module's errors of the
+            instrument and the period (``data.DataError``).
         """
         prepared = await self.prepare(user_id, body)
         author = DocumentAuthor(id=user_id, name=await self._store.author_name(user_id), mine=True)
         # Before the slower checks; again under the lock below, where it counts.
         if await self._store.queued(user_id) >= QUEUE_MAX:
-            raise QueueFull
+            raise QueueFull(await self.retry_after(user_id))
+        await self.fits(user_id, 1)
         await self.ready()
         spec = await self.spec(prepared)
         await self._store.lock_user(user_id)
         if await self._store.queued(user_id) >= QUEUE_MAX:
-            raise QueueFull
+            raise QueueFull(await self.retry_after(user_id))
+        await self.fits(user_id, 1)
         # The model may have been deleted meanwhile; held now until the backtest is stored.
         if not await self._store.hold_model(user_id, prepared.model.id):
             raise ModelNotFound
@@ -189,12 +242,39 @@ class BacktestRuns:
             user_id, prepared, spec, number=await self._store.last_number(user_id) + 1
         )
         await self._store.add_named(backtest)
-        started = await self.take_next(user_id)
-        position = await self._store.queue_position(backtest.id)
-        await self._store.commit()
-        self.run(started)
+        with anyio.CancelScope(shield=True):
+            await self._store.commit()
+            if committed is not None:
+                await committed(backtest.id)
+            await self.schedule()
+            position = await self._stored_place(backtest)
         document = _document(backtest, spec, author=author, queue_position=position)
         return backtest, dumps(document)
+
+    async def fits(self, user_id: str, adding: int) -> None:
+        """Checks that the user can keep ``adding`` more backtests, failed ones counted.
+
+        Raises:
+            BacktestLimitReached.
+        """
+        count = await self._store.count(user_id, [])
+        if count + adding > self._limit:
+            raise BacktestLimitReached(self._limit, count, adding)
+
+    async def _stored_place(self, backtest: Backtest) -> int | None:
+        """Reads the new backtest's status again (running now when a slot was free for it)
+        and its place in the queue. Postgres out of reach is a warning: it is answered queued,
+        as stored, without its place."""
+        try:
+            await self._store.refresh_status(backtest)
+            position = await self._store.queue_position(backtest.id)
+            await self._store.commit()
+        except DATABASE_ERRORS as error:
+            logger.warning(
+                "Backtest %s was answered as stored (%s)", backtest.id, type(error).__name__
+            )
+            return None
+        return position
 
     async def prepare(self, user_id: str, body: BacktestIn) -> Prepared:
         """The reads of a new backtest's checks: its benchmarks, and the user's model with the
@@ -255,16 +335,17 @@ class BacktestRuns:
             created_at=datetime.now(UTC),
         )
 
-    async def take_next(self, user_id: str) -> Backtest | None:
-        """Marks the user's oldest queued backtest running, under ``lock_user``, while none of
-        theirs runs: the one just stored, or an older one should the queue have stood still
-        (``BacktestRunner.resume``). Hand it to ``run`` once committed."""
-        return await self._store.take_next(user_id, datetime.now(UTC))
+    async def schedule(self) -> None:
+        """Gives the free run slots to the queues in turn (``BacktestRunner.fill``), once the
+        new backtests are committed: the new one starts when it is its turn."""
+        await self._runner.fill()
 
-    def run(self, started: Backtest | None) -> None:
-        """Runs the backtest ``take_next`` started, once its transaction committed."""
-        if started is not None:
-            self._runner.start(started.id)
+    async def retry_after(self, user_id: str, places: int = 1) -> int:
+        """About how many seconds until ``places`` more backtests fit in the user's queue: one
+        frees a place when it starts, about each run of theirs (the median of their recent
+        runs, else ``RUN_SECONDS``)."""
+        seconds = await self._store.run_seconds(user_id)
+        return max(1, math.ceil(places * (RUN_SECONDS if seconds is None else seconds)))
 
     async def cancel(self, user_id: str, backtest_id: str) -> bytes:
         """Cancels the user's queued backtest: it fails, as cancelled, and never runs. Returns
@@ -283,6 +364,7 @@ class BacktestRuns:
             raise BacktestNotQueued(backtest.status)
         await self._store.cancel(backtest, CANCELLED, datetime.now(UTC))
         await self._store.commit()
+        self._runner.changed(backtest_id)
         _, content = await self.document(user_id, backtest_id, light=True)
         return content
 
@@ -308,7 +390,7 @@ class BacktestRuns:
                 framework=model.framework,
                 sha256=model.sha256.hex(),
                 size_bytes=model.size_bytes,
-                manifest=model.manifest or {},
+                manifest=run_manifest(model.manifest or {}),
             ),
             data=SpecData(
                 instrument=_instrument(info),
@@ -333,36 +415,122 @@ class BacktestRuns:
             await self._data.warm_up_start(etf, timeframe, period.start, period.end, 0)
         return spec
 
-    async def document(self, user_id: str, backtest_id: str, *, light: bool) -> tuple[int, bytes]:
+    async def document(
+        self, user_id: str, backtest_id: str, *, light: bool, summary: bool = False
+    ) -> tuple[int, bytes]:
         """The number and the result document of the user's backtest, or of another account's
-        while it is published: the light view, or with ``light`` False the download, which
-        needs a finished backtest.
+        while it is published: the light view (``light``, with ``summary`` its statistics
+        without the series and the trades, ``summarized``), or with ``light`` False the
+        download, built again from the candles, which needs a finished backtest.
 
         Raises:
             BacktestNotFound, NoDocument, BacktestNotFinished (the download), and the data
-            module's errors of loading the candles again (``data.DataError``).
+            module's errors of loading the candles again (``data.DataError``): the download's,
+            and those of the first read of a backtest from before the light results were
+            stored.
         """
+        if light:
+            number, built = await self.light(
+                user_id, backtest_id, series=not summary, trades=not summary
+            )
+            if summary:
+                return number, dumps(summarized(built))
+            # Up to about 1 MB of JSON: written in a thread too.
+            return number, await anyio.to_thread.run_sync(dumps, built)
         found = await self._store.with_run(user_id, backtest_id)
         if found is None:
             raise BacktestNotFound
         backtest = found.backtest
         if backtest.spec is None:
             raise NoDocument
-        finished = backtest.status == BacktestStatus.finished.value
-        if not light and not finished:
+        if backtest.status != BacktestStatus.finished.value or backtest.report is None:
             raise BacktestNotFinished(backtest.status)
         spec = RunSpec.model_validate(backtest.spec)
-        # Only the account's display name and public ID: never its email.
-        author = DocumentAuthor(
-            id=backtest.user_id, name=found.author, mine=backtest.user_id == user_id
+        report = RunReport.model_validate(backtest.report)
+        author = _author(backtest, found.author, user_id)
+        blob, candles, held = await self._inputs(backtest, spec, report)
+        build = partial(
+            _finished, backtest, spec, report, candles, blob, author=author, light=False, held=held
         )
-        if not finished or backtest.report is None:
+        return backtest.number, await anyio.to_thread.run_sync(build)
+
+    async def light(
+        self, user_id: str, backtest_id: str, *, series: bool = True, trades: bool = True
+    ) -> tuple[int, dict[str, Any]]:
+        """The number and the light result document of the user's backtest, or of another
+        account's while it is published, from what its run stored, without the candles and
+        the engine. Its ``results`` have the statistics and the benchmarks' returns, and the
+        series and the trades when asked for (``series``, ``trades``), as NumPy arrays for
+        ``dumps``. ``data.changed`` is null: only the download compares the candles again.
+
+        A backtest that finished before its light results were stored builds them from the
+        candles once and stores them; while its candles differ from the run's, it answers that
+        build (``data.changed`` true) and stores nothing.
+
+        Raises:
+            BacktestNotFound, NoDocument, and the data module's errors of that build.
+        """
+        found = await self._store.with_run(user_id, backtest_id, series=series, trades=trades)
+        if found is None:
+            raise BacktestNotFound
+        backtest = found.backtest
+        if backtest.spec is None:
+            raise NoDocument
+        spec = RunSpec.model_validate(backtest.spec)
+        author = _author(backtest, found.author, user_id)
+        if backtest.status != BacktestStatus.finished.value or backtest.report is None:
             position = None
             if backtest.status == BacktestStatus.queued.value:
                 position = await self._store.queue_position(backtest.id)
-            document = _document(backtest, spec, author=author, queue_position=position)
-            return backtest.number, dumps(document)
+            return backtest.number, _document(
+                backtest, spec, author=author, queue_position=position
+            )
         report = RunReport.model_validate(backtest.report)
+        if report.benchmarks is None:
+            return backtest.number, await self._first_light(backtest, spec, report, author)
+        shown: dict[str, Any] = {
+            "stats": backtest.stats,
+            "benchmarks": _returns(report.benchmarks),
+        }
+        if series or trades:
+            read = partial(
+                _read_light,
+                backtest.series if series else None,
+                backtest.trades if trades else None,
+            )
+            shown |= await anyio.to_thread.run_sync(read)
+        return backtest.number, _stored_document(backtest, spec, report, shown, author)
+
+    async def _first_light(
+        self, backtest: Backtest, spec: RunSpec, report: RunReport, author: DocumentAuthor
+    ) -> dict[str, Any]:
+        """The light document of a backtest that finished before its light results were
+        stored, built from the candles; stored only while the build gives the run's statistics
+        (the candles are still the run's, and the engine counts as it did), so the stored
+        series and trades never go with statistics of another build."""
+        blob, candles, held = await self._inputs(backtest, spec, report)
+        changed = candles.fingerprint != report.loaded.fingerprint
+        build = partial(_again, spec, candles.frame, blob, held, light=True)
+        done, shown = await anyio.to_thread.run_sync(build)
+        if done is None or shown is None or changed or not _same_stats(shown, backtest):
+            return _document(backtest, spec, report, done, shown, author=author, changed=changed)
+        kept = await anyio.to_thread.run_sync(stored_results, shown)
+        report = report.model_copy(update={"benchmarks": kept.benchmarks})
+        await self._store.keep_results(
+            backtest.id,
+            series=kept.series,
+            trades=kept.trades,
+            curves=kept.curves,
+            report=report.model_dump(mode="json"),
+        )
+        await self._store.commit()
+        return _stored_document(backtest, spec, report, shown, author)
+
+    async def _inputs(
+        self, backtest: Backtest, spec: RunSpec, report: RunReport
+    ) -> tuple[bytes, CandleSet, dict[str, pl.DataFrame]]:
+        """What a build of a finished backtest's results runs on: its stored predictions, the
+        candles it loaded, and those of the index fund of each benchmark that holds one."""
         blob = await self._store.predictions(backtest.id)
         assert blob is not None  # a finished run stored them
         # The reads end here, so no connection waits on the data module and the build.
@@ -379,10 +547,14 @@ class BacktestRuns:
             benchmark: (await self._data.candles(etf, timeframe, period.start, period.end)).frame
             for benchmark, etf in spec.etf_benchmarks().items()
         }
-        build = partial(
-            _finished, backtest, spec, report, candles, blob, author=author, light=light, held=held
-        )
-        return backtest.number, await anyio.to_thread.run_sync(build)
+        return blob, candles, held
+
+    async def compared(
+        self, user_id: str, backtest_ids: Sequence[str], *, curves: bool
+    ) -> dict[str, Compared]:
+        """What the comparison reads of the backtests, the user's own and other accounts'
+        published ones, by ID (``BacktestStore.compared``)."""
+        return await self._store.compared(user_id, backtest_ids, curves=curves)
 
     async def header(self, user_id: str, backtest_id: str) -> BacktestHeader:
         """The ``backtest`` group of the document of the user's backtest, or of another
@@ -392,75 +564,173 @@ class BacktestRuns:
         Raises:
             BacktestNotFound, NoDocument.
         """
-        found = await self._store.with_run(user_id, backtest_id)
-        if found is None:
+        rows = await self._store.statuses(user_id, [backtest_id])
+        if not rows:
             raise BacktestNotFound
-        backtest = found.backtest
-        if backtest.spec is None:
+        if not rows[0].has_spec:
             raise NoDocument
-        author = DocumentAuthor(
-            id=backtest.user_id, name=found.author, mine=backtest.user_id == user_id
-        )
-        report = None if backtest.report is None else RunReport.model_validate(backtest.report)
-        position = None
-        if backtest.status == BacktestStatus.queued.value:
-            position = await self._store.queue_position(backtest.id)
-        return _header(backtest, report, author=author, queue_position=position)
+        return _status_header(rows[0], user_id)
 
-    async def stored(self, user_id: str, backtest_id: str) -> dict[str, Any]:
-        """The light result document of the user's backtest, or of another account's while it
-        is published, from what its run stored and never the data source: what the comparison
-        reads. ``results`` has only the statistics and the series' ``CURVES`` columns (null
-        until it finished), ``data`` no alignment and ``backtest`` no queue position.
+    async def statuses(self, user_id: str, backtest_ids: Sequence[str]) -> list[Standing]:
+        """Where each of the backtests stands, in the order given: the user's own or other
+        accounts' published ones, from their rows alone (``BacktestStore.statuses``), with the
+        estimate of when the user's own end. What a wait reads again and again.
 
         Raises:
-            BacktestNotFound, NoDocument.
+            NotComparable: Neither the user nor a published backtest has one of the IDs.
         """
-        found = await self._store.with_run(user_id, backtest_id, curves=True)
-        if found is None:
-            raise BacktestNotFound
-        backtest = found.backtest
-        if backtest.spec is None:
-            raise NoDocument
-        spec = RunSpec.model_validate(backtest.spec)
-        author = DocumentAuthor(
-            id=backtest.user_id, name=found.author, mine=backtest.user_id == user_id
-        )
-        finished = backtest.status == BacktestStatus.finished.value
-        if not finished or backtest.report is None or backtest.stats is None:
-            return _document(backtest, spec, author=author)
-        report = RunReport.model_validate(backtest.report)
-        if backtest.curves is None:
-            columns = _short_curves(backtest, report)
-        else:
-            columns = read_curves(backtest.curves)
-        shown = {"stats": backtest.stats, "series": {"columns": columns}}
-        document = _document(backtest, spec, report, shown=shown, author=author)
-        # The rows the run found, as a rebuild of the document finds them again.
-        document["data"]["rows"] = report.rows.model_dump()
-        return document
+        rows = {row.id: row for row in await self._store.statuses(user_id, backtest_ids)}
+        for backtest_id in backtest_ids:
+            if backtest_id not in rows:
+                raise NotComparable(backtest_id, found=False)
+        headers = [_status_header(rows[backtest_id], user_id) for backtest_id in backtest_ids]
+        going = [h for h in headers if h.author.mine and h.status not in _ENDED]
+        run = await self._store.run_seconds(user_id) if going else None
+        if run is None:
+            return [Standing(header, None) for header in headers]
+        running = any(h.status is BacktestStatus.running for h in going)
+        if not running and any(h.status is BacktestStatus.queued for h in going):
+            running = await self._store.running(user_id)
+        now = datetime.now(UTC)
+        return [Standing(header, _eta(header, run, running=running, now=now)) for header in headers]
 
 
-def _short_curves(backtest: Backtest, report: RunReport) -> dict[str, list[Any]]:
-    """The curves of a backtest that finished before they were stored, from its short equity
-    series (``Backtest.set_equity``): its points at the evenly spaced times they were taken at
-    from the first row to the last, the fall of those points, and the close as buy and hold of
-    its own instrument when that was its benchmark (else no close, so no line)."""
-    if backtest.equity is None:
-        return {name: [] for name in CURVES}
-    equity = np.asarray(backtest.equity["strategy"], dtype=np.float64) + 1.0
-    rows = report.rows
-    ts = np.linspace(rows.first_ts, rows.last_ts, equity.size).astype(np.int64)
-    fall = equity / np.maximum.accumulate(equity) - 1.0
-    close: list[float | None] = [None] * equity.size
-    if backtest.setup.get("benchmark") == SetupBenchmark.buy_and_hold.value:
-        close = [value + 1.0 for value in backtest.equity["benchmark"]]
-    return {
-        "ts": ts.tolist(),
-        "close": close,
-        "equity": equity.tolist(),
-        "drawdown": fall.tolist(),
+def _author(backtest: Backtest, name: str, user_id: str) -> DocumentAuthor:
+    """The document's author: only the account's display name and public ID, never its email."""
+    return DocumentAuthor(id=backtest.user_id, name=name, mine=backtest.user_id == user_id)
+
+
+def _status_header(row: StatusRow, user_id: str) -> BacktestHeader:
+    """The ``backtest`` group of a document from where the backtest stands."""
+    mine = row.user_id == user_id
+    return BacktestHeader(
+        id=row.id,
+        name=row.name,
+        generated_name=row.generated_name,
+        number=row.number,
+        author=DocumentAuthor(id=row.user_id, name=row.author, mine=mine),
+        public=row.published_at is not None,
+        published_at=row.published_at,
+        status=BacktestStatus(row.status),
+        queue_position=row.queue_position,
+        # Only the author can open the sweep: others see that there was none.
+        sweep_id=row.sweep_id if mine else None,
+        created_at=row.created_at,
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+        duration_s=row.duration_s,
+        error=row.error,
+        steps=shown_steps(row.steps, row.timings),
+    )
+
+
+def _eta(header: BacktestHeader, run: float, *, running: bool, now: datetime) -> float | None:
+    """About how many seconds until the user's backtest ends, each run taking ``run`` seconds:
+    a running one what is left of its run (0 once past it); a queued one the backtests ahead of
+    it in the queue, the user's running one (``running``) and its own run. The wait for a free
+    run slot while many users run is left out. None for another account's or an ended one."""
+    if not header.author.mine:
+        return None
+    if header.status is BacktestStatus.running:
+        began = header.started_at or header.created_at
+        return round(max(run - (now - began).total_seconds(), 0.0), 1)
+    if header.status is BacktestStatus.queued and header.queue_position is not None:
+        return round((header.queue_position + running) * run, 1)
+    return None
+
+
+def _returns(benchmarks: Mapping[str, float | None]) -> dict[str, dict[str, float | None]]:
+    return {benchmark: {"total_return": value} for benchmark, value in benchmarks.items()}
+
+
+def _read_light(series: bytes | None, trades: bytes | None) -> dict[str, Any]:
+    """The stored light series and trades given (CPU work, in a thread)."""
+    shown: dict[str, Any] = {}
+    if series is not None:
+        shown["series"] = read_series(series)
+    if trades is not None:
+        shown["trades"] = read_trades(trades)
+    return shown
+
+
+def _same_stats(shown: dict[str, Any], backtest: Backtest) -> bool:
+    """Whether a build's statistics are the ones its run stored, as their JSON reads them."""
+    return orjson.loads(dumps(shown["stats"])) == backtest.stats
+
+
+def _stored_document(
+    backtest: Backtest,
+    spec: RunSpec,
+    report: RunReport,
+    shown: dict[str, Any],
+    author: DocumentAuthor,
+) -> dict[str, Any]:
+    """The light document of a finished backtest from what its run stored."""
+    built = _document(backtest, spec, report, shown=shown, author=author)
+    # The engine that made what it stored.
+    built["software"]["engine_version"] = backtest.engine_version or ENGINE_VERSION
+    # The rows and the alignment the run found, as a build from the candles finds them again.
+    built["data"]["rows"] = report.rows.model_dump(mode="json")
+    built["data"]["align"] = report.align.model_dump(mode="json")
+    return built
+
+
+# The columns of the series and the trades, which the summary view leaves empty.
+_SERIES_COLUMNS = tuple(SeriesColumns.model_fields)
+_TRADE_COLUMNS = tuple(field.alias or name for name, field in TradeColumns.model_fields.items())
+
+
+def summarized(built: dict[str, Any]) -> dict[str, Any]:
+    """The summary view of a light document (``light`` without the series and the trades):
+    its ``results`` have the statistics and the benchmarks' returns, and the series and the
+    trades of the document's form left empty (``count`` 0; ``trades.total`` still how many
+    trades the run had)."""
+    shown = built["results"]
+    if shown is None:
+        return built
+    day = built["data"]["rows"]["count"] > LIGHT_ROWS
+    total = shown["stats"]["num_trades"]
+    columns = [name for name in _SERIES_COLUMNS if not day or name not in ("prediction", "signal")]
+    empty = {
+        **shown,
+        "series": {
+            "resolution": "day" if day else "candle",
+            "count": 0,
+            "columns": {name: [] for name in columns},
+            "benchmarks": {benchmark: [] for benchmark in shown["benchmarks"]},
+        },
+        "trades": {
+            "count": 0,
+            "total": total,
+            "complete": total == 0,
+            "columns": {name: [] for name in _TRADE_COLUMNS},
+        },
     }
+    return {**built, "results": empty}
+
+
+def _again(
+    spec: RunSpec,
+    candles: pl.DataFrame,
+    blob: bytes,
+    held: Mapping[str, pl.DataFrame],
+    *,
+    light: bool,
+) -> tuple[Run | None, dict[str, Any] | None]:
+    """The engine's run of a finished backtest again and its ``results`` group (CPU work, in a
+    thread); neither when the candles changed so much that no prediction lands on one."""
+    try:
+        done = run(
+            candles,
+            read_predictions(blob),
+            period=spec.data.period,
+            decision=spec.decision,
+            execution=spec.execution,
+            periods_per_year=spec.metrics.periods_per_year,
+        )
+    except NothingToTest:
+        return None, None
+    return done, results(done, spec.benchmarks, light=light, held=held)
 
 
 def _finished(  # noqa: PLR0913 (what a build of the document is made of)
@@ -477,19 +747,8 @@ def _finished(  # noqa: PLR0913 (what a build of the document is made of)
     """The document of a finished backtest, its results built again (CPU work, in a thread).
     ``held`` has the candles of the index fund of each benchmark that holds one, by its ID."""
     changed = candles.fingerprint != report.loaded.fingerprint
-    try:
-        done = run(
-            candles.frame,
-            read_predictions(blob),
-            period=spec.data.period,
-            decision=spec.decision,
-            execution=spec.execution,
-            periods_per_year=spec.metrics.periods_per_year,
-        )
-    except NothingToTest:
-        # The candles changed so much that no prediction lands on one any more.
-        return dumps(_document(backtest, spec, report, author=author, changed=changed))
-    shown = results(done, spec.benchmarks, light=light, held=held)
+    # Without a run the candles changed so much that no prediction lands on one any more.
+    done, shown = _again(spec, candles.frame, blob, held, light=light)
     return dumps(_document(backtest, spec, report, done, shown, author=author, changed=changed))
 
 

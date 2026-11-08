@@ -1,21 +1,28 @@
 """The MCP server: its instructions, the ``docs`` resource and the tools, on the official SDK.
 
-``CandleStackMCP`` checks the API key's scopes before a tool runs and answers every failure as
+``CandleStackMCP`` checks the API key's scopes before a tool runs, charges the rate limits what
+a heavy tool costs beyond the request's 1 (``ToolSpec.cost``), and answers every failure as
 a tool error with the API's problem (``convention.problem_result``): the ``ProblemError`` a tool
 raised, ``validation`` for arguments that do not fit the input schema, ``not-found`` for an
 unknown tool and ``internal-error`` for a crash, which is logged for a developer.
+
+A result's text is its structured content as compact JSON without the null fields of its
+models (``compact_text``): what a model reads costs tokens, and the SDK writes it indented. A
+null in a list or as the value of a map stays. The structured content itself stays whole, nulls
+included, so it fits the output schema.
 """
 
 import logging
-from typing import Any, override
+from typing import Any, get_type_hints, override
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
-from mcp.types import CallToolResult, Icon, InputRequiredResult
-from pydantic import ValidationError
+from mcp.types import CallToolResult, Icon, InputRequiredResult, TextContent
+from pydantic import BaseModel, ValidationError
 
+from candlestack.accounts import charge_rate
 from candlestack.core import ProblemError
-from candlestack.mcp import account, manage, market, models, run, sweeps
+from candlestack.mcp import account, deletes, manage, market, models, run, sweeps
 from candlestack.mcp.convention import ToolSpec, problem_result, tool_call
 from candlestack.mcp.docs import DOCS_TEXT, DOCS_URI, INSTRUCTIONS
 
@@ -37,6 +44,7 @@ TOOLS: tuple[ToolSpec, ...] = (
     *models.TOOLS,
     *run.TOOLS,
     *manage.TOOLS,
+    *deletes.TOOLS,
     *sweeps.TOOLS,
 )
 
@@ -63,6 +71,13 @@ def _unknown_tool(name: str) -> ProblemError:
     )
 
 
+def compact_text(output: type[BaseModel], structured: dict[str, Any]) -> str:
+    """The text of a tool result whose output model is `output`: its structured content as
+    compact JSON without the fields of its models that are null (a model reads a missing field
+    as null). A null in a list or as a map's value stays: its place there means something."""
+    return output.model_validate(structured).model_dump_json(by_alias=True, exclude_none=True)
+
+
 def _internal_error() -> ProblemError:
     return ProblemError(
         500,
@@ -85,6 +100,10 @@ class CandleStackMCP(MCPServer):
             version=version,
         )
         self.specs = {spec.name: spec for spec in specs}
+        # Each tool's output model, the return type of its function.
+        self.outputs: dict[str, type[BaseModel]] = {
+            spec.name: get_type_hints(spec.fn)["return"] for spec in specs
+        }
         for spec in specs:
             self.add_tool(
                 spec.fn,
@@ -112,12 +131,20 @@ class CandleStackMCP(MCPServer):
             return problem_result(_unknown_tool(name))
         try:
             if context is not None:
-                tool_call(context).caller.require(*spec.scopes)
-            return await super().call_tool(name, arguments, context)
+                call = tool_call(context)
+                call.caller.require(*spec.scopes)
+                await charge_rate(
+                    call.state.rate_limiter, call.caller.budget, spec.cost_of(arguments)
+                )
+            result = await super().call_tool(name, arguments, context)
         except ProblemError as problem:
             return problem_result(problem)
         except ToolError as error:
             return problem_result(self._problem(name, error))
+        if not isinstance(result, CallToolResult) or result.structured_content is None:
+            return result
+        text = compact_text(self.outputs[name], result.structured_content)
+        return result.model_copy(update={"content": [TextContent(type="text", text=text)]})
 
     @staticmethod
     def _problem(name: str, error: ToolError) -> ProblemError:

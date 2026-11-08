@@ -166,10 +166,12 @@ the same `ts` ([engine.md](engine.md)).
 ## Rate limit
 
 The API takes 60 candle and instrument detail requests a minute from one IP address (the
-instrument search is not counted), and 120 requests a minute with one API key, whatever they
-ask for. Past either it answers 429 `rate-limited` with a `Retry-After` header: the seconds
-until the next minute. A cold request for a long stock history can also
-answer 503 `source-unavailable` with `Retry-After` while the source's budget is spent; what it
+instrument search is not counted), 120 requests a minute with one API key, and 300 a minute
+across all the keys and connected apps of one account. A heavy request counts as 5: a backtest's
+result document (1 with `?view=summary`), its download, a comparison, starting a backtest or a
+sweep. Past any of them it answers 429 `rate-limited` with a `Retry-After` header and
+`retry_after_s` in the body: the seconds until the next minute. A cold request for a long stock
+history can also answer 503 `source-unavailable` with `Retry-After` while the source's budget is spent; what it
 fetched so far stays cached, so the same request continues from there. In both cases wait `Retry-After` seconds and send it again:
 
 ```python
@@ -208,6 +210,19 @@ check = api.post("/api/v1/backtests/check", json=setup)
 if check.status_code == 200:
     started = api.post("/api/v1/backtests", json=setup).json()
 ```
+
+A start may time out on your side after the backtest was stored. Send an `Idempotency-Key`
+header (any 1 to 255 visible ASCII characters, such as a UUID) with `POST /api/v1/backtests`
+and `POST /api/v1/sweeps`, and send the same request again with the same key: within 24 hours
+it answers the first answer again, with `Idempotent-Replayed: true`, instead of starting a
+second one, also when the first request stopped after it stored the backtest (then the
+answer is the backtest as it is now). The same key with another body is 422
+`idempotency-key-reused`; while the first request is still being answered and has stored
+nothing yet it is 409 `idempotency-key-in-use`: wait `retry_after_s`. Deleting the backtest
+does not free its key: the same request with it still answers the first answer (201,
+`Idempotent-Replayed: true`) for a backtest that no longer exists, so start it again with a new
+key. A start your queue has no room for is 409 `queue-full` with `retry_after_s` (and `Retry-After`),
+about when one of your queued backtests has started.
 
 ## Compare backtests
 
@@ -257,10 +272,32 @@ still needs a model and an instrument when you vary them. An unknown field, such
 `GET /api/v1/sweeps/<id>` has the `progress`, each backtest's ID, status and setup, and once
 `done` the `ranking` by the metric, best first, marked as Compare marks it. Ask with
 `?metric=max_drawdown` for another order. The backtests are ordinary ones with `sweep_id`, so
-`GET /api/v1/compare` with their IDs compares them in full. In an MCP client the same is
-`validate_sweep`, `run_sweep` and `get_sweep`. `validate_sweep` needs only the scope `read`,
-while the HTTP dry run needs `backtests`. The fields:
+`GET /api/v1/compare` with their IDs compares them in full, and
+`GET /api/v1/backtests?sweep_id=<id>` lists them. `GET /api/v1/sweeps` lists your sweeps,
+newest first, each with its progress and its best backtest so far. In an MCP client the same is
+`validate_sweep`, `run_sweep`, `get_sweep`, `list_sweeps` and `wait_for_sweep`, which waits
+until every backtest of the sweep ended and answers the ranking. `validate_sweep` needs only the
+scope `read`, while the HTTP dry run needs `backtests`. The fields:
 [architecture.md](architecture.md#sweeps).
+
+## Find backtests
+
+`GET /api/v1/backtests` lists your backtests, 10 a page or up to 100 with `per_page`. Besides
+the search `q`, it filters by `status` (repeat it for several), `sweep_id`, `model_id`,
+`instrument` (`stock:AAPL`), `timeframe`, `representation`, `created_after` and
+`created_before`, `min_sharpe`, `min_total_return`, `min_max_drawdown` (the drawdown is 0 or
+below, so `-0.2` keeps falls of up to 20 %), `starred` and `public`; every filter given has to
+hold. `sort` also takes `win_rate` and `sortino`:
+
+```python
+best = api.get("/api/v1/backtests", params={
+    "status": "finished", "instrument": "stock:AAPL", "min_max_drawdown": -0.2,
+    "sort": "sharpe", "per_page": 50,
+}).json()["backtests"]
+```
+
+In an MCP client `list_backtests` takes the same filters, and answers the counts and the models
+used only on page 1 unless `include_facets` asks.
 
 ## Upload a model through a link
 
@@ -329,7 +366,8 @@ change. Some add fields, such as `errors` of a 422 `validation`:
   "title": "Too many requests",
   "status": 429,
   "detail": "More than 60 candle and instrument requests in one minute from this address. Retry in 12 seconds.",
-  "limit": 60
+  "limit": 60,
+  "retry_after_s": 12
 }
 ```
 
@@ -340,13 +378,16 @@ change. Some add fields, such as `errors` of a 422 `validation`:
 | 403 | `missing-scope` | the key lacks the scope `scope` names: create a key with it |
 | 403 | `session-required` | keys cannot do this: do it in the app |
 | 404 | `instrument-not-found` | check the id with the instrument search |
+| 409 | `queue-full` | your queue holds 20 waiting backtests: try again in `retry_after_s` seconds, or cancel one |
+| 409 | `idempotency-key-in-use` | the first request with this `Idempotency-Key` is still being answered: send it again in `retry_after_s` seconds |
 | 404 | `upload-link-not-found` | no upload link has the token: copy the whole link or ask for a new one |
 | 410 | `upload-link-gone` | the upload link was used or expired: ask for a new one |
 | 413 | `larger-than-link` | the file is larger than the upload link's `size_bytes`: ask for a new link with its size |
 | 422 | `validation` | fix the parameters `errors` names |
+| 422 | `idempotency-key-reused` | the `Idempotency-Key` came with another body in the last 24 hours: use a new key for a new request |
 | 422 | `period-out-of-range` | `start` before the first candle, `end` at or before it (paging past the start of the data) or `end` in the future: `available_from` and `available_to` say what fits |
 | 422 | `too-many-candles` | a shorter period, a longer timeframe or paging (`suggestion`) |
-| 429 | `rate-limited` | wait `Retry-After` seconds |
+| 429 | `rate-limited` | wait `Retry-After` (`retry_after_s`) seconds |
 | 502 | `source-data-invalid` | the source sent bad data: try later, or report it |
 | 503 | `source-unavailable` | wait `Retry-After` seconds when it is there; without it the source is down |
 

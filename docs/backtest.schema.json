@@ -130,7 +130,7 @@
               "type": "null"
             }
           ],
-          "description": "Where a queued backtest is in its author's queue: 1 starts next, when the running one ends; null for any other status",
+          "description": "Where a queued backtest is in its author's queue: 1 starts next, when their running one ended and a run slot is free; null for any other status",
           "title": "Queue Position"
         },
         "started_at": {
@@ -615,7 +615,7 @@
               "type": "null"
             }
           ],
-          "description": "The candles' fingerprint differs from the run's: the source changed them",
+          "description": "The candles' fingerprint differs from the run's: the source changed them. Only the download loads the candles again to compare; the light view is what the run stored, so null there",
           "title": "Changed"
         },
         "instrument": {
@@ -800,7 +800,7 @@
         "name": {
           "description": "The account's display name",
           "examples": [
-            "Tymur Tkach"
+            "Grace Hopper"
           ],
           "title": "Name",
           "type": "string"

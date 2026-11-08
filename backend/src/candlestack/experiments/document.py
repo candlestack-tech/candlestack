@@ -291,7 +291,7 @@ class DocumentAuthor(BaseModel):
     """Who the backtest belongs to: their display name, never their email."""
 
     id: str = Field(description="Public ID of the account", examples=["usr_7f3k2m9qx4"])
-    name: str = Field(description="The account's display name", examples=["Tymur Tkach"])
+    name: str = Field(description="The account's display name", examples=["Grace Hopper"])
     mine: bool = Field(description="The signed-in user's own backtest")
 
 
@@ -319,8 +319,8 @@ class BacktestHeader(BaseModel):
     queue_position: int | None = Field(
         ge=1,
         description=(
-            "Where a queued backtest is in its author's queue: 1 starts next, when the running "
-            "one ends; null for any other status"
+            "Where a queued backtest is in its author's queue: 1 starts next, when their "
+            "running one ended and a run slot is free; null for any other status"
         ),
     )
     sweep_id: str | None = Field(
@@ -432,7 +432,9 @@ class DataOut(BaseModel):
     period: Period
     loaded: Loaded | None
     changed: bool | None = Field(
-        description="The candles' fingerprint differs from the run's: the source changed them"
+        description="The candles' fingerprint differs from the run's: the source changed them. "
+        "Only the download loads the candles again to compare; the light view is what the run "
+        "stored, so null there"
     )
     warm_up: WarmUpReport
     rows: Rows | None

@@ -3,18 +3,27 @@
 of the service as tool errors and the scopes. Postgres, the queue and the worker are
 integration tests (tests/integration/experiments/test_mcp_run.py)."""
 
+import copy
 import json
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+import anyio
 import pytest
 from mcp import Client
 
+from candlestack import experiments
 from candlestack.data import InstrumentId, InstrumentNotFound
 from candlestack.experiments import BacktestCheck, BacktestHeader
-from candlestack.experiments.compare import CompareMetric
-from candlestack.experiments.errors import BacktestNotFound, NoDocument, QueueFull
-from candlestack.mcp import run
+from candlestack.experiments.compare import CompareMetric, CompareOut, compared
+from candlestack.experiments.errors import (
+    BacktestNotFound,
+    NotComparable,
+    QueueFull,
+)
+from candlestack.experiments.runs import Standing
+from candlestack.mcp import convention, run
 
 PROBLEMS = "https://candlestack.tech/problems/"
 ADA = "usr_adaaaaaaaa"
@@ -129,17 +138,22 @@ def document(
 
 
 class FakeRuns:
-    """Stands in for ``experiments.BacktestRuns``: ``statuses`` are the statuses each poll of a
-    backtest's header answers in turn (the last one stays), ``documents`` the light documents;
-    ``refuse`` makes every call raise it."""
+    """Stands in for ``experiments.BacktestRuns``: ``sequence`` has the statuses each poll of a
+    backtest's header answers in turn (the last one stays), ``documents`` the light documents
+    (the comparison of ``fake_compare`` reads them too); ``refuse`` makes every call raise it.
+    A backtest that has not ended is 30 s from its end. ``asked`` has the series and the trades
+    each read of a light document asked for, and ``compares`` the curve points and the setup
+    mode of each comparison."""
 
     def __init__(self) -> None:
-        self.statuses: dict[str, list[str]] = {}
+        self.sequence: dict[str, list[str]] = {}
         self.documents: dict[str, dict[str, Any]] = {}
         self.refuse: Exception | None = None
         self.users: list[str] = []
         self.bodies: list[Any] = []
         self.polls = 0
+        self.asked: list[tuple[bool, bool]] = []
+        self.compares: list[tuple[int, str]] = []
 
     def _call(self, user_id: str) -> None:
         self.users.append(user_id)
@@ -149,36 +163,65 @@ class FakeRuns:
     async def header(self, user_id: str, backtest_id: str) -> BacktestHeader:
         self._call(user_id)
         self.polls += 1
-        if backtest_id not in self.statuses:
+        if backtest_id not in self.sequence:
             raise BacktestNotFound
-        statuses = self.statuses[backtest_id]
+        statuses = self.sequence[backtest_id]
         status = statuses.pop(0) if len(statuses) > 1 else statuses[0]
         return BacktestHeader.model_validate(header(backtest_id, status))
+
+    async def statuses(self, user_id: str, backtest_ids: list[str]) -> list[Standing]:
+        headers = [await self.header(user_id, backtest_id) for backtest_id in backtest_ids]
+        return [
+            Standing(header, None if header.status.value in {"finished", "failed"} else 30.0)
+            for header in headers
+        ]
 
     async def check(self, user_id: str, body: Any) -> BacktestCheck:
         self._call(user_id)
         self.bodies.append(body)
         return BacktestCheck.model_validate(run.TOOLS[0].example.result.model_dump())
 
-    async def start(self, user_id: str, body: Any) -> tuple[None, bytes]:
+    async def start(self, user_id: str, body: Any, _committed: Any = None) -> tuple[None, bytes]:
         self._call(user_id)
         self.bodies.append(body)
+        self.sequence.setdefault("bt_newnewnewn", ["queued"])
         return None, json.dumps({"backtest": header("bt_newnewnewn", "queued")}).encode()
 
-    async def document(self, user_id: str, backtest_id: str, *, light: bool) -> tuple[int, bytes]:
+    async def light(
+        self, user_id: str, backtest_id: str, *, series: bool = True, trades: bool = True
+    ) -> tuple[int, dict[str, Any]]:
         self._call(user_id)
-        assert light
+        self.asked.append((series, trades))
         if backtest_id not in self.documents:
             raise BacktestNotFound
-        return 12, json.dumps(self.documents[backtest_id]).encode()
+        shown = copy.deepcopy(self.documents[backtest_id])
+        if shown["results"] is not None:
+            # As the service: only what was asked for.
+            if not series:
+                del shown["results"]["series"]
+            if not trades:
+                del shown["results"]["trades"]
+        return 12, shown
 
-    async def stored(self, user_id: str, backtest_id: str) -> dict[str, Any]:
-        self._call(user_id)
+
+async def fake_compare(
+    runs: FakeRuns,
+    user_id: str,
+    ids: Sequence[str],
+    *,
+    curve_points: int,
+    setup_mode: experiments.SetupMode,
+) -> CompareOut:
+    """``experiments.compare_backtests`` over the fake's documents."""
+    runs._call(user_id)
+    runs.compares.append((curve_points, setup_mode))
+    for backtest_id in ids:
         if backtest_id == "bt_seedseedse":
-            raise NoDocument
-        if backtest_id not in self.documents:
-            raise BacktestNotFound
-        return self.documents[backtest_id]
+            raise NotComparable(backtest_id, found=True)
+        if backtest_id not in runs.documents:
+            raise NotComparable(backtest_id, found=False)
+    documents = [runs.documents[backtest_id] for backtest_id in ids]
+    return compared(documents, points=curve_points, setup_mode=setup_mode)
 
 
 @pytest.fixture
@@ -186,6 +229,8 @@ def runs(monkeypatch: pytest.MonkeyPatch) -> FakeRuns:
     fake = FakeRuns()
     monkeypatch.setattr(run, "backtest_runs", lambda _state, _db: fake)
     monkeypatch.setattr(run, "POLL_S", 0.01)
+    monkeypatch.setattr(experiments, "compare_backtests", fake_compare)
+    monkeypatch.setattr(convention, "POLL_S", 0.01)
     return fake
 
 
@@ -249,6 +294,7 @@ def test_start_backtest_answers_its_status_and_place(mcp, runs, keys) -> None:
     assert status["status"] == "queued"
     assert status["queue_position"] == 2
     assert status["ended"] is False
+    assert status["eta_s"] == 30.0
     assert [step["id"] for step in status["steps"]] == STEPS
     assert status["url"] == "http://testserver/backtests/bt_newnewnewn"
     [body] = runs.bodies
@@ -265,19 +311,21 @@ def test_start_backtest_needs_backtests(mcp, runs) -> None:
 
 
 def test_a_full_queue_is_the_api_s_problem(mcp, runs, keys) -> None:
-    runs.refuse = QueueFull()
+    runs.refuse = QueueFull(240)
 
     body = problem(mcp(call("start_backtest", SETUP), key=keys.backtests_key))
 
     assert body["type"] == PROBLEMS + "queue-full"
     assert body["limit"] == 20
+    assert body["retry_after_s"] == 240
+    assert "in about 240 s" in body["detail"]
 
 
 # --- get_backtest_status and wait_for_backtest ----------------------------------------------
 
 
 def test_get_backtest_status_answers_at_once(mcp, runs) -> None:
-    runs.statuses["bt_7f3k2m9qx4"] = ["queued", "finished"]
+    runs.sequence["bt_7f3k2m9qx4"] = ["queued", "finished"]
 
     status = mcp(call("get_backtest_status", {"backtest_id": "bt_7f3k2m9qx4"}))
 
@@ -293,24 +341,115 @@ def test_an_unknown_backtest_is_not_found(mcp, runs) -> None:
 
 
 def test_wait_for_backtest_polls_until_it_ended(mcp, runs) -> None:
-    runs.statuses["bt_7f3k2m9qx4"] = ["queued", "running", "running", "failed"]
+    runs.sequence["bt_7f3k2m9qx4"] = ["queued", "running", "running", "failed"]
 
     status = mcp(call("wait_for_backtest", {"backtest_id": "bt_7f3k2m9qx4"}))
 
     assert status.structured_content["status"] == "failed"
     assert status.structured_content["ended"] is True
+    assert status.structured_content["done"] is True
+    assert status.structured_content["backtests"] is None
     assert status.structured_content["error"] == "It failed."
     assert runs.polls == 4
 
 
 def test_wait_for_backtest_answers_the_status_at_its_timeout(mcp, runs) -> None:
-    runs.statuses["bt_7f3k2m9qx4"] = ["running"]
+    runs.sequence["bt_7f3k2m9qx4"] = ["running"]
 
     status = mcp(call("wait_for_backtest", {"backtest_id": "bt_7f3k2m9qx4", "timeout_s": 1}))
 
     assert status.structured_content["status"] == "running"
     assert status.structured_content["ended"] is False
+    assert status.structured_content["done"] is False
+    assert status.structured_content["eta_s"] == 30.0
     assert runs.polls > 2
+
+
+def test_a_wait_reads_again_when_the_runner_says_the_backtest_changed(
+    app, mcp, runs, monkeypatch
+) -> None:
+    # Without the runner's word, the next read would come only after the call's timeout.
+    monkeypatch.setattr(run, "POLL_S", 30)
+    runs.sequence["bt_7f3k2m9qx4"] = ["running", "finished"]
+    runner = app.state.backtest_runner
+
+    async def wait_and_change(session: Client) -> Any:
+        async def change_soon() -> None:
+            while not runner._watchers:  # noqa: ASYNC110 (no event tells of a new wait)
+                await anyio.sleep(0.01)
+            runner.changed("bt_7f3k2m9qx4")
+
+        async with anyio.create_task_group() as group:
+            group.start_soon(change_soon)
+            started = anyio.current_time()
+            result = await session.call_tool(
+                "wait_for_backtest", {"backtest_id": "bt_7f3k2m9qx4", "timeout_s": 20}
+            )
+        return result, anyio.current_time() - started
+
+    result, took = mcp(wait_and_change)
+
+    assert result.structured_content["status"] == "finished"
+    assert took < 10
+    assert runs.polls == 2
+    assert runner._watchers == {}
+
+
+def test_wait_for_backtest_waits_for_all_of_ids_by_default(mcp, runs) -> None:
+    runs.sequence["bt_aaaaaaaaaa"] = ["running", "finished"]
+    runs.sequence["bt_bbbbbbbbbb"] = ["queued", "running", "running", "failed"]
+    arguments = {"ids": ["bt_aaaaaaaaaa", "bt_bbbbbbbbbb", "bt_aaaaaaaaaa"]}
+
+    answer = mcp(call("wait_for_backtest", arguments)).structured_content
+
+    assert answer["done"] is True
+    assert [b["status"] for b in answer["backtests"]] == ["finished", "failed"]
+    assert answer["id"] == "bt_aaaaaaaaaa"
+
+
+def test_wait_for_backtest_with_until_any_answers_the_first_that_ended(mcp, runs) -> None:
+    runs.sequence["bt_aaaaaaaaaa"] = ["running"]
+    runs.sequence["bt_bbbbbbbbbb"] = ["queued", "running", "finished"]
+    arguments = {"ids": ["bt_aaaaaaaaaa", "bt_bbbbbbbbbb"], "until": "any"}
+
+    answer = mcp(call("wait_for_backtest", arguments)).structured_content
+
+    assert answer["done"] is True
+    assert (answer["id"], answer["status"]) == ("bt_bbbbbbbbbb", "finished")
+    assert [b["status"] for b in answer["backtests"]] == ["running", "finished"]
+
+
+def test_wait_for_backtest_answers_the_first_still_going_at_its_timeout(mcp, runs) -> None:
+    runs.sequence["bt_aaaaaaaaaa"] = ["finished"]
+    runs.sequence["bt_bbbbbbbbbb"] = ["running"]
+    arguments = {"ids": ["bt_aaaaaaaaaa", "bt_bbbbbbbbbb"], "timeout_s": 1}
+
+    answer = mcp(call("wait_for_backtest", arguments)).structured_content
+
+    assert answer["done"] is False
+    assert (answer["id"], answer["status"], answer["eta_s"]) == ("bt_bbbbbbbbbb", "running", 30.0)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [{}, {"backtest_id": "bt_aaaaaaaaaa", "ids": ["bt_bbbbbbbbbb"]}],
+    ids=["neither", "both"],
+)
+def test_a_wait_needs_either_an_id_or_ids(mcp, runs, arguments: dict[str, Any]) -> None:
+    body = problem(mcp(call("wait_for_backtest", arguments)))
+
+    assert body["type"] == PROBLEMS + "validation"
+    assert "either backtest_id or ids" in body["detail"]
+    assert runs.polls == 0
+
+
+def test_a_wait_follows_twenty_backtests_at_most(mcp, runs) -> None:
+    ids = [f"bt_{index:010d}" for index in range(21)]
+
+    body = problem(mcp(call("wait_for_backtest", {"ids": ids})))
+
+    assert body["type"] == PROBLEMS + "validation"
+    assert runs.polls == 0
 
 
 def test_a_wait_is_a_minute_at_most(mcp, runs) -> None:
@@ -325,10 +464,42 @@ def test_a_wait_is_a_minute_at_most(mcp, runs) -> None:
 # --- get_backtest ---------------------------------------------------------------------------
 
 
-def test_get_backtest_answers_the_results_in_short(mcp, runs) -> None:
+# A page of 50 trades and the equity in at most 200 points.
+MORE = {"trades_per_page": 50, "equity_points": 200}
+
+
+def test_get_backtest_answers_the_setup_and_the_statistics_by_default(mcp, runs) -> None:
     runs.documents["bt_7f3k2m9qx4"] = document()
 
     result = mcp(call("get_backtest", {"backtest_id": "bt_7f3k2m9qx4"}))
+
+    assert not result.is_error, result.content
+    answer = result.structured_content
+    assert answer["metrics"]["sharpe"] == 1.4
+    assert answer["benchmark_returns"] == {"bh": 0.2}
+    assert answer["setup"]["data"]["instrument"]["id"] == "stock:AAPL"
+    assert (answer["trades"], answer["equity"]) == (None, None)
+    # Neither the series nor the trades are read.
+    assert runs.asked == [(False, False)]
+
+
+def test_get_backtest_reads_only_what_it_answers(mcp, runs) -> None:
+    runs.documents["bt_7f3k2m9qx4"] = document()
+
+    trades = mcp(call("get_backtest", {"backtest_id": "bt_7f3k2m9qx4", "trades_per_page": 5}))
+    equity = mcp(call("get_backtest", {"backtest_id": "bt_7f3k2m9qx4", "equity_points": 2}))
+
+    assert len(trades.structured_content["trades"]["items"]) == 5
+    assert trades.structured_content["equity"] is None
+    assert equity.structured_content["trades"] is None
+    assert equity.structured_content["equity"]["ts"] == [1_717_372_800, 1_717_372_800 + 1800 * 499]
+    assert runs.asked == [(False, True), (True, False)]
+
+
+def test_get_backtest_answers_the_results_in_short(mcp, runs) -> None:
+    runs.documents["bt_7f3k2m9qx4"] = document()
+
+    result = mcp(call("get_backtest", {"backtest_id": "bt_7f3k2m9qx4", **MORE}))
 
     assert not result.is_error, result.content
     answer = result.structured_content
@@ -384,8 +555,8 @@ def test_the_setup_of_get_backtest_starts_it_again(mcp, runs, keys) -> None:
 def test_get_backtest_pages_through_the_trades(mcp, runs) -> None:
     runs.documents["bt_7f3k2m9qx4"] = document()
 
-    last = mcp(call("get_backtest", {"backtest_id": "bt_7f3k2m9qx4", "trades_page": 3}))
-    past = mcp(call("get_backtest", {"backtest_id": "bt_7f3k2m9qx4", "trades_page": 4}))
+    last = mcp(call("get_backtest", {"backtest_id": "bt_7f3k2m9qx4", "trades_page": 3, **MORE}))
+    past = mcp(call("get_backtest", {"backtest_id": "bt_7f3k2m9qx4", "trades_page": 4, **MORE}))
 
     items = last.structured_content["trades"]["items"]
     assert [item["open_ts"] for item in items] == list(range(100, 120))
@@ -395,7 +566,8 @@ def test_get_backtest_pages_through_the_trades(mcp, runs) -> None:
 def test_a_short_series_comes_whole(mcp, runs) -> None:
     runs.documents["bt_7f3k2m9qx4"] = document(rows=30, trades=0)
 
-    answer = mcp(call("get_backtest", {"backtest_id": "bt_7f3k2m9qx4"})).structured_content
+    answer = mcp(call("get_backtest", {"backtest_id": "bt_7f3k2m9qx4", **MORE}))
+    answer = answer.structured_content
 
     assert answer["equity"]["points"] == 30
     assert answer["trades"]["pages"] == 0
@@ -408,7 +580,8 @@ def test_a_running_backtest_has_no_results(mcp, runs) -> None:
     running["data"]["rows"] = None
     runs.documents["bt_7f3k2m9qx4"] = running
 
-    answer = mcp(call("get_backtest", {"backtest_id": "bt_7f3k2m9qx4"})).structured_content
+    answer = mcp(call("get_backtest", {"backtest_id": "bt_7f3k2m9qx4", **MORE}))
+    answer = answer.structured_content
 
     assert answer["backtest"]["status"] == "running"
     assert answer["metrics"] is None
@@ -431,6 +604,14 @@ def test_equity_rows_are_spaced_with_the_deepest_fall() -> None:
     assert rows == sorted(set(rows))
 
 
+@pytest.mark.parametrize(("points", "rows"), [(1, [999]), (2, [0, 999]), (3, [0, 501, 999])])
+def test_a_few_equity_points_keep_the_end(points: int, rows: list[int]) -> None:
+    drawdown = [0.0] * 1000
+    drawdown[501] = -0.3
+
+    assert run.equity_rows(drawdown, points) == rows
+
+
 # --- compare_backtests ----------------------------------------------------------------------
 
 
@@ -449,7 +630,34 @@ def test_compare_backtests_answers_the_comparison(mcp, runs) -> None:
         "http://testserver/backtests/bt_bbbbbbbbbb",
     ]
     assert answer["metrics"][0]["key"] == "total_return"
-    assert len(answer["times"]) <= 200
+    # Without curve points no curves: an agent asks for them.
+    assert answer["times"] == []
+    assert answer["backtests"][0]["equity"] is None
+    assert answer["backtests"][0]["setup"]["instrument"] == "stock:AAPL"
+    assert answer["shared_setup"] is None
+    assert runs.compares == [(0, "full")]
+
+
+def test_compare_backtests_draws_curves_and_shows_the_setup_once_when_asked(mcp, runs) -> None:
+    runs.documents["bt_aaaaaaaaaa"] = document("bt_aaaaaaaaaa")
+    other = document("bt_bbbbbbbbbb")
+    other["decision"] = {"rule": {"name": "threshold", "limit": 0.3}, "long_only": True}
+    runs.documents["bt_bbbbbbbbbb"] = other
+    arguments = {"curve_points": 20, "setup_mode": "diff"}
+
+    result = mcp(call("compare_backtests", {"ids": list(runs.documents), **arguments}))
+
+    answer = result.structured_content
+    assert 2 <= len(answer["times"]) <= 20
+    assert len(answer["backtests"][0]["equity"]) == len(answer["times"])
+    assert answer["differs"] == ["decision.rule.limit"]
+    assert [item["setup"] for item in answer["backtests"]] == [
+        {"decision": {"rule": {"limit": 0.1}}},
+        {"decision": {"rule": {"limit": 0.3}}},
+    ]
+    assert answer["shared_setup"]["decision"] == {"rule": {"name": "threshold"}, "long_only": True}
+    assert answer["shared_setup"]["instrument"] == "stock:AAPL"
+    assert runs.compares == [(20, "diff")]
 
 
 def test_compare_says_how_to_read_the_max_drawdown() -> None:

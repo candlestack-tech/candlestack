@@ -117,10 +117,13 @@ PARITY: dict[str, Entry] = {
         ("rename_backtest", "star_backtest", "publish_backtest", "unpublish_backtest")
     ),
     "POST /api/v1/backtests/{backtest_id}/cancel": Tools(("cancel_backtest",)),
+    "DELETE /api/v1/backtests/{backtest_id}": Tools(("delete_backtests",)),
+    "POST /api/v1/backtests/delete": Tools(("delete_backtests",)),
     "GET /api/v1/experiments": Tools(("list_experiments",)),
     "GET /api/v1/dashboard": Tools(("get_dashboard",)),
     "POST /api/v1/sweeps": Tools(("validate_sweep", "run_sweep")),
-    "GET /api/v1/sweeps/{sweep_id}": Tools(("get_sweep",)),
+    "GET /api/v1/sweeps": Tools(("list_sweeps",)),
+    "GET /api/v1/sweeps/{sweep_id}": Tools(("get_sweep", "wait_for_sweep")),
 }
 
 

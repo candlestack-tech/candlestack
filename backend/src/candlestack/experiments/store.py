@@ -10,6 +10,7 @@ It never reads the author's email, and shows the model's name of when the backte
 """
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, NamedTuple
 
@@ -30,17 +31,18 @@ from sqlalchemy import (
     select,
     text,
     true,
+    type_coerce,
     update,
 )
 from sqlalchemy.dialects.postgresql import JSONB, aggregate_order_by, array_agg
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import InstrumentedAttribute, aliased, undefer
+from sqlalchemy.orm import InstrumentedAttribute, aliased, load_only, undefer
 from sqlalchemy.sql import visitors
 
 from candlestack.accounts import User
 from candlestack.experiments.models import Backtest, Sweep
-from candlestack.experiments.names import generated_name
+from candlestack.experiments.names import candidates, generated_name
 from candlestack.experiments.schemas import (
     BacktestShow,
     BacktestSort,
@@ -62,6 +64,8 @@ MODEL_NAME = func.coalesce(Model.name, Backtest.model_name)
 SHOWN_NAME = func.coalesce(Backtest.name, Backtest.generated_name)
 # How often a new backtest draws its generated name again when the unique index refuses it.
 NAME_ATTEMPTS = 3
+# How many random names a new backtest looks up at once for a free one (``free_name``).
+NAME_CANDIDATES = 10
 _NAME_INDEX = "uq_backtests_user_id_generated_name"
 
 _FINISHED = Backtest.status == BacktestStatus.finished.value
@@ -70,6 +74,8 @@ _RUNNING = Backtest.status == BacktestStatus.running.value
 _QUEUED = Backtest.status == BacktestStatus.queued.value
 # The most backtests a user can have waiting in their queue, besides the one running.
 QUEUE_MAX = 20
+# How many of a user's last finished runs an estimate of a wait counts with (``run_seconds``).
+RECENT_RUNS = 20
 # Only a finished backtest can be published, and it stays finished; the status is checked
 # anyway, so nothing else can ever show in Experiments.
 PUBLISHED = Backtest.published_at.is_not(None) & _FINISHED
@@ -102,6 +108,10 @@ _SORT_KEYS: dict[BacktestSort, SortKey] = {
     BacktestSort.sharpe: Backtest.sharpe,
     BacktestSort.max_drawdown: Backtest.max_drawdown,
     BacktestSort.trades: Backtest.num_trades,
+    BacktestSort.win_rate: Backtest.win_rate,
+    # Read from the small statistics document: a user's backtests are a few thousand at most,
+    # so a column of its own would buy nothing.
+    BacktestSort.sortino: Backtest.stats["sortino"].as_float(),
 }
 
 
@@ -129,6 +139,22 @@ class Authored(NamedTuple):
 
     backtest: Backtest
     author: str
+
+
+class Compared(NamedTuple):
+    """What the comparison reads of a backtest (``BacktestStore.compared``): the backtest, its
+    author's display name, the parts of its setup the comparison shows (``setup``: the model's
+    name as ``model``, the representation it reads as ``reads``, its input's shape as
+    ``input``, and the ``data``, ``decision``, ``execution`` and ``benchmarks`` groups as
+    stored; None for test data without a spec), the rows its run found (``report.rows``), its
+    statistics and its curves (None unless asked for)."""
+
+    backtest: Backtest
+    author: str
+    setup: dict[str, Any] | None
+    rows: dict[str, Any] | None
+    stats: dict[str, Any] | None
+    curves: bytes | None
 
 
 class Counts(NamedTuple):
@@ -167,6 +193,39 @@ class Namesake(NamedTuple):
     number: int
     name: str
     generated: bool
+
+
+class Doomed(NamedTuple):
+    """A backtest about to be deleted (``BacktestStore.to_delete``)."""
+
+    id: str
+    status: str
+    sweep_id: str | None
+
+
+class StatusRow(NamedTuple):
+    """Where a backtest stands (``BacktestStore.statuses``): its row without what its run
+    stored, its author's display name, its place in the queue while queued, and the timings
+    of its report only when it has no steps."""
+
+    id: str
+    number: int
+    name: str
+    generated_name: str
+    user_id: str
+    author: str
+    published_at: datetime | None
+    sweep_id: str | None
+    status: str
+    queue_position: int | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    duration_s: float | None
+    error: str | None
+    steps: list[dict[str, Any]] | None
+    timings: dict[str, float | None] | None
+    has_spec: bool
 
 
 class UserModel(NamedTuple):
@@ -210,8 +269,63 @@ def search(query: str) -> ColumnElement[bool] | None:
     return number | name | symbol | MODEL_NAME.ilike(pattern, escape="\\")
 
 
+@dataclass(frozen=True)
+class BacktestFilters:
+    """The filters of the list beyond the Backtests page's own (search, show, model), for the
+    API and the agents; a value left None filters nothing. Every condition also holds the
+    user's ID, so Postgres reads only the user's rows (an index of each kind leads with it),
+    a few thousand at most: no filter needs an index of its own."""
+
+    statuses: tuple[BacktestStatus, ...] = ()
+    sweep_id: str | None = None
+    model_id: str | None = None
+    # ``<market>:<symbol>`` as ``InstrumentId`` writes it: lowercase market, uppercase symbol.
+    instrument: str | None = None
+    timeframe: SetupTimeframe | None = None
+    representation: Representation | None = None
+    created_after: datetime | None = None
+    created_before: datetime | None = None
+    min_sharpe: float | None = None
+    min_total_return: float | None = None
+    # The deepest fall allowed: max_drawdown is 0 or below, so -0.2 keeps falls up to 20 %.
+    min_max_drawdown: float | None = None
+    starred: bool | None = None
+    public: bool | None = None
+
+    def conditions(self) -> list[ColumnElement[bool]]:
+        """The condition of each filter that is set."""
+        market, _, symbol = (self.instrument or "").partition(":")
+        timeframe = Backtest.setup["timeframe"].astext
+        each: list[tuple[object, Callable[[], ColumnElement[bool]]]] = [
+            (self.statuses or None, lambda: Backtest.status.in_(self.statuses)),
+            (self.sweep_id, lambda: Backtest.sweep_id == self.sweep_id),
+            (self.model_id, lambda: Backtest.model_id == self.model_id),
+            (
+                self.instrument,
+                lambda: Backtest.instruments.contains([{"market": market, "symbol": symbol}]),
+            ),
+            (self.timeframe, lambda: timeframe == self.timeframe),
+            (self.representation, lambda: Backtest.representation == self.representation),
+            (self.created_after, lambda: Backtest.created_at >= self.created_after),
+            (self.created_before, lambda: Backtest.created_at < self.created_before),
+            (self.min_sharpe, lambda: Backtest.sharpe >= self.min_sharpe),
+            (self.min_total_return, lambda: Backtest.total_return >= self.min_total_return),
+            (self.min_max_drawdown, lambda: Backtest.max_drawdown >= self.min_max_drawdown),
+            (self.starred, lambda: Backtest.starred.is_(self.starred)),
+            (
+                self.public,
+                lambda: PUBLISHED if self.public else Backtest.published_at.is_(None),
+            ),
+        ]
+        return [condition() for value, condition in each if value is not None]
+
+
 def filters(
-    *, query: str = "", show: BacktestShow = BacktestShow.all, model: str | None = None
+    *,
+    query: str = "",
+    show: BacktestShow = BacktestShow.all,
+    model: str | None = None,
+    more: BacktestFilters | None = None,
 ) -> list[ColumnElement[bool]]:
     """The conditions of the list's search and filters (all of them must hold)."""
     conditions: list[ColumnElement[bool]] = []
@@ -225,6 +339,8 @@ def filters(
         conditions.append(PUBLISHED)
     if model is not None:
         conditions.append(func.lower(MODEL_NAME) == func.lower(model))
+    if more is not None:
+        conditions.extend(more.conditions())
     return conditions
 
 
@@ -323,6 +439,33 @@ def _listed() -> Select[Backtest, str, int | None]:
 
 def _authored() -> Select[Backtest, str]:
     return select(Backtest, User.display_name).join(User, User.id == Backtest.user_id)
+
+
+# What the comparison shows of a backtest's setup, cut from its spec in Postgres: the copy of
+# the model's manifest stays in the database.
+_SPEC = Backtest.spec
+_COMPARED_SETUP = case(
+    (_SPEC.is_(None), None),
+    else_=type_coerce(
+        func.jsonb_build_object(
+            "model",
+            _SPEC[("model", "name")],
+            "reads",
+            _SPEC[("model", "manifest", "input", "representation", "id")],
+            "input",
+            _SPEC[("model", "manifest", "signature", "input", "shape")],
+            "data",
+            _SPEC["data"],
+            "decision",
+            _SPEC["decision"],
+            "execution",
+            _SPEC["execution"],
+            "benchmarks",
+            _SPEC["benchmarks"],
+        ),
+        JSONB,
+    ),
+)
 
 
 async def model_usage(
@@ -459,6 +602,27 @@ class BacktestStore:
         )
         return {name for row in rows for name in row if name is not None}
 
+    async def free_name(self, user_id: str) -> str:
+        """A generated name none of the user's backtests has, as its own or its generated name:
+        the first of ``NAME_CANDIDATES`` random names that is free, looked up by the unique
+        index of the generated names and ``ix_backtests_user_id_name``, so a new backtest never
+        reads every name of the account
+        (a sweep names 20); only when all of them are taken, from every name (``names``)."""
+        tried = candidates(NAME_CANDIDATES)
+        lowered = [name.lower() for name in tried]
+        rows = await self._db.execute(
+            select(func.lower(Backtest.generated_name), func.lower(Backtest.name)).where(
+                Backtest.user_id == user_id,
+                func.lower(Backtest.generated_name).in_(lowered)
+                | func.lower(Backtest.name).in_(lowered),
+            )
+        )
+        taken = {name for row in rows for name in row if name is not None}
+        free = [name for name, low in zip(tried, lowered, strict=True) if low not in taken]
+        if free:
+            return free[0]
+        return generated_name(await self.names(user_id))
+
     async def namesakes(self, user_id: str, name: str) -> list[Namesake]:
         """The user's backtests whose custom or generated name is `name`, in any case, the
         oldest first."""
@@ -572,7 +736,7 @@ class BacktestStore:
         """
         attempt = 1
         while True:
-            backtest.generated_name = generated_name(await self.names(backtest.user_id))
+            backtest.generated_name = await self.free_name(backtest.user_id)
             try:
                 async with self._db.begin_nested():
                     self._db.add(backtest)
@@ -596,17 +760,52 @@ class BacktestStore:
 
     async def sweep_backtests(self, sweep: Sweep) -> list[Listed]:
         """The backtests of the sweep in the order they were made, the grid's, with their
-        statistics (``stats``, null until one finished)."""
+        statistics (``stats``, null until one finished). Read again even when this session
+        holds them: a start that just added them answers what the runner started since."""
         rows = await self._db.execute(
             _listed()
             .options(undefer(Backtest.stats))
             .where(Backtest.user_id == sweep.user_id, Backtest.sweep_id == sweep.id)
             .order_by(Backtest.number)
+            .execution_options(populate_existing=True)
+        )
+        return [Listed(*row) for row in rows]
+
+    async def sweep_total(self, user_id: str) -> int:
+        """How many sweeps the user started."""
+        total = await self._db.scalar(
+            select(func.count()).select_from(Sweep).where(Sweep.user_id == user_id)
+        )
+        return int(total or 0)
+
+    async def sweeps(self, user_id: str, *, limit: int, offset: int = 0) -> list[Sweep]:
+        """The user's sweeps, newest first, from `offset` on, without their grids."""
+        rows = await self._db.scalars(
+            select(Sweep)
+            .options(load_only(Sweep.id, Sweep.user_id, Sweep.metric, Sweep.created_at))
+            .where(Sweep.user_id == user_id)
+            .order_by(Sweep.created_at.desc(), Sweep.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(rows)
+
+    async def backtests_of_sweeps(self, user_id: str, sweep_ids: Sequence[str]) -> list[Listed]:
+        """The backtests of the user's sweeps in one query, in the order they were made, with
+        their statistics (``stats``, null until one finished)."""
+        if not sweep_ids:
+            return []
+        rows = await self._db.execute(
+            _listed()
+            .options(undefer(Backtest.stats))
+            .where(Backtest.user_id == user_id, Backtest.sweep_id.in_(sweep_ids))
+            .order_by(Backtest.number)
         )
         return [Listed(*row) for row in rows]
 
     async def running(self, user_id: str) -> bool:
-        """Whether a backtest of the user is running."""
+        """Whether a backtest of the user is running (the partial index
+        ``ix_backtests_running``)."""
         found = await self._db.scalar(
             select(Backtest.id).where(Backtest.user_id == user_id, _RUNNING).limit(1)
         )
@@ -642,6 +841,13 @@ class BacktestStore:
             backtest.started_at = now
         return backtest
 
+    async def running_since(self, before: datetime) -> list[str]:
+        """The IDs of the backtests of any user that began to run before ``before`` and
+        still run (``ix_backtests_running``)."""
+        began = func.coalesce(Backtest.started_at, Backtest.created_at)
+        rows = await self._db.scalars(select(Backtest.id).where(_RUNNING, began < before))
+        return list(rows)
+
     async def requeue(self, backtest_id: str) -> None:
         """Puts the running backtest that never began back in its queue, where its number
         keeps it first."""
@@ -652,18 +858,85 @@ class BacktestStore:
         )
 
     async def waiting(self) -> list[str]:
-        """The users with a queued backtest and none running: whose queue should move on."""
+        """The users with a queued backtest and none running, whose queue may take a run slot:
+        the one whose oldest queued backtest waits longest first."""
         running = select(literal(1)).where(
             _AHEAD.user_id == Backtest.user_id, _AHEAD.status == BacktestStatus.running.value
         )
         rows = await self._db.scalars(
-            select(Backtest.user_id).where(_QUEUED, ~exists(running)).distinct()
+            select(Backtest.user_id)
+            .where(_QUEUED, ~exists(running))
+            .group_by(Backtest.user_id)
+            .order_by(func.min(Backtest.created_at), Backtest.user_id)
         )
         return list(rows)
 
-    async def user_of(self, backtest_id: str) -> str | None:
-        """The ID of the backtest's user; None once it is gone (the account was deleted)."""
-        return await self._db.scalar(select(Backtest.user_id).where(Backtest.id == backtest_id))
+    async def statuses(self, user_id: str, backtest_ids: Sequence[str]) -> list[StatusRow]:
+        """Where each of the backtests stands, the user's own or another account's published
+        ones, from their rows alone: no setup, report, statistics or curves are read (the
+        report's timings only for a backtest stored before its steps were). What a wait polls;
+        in no particular order, and without the IDs nobody can read."""
+        mine = Backtest.user_id == user_id
+        rows = await self._db.execute(
+            select(
+                Backtest.id,
+                Backtest.number,
+                SHOWN_NAME,
+                Backtest.generated_name,
+                Backtest.user_id,
+                User.display_name,
+                Backtest.published_at,
+                Backtest.sweep_id,
+                Backtest.status,
+                QUEUE_POSITION,
+                Backtest.created_at,
+                Backtest.started_at,
+                Backtest.finished_at,
+                Backtest.duration_s,
+                Backtest.error,
+                Backtest.steps,
+                case((Backtest.steps.is_(None), Backtest.report["timings"]), else_=None),
+                Backtest.spec.is_not(None),
+            )
+            .join(User, User.id == Backtest.user_id)
+            .where(Backtest.id.in_(backtest_ids), mine | PUBLISHED)
+        )
+        return [StatusRow(*row) for row in rows]
+
+    async def run_seconds(self, user_id: str) -> float | None:
+        """The median of how long the user's last ``RECENT_RUNS`` finished backtests ran, in
+        seconds: what an estimate of a wait counts with; None before any finished."""
+        recent = (
+            select(Backtest.duration_s.label("seconds"))
+            .where(Backtest.user_id == user_id, _FINISHED, Backtest.duration_s.is_not(None))
+            .order_by(Backtest.number.desc())
+            .limit(RECENT_RUNS)
+            .subquery()
+        )
+        median = await self._db.scalar(
+            select(func.percentile_cont(0.5).within_group(recent.c.seconds))
+        )
+        return None if median is None else float(median)
+
+    async def sweep_statuses(self, user_id: str, sweep_id: str) -> list[tuple[str, str]] | None:
+        """The ID and status of each backtest of the user's sweep, from their rows alone; None
+        when the user has no such sweep."""
+        found = await self._db.scalar(
+            select(Sweep.id).where(Sweep.id == sweep_id, Sweep.user_id == user_id)
+        )
+        if found is None:
+            return None
+        rows = await self._db.execute(
+            select(Backtest.id, Backtest.status)
+            .where(Backtest.user_id == user_id, Backtest.sweep_id == sweep_id)
+            .order_by(Backtest.number)
+        )
+        return [(backtest_id, status) for backtest_id, status in rows]
+
+    async def refresh_status(self, backtest: Backtest) -> None:
+        """Reads the backtest's status and start again: the runner may have started it in a
+        session of its own."""
+        await self._db.refresh(backtest, ["status", "started_at"])
 
     async def cancel(self, backtest: Backtest, error: str, now: datetime) -> None:
         """Fails the queued backtest with ``error``: it never ran, so its steps stay pending
@@ -671,6 +944,34 @@ class BacktestStore:
         backtest.status = BacktestStatus.failed.value
         backtest.error = error
         backtest.finished_at = now
+
+    # --- What deleting backtests needs -----------------------------------------------------------
+
+    async def to_delete(
+        self, user_id: str, *, ids: Sequence[str] = (), sweep_id: str | None = None
+    ) -> list[Doomed]:
+        """The user's backtests with one of the IDs, or of the sweep, locked until the
+        transaction ends (a run that is finishing stores its results first), by number."""
+        query = select(Backtest.id, Backtest.status, Backtest.sweep_id).where(
+            Backtest.user_id == user_id
+        )
+        if sweep_id is not None:
+            query = query.where(Backtest.sweep_id == sweep_id)
+        else:
+            query = query.where(Backtest.id.in_(ids))
+        rows = await self._db.execute(query.order_by(Backtest.number).with_for_update())
+        return [Doomed(*row) for row in rows]
+
+    async def delete(self, backtest_ids: Sequence[str]) -> None:
+        """Deletes the backtests with what their runs stored: one row each holds it all."""
+        await self._db.execute(delete(Backtest).where(Backtest.id.in_(backtest_ids)))
+
+    async def delete_empty_sweeps(self, user_id: str, sweep_ids: Sequence[str]) -> None:
+        """Deletes the user's sweeps of the IDs that have no backtest left."""
+        left = select(literal(1)).where(Backtest.sweep_id == Sweep.id)
+        await self._db.execute(
+            delete(Sweep).where(Sweep.user_id == user_id, Sweep.id.in_(sweep_ids), ~exists(left))
+        )
 
     async def run_model(self, user_id: str, model_id: str) -> Model | None:
         """The user's model with the ID and its manifest; None also when it is another user's."""
@@ -695,14 +996,16 @@ class BacktestStore:
         return await self._db.scalar(select(Backtest.model_id).where(Backtest.id == backtest_id))
 
     async def with_run(
-        self, user_id: str, backtest_id: str, *, curves: bool = False
+        self, user_id: str, backtest_id: str, *, series: bool = False, trades: bool = False
     ) -> Authored | None:
         """The user's backtest, or another account's while it is published, with what its run
-        stored, its predictions aside (and its curves unless ``curves``), and its author's
-        display name; None for any other."""
+        stored, its predictions and curves aside (and its light series and trades unless
+        ``series`` and ``trades``), and its author's display name; None for any other."""
         stored = [Backtest.spec, Backtest.report, Backtest.stats, Backtest.steps]
-        if curves:
-            stored.append(Backtest.curves)
+        if series:
+            stored.append(Backtest.series)
+        if trades:
+            stored.append(Backtest.trades)
         row = (
             await self._db.execute(
                 _authored()
@@ -711,6 +1014,49 @@ class BacktestStore:
             )
         ).first()
         return Authored(*row) if row is not None else None
+
+    async def compared(
+        self, user_id: str, backtest_ids: Sequence[str], *, curves: bool
+    ) -> dict[str, Compared]:
+        """What the comparison reads of each of the backtests that is the user's or another
+        account's published one, by its ID, in one query; the others are left out. The curves
+        only with ``curves``."""
+        query = (
+            select(
+                Backtest,
+                User.display_name,
+                _COMPARED_SETUP,
+                Backtest.report["rows"],
+                Backtest.stats,
+                Backtest.curves if curves else literal(None, Backtest.curves.type),
+            )
+            .join(User, User.id == Backtest.user_id)
+            .where(Backtest.id.in_(backtest_ids), (Backtest.user_id == user_id) | PUBLISHED)
+        )
+        rows = (await self._db.execute(query)).all()
+        return {row[0].id: Compared(*row) for row in rows}
+
+    async def keep_results(
+        self,
+        backtest_id: str,
+        *,
+        series: bytes,
+        trades: bytes,
+        curves: bytes,
+        report: dict[str, Any],
+    ) -> None:
+        """Stores the light results of a finished backtest that finished before they were
+        stored (``report`` with the benchmarks' returns); it keeps curves it has."""
+        await self._db.execute(
+            update(Backtest)
+            .where(Backtest.id == backtest_id, _FINISHED)
+            .values(
+                series=series,
+                trades=trades,
+                curves=func.coalesce(Backtest.curves, curves),
+                report=report,
+            )
+        )
 
     async def run_of(self, backtest_id: str) -> Backtest | None:
         """The backtest with its setup, whoever it is of: what the run reads when it starts."""

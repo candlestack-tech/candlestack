@@ -138,3 +138,55 @@ def test_the_tools_need_their_scopes_and_answer_problems(ada, key, mcp) -> None:
     assert missing["type"] == PROBLEMS + "not-found"
     assert (elsewhere["type"], elsewhere["setup"]) == (PROBLEMS + "instrument-not-found", 2)
     assert ada.sql("SELECT count(*) FROM backtests") == [(0,)]
+
+
+def test_an_agent_waits_for_a_sweep_until_it_is_ranked(ada, key, mcp, worker) -> None:
+    worker.gate.clear()  # nothing ends until the first wait has answered
+    model_id = ada.runnable_model()
+    secret = key("read", "backtests")
+    started = mcp(tool("run_sweep", base=base(model_id), vary={"rules": RULES}), secret)
+    sweep = started.structured_content
+
+    waiting = mcp(tool("wait_for_sweep", sweep_id=sweep["id"], timeout_s=1), secret)
+    worker.gate.set()
+    done = None
+    for _ in range(5):
+        done = mcp(tool("wait_for_sweep", sweep_id=sweep["id"]), secret).structured_content
+        if done["done"]:
+            break
+
+    assert not started.is_error, started.content
+    assert "eta_s" in sweep
+    assert not waiting.is_error, waiting.content
+    assert waiting.structured_content["done"] is False
+    assert waiting.structured_content["ranking"] is None
+    assert waiting.structured_content["progress"]["finished"] == 0
+    assert done is not None
+    assert done["done"] is True
+    assert (done["count"], done["eta_s"]) == (2, None)
+    assert done["progress"] == {"queued": 0, "running": 0, "finished": 2, "failed": 0}
+    gotten = ada.request("GET", f"/api/v1/sweeps/{sweep['id']}").json()
+    assert done["ranking"] == gotten["ranking"]
+
+
+@pytest.mark.usefixtures("market")
+def test_a_sweep_started_again_with_its_key_is_the_first_one(ada, key, mcp, sql) -> None:
+    model_id = ada.runnable_model()
+    secret = key("read", "backtests")
+    arguments = {"base": base(model_id), "vary": {"rules": RULES}, "idempotency_key": "sweep-1"}
+
+    first = mcp(tool("run_sweep", **arguments), secret)
+    again = mcp(tool("run_sweep", **arguments), secret)
+    other = mcp(tool("run_sweep", **{**arguments, "metric": "win_rate"}), secret)
+
+    assert not first.is_error, first.content
+    assert again.structured_content == first.structured_content
+    assert sql("SELECT count(*) FROM sweeps") == [(1,)]
+    assert problem(other)["type"] == PROBLEMS + "idempotency-key-reused"
+
+
+@pytest.mark.usefixtures("market")
+def test_a_wait_for_another_users_sweep_is_not_found(ada, key, mcp) -> None:
+    result = mcp(tool("wait_for_sweep", sweep_id="sw_7f3k2m9qx4"), key("read"))
+
+    assert problem(result)["type"] == PROBLEMS + "not-found"

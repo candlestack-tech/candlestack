@@ -138,6 +138,57 @@ def test_list_backtests_searches_sorts_and_pages_the_users_own(mcp, keys, ada, a
     assert first["models"] == [{"name": "lstm.keras", "framework": "keras", "count": 12}]
     assert [item["number"] for item in nvda.structured_content["backtests"]] == [2, 4, 6, 8, 10, 12]
     assert "equity" not in first["backtests"][0]
+    assert first["backtests"][0]["sweep_id"] is None
+    # The counts and the models only on page 1, unless asked.
+    assert (second["counts"], second["models"]) == (None, None)
+    asked = mcp(tool("list_backtests", page=2, include_facets=True), key).structured_content
+    assert asked["counts"] == first["counts"]
+
+
+def test_list_backtests_filters_and_pages_as_the_api_does(mcp, keys, ada, sql) -> None:
+    sql(
+        "INSERT INTO sweeps (id, user_id, metric, grid, created_at) "
+        "VALUES ('sw_aaaaaaaaaa', :user_id, 'sharpe', '[]', now())",
+        user_id=ada.id,
+    )
+    for number in range(1, 6):
+        add_backtest(sql, ada.id, number, sharpe=number / 2, starred=number == 2)
+    sql("UPDATE backtests SET sweep_id = 'sw_aaaaaaaaaa' WHERE number IN (3, 4)")
+    key = keys("read")
+
+    swept = mcp(tool("list_backtests", sweep_id="sw_aaaaaaaaaa"), key).structured_content
+    good = mcp(
+        tool("list_backtests", min_sharpe=1, starred=False, per_page=2, include_facets=False),
+        key,
+    ).structured_content
+
+    assert [(each["number"], each["sweep_id"]) for each in swept["backtests"]] == [
+        (4, "sw_aaaaaaaaaa"),
+        (3, "sw_aaaaaaaaaa"),
+    ]
+    assert [each["number"] for each in good["backtests"]] == [5, 4]
+    assert (good["total"], good["pages"], good["counts"]) == (3, 2, None)
+
+
+def test_list_sweeps(mcp, keys, ada, sql) -> None:
+    sql(
+        "INSERT INTO sweeps (id, user_id, metric, grid, created_at) "
+        "VALUES ('sw_aaaaaaaaaa', :user_id, 'sharpe', '[]', now())",
+        user_id=ada.id,
+    )
+    add_backtest(sql, ada.id, 1, sharpe=0.5)
+    add_backtest(sql, ada.id, 2, sharpe=None, status="running")
+    sql(
+        "UPDATE backtests SET sweep_id = 'sw_aaaaaaaaaa', stats = jsonb_build_object('sharpe', "
+        "sharpe)"
+    )
+
+    listed = mcp(tool("list_sweeps"), keys("read")).structured_content
+
+    [sweep] = listed["sweeps"]
+    assert (sweep["id"], sweep["count"], sweep["done"]) == ("sw_aaaaaaaaaa", 2, False)
+    assert (sweep["best"]["number"], sweep["best"]["value"]) == (1, 0.5)
+    assert (listed["total"], listed["pages"]) == (1, 1)
 
 
 def test_rename_star_and_their_problems(mcp, keys, ada, account, sql) -> None:
@@ -249,6 +300,15 @@ def test_get_dashboard(mcp, keys, ada, sql) -> None:
     dashboard = mcp(tool("get_dashboard"), keys("read")).structured_content
 
     assert dashboard["counts"] == {"all": 9, "starred": 2, "failed": 0, "public": 0}
-    assert [item["number"] for item in dashboard["newest"]] == [8, 7, 6, 5, 4, 3]
-    assert [item["number"] for item in dashboard["best"]["sharpe"]] == [8, 7, 6, 5, 4]
-    assert [item["number"] for item in dashboard["starred"]] == [5, 2]
+    backtests = dashboard["backtests"]
+
+    def numbers(ids: list[str]) -> list[int]:
+        return [backtests[backtest_id]["number"] for backtest_id in ids]
+
+    assert numbers(dashboard["newest"]) == [8, 7, 6, 5, 4, 3]
+    sharpe = dashboard["best"]["sharpe"]
+    assert numbers([item["id"] for item in sharpe]) == [8, 7, 6, 5, 4]
+    assert [item["value"] for item in sharpe] == [8.0, 7.0, 6.0, 5.0, 4.0]
+    assert numbers(dashboard["starred"]) == [5, 2]
+    # Each backtest once, however many lists name it.
+    assert sorted(item["number"] for item in backtests.values()) == [2, 3, 4, 5, 6, 7, 8]

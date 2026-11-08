@@ -148,22 +148,24 @@ export interface paths {
         };
         /**
          * List Backtests
-         * @description A page of the user's backtests that match the search and the filters, and what the
+         * @description A page of the user's backtests that match the search and every filter, and what the
          *     filter panel shows: the counts of all, starred and failed backtests and every model the
-         *     backtests used. A page past the last one is empty.
+         *     backtests used, whatever the filters. A page past the last one is empty.
          */
         get: operations["list_backtests_api_v1_backtests_get"];
         put?: never;
         /**
          * Start Backtest
          * @description Starts a backtest of one of the user's models on one instrument and period and returns
-         *     its document with its number: `running`, or `queued` with its `queue_position` while
-         *     another backtest of the user runs (one runs at a time per user, up to 20 more wait, and
-         *     the oldest starts when the running one ends). Checked first: the model is the user's and
-         *     has a manifest, the instrument fits the model, the period with the candles the model needs
-         *     before it fits the data and the candle limit, the user's queue has room, and the worker
-         *     that runs the models can be reached. The run goes on after the response; the document
-         *     (`GET /api/v1/backtests/{backtest_id}`) has the results once it finished.
+         *     its document with its number: `running`, or `queued` with its `queue_position` until one
+         *     of the run slots shared by all users frees and it is the user's turn (users take turns;
+         *     one of a user's backtests runs at a time, up to 20 more wait, oldest first). Checked first:
+         *     the model is the user's and has a manifest, the instrument fits the model, the period with
+         *     the candles the model needs before it fits the data and the candle limit, the user's queue
+         *     has room, and the worker that runs the models can be reached. The run goes on after the
+         *     response; the document (`GET /api/v1/backtests/{backtest_id}`) has the results once it
+         *     finished. With an `Idempotency-Key`, the same request sent again within 24 hours answers
+         *     the first document again instead of starting another backtest.
          */
         post: operations["start_backtest_api_v1_backtests_post"];
         delete?: never;
@@ -195,6 +197,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backtests/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete Backtests
+         * @description Deletes the user's backtests for good, as `DELETE /api/v1/backtests/{backtest_id}` does
+         *     one: up to 100 by their `ids`, or every backtest of a sweep with `sweep_id`, which deletes
+         *     the sweep too. IDs the user has no backtest with are listed in `not_found` and change
+         *     nothing, so sending the same request again is safe.
+         */
+        post: operations["delete_backtests_api_v1_backtests_delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backtests/{backtest_id}": {
         parameters: {
             query?: never;
@@ -207,12 +232,20 @@ export interface paths {
          * @description The result document of the user's backtest, whatever its status (`results` is null until
          *     it finished), or of another account's while it is published (`backtest.author`, read only,
          *     `model.id` null), in the light view: a series of more than 10,000 rows has one point per
-         *     UTC day, and only the newest 10,000 trades are in it (`trades.complete` false).
+         *     UTC day, and only the newest 10,000 trades are in it (`trades.complete` false). It is what
+         *     the run stored, so `data.changed` is null: the download compares the candles again.
          */
         get: operations["get_backtest_api_v1_backtests__backtest_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Backtest
+         * @description Deletes the user's backtest for good, with everything its run stored. A queued one
+         *     leaves the queue, a running one is stopped first. A published one leaves Experiments, and
+         *     its page answers 404 to everyone. Its sweep no longer lists it, and a sweep without any
+         *     backtest left is deleted too.
+         */
+        delete: operations["delete_backtest_api_v1_backtests__backtest_id__delete"];
         options?: never;
         head?: never;
         /**
@@ -987,7 +1020,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Sweeps
+         * @description A page of the user's sweeps, newest first: each one's metric, how many of its backtests
+         *     are queued, running, finished and failed, and its best finished backtest so far by the
+         *     metric. A page past the last one is empty.
+         */
+        get: operations["list_sweeps_api_v1_sweeps_get"];
         put?: never;
         /**
          * Start Sweep
@@ -998,7 +1037,8 @@ export interface paths {
          *     all go to the end of the queue, or none does. With `validate_only` nothing starts: the
          *     answer is 200 with the count and each setup. The sweep's backtests are ordinary backtests
          *     with its `sweep_id`. `GET /api/v1/sweeps/{sweep_id}` follows them and ranks them once all
-         *     ended.
+         *     ended. With an `Idempotency-Key`, the same request sent again within 24 hours answers the
+         *     first sweep again instead of starting another.
          */
         post: operations["start_sweep_api_v1_sweeps_post"];
         delete?: never;
@@ -1271,7 +1311,7 @@ export interface components {
             /**
              * Name
              * @description The account's display name
-             * @example Tymur Tkach
+             * @example Grace Hopper
              */
             name: string;
         };
@@ -1550,7 +1590,7 @@ export interface components {
             published_at: string | null;
             /**
              * Queue Position
-             * @description Where a queued backtest is in its author's queue: 1 starts next, when the running one ends; null for any other status
+             * @description Where a queued backtest is in its author's queue: 1 starts next, when their running one ended and a run slot is free; null for any other status
              */
             queue_position: number | null;
             /**
@@ -1742,7 +1782,7 @@ export interface components {
             published_at: string | null;
             /**
              * Queue Position
-             * @description Where a queued backtest is in the user's queue: 1 starts next, when the running one ends; null for any other status
+             * @description Where a queued backtest is in the user's queue: 1 starts next, when their running one ended and a run slot is free; null for any other status
              * @example null
              */
             queue_position: number | null;
@@ -1834,11 +1874,12 @@ export interface components {
         /**
          * BacktestSort
          * @description What the list is sorted by. `default` is newest first (`order` does not apply); `when`
-         *     sorts like `number`; `name` by the name, in any case. Backtests without the value (failed
-         *     ones) come last either way, and ties go by number, newest first.
+         *     sorts like `number`; `name` by the name, in any case; `sortino` by the Sortino ratio of
+         *     `results.stats`. Backtests without the value (failed ones) come last either way, and ties
+         *     go by number, newest first.
          * @enum {string}
          */
-        BacktestSort: "default" | "number" | "name" | "model" | "return" | "sharpe" | "max_drawdown" | "trades" | "when";
+        BacktestSort: "default" | "number" | "name" | "model" | "return" | "sharpe" | "max_drawdown" | "trades" | "when" | "win_rate" | "sortino";
         /**
          * BacktestStatus
          * @description `queued` (it waits for the user's running backtest to end), `running`, `finished` (it
@@ -1961,11 +2002,55 @@ export interface components {
              */
             starred?: boolean | null;
         };
+        /**
+         * BacktestsDeleteIn
+         * @description The backtests to delete: `ids` or `sweep_id`, one of the two.
+         */
+        BacktestsDeleteIn: {
+            /**
+             * Ids
+             * @description 1 to 100 IDs of the user's backtests
+             */
+            ids?: string[] | null;
+            /**
+             * Sweep Id
+             * @description Every backtest of this sweep of the user, and the sweep
+             * @example sw_7f3k2m9qx4
+             */
+            sweep_id?: string | null;
+        };
+        /**
+         * BacktestsDeleted
+         * @description What was deleted.
+         */
+        BacktestsDeleted: {
+            /**
+             * Count
+             * @description How many were deleted
+             * @example 2
+             */
+            count: number;
+            /**
+             * Deleted
+             * @description The IDs of the backtests deleted, in the order given (a sweep's in its order)
+             * @example [
+             *       "bt_7f3k2m9qx4",
+             *       "bt_t9n8v7d6a5"
+             *     ]
+             */
+            deleted: string[];
+            /**
+             * Not Found
+             * @description IDs of `ids` the user has no backtest with (deleted already, or another account's): nothing was deleted for them
+             * @example []
+             */
+            not_found: string[];
+        };
         /** BacktestsPage */
         BacktestsPage: {
             /**
              * Backtests
-             * @description The page, at most 10 backtests
+             * @description The page, at most `per_page` backtests (10 unless asked)
              */
             backtests: components["schemas"]["BacktestOut"][];
             /** @description All the user's backtests, whatever the filters */
@@ -2486,8 +2571,15 @@ export interface components {
              */
             metrics: components["schemas"]["CompareMetric"][];
             /**
+             * Shared Setup
+             * @description With `setup_mode=diff`, the setup fields every backtest has alike, once; each backtest's `setup` then has only its fields of `differs`. Null otherwise
+             */
+            shared_setup?: {
+                [key: string]: unknown;
+            } | null;
+            /**
              * Times
-             * @description The common time axis of the curves, at most 200 UTC epoch seconds: the first and the last time of each backtest's series and times evenly spaced between the earliest and the latest
+             * @description The common time axis of the curves, at most 200 UTC epoch seconds (`curve_points`; none with 0): the first and the last time of each backtest's series and times evenly spaced between the earliest and the latest
              */
             times: number[];
         };
@@ -2512,7 +2604,7 @@ export interface components {
             drawdown: (number | null)[] | null;
             /**
              * Equity
-             * @description Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results. A long backtest's series has a point per day, so its line begins at the end of its first day. One that finished before its curves were stored is drawn from its short series of at most 60 points, with buy and hold only when its benchmark held its own instrument
+             * @description Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results and with `curve_points` 0. A long backtest's series has a point per day, so its line begins at the end of its first day, and its stored curve has at most 1,000 points. One that finished before its curves were stored is drawn from its short series of at most 60 points, with buy and hold only when its benchmark held its own instrument
              */
             equity: (number | null)[] | null;
             /**
@@ -2543,7 +2635,7 @@ export interface components {
             public: boolean;
             /**
              * Setup
-             * @description What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `input` (the model's input, rows by features, from its manifest's signature), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document
+             * @description What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `input` (the model's input, rows by features, from its manifest's signature), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document. With `setup_mode=diff` only its fields of `differs`, the rest once in `shared_setup`
              */
             setup: {
                 [key: string]: unknown;
@@ -2653,7 +2745,7 @@ export interface components {
             align: components["schemas"]["AlignOut"] | null;
             /**
              * Changed
-             * @description The candles' fingerprint differs from the run's: the source changed them
+             * @description The candles' fingerprint differs from the run's: the source changed them. Only the download loads the candles again to compare; the light view is what the run stored, so null there
              */
             changed: boolean | null;
             instrument: components["schemas"]["InstrumentOut"];
@@ -2748,7 +2840,7 @@ export interface components {
             /**
              * Name
              * @description The account's display name
-             * @example Tymur Tkach
+             * @example Grace Hopper
              */
             name: string;
         };
@@ -4516,6 +4608,33 @@ export interface components {
             status: components["schemas"]["BacktestStatus"];
         };
         /**
+         * SweepBest
+         * @description The sweep's best backtest so far by its `metric`, as its ranking would put it first.
+         */
+        SweepBest: {
+            /**
+             * Id
+             * @example bt_t9n8v7d6a5
+             */
+            id: string;
+            /**
+             * Name
+             * @example Bright Vega
+             */
+            name: string;
+            /**
+             * Number
+             * @example 13
+             */
+            number: number;
+            /**
+             * Value
+             * @description The statistic, as in `results.stats`
+             * @example 1.42
+             */
+            value: number;
+        };
+        /**
          * SweepIn
          * @description A new sweep: a base setup, the values to vary and the statistic to rank by.
          */
@@ -4534,6 +4653,39 @@ export interface components {
              */
             validate_only: boolean;
             vary?: components["schemas"]["SweepVary"];
+        };
+        /**
+         * SweepListed
+         * @description A sweep in the list: how far it is and its best backtest so far.
+         */
+        SweepListed: {
+            /** @description The finished backtest with the best `metric` so far; null until one has a value. `GET /api/v1/sweeps/{sweep_id}` ranks them all */
+            best: components["schemas"]["SweepBest"] | null;
+            /**
+             * Count
+             * @description Its backtests
+             * @example 6
+             */
+            count: number;
+            /**
+             * Created At
+             * Format: date-time
+             * @description When it was started (UTC)
+             */
+            created_at: string;
+            /**
+             * Done
+             * @description None of its backtests is queued or running
+             */
+            done: boolean;
+            /**
+             * Id
+             * @example sw_7f3k2m9qx4
+             */
+            id: string;
+            /** @description What its ranking orders by */
+            metric: components["schemas"]["SweepMetric"];
+            progress: components["schemas"]["SweepProgress"];
         };
         /**
          * SweepMetric
@@ -4762,6 +4914,32 @@ export interface components {
              *     ]
              */
             rules?: (components["schemas"]["ThresholdRule"] | components["schemas"]["HysteresisRule"] | components["schemas"]["KmeansRule"])[];
+        };
+        /** SweepsPage */
+        SweepsPage: {
+            /**
+             * Page
+             * @description The page, from 1
+             * @example 1
+             */
+            page: number;
+            /**
+             * Pages
+             * @description Pages of the sweeps, at least 1
+             * @example 1
+             */
+            pages: number;
+            /**
+             * Sweeps
+             * @description The page, newest first
+             */
+            sweeps: components["schemas"]["SweepListed"][];
+            /**
+             * Total
+             * @description The user's sweeps
+             * @example 3
+             */
+            total: number;
         };
         /**
          * Tensor
@@ -5236,12 +5414,40 @@ export interface operations {
                 show?: components["schemas"]["BacktestShow"];
                 /** @description Only the backtests of the model with this name, in any case */
                 model?: string | null;
+                /** @description Only backtests with one of these statuses (repeat the parameter) */
+                status?: components["schemas"]["BacktestStatus"][] | null;
+                /** @description Only the backtests of this sweep */
+                sweep_id?: string | null;
+                /** @description Only the backtests of the model with this ID */
+                model_id?: string | null;
+                /** @description Only the backtests of this instrument, `<market>:<symbol>` */
+                instrument?: string | null;
+                /** @description Only this timeframe */
+                timeframe?: components["schemas"]["SetupTimeframe"] | null;
+                /** @description Only models that read this */
+                representation?: components["schemas"]["Representation"] | null;
+                /** @description Only those started at or after this time (UTC) */
+                created_after?: string | null;
+                /** @description Only those started before this time (UTC) */
+                created_before?: string | null;
+                /** @description Only those with at least this Sharpe ratio */
+                min_sharpe?: number | null;
+                /** @description Only those with at least this return, a fraction */
+                min_total_return?: number | null;
+                /** @description Only those whose largest fall is no deeper than this, 0 or below: -0.2 keeps falls of up to 20 percent */
+                min_max_drawdown?: number | null;
+                /** @description Only the starred (true) or the unstarred (false) */
+                starred?: boolean | null;
+                /** @description Only the published (true) or the unpublished (false) */
+                public?: boolean | null;
                 /** @description What to sort by */
                 sort?: components["schemas"]["BacktestSort"];
                 /** @description Direction of the sort */
                 order?: components["schemas"]["SortOrder"];
-                /** @description The page, from 1, of 10 backtests */
+                /** @description The page, from 1, of `per_page` backtests */
                 page?: number;
+                /** @description Backtests per page */
+                per_page?: number;
             };
             header?: never;
             path?: never;
@@ -5285,7 +5491,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5299,7 +5505,10 @@ export interface operations {
     start_backtest_api_v1_backtests_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Any 1 to 255 visible ASCII characters, such as a UUID: the same request sent again with it within 24 hours gets the first answer (with `Idempotent-Replayed: true`) instead of a second start */
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5345,7 +5554,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The model has no manifest (`model-needs-setup`), or the user has 20 backtests waiting already (`queue-full`, with `limit`). */
+            /** @description The model has no manifest (`model-needs-setup`), the user has 20 backtests waiting already (`queue-full`, with `limit` and `retry_after_s`), as many backtests as an account keeps (`backtest-limit`, with `limit` and `count`), or the first request with the `Idempotency-Key` is still being answered (`idempotency-key-in-use`, with `retry_after_s`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5354,7 +5563,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description An invalid setup (`validation`), a model of another market (`instrument-not-for-model`), a period outside the data (`period-out-of-range`), without the candles the model needs before it (`warm-up-out-of-range`), or with more candles than allowed (`too-many-candles`). */
+            /** @description An invalid setup (`validation`), a model of another market (`instrument-not-for-model`), a period outside the data (`period-out-of-range`), without the candles the model needs before it (`warm-up-out-of-range`), with more candles than allowed (`too-many-candles`), or an `Idempotency-Key` sent before with another body (`idempotency-key-reused`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -5363,7 +5572,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5441,7 +5650,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The model has no manifest (`model-needs-setup`), or the user has 20 backtests waiting already (`queue-full`, with `limit`). */
+            /** @description The model has no manifest (`model-needs-setup`), the user has 20 backtests waiting already (`queue-full`, with `limit` and `retry_after_s`), or as many backtests as an account keeps (`backtest-limit`, with `limit` and `count`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5459,7 +5668,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5488,9 +5697,81 @@ export interface operations {
             };
         };
     };
-    get_backtest_api_v1_backtests__backtest_id__get: {
+    delete_backtests_api_v1_backtests_delete_post: {
         parameters: {
             query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestsDeleteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestsDeleted"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no sweep with `sweep_id` (`not-found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Neither or both of `ids` and `sweep_id`, or more than 100 IDs (`validation`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_backtest_api_v1_backtests__backtest_id__get: {
+        parameters: {
+            query?: {
+                /** @description `light`: the light view. `summary`: the setup and the statistics only, `results.series` and `results.trades` left empty (`count` 0, `trades.total` still the trades the run had) */
+                view?: "light" | "summary";
+            };
             header?: never;
             path: {
                 /** @description Public ID of the backtest */
@@ -5554,7 +5835,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5574,6 +5855,72 @@ export interface operations {
             };
             /** @description A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`). */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_backtest_api_v1_backtests__backtest_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Public ID of the backtest */
+                backtest_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no backtest with this ID (`not-found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5653,7 +6000,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5730,7 +6077,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5807,7 +6154,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5841,6 +6188,10 @@ export interface operations {
             query: {
                 /** @description 1 to 20 backtest IDs separated by commas: the user's own and published ones of other accounts */
                 ids: string;
+                /** @description The most times of the curves; 0 for none (`times` empty, the curves null) */
+                curve_points?: number;
+                /** @description `full`: each backtest's whole setup. `diff`: what all share once in `shared_setup`, each backtest's `setup` only its fields of `differs` */
+                setup_mode?: "full" | "diff";
             };
             header?: never;
             path?: never;
@@ -5902,7 +6253,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -5949,7 +6300,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6018,7 +6369,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6104,7 +6455,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6198,7 +6549,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6375,7 +6726,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6422,7 +6773,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6806,7 +7157,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6917,7 +7268,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7029,7 +7380,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7129,7 +7480,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7216,7 +7567,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7284,7 +7635,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7350,7 +7701,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7431,7 +7782,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7499,7 +7850,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7581,7 +7932,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7663,7 +8014,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -8066,10 +8417,74 @@ export interface operations {
             };
         };
     };
+    list_sweeps_api_v1_sweeps_get: {
+        parameters: {
+            query?: {
+                /** @description The page, from 1 */
+                page?: number;
+                /** @description Sweeps per page */
+                per_page?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SweepsPage"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     start_sweep_api_v1_sweeps_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Any 1 to 255 visible ASCII characters, such as a UUID: the same request sent again with it within 24 hours gets the first answer (with `Idempotent-Replayed: true`) instead of a second start */
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -8124,7 +8539,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description A model has no manifest (`model-needs-setup`, with `setup`), or the user's queue has room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count` and `room`). */
+            /** @description A model has no manifest (`model-needs-setup`, with `setup`), the user's queue has room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count`, `room` and `retry_after_s`), the account cannot keep that many more backtests (`backtest-limit`, with `limit`, `count` and `adding`), or the first request with the `Idempotency-Key` is still being answered (`idempotency-key-in-use`, with `retry_after_s`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8133,7 +8548,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description An invalid body or fewer than 2 or more than 20 backtests (`validation`, the latter with `count` and `limit`), or a setup that fails a check of `POST /api/v1/backtests` (`instrument-not-for-model`, `period-out-of-range`, `warm-up-out-of-range`, `too-many-candles`, `validation`; `setup` names it, from 1). */
+            /** @description An invalid body or fewer than 2 or more than 20 backtests (`validation`, the latter with `count` and `limit`), a setup that fails a check of `POST /api/v1/backtests` (`instrument-not-for-model`, `period-out-of-range`, `warm-up-out-of-range`, `too-many-candles`, `validation`; `setup` names it, from 1), or an `Idempotency-Key` sent before with another body (`idempotency-key-reused`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8142,7 +8557,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -8231,7 +8646,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            /** @description More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`). */
             429: {
                 headers: {
                     [name: string]: unknown;

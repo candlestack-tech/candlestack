@@ -297,6 +297,7 @@ def test_the_rate_limit_per_key(browser, script, monkeypatch) -> None:
     body = problem(limited, 429, "rate-limited")
     assert body["limit"] == 2
     assert 1 <= int(limited.headers["retry-after"]) <= 60
+    assert body["retry_after_s"] == int(limited.headers["retry-after"])
     assert script.request("GET", "/api/v1/me", second).status_code == 200  # its own budget
 
 

@@ -394,7 +394,7 @@
           "name": {
             "description": "The account's display name",
             "examples": [
-              "Tymur Tkach"
+              "Grace Hopper"
             ],
             "title": "Name",
             "type": "string"
@@ -872,7 +872,7 @@
                 "type": "null"
               }
             ],
-            "description": "Where a queued backtest is in its author's queue: 1 starts next, when the running one ends; null for any other status",
+            "description": "Where a queued backtest is in its author's queue: 1 starts next, when their running one ended and a run slot is free; null for any other status",
             "title": "Queue Position"
           },
           "started_at": {
@@ -1244,7 +1244,7 @@
                 "type": "null"
               }
             ],
-            "description": "Where a queued backtest is in the user's queue: 1 starts next, when the running one ends; null for any other status",
+            "description": "Where a queued backtest is in the user's queue: 1 starts next, when their running one ended and a run slot is free; null for any other status",
             "examples": [
               null
             ],
@@ -1432,7 +1432,7 @@
         "type": "string"
       },
       "BacktestSort": {
-        "description": "What the list is sorted by. `default` is newest first (`order` does not apply); `when`\nsorts like `number`; `name` by the name, in any case. Backtests without the value (failed\nones) come last either way, and ties go by number, newest first.",
+        "description": "What the list is sorted by. `default` is newest first (`order` does not apply); `when`\nsorts like `number`; `name` by the name, in any case; `sortino` by the Sortino ratio of\n`results.stats`. Backtests without the value (failed ones) come last either way, and ties\ngo by number, newest first.",
         "enum": [
           "default",
           "number",
@@ -1442,7 +1442,9 @@
           "sharpe",
           "max_drawdown",
           "trades",
-          "when"
+          "when",
+          "win_rate",
+          "sortino"
         ],
         "title": "BacktestSort",
         "type": "string"
@@ -1734,10 +1736,102 @@
         "title": "BacktestUpdate",
         "type": "object"
       },
+      "BacktestsDeleteIn": {
+        "additionalProperties": false,
+        "description": "The backtests to delete: `ids` or `sweep_id`, one of the two.",
+        "properties": {
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "examples": [
+                    "bt_7f3k2m9qx4"
+                  ],
+                  "maxLength": 32,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1 to 100 IDs of the user's backtests",
+            "title": "Ids"
+          },
+          "sweep_id": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every backtest of this sweep of the user, and the sweep",
+            "examples": [
+              "sw_7f3k2m9qx4"
+            ],
+            "title": "Sweep Id"
+          }
+        },
+        "title": "BacktestsDeleteIn",
+        "type": "object"
+      },
+      "BacktestsDeleted": {
+        "description": "What was deleted.",
+        "properties": {
+          "count": {
+            "description": "How many were deleted",
+            "examples": [
+              2
+            ],
+            "title": "Count",
+            "type": "integer"
+          },
+          "deleted": {
+            "description": "The IDs of the backtests deleted, in the order given (a sweep's in its order)",
+            "examples": [
+              [
+                "bt_7f3k2m9qx4",
+                "bt_t9n8v7d6a5"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Deleted",
+            "type": "array"
+          },
+          "not_found": {
+            "description": "IDs of `ids` the user has no backtest with (deleted already, or another account's): nothing was deleted for them",
+            "examples": [
+              []
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Not Found",
+            "type": "array"
+          }
+        },
+        "required": [
+          "deleted",
+          "count",
+          "not_found"
+        ],
+        "title": "BacktestsDeleted",
+        "type": "object"
+      },
       "BacktestsPage": {
         "properties": {
           "backtests": {
-            "description": "The page, at most 10 backtests",
+            "description": "The page, at most `per_page` backtests (10 unless asked)",
             "items": {
               "$ref": "#/components/schemas/BacktestOut"
             },
@@ -2719,8 +2813,21 @@
             "title": "Metrics",
             "type": "array"
           },
+          "shared_setup": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With `setup_mode=diff`, the setup fields every backtest has alike, once; each backtest's `setup` then has only its fields of `differs`. Null otherwise",
+            "title": "Shared Setup"
+          },
           "times": {
-            "description": "The common time axis of the curves, at most 200 UTC epoch seconds: the first and the last time of each backtest's series and times evenly spaced between the earliest and the latest",
+            "description": "The common time axis of the curves, at most 200 UTC epoch seconds (`curve_points`; none with 0): the first and the last time of each backtest's series and times evenly spaced between the earliest and the latest",
             "items": {
               "type": "integer"
             },
@@ -2820,7 +2927,7 @@
                 "type": "null"
               }
             ],
-            "description": "Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results. A long backtest's series has a point per day, so its line begins at the end of its first day. One that finished before its curves were stored is drawn from its short series of at most 60 points, with buy and hold only when its benchmark held its own instrument",
+            "description": "Its cumulative return (a fraction of its starting capital) at each of `times`: its last value up to then, null outside its period; null without results and with `curve_points` 0. A long backtest's series has a point per day, so its line begins at the end of its first day, and its stored curve has at most 1,000 points. One that finished before its curves were stored is drawn from its short series of at most 60 points, with buy and hold only when its benchmark held its own instrument",
             "title": "Equity"
           },
           "error": {
@@ -2864,7 +2971,7 @@
           },
           "setup": {
             "additionalProperties": true,
-            "description": "What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `input` (the model's input, rows by features, from its manifest's signature), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document",
+            "description": "What it ran on and with: `instrument`, `model` (its file name), `reads` (the representation of its manifest), `input` (the model's input, rows by features, from its manifest's signature), `timeframe`, `period`, and the `decision`, `execution` and `benchmarks` (the instruments held) of its result document. With `setup_mode=diff` only its fields of `differs`, the rest once in `shared_setup`",
             "title": "Setup",
             "type": "object"
           },
@@ -3086,7 +3193,7 @@
                 "type": "null"
               }
             ],
-            "description": "The candles' fingerprint differs from the run's: the source changed them",
+            "description": "The candles' fingerprint differs from the run's: the source changed them. Only the download loads the candles again to compare; the light view is what the run stored, so null there",
             "title": "Changed"
           },
           "instrument": {
@@ -3307,7 +3414,7 @@
           "name": {
             "description": "The account's display name",
             "examples": [
-              "Tymur Tkach"
+              "Grace Hopper"
             ],
             "title": "Name",
             "type": "string"
@@ -6856,6 +6963,48 @@
         "title": "SweepBacktest",
         "type": "object"
       },
+      "SweepBest": {
+        "description": "The sweep's best backtest so far by its `metric`, as its ranking would put it first.",
+        "properties": {
+          "id": {
+            "examples": [
+              "bt_t9n8v7d6a5"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "examples": [
+              "Bright Vega"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "number": {
+            "examples": [
+              13
+            ],
+            "title": "Number",
+            "type": "integer"
+          },
+          "value": {
+            "description": "The statistic, as in `results.stats`",
+            "examples": [
+              1.42
+            ],
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "name",
+          "value"
+        ],
+        "title": "SweepBest",
+        "type": "object"
+      },
       "SweepIn": {
         "additionalProperties": false,
         "description": "A new sweep: a base setup, the values to vary and the statistic to rank by.",
@@ -6883,6 +7032,66 @@
           "base"
         ],
         "title": "SweepIn",
+        "type": "object"
+      },
+      "SweepListed": {
+        "description": "A sweep in the list: how far it is and its best backtest so far.",
+        "properties": {
+          "best": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SweepBest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The finished backtest with the best `metric` so far; null until one has a value. `GET /api/v1/sweeps/{sweep_id}` ranks them all"
+          },
+          "count": {
+            "description": "Its backtests",
+            "examples": [
+              6
+            ],
+            "title": "Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "description": "When it was started (UTC)",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "done": {
+            "description": "None of its backtests is queued or running",
+            "title": "Done",
+            "type": "boolean"
+          },
+          "id": {
+            "examples": [
+              "sw_7f3k2m9qx4"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "metric": {
+            "$ref": "#/components/schemas/SweepMetric",
+            "description": "What its ranking orders by"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/SweepProgress"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "metric",
+          "count",
+          "done",
+          "progress",
+          "best"
+        ],
+        "title": "SweepListed",
         "type": "object"
       },
       "SweepMetric": {
@@ -7318,6 +7527,50 @@
           }
         },
         "title": "SweepVary",
+        "type": "object"
+      },
+      "SweepsPage": {
+        "properties": {
+          "page": {
+            "description": "The page, from 1",
+            "examples": [
+              1
+            ],
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "description": "Pages of the sweeps, at least 1",
+            "examples": [
+              1
+            ],
+            "title": "Pages",
+            "type": "integer"
+          },
+          "sweeps": {
+            "description": "The page, newest first",
+            "items": {
+              "$ref": "#/components/schemas/SweepListed"
+            },
+            "title": "Sweeps",
+            "type": "array"
+          },
+          "total": {
+            "description": "The user's sweeps",
+            "examples": [
+              3
+            ],
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sweeps",
+          "total",
+          "page",
+          "pages"
+        ],
+        "title": "SweepsPage",
         "type": "object"
       },
       "Tensor": {
@@ -8110,7 +8363,7 @@
     },
     "/api/v1/backtests": {
       "get": {
-        "description": "A page of the user's backtests that match the search and the filters, and what the\nfilter panel shows: the counts of all, starred and failed backtests and every model the\nbacktests used. A page past the last one is empty.",
+        "description": "A page of the user's backtests that match the search and every filter, and what the\nfilter panel shows: the counts of all, starred and failed backtests and every model the\nbacktests used, whatever the filters. A page past the last one is empty.",
         "operationId": "list_backtests_api_v1_backtests_get",
         "parameters": [
           {
@@ -8163,6 +8416,258 @@
             }
           },
           {
+            "description": "Only backtests with one of these statuses (repeat the parameter)",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/BacktestStatus"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only backtests with one of these statuses (repeat the parameter)",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Only the backtests of this sweep",
+            "in": "query",
+            "name": "sweep_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the backtests of this sweep",
+              "examples": [
+                "sw_7f3k2m9qx4"
+              ],
+              "title": "Sweep Id"
+            }
+          },
+          {
+            "description": "Only the backtests of the model with this ID",
+            "in": "query",
+            "name": "model_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the backtests of the model with this ID",
+              "examples": [
+                "mdl_k2m9qx47f3"
+              ],
+              "title": "Model Id"
+            }
+          },
+          {
+            "description": "Only the backtests of this instrument, `<market>:<symbol>`",
+            "in": "query",
+            "name": "instrument",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the backtests of this instrument, `<market>:<symbol>`",
+              "examples": [
+                "stock:AAPL"
+              ],
+              "title": "Instrument"
+            }
+          },
+          {
+            "description": "Only this timeframe",
+            "in": "query",
+            "name": "timeframe",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SetupTimeframe"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this timeframe",
+              "title": "Timeframe"
+            }
+          },
+          {
+            "description": "Only models that read this",
+            "in": "query",
+            "name": "representation",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Representation"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only models that read this",
+              "title": "Representation"
+            }
+          },
+          {
+            "description": "Only those started at or after this time (UTC)",
+            "in": "query",
+            "name": "created_after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only those started at or after this time (UTC)",
+              "title": "Created After"
+            }
+          },
+          {
+            "description": "Only those started before this time (UTC)",
+            "in": "query",
+            "name": "created_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only those started before this time (UTC)",
+              "title": "Created Before"
+            }
+          },
+          {
+            "description": "Only those with at least this Sharpe ratio",
+            "in": "query",
+            "name": "min_sharpe",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only those with at least this Sharpe ratio",
+              "title": "Min Sharpe"
+            }
+          },
+          {
+            "description": "Only those with at least this return, a fraction",
+            "in": "query",
+            "name": "min_total_return",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only those with at least this return, a fraction",
+              "title": "Min Total Return"
+            }
+          },
+          {
+            "description": "Only those whose largest fall is no deeper than this, 0 or below: -0.2 keeps falls of up to 20 percent",
+            "in": "query",
+            "name": "min_max_drawdown",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only those whose largest fall is no deeper than this, 0 or below: -0.2 keeps falls of up to 20 percent",
+              "title": "Min Max Drawdown"
+            }
+          },
+          {
+            "description": "Only the starred (true) or the unstarred (false)",
+            "in": "query",
+            "name": "starred",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the starred (true) or the unstarred (false)",
+              "title": "Starred"
+            }
+          },
+          {
+            "description": "Only the published (true) or the unpublished (false)",
+            "in": "query",
+            "name": "public",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the published (true) or the unpublished (false)",
+              "title": "Public"
+            }
+          },
+          {
             "description": "What to sort by",
             "in": "query",
             "name": "sort",
@@ -8185,16 +8690,30 @@
             }
           },
           {
-            "description": "The page, from 1, of 10 backtests",
+            "description": "The page, from 1, of `per_page` backtests",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
-              "description": "The page, from 1, of 10 backtests",
+              "description": "The page, from 1, of `per_page` backtests",
               "maximum": 100000,
               "minimum": 1,
               "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Backtests per page",
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Backtests per page",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
               "type": "integer"
             }
           }
@@ -8248,7 +8767,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -8264,8 +8783,30 @@
         ]
       },
       "post": {
-        "description": "Starts a backtest of one of the user's models on one instrument and period and returns\nits document with its number: `running`, or `queued` with its `queue_position` while\nanother backtest of the user runs (one runs at a time per user, up to 20 more wait, and\nthe oldest starts when the running one ends). Checked first: the model is the user's and\nhas a manifest, the instrument fits the model, the period with the candles the model needs\nbefore it fits the data and the candle limit, the user's queue has room, and the worker\nthat runs the models can be reached. The run goes on after the response; the document\n(`GET /api/v1/backtests/{backtest_id}`) has the results once it finished.",
+        "description": "Starts a backtest of one of the user's models on one instrument and period and returns\nits document with its number: `running`, or `queued` with its `queue_position` until one\nof the run slots shared by all users frees and it is the user's turn (users take turns;\none of a user's backtests runs at a time, up to 20 more wait, oldest first). Checked first:\nthe model is the user's and has a manifest, the instrument fits the model, the period with\nthe candles the model needs before it fits the data and the candle limit, the user's queue\nhas room, and the worker that runs the models can be reached. The run goes on after the\nresponse; the document (`GET /api/v1/backtests/{backtest_id}`) has the results once it\nfinished. With an `Idempotency-Key`, the same request sent again within 24 hours answers\nthe first document again instead of starting another backtest.",
         "operationId": "start_backtest_api_v1_backtests_post",
+        "parameters": [
+          {
+            "description": "Any 1 to 255 visible ASCII characters, such as a UUID: the same request sent again with it within 24 hours gets the first answer (with `Idempotent-Replayed: true`) instead of a second start",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "pattern": "^[!-~]{1,255}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Any 1 to 255 visible ASCII characters, such as a UUID: the same request sent again with it within 24 hours gets the first answer (with `Idempotent-Replayed: true`) instead of a second start",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -8325,7 +8866,7 @@
                 }
               }
             },
-            "description": "The model has no manifest (`model-needs-setup`), or the user has 20 backtests waiting already (`queue-full`, with `limit`)."
+            "description": "The model has no manifest (`model-needs-setup`), the user has 20 backtests waiting already (`queue-full`, with `limit` and `retry_after_s`), as many backtests as an account keeps (`backtest-limit`, with `limit` and `count`), or the first request with the `Idempotency-Key` is still being answered (`idempotency-key-in-use`, with `retry_after_s`)."
           },
           "422": {
             "content": {
@@ -8335,7 +8876,7 @@
                 }
               }
             },
-            "description": "An invalid setup (`validation`), a model of another market (`instrument-not-for-model`), a period outside the data (`period-out-of-range`), without the candles the model needs before it (`warm-up-out-of-range`), or with more candles than allowed (`too-many-candles`)."
+            "description": "An invalid setup (`validation`), a model of another market (`instrument-not-for-model`), a period outside the data (`period-out-of-range`), without the candles the model needs before it (`warm-up-out-of-range`), with more candles than allowed (`too-many-candles`), or an `Idempotency-Key` sent before with another body (`idempotency-key-reused`)."
           },
           "429": {
             "content": {
@@ -8345,7 +8886,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -8444,7 +8985,7 @@
                 }
               }
             },
-            "description": "The model has no manifest (`model-needs-setup`), or the user has 20 backtests waiting already (`queue-full`, with `limit`)."
+            "description": "The model has no manifest (`model-needs-setup`), the user has 20 backtests waiting already (`queue-full`, with `limit` and `retry_after_s`), or as many backtests as an account keeps (`backtest-limit`, with `limit` and `count`)."
           },
           "422": {
             "content": {
@@ -8464,7 +9005,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -8500,9 +9041,184 @@
         ]
       }
     },
+    "/api/v1/backtests/delete": {
+      "post": {
+        "description": "Deletes the user's backtests for good, as `DELETE /api/v1/backtests/{backtest_id}` does\none: up to 100 by their `ids`, or every backtest of a sweep with `sweep_id`, which deletes\nthe sweep too. IDs the user has no backtest with are listed in `not_found` and change\nnothing, so sending the same request again is safe.",
+        "operationId": "delete_backtests_api_v1_backtests_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestsDeleteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestsDeleted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The user has no sweep with `sweep_id` (`not-found`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Neither or both of `ids` and `sweep_id`, or more than 100 IDs (`validation`)."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "backtests"
+            ]
+          }
+        ],
+        "summary": "Delete Backtests",
+        "tags": [
+          "backtests"
+        ]
+      }
+    },
     "/api/v1/backtests/{backtest_id}": {
+      "delete": {
+        "description": "Deletes the user's backtest for good, with everything its run stored. A queued one\nleaves the queue, a running one is stopped first. A published one leaves Experiments, and\nits page answers 404 to everyone. Its sweep no longer lists it, and a sweep without any\nbacktest left is deleted too.",
+        "operationId": "delete_backtest_api_v1_backtests__backtest_id__delete",
+        "parameters": [
+          {
+            "description": "Public ID of the backtest",
+            "in": "path",
+            "name": "backtest_id",
+            "required": true,
+            "schema": {
+              "description": "Public ID of the backtest",
+              "examples": [
+                "bt_7f3k2m9qx4"
+              ],
+              "title": "Backtest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The user has no backtest with this ID (`not-found`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "backtests"
+            ]
+          }
+        ],
+        "summary": "Delete Backtest",
+        "tags": [
+          "backtests"
+        ]
+      },
       "get": {
-        "description": "The result document of the user's backtest, whatever its status (`results` is null until\nit finished), or of another account's while it is published (`backtest.author`, read only,\n`model.id` null), in the light view: a series of more than 10,000 rows has one point per\nUTC day, and only the newest 10,000 trades are in it (`trades.complete` false).",
+        "description": "The result document of the user's backtest, whatever its status (`results` is null until\nit finished), or of another account's while it is published (`backtest.author`, read only,\n`model.id` null), in the light view: a series of more than 10,000 rows has one point per\nUTC day, and only the newest 10,000 trades are in it (`trades.complete` false). It is what\nthe run stored, so `data.changed` is null: the download compares the candles again.",
         "operationId": "get_backtest_api_v1_backtests__backtest_id__get",
         "parameters": [
           {
@@ -8516,6 +9232,22 @@
                 "bt_7f3k2m9qx4"
               ],
               "title": "Backtest Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "`light`: the light view. `summary`: the setup and the statistics only, `results.series` and `results.trades` left empty (`count` 0, `trades.total` still the trades the run had)",
+            "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "default": "light",
+              "description": "`light`: the light view. `summary`: the setup and the statistics only, `results.series` and `results.trades` left empty (`count` 0, `trades.total` still the trades the run had)",
+              "enum": [
+                "light",
+                "summary"
+              ],
+              "title": "View",
               "type": "string"
             }
           }
@@ -8589,7 +9321,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -8722,7 +9454,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -8832,7 +9564,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -8937,7 +9669,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -8990,6 +9722,36 @@
               ],
               "maxLength": 400,
               "title": "Ids",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The most times of the curves; 0 for none (`times` empty, the curves null)",
+            "in": "query",
+            "name": "curve_points",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "description": "The most times of the curves; 0 for none (`times` empty, the curves null)",
+              "maximum": 200,
+              "minimum": 0,
+              "title": "Curve Points",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`full`: each backtest's whole setup. `diff`: what all share once in `shared_setup`, each backtest's `setup` only its fields of `differs`",
+            "in": "query",
+            "name": "setup_mode",
+            "required": false,
+            "schema": {
+              "default": "full",
+              "description": "`full`: each backtest's whole setup. `diff`: what all share once in `shared_setup`, each backtest's `setup` only its fields of `differs`",
+              "enum": [
+                "full",
+                "diff"
+              ],
+              "title": "Setup Mode",
               "type": "string"
             }
           }
@@ -9063,7 +9825,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -9122,7 +9884,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -9290,7 +10052,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -9405,7 +10167,7 @@
                 }
               }
             },
-            "description": "More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -9618,7 +10380,7 @@
                 }
               }
             },
-            "description": "More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More candle and instrument requests from this address than the per-minute limit (`rate-limited`); see `Retry-After`. More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -9987,7 +10749,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -10079,7 +10841,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -10494,7 +11256,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -10635,7 +11397,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -10769,7 +11531,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -10906,7 +11668,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -11015,7 +11777,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -11110,7 +11872,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -11198,7 +11960,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -11311,7 +12073,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -11406,7 +12168,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -11520,7 +12282,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -11636,7 +12398,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [
@@ -12316,9 +13078,128 @@
       }
     },
     "/api/v1/sweeps": {
+      "get": {
+        "description": "A page of the user's sweeps, newest first: each one's metric, how many of its backtests\nare queued, running, finished and failed, and its best finished backtest so far by the\nmetric. A page past the last one is empty.",
+        "operationId": "list_sweeps_api_v1_sweeps_get",
+        "parameters": [
+          {
+            "description": "The page, from 1",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "The page, from 1",
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sweeps per page",
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Sweeps per page",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SweepsPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`)."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The API key does not have a scope this needs (`missing-scope`; `scope` names it)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "read"
+            ]
+          }
+        ],
+        "summary": "List Sweeps",
+        "tags": [
+          "backtests"
+        ]
+      },
       "post": {
-        "description": "Starts a backtest for every combination of the values in `vary` over the `base` setup\n(the body of `POST /api/v1/backtests`): models, instruments, periods and decision rules,\n2 to 20 backtests, in that order. Every setup is checked as `POST /api/v1/backtests`\nchecks one, and the user's queue must have room for all of them (up to 20 wait); then they\nall go to the end of the queue, or none does. With `validate_only` nothing starts: the\nanswer is 200 with the count and each setup. The sweep's backtests are ordinary backtests\nwith its `sweep_id`. `GET /api/v1/sweeps/{sweep_id}` follows them and ranks them once all\nended.",
+        "description": "Starts a backtest for every combination of the values in `vary` over the `base` setup\n(the body of `POST /api/v1/backtests`): models, instruments, periods and decision rules,\n2 to 20 backtests, in that order. Every setup is checked as `POST /api/v1/backtests`\nchecks one, and the user's queue must have room for all of them (up to 20 wait); then they\nall go to the end of the queue, or none does. With `validate_only` nothing starts: the\nanswer is 200 with the count and each setup. The sweep's backtests are ordinary backtests\nwith its `sweep_id`. `GET /api/v1/sweeps/{sweep_id}` follows them and ranks them once all\nended. With an `Idempotency-Key`, the same request sent again within 24 hours answers the\nfirst sweep again instead of starting another.",
         "operationId": "start_sweep_api_v1_sweeps_post",
+        "parameters": [
+          {
+            "description": "Any 1 to 255 visible ASCII characters, such as a UUID: the same request sent again with it within 24 hours gets the first answer (with `Idempotent-Replayed: true`) instead of a second start",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "pattern": "^[!-~]{1,255}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Any 1 to 255 visible ASCII characters, such as a UUID: the same request sent again with it within 24 hours gets the first answer (with `Idempotent-Replayed: true`) instead of a second start",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -12388,7 +13269,7 @@
                 }
               }
             },
-            "description": "A model has no manifest (`model-needs-setup`, with `setup`), or the user's queue has room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count` and `room`)."
+            "description": "A model has no manifest (`model-needs-setup`, with `setup`), the user's queue has room for fewer backtests than the sweep has (`queue-full`, with `limit`, `count`, `room` and `retry_after_s`), the account cannot keep that many more backtests (`backtest-limit`, with `limit`, `count` and `adding`), or the first request with the `Idempotency-Key` is still being answered (`idempotency-key-in-use`, with `retry_after_s`)."
           },
           "422": {
             "content": {
@@ -12398,7 +13279,7 @@
                 }
               }
             },
-            "description": "An invalid body or fewer than 2 or more than 20 backtests (`validation`, the latter with `count` and `limit`), or a setup that fails a check of `POST /api/v1/backtests` (`instrument-not-for-model`, `period-out-of-range`, `warm-up-out-of-range`, `too-many-candles`, `validation`; `setup` names it, from 1)."
+            "description": "An invalid body or fewer than 2 or more than 20 backtests (`validation`, the latter with `count` and `limit`), a setup that fails a check of `POST /api/v1/backtests` (`instrument-not-for-model`, `period-out-of-range`, `warm-up-out-of-range`, `too-many-candles`, `validation`; `setup` names it, from 1), or an `Idempotency-Key` sent before with another body (`idempotency-key-reused`)."
           },
           "429": {
             "content": {
@@ -12408,7 +13289,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           },
           "502": {
             "content": {
@@ -12541,7 +13422,7 @@
                 }
               }
             },
-            "description": "More than 120 requests in one minute with this API key (`rate-limited`)."
+            "description": "More than 120 requests in one minute with this API key, or 300 across all the account's keys and connected apps, where a heavy request counts as 5 (`rate-limited`)."
           }
         },
         "security": [

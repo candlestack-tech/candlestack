@@ -176,9 +176,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    # About 11 minutes on a quiet runner since the sweeps and the MCP tools; slow runners took
-    # past 15 with every test passing.
-    timeout-minutes: 25
+    # About 12 minutes on a quiet runner with the unit tests in parallel; slow runners took past
+    # 25 with every test passing when everything ran serially.
+    timeout-minutes: 40
     permissions:
       contents: read
     services:
@@ -224,10 +224,11 @@ jobs:
           cache-dependency-glob: backend/uv.lock
 
       - run: uv sync --locked
-      # Unit and integration tests together, serially (the integration tests share one Redis
-      # and one Postgres), measured against the coverage gate of pyproject.toml (95%, branches
-      # included).
-      - run: uv run pytest -m "not e2e and not slow" --cov --cov-report=xml
+      # The integration tests serially (they share one Redis and one Postgres), then the unit tests
+      # in parallel, their coverage added up and measured against the gate of pyproject.toml (95%,
+      # branches included).
+      - run: uv run pytest -m integration --cov --cov-report= --cov-fail-under=0
+      - run: uv run pytest -n auto -m "not integration and not e2e and not slow" --cov --cov-append --cov-report=xml
 
       # At least 90% of the lines a pull request changes are covered.
       - name: Coverage of the changed lines

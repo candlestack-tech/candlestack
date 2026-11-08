@@ -168,8 +168,9 @@ markers = [
 filterwarnings = ["error"]
 xfail_strict = true
 
-# The gate is for the unit and integration tests together (CI's integration job):
-# `pytest --cov -m "not e2e and not slow"` with Redis and Postgres running.
+# The gate is for the unit and integration tests together (CI's integration job runs
+# `pytest -m integration --cov` then `pytest -n auto --cov --cov-append`) with Redis and Postgres
+# running.
 [tool.coverage.run]
 source = ["candlestack"]
 branch = true
@@ -397,7 +398,7 @@ layers = [
     "dependencies",
     "compare",
     "service | runs",
-    "runner",
+    "runner | idempotency",
     "store | assembly",
     "models | errors | spec",
     "document",

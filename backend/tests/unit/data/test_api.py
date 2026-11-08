@@ -1017,6 +1017,7 @@ def test_rate_limited(client: TestClient, service: FakeDataService, limiter: Fak
         "detail": "More than 60 candle and instrument requests in one minute from this "
         "address. Retry in 13 seconds.",
         "limit": 60,
+        "retry_after_s": 13,
     }
     assert service.calls == []
 
