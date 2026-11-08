@@ -760,12 +760,14 @@ class BacktestStore:
 
     async def sweep_backtests(self, sweep: Sweep) -> list[Listed]:
         """The backtests of the sweep in the order they were made, the grid's, with their
-        statistics (``stats``, null until one finished)."""
+        statistics (``stats``, null until one finished). Read again even when this session
+        holds them: a start that just added them answers what the runner started since."""
         rows = await self._db.execute(
             _listed()
             .options(undefer(Backtest.stats))
             .where(Backtest.user_id == sweep.user_id, Backtest.sweep_id == sweep.id)
             .order_by(Backtest.number)
+            .execution_options(populate_existing=True)
         )
         return [Listed(*row) for row in rows]
 
