@@ -171,6 +171,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backtests/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Backtest
+         * @description Checks a new backtest as `POST /api/v1/backtests` does, with the same body and the same
+         *     problems, and starts nothing: what would run (the model, the instrument as the catalog has
+         *     it, the model's timeframe and session, the warm-up) and whether it would wait in the
+         *     user's queue. An API key needs only the scope `read`.
+         */
+        post: operations["check_backtest_api_v1_backtests_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backtests/{backtest_id}": {
         parameters: {
             query?: never;
@@ -1072,6 +1095,45 @@ export interface components {
              * @example Tymur Tkach
              */
             name: string;
+        };
+        /**
+         * BacktestCheck
+         * @description What a start with this setup would run: every check of `POST /api/v1/backtests` passed
+         *     and nothing was stored.
+         */
+        BacktestCheck: {
+            /**
+             * Benchmarks
+             * @description As the run would store them: the instrument IDs as the catalog writes them
+             */
+            benchmarks: components["schemas"]["BenchmarkOut"][];
+            instrument: components["schemas"]["InstrumentOut"];
+            model: components["schemas"]["CheckedModel"];
+            period: components["schemas"]["Period"];
+            /**
+             * Queue Position
+             * @description Where it would wait in the user's queue (1 starts next); null when it would start now
+             */
+            queue_position: number | null;
+            /**
+             * Session
+             * @description The model's session
+             * @example regular
+             */
+            session: string;
+            /**
+             * Starts
+             * @description `queued` while another backtest of the user runs or waits
+             * @enum {string}
+             */
+            starts: "now" | "queued";
+            /**
+             * Timeframe
+             * @description The model's timeframe
+             * @example 30m
+             */
+            timeframe: string;
+            warm_up: components["schemas"]["CheckedWarmUp"];
         };
         /**
          * BacktestCounts
@@ -2037,6 +2099,45 @@ export interface components {
          * @enum {string}
          */
         CheckPart: "trial_run" | "example";
+        /** CheckedModel */
+        CheckedModel: {
+            /**
+             * Framework
+             * @example keras
+             */
+            framework: string;
+            /**
+             * Id
+             * @example mdl_k2m9qx47f3
+             */
+            id: string;
+            /**
+             * Name
+             * @example raw-candles.keras
+             */
+            name: string;
+        };
+        /** CheckedWarmUp */
+        CheckedWarmUp: {
+            /**
+             * Candles
+             * @description Candles the model needs before the period, loaded with it
+             * @example 24
+             */
+            candles: number;
+            /**
+             * Kind
+             * @description `estimate` for a representation whose need depends on the prices (Renko, Kagi)
+             * @enum {string}
+             */
+            kind: "exact" | "estimate";
+            /**
+             * Load Start
+             * @description Where the load with the warm-up starts, UTC epoch seconds
+             * @example 1717329600
+             */
+            load_start: number;
+        };
         /**
          * CompareMetric
          * @description One statistic of every backtest, in the order of `backtests`.
@@ -4742,6 +4843,102 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BacktestDocument"];
+                };
+            };
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The user has no model with this ID (`not-found`), or the instrument is not in the catalog (`instrument-not-found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The model has no manifest (`model-needs-setup`), or the user has 20 backtests waiting already (`queue-full`, with `limit`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description An invalid setup (`validation`), a model of another market (`instrument-not-for-model`), a period outside the data (`period-out-of-range`), without the candles the model needs before it (`warm-up-out-of-range`), or with more candles than allowed (`too-many-candles`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A data source sent candles that failed validation (`source-data-invalid`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A data source cannot be reached (`source-unavailable`), or for a new backtest the worker that runs the models (`backtests-unavailable`). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    check_backtest_api_v1_backtests_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestCheck"];
                 };
             };
             /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */

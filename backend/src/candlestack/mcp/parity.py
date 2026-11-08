@@ -82,15 +82,16 @@ PARITY: dict[str, Entry] = {
     "GET /api/v1/models/{model_id}/manifest": Tools(("get_manifest",)),
     "PUT /api/v1/models/{model_id}/manifest": Tools(("set_manifest",)),
     "POST /api/v1/models/{model_id}/manifest/check": Tools(("validate_manifest",)),
-    "POST /api/v1/backtests": Planned(404, ("validate_backtest", "start_backtest")),
-    "GET /api/v1/backtests/{backtest_id}": Planned(
-        404, ("get_backtest", "get_backtest_status", "wait_for_backtest")
+    "POST /api/v1/backtests": Tools(("start_backtest",)),
+    "POST /api/v1/backtests/check": Tools(("validate_backtest",)),
+    "GET /api/v1/backtests/{backtest_id}": Tools(
+        ("get_backtest", "get_backtest_status", "wait_for_backtest")
     ),
     "GET /api/v1/backtests/{backtest_id}/download": WebOnly(
         "The whole result document as a file to save; an agent reads the same result in pages "
         "with get_backtest."
     ),
-    "GET /api/v1/compare": Planned(404, ("compare_backtests",)),
+    "GET /api/v1/compare": Tools(("compare_backtests",)),
     "GET /api/v1/backtests": Tools(("list_backtests",)),
     "PATCH /api/v1/backtests/{backtest_id}": Tools(
         ("rename_backtest", "star_backtest", "publish_backtest", "unpublish_backtest")

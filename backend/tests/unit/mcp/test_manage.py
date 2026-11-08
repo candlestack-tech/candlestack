@@ -198,7 +198,6 @@ class FakeRuns:
 
     def __init__(self) -> None:
         self.cancelled: list[tuple[str, str]] = []
-        self.versions: list[str] = []
         self.refuse: Exception | None = None
 
     async def cancel(self, user_id: str, backtest_id: str) -> bytes:
@@ -231,8 +230,7 @@ def service(monkeypatch: pytest.MonkeyPatch) -> FakeService:
 def runs(monkeypatch: pytest.MonkeyPatch) -> FakeRuns:
     fake = FakeRuns()
 
-    def backtest_runs(_state: Any, _db: Any, app_version: str) -> FakeRuns:
-        fake.versions.append(app_version)
+    def backtest_runs(_state: Any, _db: Any) -> FakeRuns:
         return fake
 
     monkeypatch.setattr(manage, "backtest_runs", backtest_runs)
@@ -399,7 +397,6 @@ def test_cancel_backtest_answers_the_cancelled_backtest(mcp, runs) -> None:
 
     assert not result.is_error, result.content
     assert runs.cancelled == [(ADA.id, "bt_0000000014")]
-    assert runs.versions == ["1.2.3"]
     assert result.structured_content == {
         "id": "bt_0000000014",
         "number": 14,

@@ -182,6 +182,27 @@ def get(path, params=None):
 
 The example gives up after 5 waits.
 
+## Check a backtest before starting it
+
+`POST /api/v1/backtests/check` takes the body of `POST /api/v1/backtests` and runs the same
+checks without starting anything: the model is yours and has a manifest, the instrument fits
+the model, the period with the candles the model needs before it fits the data, your queue has
+room. It answers the same problem a start would, or 200 with what would run: the instrument as
+the catalog has it, the model's timeframe and session, the warm-up and where the load starts,
+and whether it would start now or wait in your queue (`starts`, `queue_position`). A key needs
+only the scope `read`:
+
+```python
+setup = {
+    "model": {"id": "mdl_k2m9qx47f3"},
+    "data": {"instrument": {"id": "stock:AAPL"},
+             "period": {"start": 1_717_372_800, "end": 1_725_148_800}},
+}
+check = api.post("/api/v1/backtests/check", json=setup)
+if check.status_code == 200:
+    started = api.post("/api/v1/backtests", json=setup).json()
+```
+
 ## Compare backtests
 
 `GET /api/v1/compare?ids=bt_7f3k2m9qx4,bt_t9n8v7d6a5` compares 1 to 20 of your backtests and

@@ -15,7 +15,7 @@ from mcp.types import CallToolResult, InputRequiredResult
 from pydantic import ValidationError
 
 from candlestack.core import ProblemError
-from candlestack.mcp import account, manage, models, sweeps
+from candlestack.mcp import account, manage, models, run, sweeps
 from candlestack.mcp.convention import ToolSpec, problem_result, tool_call
 from candlestack.mcp.docs import DOCS_TEXT, DOCS_URI, INSTRUCTIONS
 
@@ -28,6 +28,7 @@ WEBSITE = "https://candlestack.tech"
 TOOLS: tuple[ToolSpec, ...] = (
     *account.TOOLS,
     *models.TOOLS,
+    *run.TOOLS,
     *manage.TOOLS,
     *sweeps.TOOLS,
 )

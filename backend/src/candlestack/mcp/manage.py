@@ -302,7 +302,7 @@ async def cancel_backtest(backtest_id: BacktestId, ctx: Context) -> CancelledBac
     cancelled; a running or ended one answers the problem backtest-not-queued."""
     call = tool_call(ctx)
     async with call.db() as db:
-        runs = backtest_runs(call.state, db, call.settings.app_version)
+        runs = backtest_runs(call.state, db)
         with backtest_problems():
             document = await runs.cancel(call.user.id, backtest_id)
     return CancelledBacktest.model_validate(json.loads(document)["backtest"])

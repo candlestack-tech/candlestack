@@ -7,6 +7,8 @@ keys until it says otherwise:
 - ``CurrentUserDep``: the session, or on a GET a key with the scope ``read``. A key on a route
   that changes something gets 403 ``session-required``.
 - ``BacktestsUserDep``, ``ModelsUserDep``: the session, or a key with that scope.
+- ``ReaderDep``: the session, or a key with the scope ``read`` on any method, for a POST that
+  changes nothing (a dry run).
 - ``CallerDep``: the session or any valid key; the route checks the scopes itself with
   ``Caller.require``, for a body whose fields need different scopes.
 - ``SessionUserDep``: the session only (managing keys, deleting the account, sign-in methods).
@@ -285,6 +287,8 @@ async def session_user(
 
 # The signed-in user: the session, or on a GET an API key with the scope `read`.
 CurrentUserDep = Annotated[User, Security(current_user)]
+# The session, or an API key with the scope `read` on any method: a POST that changes nothing.
+ReaderDep = Annotated[User, Security(current_user, scopes=[Scope.read.value])]
 # The session, or an API key with the scope `backtests` (start, rename and star backtests).
 BacktestsUserDep = Annotated[User, Security(current_user, scopes=[Scope.backtests.value])]
 # The session, or an API key with the scope `models` (upload, manifest, rename, star, delete).
