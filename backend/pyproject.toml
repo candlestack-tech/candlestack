@@ -414,7 +414,7 @@ containers = ["candlestack.mcp"]
 layers = [
     "reference | http",
     "server",
-    "account | models",
+    "account | manage | market | models | run | sweeps",
     "convention",
     "docs | parity",
 ]

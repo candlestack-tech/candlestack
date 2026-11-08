@@ -73,19 +73,19 @@ PARITY: dict[str, Entry] = {
     "POST /api/v1/oauth/requests/{request_id}": WebOnly(_CONSENT),
     "GET /api/v1/me/connected-apps": WebOnly(_APPS),
     "DELETE /api/v1/me/connected-apps/{app_id}": WebOnly(_APPS),
-    "GET /api/v1/me/preferences": Planned(402, ("get_preferences", "get_backtest_defaults")),
-    "PUT /api/v1/me/preferences/backtest-defaults": Planned(402, ("update_backtest_defaults",)),
+    "GET /api/v1/me/preferences": Tools(("get_preferences", "get_backtest_defaults")),
+    "PUT /api/v1/me/preferences/backtest-defaults": Tools(("update_backtest_defaults",)),
     "PATCH /api/v1/me/preferences/appearance": WebOnly(
         "The theme of the web app, which means nothing to an agent."
     ),
-    "GET /api/v1/data/instruments": Planned(402, ("search_instruments",)),
-    "GET /api/v1/data/instruments/{instrument_id}": Planned(402, ("get_instrument",)),
-    "GET /api/v1/data/instruments/{instrument_id}/candles": Planned(402, ("get_candles",)),
+    "GET /api/v1/data/instruments": Tools(("search_instruments", "top_instruments")),
+    "GET /api/v1/data/instruments/{instrument_id}": Tools(("get_instrument",)),
+    "GET /api/v1/data/instruments/{instrument_id}/candles": Tools(("get_candles",)),
     "GET /api/v1/data/instruments/{instrument_id}/icon": WebOnly(
         "An image for the app's lists, which an agent does not need."
     ),
-    "GET /api/v1/data/top-instruments": Planned(402, ("top_instruments",)),
-    "GET /api/v1/preprocessing/catalog": Planned(402, ("preprocessing_catalog",)),
+    "GET /api/v1/data/top-instruments": Tools(("top_instruments",)),
+    "GET /api/v1/preprocessing/catalog": Tools(("preprocessing_catalog",)),
     "GET /api/v1/models": Tools(("list_models", "get_model")),
     "POST /api/v1/models": Tools(("create_model_upload", "get_model_upload")),
     "POST /api/v1/models/uploads": Tools(("create_model_upload",)),

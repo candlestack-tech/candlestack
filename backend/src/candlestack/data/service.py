@@ -317,6 +317,33 @@ class DataService:
             raise TooManyCandles(requested, self._candles_max, hint)
         return await self._load(lookup, start, end, background=background)
 
+    async def first_candles(
+        self, instrument_id: InstrumentId, timeframe: Timeframe, start: int, end: int, limit: int
+    ) -> CandleSet:
+        """The first ``limit`` candles of ``[start, end)``: ``candles`` of the period up to the
+        open of candle number ``limit + 1``, or up to ``end`` when it holds fewer. Stocks count
+        only session candles, so nights, weekends and holidays are skipped. The set's ``end``
+        says where the next ones start.
+
+        Raises ``InvalidRequest``, ``InstrumentNotFound``, ``PeriodOutOfRange``,
+        ``TooManyCandles`` when ``limit`` is above the maximum, and the other errors of
+        ``candles``.
+        """
+        if start >= end:
+            raise InvalidRequest(f"start ({start}) must be before end ({end}).")
+        lookup = await self._lookup(instrument_id, timeframe)
+        if end > lookup.now or (
+            lookup.available_from is not None and start < lookup.available_from
+        ):
+            raise lookup.out_of_range(start=start, end=end)
+        if limit > self._candles_max:
+            raise TooManyCandles(
+                limit, self._candles_max, f"Use a limit of {self._candles_max} or less."
+            )
+        return await self._load(
+            lookup, start, latest_end(start, end, timeframe, limit, lookup.sessions)
+        )
+
     async def warm_up_start(
         self, instrument_id: InstrumentId, timeframe: Timeframe, start: int, end: int, candles: int
     ) -> int:

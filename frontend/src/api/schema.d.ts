@@ -639,7 +639,8 @@ export interface paths {
         get?: never;
         /**
          * Save Backtest Defaults
-         * @description Saves how new backtests start (Save defaults): every setting, as a whole.
+         * @description Saves how new backtests start (Save defaults): every setting, as a whole. An API key
+         *     needs the scope `backtests`.
          */
         put: operations["save_backtest_defaults_api_v1_me_preferences_backtest_defaults_put"];
         post?: never;
@@ -1360,9 +1361,15 @@ export interface components {
          * @description How new backtests start (Settings, Backtest defaults).
          */
         BacktestDefaults: {
-            /** @default bh */
+            /**
+             * @description What the result is measured against: bh buy and hold of the backtest's own instrument, or the ETF SPY, QQQ or DIA
+             * @default bh
+             */
             benchmark: components["schemas"]["Benchmark"];
-            /** @default long */
+            /**
+             * @description long: long trades only, flat on a sell signal; both: long and short
+             * @default long
+             */
             direction: components["schemas"]["Direction"];
             /**
              * Fees Pct
@@ -1402,7 +1409,10 @@ export interface components {
              * @default 0.05
              */
             threshold: number;
-            /** @default 30m */
+            /**
+             * @description Length of one candle the model sees
+             * @default 30m
+             */
             timeframe: components["schemas"]["BacktestTimeframe"];
         };
         /**
@@ -1412,7 +1422,9 @@ export interface components {
          *     refused instead of filled in.
          */
         BacktestDefaultsIn: {
+            /** @description What the result is measured against: bh buy and hold of the backtest's own instrument, or the ETF SPY, QQQ or DIA */
             benchmark: components["schemas"]["Benchmark"];
+            /** @description long: long trades only, flat on a sell signal; both: long and short */
             direction: components["schemas"]["Direction"];
             /**
              * Fees Pct
@@ -1446,6 +1458,7 @@ export interface components {
              * @description Signal strength to trade
              */
             threshold: number;
+            /** @description Length of one candle the model sees */
             timeframe: components["schemas"]["BacktestTimeframe"];
         };
         /**
@@ -4239,9 +4252,10 @@ export interface components {
         /**
          * Scope
          * @description What an API key may do. `read`: every GET; `backtests`: start, rename and star
-         *     backtests; `models`: upload models, add their manifests, rename, star and delete them;
-         *     `publish`: publish and unpublish backtests. Managing keys, deleting the account, sign-in
-         *     methods and signing out need the browser session whatever the scopes.
+         *     backtests and save the backtest defaults; `models`: upload models, add their manifests,
+         *     rename, star and delete them; `publish`: publish and unpublish backtests. Managing keys,
+         *     deleting the account, sign-in methods and signing out need the browser session whatever
+         *     the scopes.
          * @enum {string}
          */
         Scope: "read" | "backtests" | "models" | "publish";
@@ -6873,7 +6887,7 @@ export interface operations {
                     "application/json": components["schemas"]["BacktestDefaults"];
                 };
             };
-            /** @description Not signed in (`not-signed-in`). */
+            /** @description Not signed in (`not-signed-in`). With an API key: the key is unknown, revoked or expired, or its account is no longer on the beta list (`invalid-api-key`). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -6882,7 +6896,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The request does not come from the app's own pages (`cross-origin-request`). API keys cannot do this, only the signed-in browser (`session-required`). */
+            /** @description The request does not come from the app's own pages (`cross-origin-request`). The API key does not have a scope this needs (`missing-scope`; `scope` names it). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6893,6 +6907,15 @@ export interface operations {
             };
             /** @description Invalid request */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description More than 120 requests in one minute with this API key (`rate-limited`). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -64,7 +64,8 @@ _BEARER = HTTPBearer(
     bearerFormat="cs_...",
     description=(
         "An API key from Settings, API and MCP: `Authorization: Bearer cs_...`. Its scopes "
-        "decide what it may do: `read` every GET, `backtests` start, rename and star backtests, "
+        "decide what it may do: `read` every GET, `backtests` start, rename and star backtests "
+        "and save the backtest defaults, "
         "`models` upload models, add their manifests, rename, star and delete them, `publish` "
         "publish and unpublish backtests. Managing keys, deleting the account, sign-in methods "
         "and signing out need the browser session. The web app signs in with its session "
@@ -337,7 +338,8 @@ async def session_user(
 CurrentUserDep = Annotated[User, Security(current_user)]
 # The session, or an API key with the scope `read` on any method: a POST that changes nothing.
 ReaderDep = Annotated[User, Security(current_user, scopes=[Scope.read.value])]
-# The session, or an API key with the scope `backtests` (start, rename and star backtests).
+# The session, or an API key with the scope `backtests` (start, rename and star backtests,
+# save the backtest defaults).
 BacktestsUserDep = Annotated[User, Security(current_user, scopes=[Scope.backtests.value])]
 # The session, or an API key with the scope `models` (upload, manifest, rename, star, delete).
 ModelsUserDep = Annotated[User, Security(current_user, scopes=[Scope.models.value])]
