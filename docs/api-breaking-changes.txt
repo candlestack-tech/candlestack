@@ -52,3 +52,4 @@ GET /api/v1/dashboard added the new `queued` enum value to the `best/total_retur
 GET /api/v1/dashboard added the new `queued` enum value to the `best/win_rate/items/status` response property for the response status `200`
 GET /api/v1/dashboard added the new `queued` enum value to the `last/items/status` response property for the response status `200`
 GET /api/v1/dashboard added the new `queued` enum value to the `starred/backtests/items/status` response property for the response status `200`
+GET /api/v1/compare added the new `queued` enum value to the `backtests/items/status` response property for the response status `200`
