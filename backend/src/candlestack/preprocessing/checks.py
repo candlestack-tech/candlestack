@@ -3,16 +3,20 @@
 ``parse_manifest`` checks the form (the JSON Schema), ``check_manifest`` what the form cannot
 say: that the catalog has every block, their parameters, the names, the signature and the
 example; ``check_with_model`` compares the manifest with what the model file says. Each check
-that fails gives one ``ManifestProblem`` in plain sentences, for the upload page to show next
-to it; a check that passes gives none.
+that fails gives one ``ManifestProblem``: a ``Finding`` for each thing wrong, a plain sentence
+for the upload page to show next to it, with the field it is about and, where the check knows
+them, the values that fit there, so an agent can fix the manifest from it. A check that passes
+gives none.
 """
 
+import re
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from functools import cache
 from typing import Any, Literal
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from pydantic_core import ErrorDetails
 
 from candlestack.preprocessing.catalog import CATALOG, RENKO_TRIPLES, Step
@@ -32,14 +36,39 @@ OLD_VERSION_FIELD = "schema"
 # unknown fields.
 SCHEMA_ERRORS_MAX = 100
 
+# The fields of a manifest that name a block of one step, by their path.
+_BLOCK_FIELDS: tuple[tuple[re.Pattern[str], Step], ...] = (
+    (re.compile(r"input\.representation\.id"), "representation"),
+    (re.compile(r"input\.features\[\d+\]\.id"), "feature"),
+    (re.compile(r"input\.features\[\d+\]\.norm\.id"), "normalization"),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class Finding:
+    """One thing wrong: the sentence that says it (and, when it helps, a second one that says
+    what to do), the field of the manifest it is about (a path such as
+    ``input.features[2].id``; empty when it is about the whole document) and the values that
+    fit there when the check knows them (``allowed``: the blocks of the step, the fields of the
+    object, the options of a choice, the shape to give; empty when nothing fits, as for the
+    parameters of a block that has none; None when the check does not say)."""
+
+    sentence: str
+    field: str = ""
+    allowed: tuple[Any, ...] | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class ManifestProblem:
-    """A failed check: which one (``check``) and what is wrong, one sentence (or two, when the
-    second says what to do) for each thing (``sentences``)."""
+    """A failed check: which one (``check``) and what is wrong, a ``Finding`` for each thing."""
 
     check: Check
-    sentences: tuple[str, ...]
+    findings: tuple[Finding, ...]
+
+    @property
+    def sentences(self) -> tuple[str, ...]:
+        """One sentence (or two, when the second says what to do) for each thing wrong."""
+        return tuple(finding.sentence for finding in self.findings)
 
     @property
     def message(self) -> str:
@@ -79,14 +108,19 @@ def parse_manifest(document: str | bytes | Mapping[str, Any]) -> Manifest:
                 f"The manifest has {error.error_count()} mistakes in its form, too many to list. "
                 "Check that the file is a CandleStack manifest."
             )
-            raise InvalidManifest(ManifestProblem("schema", (sentence,))) from None
+            raise InvalidManifest(ManifestProblem("schema", (Finding(sentence),))) from None
         details = error.errors(include_url=False)
-        sentences = []
+        findings = []
         if any(_is_old_version_field(detail) for detail in details):
             # One sentence says how to update the manifest instead of two about its fields.
-            sentences.append(
-                f"The manifest names its version with the old field {OLD_VERSION_FIELD}. Replace "
-                f'"{OLD_VERSION_FIELD}": "candlestack.manifest/1" with "version": {VERSION}.'
+            findings.append(
+                Finding(
+                    f"The manifest names its version with the old field {OLD_VERSION_FIELD}. "
+                    f'Replace "{OLD_VERSION_FIELD}": "candlestack.manifest/1" with "version": '
+                    f"{VERSION}.",
+                    "version",
+                    (VERSION,),
+                )
             )
             details = [
                 detail
@@ -94,8 +128,9 @@ def parse_manifest(document: str | bytes | Mapping[str, Any]) -> Manifest:
                 if not _is_old_version_field(detail)
                 and (detail["loc"], detail["type"]) != (("version",), "missing")
             ]
-        sentences += [_sentence(detail) for detail in details]
-        raise InvalidManifest(ManifestProblem("schema", tuple(sentences))) from None
+        schema = _schema_of(Manifest)
+        findings += [_finding(detail, schema) for detail in details]
+        raise InvalidManifest(ManifestProblem("schema", tuple(findings))) from None
 
 
 def _is_old_version_field(detail: ErrorDetails) -> bool:
@@ -104,7 +139,7 @@ def _is_old_version_field(detail: ErrorDetails) -> bool:
 
 def check_manifest(manifest: Manifest) -> list[ManifestProblem]:
     """The problems of a manifest that has the right form: none when it can run."""
-    checks: list[tuple[Check, list[str]]] = [
+    checks: list[tuple[Check, list[Finding]]] = [
         ("catalog", _catalog(manifest)),
         ("params", _params(manifest)),
         ("names", _names(manifest)),
@@ -134,17 +169,21 @@ def check_with_model(
             "The manifest says the model gives {ours}, the model gives {theirs}.",
         ),
     )
-    found = [sentence for sentence in compared if sentence is not None]
+    found = [finding for finding in compared if finding is not None]
     return [ManifestProblem("model", tuple(found))] if found else []
 
 
 def _compared(
     name: str, ours: list[int], theirs: Sequence[int] | None, mismatch: str
-) -> str | None:
+) -> Finding | None:
+    field = f"signature.{name}.shape"
     if theirs is None:
-        return f"The model file does not say the shape of its {name}, so it cannot be compared."
+        return Finding(
+            f"The model file does not say the shape of its {name}, so it cannot be compared.",
+            field,
+        )
     if list(theirs) != ours:
-        return mismatch.format(ours=ours, theirs=list(theirs))
+        return Finding(mismatch.format(ours=ours, theirs=list(theirs)), field, (list(theirs),))
     return None
 
 
@@ -165,25 +204,8 @@ def _steps(manifest: Manifest) -> Iterator[_Step]:
         yield _Step(f"{where}.norm", feature.norm.id, "normalization", feature.norm.params)
 
 
-def _catalog(manifest: Manifest) -> list[str]:
-    found = []
-    if unknown := unknown_blocks(manifest):
-        kind = "block" if len(unknown) == 1 else "blocks"
-        found.append(f"The catalog has no {kind} {_listed(unknown)} yet, so it cannot run.")
-    session = manifest.input.session
-    for step in _steps(manifest):
-        block = CATALOG.get(step.id)
-        if block is None:
-            continue
-        if block.step != step.step:
-            found.append(
-                f"{step.where} is {step.id}, a {block.step} block, where a {step.step} block goes."
-            )
-        if block.needs_session and session != "regular":
-            found.append(
-                f"{step.where} is {step.id}, which marks the last candle of each trading "
-                f"session, but {session} candles have no sessions. Use it with the regular session."
-            )
+def _catalog(manifest: Manifest) -> list[Finding]:
+    found = _blocks_in_their_steps(manifest)
     found += _has_rules(manifest)
     rep = CATALOG.get(manifest.input.representation.id)
     if rep is not None and rep.step == "representation":
@@ -191,7 +213,48 @@ def _catalog(manifest: Manifest) -> list[str]:
     return found
 
 
-def _has_rules(manifest: Manifest) -> list[str]:
+def _blocks_in_their_steps(manifest: Manifest) -> list[Finding]:
+    """Each step's block in the catalog, of that step, and of the manifest's session."""
+    found = []
+    session = manifest.input.session
+    unknown: set[str] = set()
+    for step in _steps(manifest):
+        block = CATALOG.get(step.id)
+        if block is None:
+            # Once for each block, where the manifest names it first.
+            if step.id not in unknown:
+                unknown.add(step.id)
+                found.append(
+                    Finding(
+                        f"The catalog has no block {step.id} yet, so it cannot run.",
+                        f"{step.where}.id",
+                        _blocks_of(step.step),
+                    )
+                )
+            continue
+        if block.step != step.step:
+            found.append(
+                Finding(
+                    f"{step.where} is {step.id}, a {block.step} block, where a {step.step} block "
+                    "goes.",
+                    f"{step.where}.id",
+                    _blocks_of(step.step),
+                )
+            )
+        if block.needs_session and session != "regular":
+            found.append(
+                Finding(
+                    f"{step.where} is {step.id}, which marks the last candle of each trading "
+                    f"session, but {session} candles have no sessions. Use it with the regular "
+                    "session.",
+                    "input.session",
+                    ("regular",),
+                )
+            )
+    return found
+
+
+def _has_rules(manifest: Manifest) -> list[Finding]:
     """Each feature against its normalization, where that has a rule of its own per feature
     (``blesk-norm@1``)."""
     found = []
@@ -202,38 +265,67 @@ def _has_rules(manifest: Manifest) -> list[str]:
             continue
         rules = norm.normalizes if norm.step == "normalization" else None
         if rules is not None and feature.id not in rules:
+            fitting = tuple(
+                other.id
+                for other in CATALOG.values()
+                if other.step == "normalization"
+                and (other.normalizes is None or feature.id in other.normalizes)
+            )
             found.append(
-                f"input.features[{index}].norm is {norm.id}, which has no rule for "
-                f"{feature.id}, so it cannot scale that feature."
+                Finding(
+                    f"input.features[{index}].norm is {norm.id}, which has no rule for "
+                    f"{feature.id}, so it cannot scale that feature.",
+                    f"input.features[{index}].norm.id",
+                    fitting,
+                )
             )
     return found
 
 
-def _fits_representation(manifest: Manifest, rep: str, *, forming: bool) -> list[str]:
+def _fits_representation(manifest: Manifest, rep: str, *, forming: bool) -> list[Finding]:
     """The features of rows and the window rule against the rows the representation makes."""
     found = []
     for index, feature in enumerate(manifest.input.features):
         block = CATALOG.get(feature.id)
         if block is not None and block.of_rows is not None and rep not in block.of_rows:
+            fitting = tuple(
+                other.id
+                for other in CATALOG.values()
+                if other.step == "feature" and (other.of_rows is None or rep in other.of_rows)
+            )
             found.append(
-                f"input.features[{index}] is {feature.id}, a column of the rows of "
-                f"{' or '.join(block.of_rows)}, but the representation is {rep}."
+                Finding(
+                    f"input.features[{index}] is {feature.id}, a column of the rows of "
+                    f"{' or '.join(block.of_rows)}, but the representation is {rep}.",
+                    f"input.features[{index}].id",
+                    fitting,
+                )
             )
     last = manifest.input.window.last
     if last == "current" and not forming:
         found.append(
-            f'The window option last "current" needs rows that span several candles, such as '
-            f'{RENKO_TRIPLES}, but each row of {rep} is finished at its candle. Use "closed".'
+            Finding(
+                f'The window option last "current" needs rows that span several candles, such '
+                f"as {RENKO_TRIPLES}, but each row of {rep} is finished at its candle. Use "
+                '"closed".',
+                "input.window.last",
+                ("closed",),
+            )
         )
     if last == "closed" and forming:
         found.append(
-            f'The rows of {rep} span several candles, so the window needs last "current": the '
-            'last finished rows and the row still forming. "closed" is not supported with it.'
+            Finding(
+                f'The rows of {rep} span several candles, so the window needs last "current": '
+                'the last finished rows and the row still forming. "closed" is not supported '
+                "with it.",
+                "input.window.last",
+                ("current",),
+            )
         )
     return found
 
 
-def _params(manifest: Manifest) -> list[str]:
+def _params(manifest: Manifest) -> list[Finding]:
     """The parameters of each known block in its right step, against its model."""
     found = []
     for step in _steps(manifest):
@@ -243,47 +335,64 @@ def _params(manifest: Manifest) -> list[str]:
         try:
             block.params.model_validate(step.params)
         except ValidationError as error:
+            schema = _schema_of(block.params)
             found += [
-                _sentence(detail, where=f"{step.where}.params", block=step.id)
+                _finding(detail, schema, where=f"{step.where}.params", block=step.id)
                 for detail in error.errors(include_url=False)
             ]
     return found
 
 
-def _names(manifest: Manifest) -> list[str]:
-    counts = Counter(feature.name for feature in manifest.input.features)
+def _names(manifest: Manifest) -> list[Finding]:
+    names = [feature.name for feature in manifest.input.features]
+    counts = Counter(names)
+    # A name used again is wrong where it comes the second time, a reserved one where it is.
     found = [
-        f"The feature name {name} is used {count} times. Each feature needs a name of its own."
+        Finding(
+            f"The feature name {name} is used {count} times. Each feature needs a name of its own.",
+            f"input.features[{names.index(name, names.index(name) + 1)}].name",
+        )
         for name, count in counts.items()
         if count > 1
     ]
     found += [
-        f"The feature name {name} is taken by {RESERVED_NAMES[name]}. Rename the feature."
+        Finding(
+            f"The feature name {name} is taken by {RESERVED_NAMES[name]}. Rename the feature.",
+            f"input.features[{names.index(name)}].name",
+        )
         for name in counts
         if name in RESERVED_NAMES
     ]
     return found
 
 
-def _signature(manifest: Manifest) -> list[str]:
+def _signature(manifest: Manifest) -> list[Finding]:
     found = []
     length, features = manifest.input.window.length, len(manifest.input.features)
     expected = [length, features]
     if manifest.signature.input.shape != expected:
         found.append(
-            f"signature.input is {manifest.signature.input.shape}, but a window of {length} "
-            f"{_plural(length, 'row')} of {features} {_plural(features, 'feature')} gives "
-            f"{expected}."
+            Finding(
+                f"signature.input is {manifest.signature.input.shape}, but a window of {length} "
+                f"{_plural(length, 'row')} of {features} {_plural(features, 'feature')} gives "
+                f"{expected}.",
+                "signature.input.shape",
+                (expected,),
+            )
         )
     if manifest.signature.output.shape != SCORE_SHAPE:
         found.append(
-            f"signature.output is {manifest.signature.output.shape}, but CandleStack takes "
-            f"models that give one score per sample, {SCORE_SHAPE}."
+            Finding(
+                f"signature.output is {manifest.signature.output.shape}, but CandleStack takes "
+                f"models that give one score per sample, {SCORE_SHAPE}.",
+                "signature.output.shape",
+                (SCORE_SHAPE,),
+            )
         )
     return found
 
 
-def _example(manifest: Manifest) -> list[str]:
+def _example(manifest: Manifest) -> list[Finding]:
     example = manifest.example
     if example is None:
         return []
@@ -298,8 +407,11 @@ def _example(manifest: Manifest) -> list[str]:
         if got != expected:
             what = f"the shape {got}" if got is not None else "rows of different lengths"
             found.append(
-                f"example.{name} has {what}, but {samples} {_plural(samples, 'sample')} of "
-                f"signature.{name} make {expected}."
+                Finding(
+                    f"example.{name} has {what}, but {samples} {_plural(samples, 'sample')} of "
+                    f"signature.{name} make {expected}.",
+                    f"example.{name}",
+                )
             )
     return found
 
@@ -312,6 +424,82 @@ def _shape(values: list[Any]) -> list[int] | None:
     if any(shape != inner[0] for shape in inner) or inner[0] is None:
         return None
     return [len(values), *inner[0]]
+
+
+def _finding(
+    detail: ErrorDetails, schema: dict[str, Any], *, where: str = "", block: str | None = None
+) -> Finding:
+    """One validation error as a finding: its sentence, its field, and what fits there by the
+    JSON Schema `schema` of the model that raised it (the manifest's, or a block's parameters')
+    or, for a field that names a block, the blocks of its step."""
+    field = _path(where, detail["loc"])
+    allowed = _allowed_by_schema(schema, detail["loc"], detail["type"])
+    if allowed is None:
+        allowed = _blocks_at(field)
+    return Finding(_sentence(detail, where=where, block=block), field, allowed)
+
+
+@cache
+def _schema_of(model: type[BaseModel]) -> dict[str, Any]:
+    return model.model_json_schema()
+
+
+def _resolved(schema: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    """`node` without its reference and its null branch (an optional field)."""
+    while True:
+        if "$ref" in node:
+            node = schema["$defs"][node["$ref"].rsplit("/", 1)[-1]]
+            continue
+        branches = [branch for branch in node.get("anyOf", []) if branch.get("type") != "null"]
+        if len(branches) != 1:
+            return node
+        node = branches[0]
+
+
+def _child(schema: dict[str, Any], node: dict[str, Any], part: int | str) -> dict[str, Any] | None:
+    """The schema of the item or field `part` of `node`; None when it has none."""
+    node = _resolved(schema, node)
+    if isinstance(part, int):
+        child = node.get("items")
+    else:
+        child = node.get("properties", {}).get(part, node.get("additionalProperties"))
+    return child if isinstance(child, dict) else None
+
+
+def _allowed_by_schema(
+    schema: dict[str, Any], location: tuple[int | str, ...], kind: str
+) -> tuple[Any, ...] | None:
+    """What fits where a validation error points, by `schema`: for a field the object does not
+    have, the fields it has; for a choice, its options; None when the schema does not say."""
+    node: dict[str, Any] | None = schema
+    parent = schema
+    for part in location:
+        if node is None:
+            return None
+        parent, node = node, _child(schema, node, part)
+    if kind == "extra_forbidden":
+        return tuple(_resolved(schema, parent).get("properties", {}))
+    if node is None:
+        return None
+    node = _resolved(schema, node)
+    if "enum" in node:
+        return tuple(node["enum"])
+    if "const" in node:
+        return (node["const"],)
+    return None
+
+
+def _blocks_at(field: str) -> tuple[str, ...] | None:
+    """The blocks of the step whose block `field` names; None for any other field."""
+    for pattern, step in _BLOCK_FIELDS:
+        if pattern.fullmatch(field):
+            return _blocks_of(step)
+    return None
+
+
+def _blocks_of(step: Step) -> tuple[str, ...]:
+    """The blocks of the catalog for `step`, in its order."""
+    return tuple(block.id for block in CATALOG.values() if block.step == step)
 
 
 def _sentence(detail: ErrorDetails, *, where: str = "", block: str | None = None) -> str:
@@ -340,10 +528,6 @@ def _path(where: str, location: tuple[int | str, ...]) -> str:
     for part in location:
         path += f"[{part}]" if isinstance(part, int) else f".{part}" if path else part
     return path
-
-
-def _listed(items: list[str]) -> str:
-    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
 
 
 def _plural(count: int, word: str) -> str:

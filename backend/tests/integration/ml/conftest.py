@@ -133,6 +133,9 @@ class ModelsUser:
     def set_manifest(self, model_id: str, content: bytes | Any) -> httpx2.Response:
         return self.request("PUT", f"/api/v1/models/{model_id}/manifest", content=content)
 
+    def check_manifest(self, model_id: str, content: bytes | Any) -> httpx2.Response:
+        return self.request("POST", f"/api/v1/models/{model_id}/manifest/check", content=content)
+
     def manifest(self, model_id: str) -> httpx2.Response:
         return self.request("GET", f"/api/v1/models/{model_id}/manifest")
 
