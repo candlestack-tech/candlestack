@@ -11,7 +11,7 @@ from typing import Any, override
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
-from mcp.types import CallToolResult, InputRequiredResult
+from mcp.types import CallToolResult, Icon, InputRequiredResult
 from pydantic import ValidationError
 
 from candlestack.core import ProblemError
@@ -24,6 +24,12 @@ logger = logging.getLogger(__name__)
 NAME = "candlestack"
 TITLE = "CandleStack"
 WEBSITE = "https://candlestack.tech"
+# The logo clients show next to the server's name: the website's, public on every environment
+# (stage's own files sit behind Cloudflare Access), as SVG and as a PNG for clients without SVG.
+ICONS = [
+    Icon(src=f"{WEBSITE}/favicon.svg", mime_type="image/svg+xml", sizes=["any"]),
+    Icon(src=f"{WEBSITE}/apple-touch-icon.png", mime_type="image/png", sizes=["180x180"]),
+]
 # Every tool of the server, in the order tools/list and the tool reference show them.
 TOOLS: tuple[ToolSpec, ...] = (
     *account.TOOLS,
@@ -75,6 +81,7 @@ class CandleStackMCP(MCPServer):
             title=TITLE,
             instructions=INSTRUCTIONS,
             website_url=WEBSITE,
+            icons=ICONS,
             version=version,
         )
         self.specs = {spec.name: spec for spec in specs}

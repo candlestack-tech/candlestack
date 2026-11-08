@@ -93,6 +93,11 @@ def test_a_client_gets_the_instructions_and_the_tools(mcp, mode: str, protocol: 
     assert MCP_DOCS in instructions
     assert info.name == "candlestack"
     assert info.version == "1.2.3"
+    assert info.title == "CandleStack"
+    assert [(icon.src, icon.mime_type) for icon in info.icons] == [
+        ("https://candlestack.tech/favicon.svg", "image/svg+xml"),
+        ("https://candlestack.tech/apple-touch-icon.png", "image/png"),
+    ]
     get_me = next(tool for tool in tools.tools if tool.name == "get_me")
     assert get_me.annotations.read_only_hint is True
     assert get_me.annotations.destructive_hint is False

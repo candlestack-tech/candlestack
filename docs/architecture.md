@@ -1033,6 +1033,9 @@ call, as the routes' dependencies do), never the API over HTTP.
   The tools answer the problems of the routes they stand for; the one problem only a tool
   answers is `confirmation-mismatch` (409: `delete_model` got a `confirm_name` that is not
   the model's name, so nothing was deleted).
+- **Name and icon**: `serverInfo` names the server `candlestack` (title CandleStack, website
+  `https://candlestack.tech`) with the website's logo as icons (`favicon.svg`,
+  `apple-touch-icon.png` 180x180), public on every environment, for clients that show them.
 - **Instructions and docs**: the server's `instructions` say what CandleStack is, how keys and
   scopes work, how errors read and link `https://candlestack.tech/docs/agents/` and
   `https://candlestack.tech/docs/mcp/`; the resource `candlestack://docs` (Markdown) lists the
