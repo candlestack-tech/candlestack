@@ -258,7 +258,7 @@ async def test_a_wait_is_told_when_its_backtest_changes() -> None:
         runs.changed("bt_bbbbbbbbbb")
         assert other.is_set()
 
-    assert runs._watchers == {}
+    assert runs._watchers.waiting == {}
 
 
 async def test_a_backtest_handed_to_a_closed_runner_goes_back_to_its_queue(

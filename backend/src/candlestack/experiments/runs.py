@@ -55,6 +55,7 @@ from candlestack.experiments.assembly import (
     run,
     stored_results,
 )
+from candlestack.experiments.channel import Runner
 from candlestack.experiments.document import (
     BENCHMARK_ETFS,
     LIGHT_ROWS,
@@ -93,7 +94,6 @@ from candlestack.experiments.errors import (
 )
 from candlestack.experiments.idempotency import Committed
 from candlestack.experiments.models import Backtest, new_backtest_id
-from candlestack.experiments.runner import BacktestRunner
 from candlestack.experiments.schemas import (
     BacktestSetup,
     BacktestStatus,
@@ -158,7 +158,7 @@ class BacktestRuns:
         self,
         store: BacktestStore,
         data: DataService,
-        runner: BacktestRunner,
+        runner: Runner,
         app_version: str,
         *,
         limit: int,
@@ -186,7 +186,9 @@ class BacktestRuns:
         await self.ready()
         spec = await self.spec(prepared)
         queued = await self._store.queued(user_id)
-        waits = queued > 0 or not self._runner.free or await self._store.running(user_id)
+        waits = (
+            queued > 0 or not await self._runner.free_slot() or await self._store.running(user_id)
+        )
         data = spec.data
         return BacktestCheck(
             model=CheckedModel(id=model.id, name=model.name, framework=model.framework),

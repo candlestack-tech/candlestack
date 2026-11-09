@@ -8,12 +8,14 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from redis.asyncio import Redis
 
+from candlestack import main
 from candlestack.core import Database, RateLimiter, Settings
 from candlestack.core.redis import get_redis
 from candlestack.data import DataService
-from candlestack.experiments import BacktestRunner
+from candlestack.experiments import BacktestRunner, RemoteRunner, RunnerChannel
 from candlestack.main import _report_death, create_app
 from candlestack.main import app as module_app
+from candlestack.ml import ModelChecks
 
 
 def test_lifespan_opens_and_closes_the_shared_clients(app: FastAPI) -> None:
@@ -94,3 +96,67 @@ async def test_a_cancelled_stats_task_is_no_error(caplog: pytest.LogCaptureFixtu
     _report_death(task)
 
     assert caplog.text == ""
+
+
+async def _listens(*_args: Any, **_kwargs: Any) -> None:
+    await asyncio.Event().wait()
+
+
+def test_an_api_process_leaves_the_background_work_to_the_runner(
+    settings: Settings, fake_redis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started: list[str] = []
+    monkeypatch.setattr(RunnerChannel, "listen", _listens)
+    monkeypatch.setattr(BacktestRunner, "recover", lambda _runner: started.append("runner"))
+    monkeypatch.setattr(ModelChecks, "recover", lambda _checks: started.append("checks"))
+    monkeypatch.setattr(DataService, "keep_stats_fresh", lambda _service: started.append("stats"))
+    monkeypatch.setattr(main, "keep_incoming_swept", lambda _storage: started.append("sweep"))
+    app = create_app(settings.model_copy(update={"app_role": "api", "stats_refresh": True}))
+    app.dependency_overrides[get_redis] = lambda: fake_redis
+
+    with TestClient(app):
+        runner = app.state.backtest_runner
+        assert isinstance(runner, RemoteRunner)
+        assert runner._listening is not None
+        assert not runner._listening.done()
+        assert app.state.mcp_sessions is not None
+
+    assert started == []
+    assert runner._listening.cancelled()
+
+
+def test_a_runner_process_runs_the_backtests_and_the_background_work_but_no_mcp(
+    settings: Settings, fake_redis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started: list[str] = []
+
+    async def recover(_runner: BacktestRunner) -> None:
+        started.append("runner")
+
+    async def keep_stats_fresh(_service: DataService) -> None:
+        started.append("stats")
+
+    async def keep_incoming_swept(_storage: Any) -> None:
+        started.append("sweep")
+
+    monkeypatch.setattr(BacktestRunner, "recover", recover)
+    monkeypatch.setattr(ModelChecks, "recover", lambda _checks: started.append("checks"))
+    monkeypatch.setattr(DataService, "keep_stats_fresh", keep_stats_fresh)
+    monkeypatch.setattr(main, "keep_incoming_swept", keep_incoming_swept)
+    app = create_app(settings.model_copy(update={"app_role": "runner", "stats_refresh": True}))
+    app.dependency_overrides[get_redis] = lambda: fake_redis
+
+    with TestClient(app):
+        runner = app.state.backtest_runner
+        assert isinstance(runner, BacktestRunner)
+        assert runner._channel is not None
+        assert not hasattr(app.state, "mcp_sessions")
+
+    assert sorted(started) == ["checks", "runner", "stats", "sweep"]
+
+
+def test_one_process_does_everything_by_default(app: FastAPI) -> None:
+    with TestClient(app):
+        runner = app.state.backtest_runner
+        assert isinstance(runner, BacktestRunner)
+        assert runner._channel is None

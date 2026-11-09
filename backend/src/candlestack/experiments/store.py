@@ -10,7 +10,7 @@ It never reads the author's email, and shows the model's name of when the backte
 """
 
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, NamedTuple
@@ -932,6 +932,18 @@ class BacktestStore:
         began = func.coalesce(Backtest.started_at, Backtest.created_at)
         rows = await self._db.scalars(select(Backtest.id).where(_RUNNING, began < before))
         return list(rows)
+
+    async def running_total(self) -> int:
+        """How many backtests of any user run: the run slots taken (``ix_backtests_running``)."""
+        total = await self._db.scalar(select(func.count()).select_from(Backtest).where(_RUNNING))
+        return int(total or 0)
+
+    async def existing(self, backtest_ids: Collection[str]) -> set[str]:
+        """Those of the IDs whose backtest is still there."""
+        if not backtest_ids:
+            return set()
+        rows = await self._db.scalars(select(Backtest.id).where(Backtest.id.in_(backtest_ids)))
+        return set(rows)
 
     async def requeue(self, backtest_id: str) -> None:
         """Puts the running backtest that never began back in its queue, where its number

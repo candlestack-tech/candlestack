@@ -34,7 +34,7 @@ from starlette.requests import Request
 
 from candlestack.accounts import Caller, Scope, User
 from candlestack.core import PROBLEM_TYPE_BASE, ProblemError, Settings
-from candlestack.experiments import IDEMPOTENCY_KEY_MAX, IDEMPOTENCY_KEY_PATTERN, BacktestRunner
+from candlestack.experiments import IDEMPOTENCY_KEY_MAX, IDEMPOTENCY_KEY_PATTERN, Runner
 
 # A verb and what it acts on, lowercase: get_me, start_backtest, list_models.
 _NAME = re.compile(r"[a-z]+(_[a-z0-9]+){1,3}")
@@ -49,7 +49,7 @@ WAIT_DEFAULT_S = 50
 # frontend/src/routes/compareSearch.ts); the API compares more.
 COMPARE_PAGE_MAX = 4
 # How often a wait reads the backtests' rows again when nothing told it of a change: the runner
-# tells it when one starts, ends or is cancelled (``BacktestRunner.watch``).
+# tells it when one starts, ends or is cancelled (``experiments.Runner.watch``).
 POLL_S = 2.5
 # A wait's progress in five equal stages: the user's queue, then the four steps of the run.
 STAGES = 5
@@ -177,7 +177,7 @@ class ToolCall:
             yield session
 
 
-def runner_of(call: ToolCall) -> BacktestRunner:
+def runner_of(call: ToolCall) -> Runner:
     """The app's backtest runner, which tells a wait when a backtest changed."""
     return call.state.backtest_runner
 

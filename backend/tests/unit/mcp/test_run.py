@@ -377,7 +377,7 @@ def test_a_wait_reads_again_when_the_runner_says_the_backtest_changed(
 
     async def wait_and_change(session: Client) -> Any:
         async def change_soon() -> None:
-            while not runner._watchers:  # noqa: ASYNC110 (no event tells of a new wait)
+            while not runner._watchers.waiting:  # noqa: ASYNC110 (no event tells of a new wait)
                 await anyio.sleep(0.01)
             runner.changed("bt_7f3k2m9qx4")
 
@@ -394,7 +394,7 @@ def test_a_wait_reads_again_when_the_runner_says_the_backtest_changed(
     assert result.structured_content["status"] == "finished"
     assert took < 10
     assert runs.polls == 2
-    assert runner._watchers == {}
+    assert runner._watchers.waiting == {}
 
 
 def test_wait_for_backtest_waits_for_all_of_ids_by_default(mcp, runs) -> None:
