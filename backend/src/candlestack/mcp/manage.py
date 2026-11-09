@@ -67,15 +67,15 @@ from candlestack.mcp.convention import (
 
 BacktestId = Annotated[
     str,
-    Field(examples=["bt_7f3k2m9qx4"]),
+    Field(description="Public ID of the backtest", examples=["bt_7f3k2m9qx4"]),
 ]
 # The IDs a bulk change takes, as delete_backtests does.
 BacktestIds = Annotated[
     list[Annotated[str, Field(min_length=1, max_length=32, examples=["bt_7f3k2m9qx4"])]],
     Field(min_length=1, max_length=UPDATE_MAX, description="The user's backtests"),
 ]
-Page = Annotated[int, Field(ge=1, le=PAGE_MAX)]
-Order = SortOrder
+Page = Annotated[int, Field(ge=1, le=PAGE_MAX, description="The page, from 1")]
+Order = Annotated[SortOrder, Field(description="Direction of the sort")]
 # Whether a list answers its counts and filter values, which cost queries of their own.
 IncludeFacets = Annotated[
     bool | None,
@@ -298,14 +298,18 @@ async def list_backtests(  # noqa: PLR0913 (one argument per filter, as GET /bac
         list[BacktestStatus] | None,
         Field(description="Any of these"),
     ] = None,
-    sweep_id: Annotated[str | None, Field(max_length=32)] = None,
-    model_id: Annotated[str | None, Field(max_length=32)] = None,
+    sweep_id: Annotated[
+        str | None, Field(max_length=32, description="Only the backtests of this sweep")
+    ] = None,
+    model_id: Annotated[
+        str | None, Field(max_length=32, description="Only the backtests of this model")
+    ] = None,
     instrument: Annotated[
         str | None,
         Field(max_length=64, description="<market>:<symbol>"),
         AfterValidator(instrument_filter),
     ] = None,
-    timeframe: SetupTimeframe | None = None,
+    timeframe: Annotated[SetupTimeframe | None, Field(description="Only this timeframe")] = None,
     representation: Annotated[
         Representation | None, Field(description="What the model reads")
     ] = None,
@@ -319,7 +323,9 @@ async def list_backtests(  # noqa: PLR0913 (one argument per filter, as GET /bac
         Field(description="Started before (UTC)"),
         AfterValidator(as_utc),
     ] = None,
-    min_sharpe: Annotated[float | None, Field(allow_inf_nan=False)] = None,
+    min_sharpe: Annotated[
+        float | None, Field(allow_inf_nan=False, description="Sharpe ratio at least this")
+    ] = None,
     min_total_return: Annotated[
         float | None, Field(allow_inf_nan=False, description="A fraction")
     ] = None,
@@ -331,7 +337,7 @@ async def list_backtests(  # noqa: PLR0913 (one argument per filter, as GET /bac
             description="0 or below: -0.2 keeps falls of up to 20 percent",
         ),
     ] = None,
-    starred: bool | None = None,
+    starred: Annotated[bool | None, Field(description="Only starred (true) or not")] = None,
     public: Annotated[bool | None, Field(description="Published")] = None,
     sort: Annotated[
         BacktestSort,
@@ -339,7 +345,9 @@ async def list_backtests(  # noqa: PLR0913 (one argument per filter, as GET /bac
     ] = BacktestSort.default,
     order: Order = SortOrder.desc,
     page: Page = 1,
-    per_page: Annotated[int, Field(ge=1, le=PER_PAGE_MAX)] = PAGE_SIZE,
+    per_page: Annotated[
+        int, Field(ge=1, le=PER_PAGE_MAX, description="Backtests per page")
+    ] = PAGE_SIZE,
     include_facets: IncludeFacets = None,
 ) -> BacktestList:
     """Lists the user's backtests with search, filters (all must hold) and a sort by a
@@ -458,12 +466,14 @@ async def list_experiments(  # noqa: PLR0913 (one argument per filter, as GET /e
         str | None,
         Field(max_length=32, description="An `author.id`"),
     ] = None,
-    market: InstrumentMarket | None = None,
-    symbol: Annotated[str | None, Field(max_length=32)] = None,
+    market: Annotated[InstrumentMarket | None, Field(description="Only this market")] = None,
+    symbol: Annotated[
+        str | None, Field(max_length=32, description="Only this instrument's symbol")
+    ] = None,
     representation: Annotated[
         Representation | None, Field(description="What the model reads")
     ] = None,
-    timeframe: SetupTimeframe | None = None,
+    timeframe: Annotated[SetupTimeframe | None, Field(description="Only this timeframe")] = None,
     sort: ExperimentSort = ExperimentSort.newest,
     order: Order = SortOrder.desc,
     page: Page = 1,

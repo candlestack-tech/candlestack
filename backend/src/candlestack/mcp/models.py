@@ -564,8 +564,8 @@ async def get_model_upload(
     ctx: Context,
 ) -> UploadState:
     """How an upload through a one-time link stands: `waiting`, `checking`, `done` (with
-    `model_id`), `failed` (with the `error` to tell the user) or `expired`. A failed or expired
-    link is spent: make a new one."""
+    `model_id` and `model_url`, the page to show the user), `failed` (with the `error` to tell
+    the user) or `expired`. A failed or expired link is spent: make a new one."""
     call = tool_call(ctx)
     async with call.db() as db:
         try:

@@ -214,8 +214,10 @@ async def get_sweep(sweep_id: str, ctx: Context, metric: SweepMetric | None = No
 
 async def list_sweeps(
     ctx: Context,
-    page: Annotated[int, Field(ge=1, le=PAGE_MAX)] = 1,
-    per_page: Annotated[int, Field(ge=1, le=PER_PAGE_MAX)] = PAGE_SIZE,
+    page: Annotated[int, Field(ge=1, le=PAGE_MAX, description="The page, from 1")] = 1,
+    per_page: Annotated[
+        int, Field(ge=1, le=PER_PAGE_MAX, description="Sweeps per page")
+    ] = PAGE_SIZE,
 ) -> SweepsPage:
     """Lists the user's sweeps, newest first, with their progress and best backtest so far.
     get_sweep ranks one; list_backtests with `sweep_id` lists its backtests."""
@@ -227,11 +229,13 @@ async def list_sweeps(
 
 
 async def wait_for_sweep(
-    sweep_id: Annotated[str, Field(examples=["sw_7f3k2m9qx4"])],
+    sweep_id: Annotated[
+        str, Field(description="Public ID of the sweep", examples=["sw_7f3k2m9qx4"])
+    ],
     ctx: Context,
     timeout_s: Annotated[
         int,
-        Field(ge=1, le=WAIT_MAX_S),
+        Field(ge=1, le=WAIT_MAX_S, description="Seconds to wait at most"),
     ] = WAIT_DEFAULT_S,
 ) -> SweepWaitResult:
     """Waits until every backtest of a sweep ended or `timeout_s` passed, then answers the

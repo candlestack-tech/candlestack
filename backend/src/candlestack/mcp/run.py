@@ -538,7 +538,9 @@ def backtest_result(
 
 # --- The tools --------------------------------------------------------------------------------
 
-BacktestId = Annotated[str, Field(examples=["bt_7f3k2m9qx4"])]
+BacktestId = Annotated[
+    str, Field(description="Public ID of the backtest", examples=["bt_7f3k2m9qx4"])
+]
 Decisions = Annotated[Decision, Field(default_factory=Decision)]
 Executions = Annotated[Execution, Field(default_factory=Execution)]
 Benchmarks = Annotated[list[BenchmarkIn], Field(default_factory=list, max_length=1)]
@@ -684,7 +686,7 @@ async def wait_for_backtest(
     ] = None,
     timeout_s: Annotated[
         int,
-        Field(ge=1, le=WAIT_MAX_S),
+        Field(ge=1, le=WAIT_MAX_S, description="Seconds to wait at most"),
     ] = WAIT_DEFAULT_S,
     ids: Annotated[
         list[str] | None,
@@ -726,7 +728,7 @@ async def wait_for_backtest(
 
 async def get_backtest(
     backtest_id: BacktestId,
-    trades_page: Annotated[int, Field(ge=1)] = 1,
+    trades_page: Annotated[int, Field(ge=1, description="The page of trades, from 1")] = 1,
     trades_per_page: Annotated[
         int,
         Field(

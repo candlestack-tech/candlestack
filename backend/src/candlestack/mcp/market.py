@@ -146,12 +146,12 @@ async def search_instruments(
     ],
     ctx: Context,
     *,
-    market: Market | None = None,
+    market: Annotated[Market | None, Field(description="Only this market")] = None,
     exchange: Annotated[
         Exchange | None,
         Field(description="Only instruments that trade there: BINANCE for crypto pairs"),
     ] = None,
-    limit: Annotated[int, Field(ge=1, le=50)] = 10,
+    limit: Annotated[int, Field(ge=1, le=50, description="Most items to answer")] = 10,
     offset: Annotated[int, Field(ge=0, description="Matches to skip")] = 0,
 ) -> InstrumentsFound:
     """Finds instruments by symbol or name and gives the instrument ID the other tools take
@@ -186,7 +186,7 @@ _TOP_SORTS = {
 
 async def top_instruments(
     ctx: Context,
-    market: Market | None = None,
+    market: Annotated[Market | None, Field(description="Both when left out")] = None,
     sort: Annotated[
         Literal["volume", "change", "-change"],
         Field(
@@ -194,7 +194,7 @@ async def top_instruments(
             "-change: the top losers"
         ),
     ] = "volume",
-    limit: Annotated[int, Field(ge=1, le=25)] = 10,
+    limit: Annotated[int, Field(ge=1, le=25, description="How many")] = 10,
 ) -> TopInstruments:
     """The most traded instruments, or the top gainers or losers of the last 24 hours, for
     ideas when the user names none; to find a named one: search_instruments."""
@@ -343,7 +343,9 @@ async def get_candles(
         TimeParam | None,
         Field(description="Exclusive, in the same forms; default now"),
     ] = None,
-    limit: Annotated[int, Field(ge=1, le=CANDLES_MAX)] = CANDLES_DEFAULT,
+    limit: Annotated[
+        int, Field(ge=1, le=CANDLES_MAX, description="Most candles in this page")
+    ] = CANDLES_DEFAULT,
 ) -> CandlesPage:
     """Closed OHLCV candles of one instrument and timeframe, up to 500 a page. A backtest
     loads its own candles: do not fetch them for it.
