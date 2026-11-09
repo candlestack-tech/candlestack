@@ -1173,7 +1173,8 @@ call, as the routes' dependencies do), never the API over HTTP.
   `https://candlestack.tech`) with the website's logo as icons (`favicon.svg`,
   `apple-touch-icon.png` 180x180), public on every environment, for clients that show them.
 - **Instructions and docs**: the server's `instructions` say what CandleStack is, how keys and
-  scopes work, how errors read and link `https://candlestack.tech/docs/agents/` and
+  scopes work, how errors read, that answers link the app's pages (`url`) for the agent to give
+  the user, and link `https://candlestack.tech/docs/agents/` and
   `https://candlestack.tech/docs/mcp/`; the resource `candlestack://docs` (Markdown) lists the
   docs pages, the tool reference, the manifest and backtest result references with their JSON
   Schemas, the problem pages and the API reference. The manifest and the result document link
@@ -1214,9 +1215,11 @@ call, as the routes' dependencies do), never the API over HTTP.
     the data terms (Alpaca's data for the user's personal, noncommercial use only).
   - `models` (#403), on the models service and its problems (`ml.problems`):
     `list_models` (the models in short: ID, name, format, state, star, the manifest's
-    timeframe and session, backtests, best Sharpe; and the storage; all of them, or a page
+    timeframe and session, backtests, best Sharpe, the `url` of its page
+    (`<PUBLIC_URL>/models/<id>`, `convention.model_url`); and the storage; all of them, or a page
     with `page` and `per_page`, and the `total`), `get_model` (one in full, as
-    `GET /api/v1/models` shows it, with `backtest_count`, not the list of its backtests; it
+    `GET /api/v1/models` shows it, with its page's `url` besides and `backtest_count`, not the
+    list of its backtests; it
     reads that model and its usage alone, `ModelsService.model`), `get_manifest` (the manifest with its defaults,
     its example left out unless `include_example`, with `example_samples`) and
     `validate_manifest` (the dry run of `POST .../manifest/check`), all `read`;
@@ -1234,7 +1237,9 @@ call, as the routes' dependencies do), never the API over HTTP.
     `<PUBLIC_URL>/upload/<token>`, #406) and `next_steps` to tell the user: the file goes
     from the user's disk with curl or through that page, never through a tool.
     `get_model_upload` (`read`) says how it stands (`waiting`, `checking`, `done` with the
-    `model_id`, `failed` with the `problem` and `error`, `expired`).
+    `model_id` and the new model's page, `model_url`, `failed` with the `problem` and `error`,
+    `expired`). `set_manifest`, `rename_model` and `star_model` answer the model with its `url`
+    too.
   - `sweeps`: `validate_sweep` (scope `read`, as the convention asks of a tool that changes
     nothing, while the dry run over HTTP needs `backtests` because it is the route that starts a
     sweep; it still runs each setup's checks against the data source, so a read key spends the
@@ -1243,12 +1248,14 @@ call, as the routes' dependencies do), never the API over HTTP.
     the user's sweeps, on the service of `POST /api/v1/sweeps`, `GET /api/v1/sweeps/{sweep_id}`
     and `GET /api/v1/sweeps` (`experiments.build_sweeps`, its
     errors as problems through `experiments.sweep_problems`), answering what the routes answer
-    ([Sweeps](#sweeps)); `run_sweep` adds `eta_s` (the latest of its backtests') and takes an
+    ([Sweeps](#sweeps)) with `url` besides, the app's Compare page of its backtests: once ranked
+    the best 4 that have a value, before that all of them when they are 4 at most, else null
+    (`sweeps._compare_url`); `run_sweep` adds `eta_s` (the latest of its backtests') and takes an
     optional `idempotency_key`, kept as the route's `Idempotency-Key`. `wait_for_sweep`
     (`read`) waits as `wait_for_backtest` does, on the runner's word for any of the sweep's
     backtests, reading only their statuses (`Sweeps.progress`), until none is queued or
     running or `timeout_s` passed, and answers `done`, `progress`, `eta_s` and, once done, the
-    ranking `get_sweep` gives.
+    ranking `get_sweep` gives with its Compare page's `url`.
   - `run` (#404): running and reading backtests, on `experiments.backtest_runs` and the problems
     of the routes (`experiments.backtest_problems`): `validate_backtest` (`read`,
     `POST /api/v1/backtests/check`) and `start_backtest` (`backtests`, not idempotent) take the
@@ -1280,7 +1287,9 @@ call, as the routes' dependencies do), never the API over HTTP.
     rows (0 to 200, 0 by default; evenly spaced, the first, the last and the deepest fall
     included, six decimals). It reads the stored trades or series only when it answers them.
     `compare_backtests` (`read`) answers `GET /api/v1/compare` for a list of 1 to 20 IDs, each
-    backtest with its page's `url` besides, with `curve_points` 0 by default (no curves; up to
+    backtest with its page's `url` besides and `url`, the app's Compare page of them
+    (`<PUBLIC_URL>/backtests/compare?ids=<id>,<id>`, `convention.compare_url`) for 2 to 4
+    (the page's slots; null for one, or for more than 4), with `curve_points` 0 by default (no curves; up to
     200) and `setup_mode` (`full` or `diff`); its description says how to read `max_drawdown` (0 or below, a smaller fall
     is better, though `better` says `lower`). The access is that of the
     routes: the user's own backtests and other accounts' while they are published.

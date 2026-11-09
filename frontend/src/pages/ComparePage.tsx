@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { useCanGoBack, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
+import { useCanGoBack, useNavigate, useRouter, useRouterState, useSearch } from '@tanstack/react-router';
 import { Scale, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { compareQueryOptions, type CompareMetric } from '@/api';
 import { ErrorNote } from '@/components/ErrorNote';
@@ -15,6 +15,7 @@ import {
   SLOTS,
   SLOT_COLORS,
   clearCompare,
+  comparedIds,
   isMissing,
   lineOf,
   pickName,
@@ -26,6 +27,7 @@ import {
   type ComparePick,
 } from '@/features/backtests';
 import { usePageTitle } from '@/lib/usePageTitle';
+import { compareSearchIds } from '@/routes/compareSearch';
 
 // The chosen backtests in the order of their slots, each with its colour, as the server compares
 // them (GET /api/v1/compare). While a new choice loads, the last answer shows those still chosen. A
@@ -44,6 +46,31 @@ function useColumns() {
   });
   const failed = error !== null && !isMissing(error);
   return { columns, metrics: data?.metrics ?? [], times: data?.times ?? [], picks, full, failed };
+}
+
+// The URL names the backtests compared (?ids=bt_12,bt_11), so a copied address opens the same
+// comparison: every change of the choice, here or in another tab, writes it in place, keeping the
+// back link's page. An address that already names the choice, a link's, is marked as written too,
+// so Back to it keeps a choice changed since. What the URL could not name (a broken stored ID) is
+// left out, or each write would ask for the next.
+function useComparedInUrl(picks: readonly ComparePick[]) {
+  const { ids } = useSearch({ from: '/_app/backtests/compare' });
+  // While a link leaves the page, the location is already the next page's: nothing to mark there.
+  const written = useRouterState({
+    select: ({ location }) => location.pathname !== '/backtests/compare' || location.state.comparedInUrl === true,
+  });
+  const navigate = useNavigate();
+  const chosen = compareSearchIds(comparedIds(picks));
+  useEffect(() => {
+    if (chosen === ids && written) return;
+    void navigate({
+      to: '/backtests/compare',
+      search: { ids: chosen },
+      state: (state) => ({ ...state, comparedInUrl: true }),
+      replace: true,
+      resetScroll: false,
+    });
+  }, [chosen, ids, written, navigate]);
 }
 
 // "← Dashboard": back where the page was opened from, the Backtests page when it was opened
@@ -144,6 +171,7 @@ export function ComparePage() {
   usePageTitle('Compare backtests');
   const { columns, metrics, times, picks, full, failed } = useColumns();
   const { gone } = useCompareSelection();
+  useComparedInUrl(picks);
   const [adding, setAdding] = useState(false);
   const open = () => {
     setAdding(true);

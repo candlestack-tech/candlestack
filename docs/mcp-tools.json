@@ -9,7 +9,7 @@
     }
   ],
   "server": {
-    "instructions": "CandleStack is a lab for experiments on financial time series: a user uploads a trading model (Keras or ONNX), describes its input in a manifest and backtests it on market data, crypto from Binance and US stocks from Alpaca, then compares the results and publishes the good ones.\n\nYou act as the user who signed you in, with an API key or by allowing you on CandleStack (OAuth). The scopes of that sign-in decide which tools work: read (everything that only reads), backtests, models and publish. Call get_me first to see who you act for and what you may do. A tool that changes data says so in its annotations.\n\nA tool answers JSON; its text leaves out the fields that are null. A failed tool call answers a problem as JSON: its type (https://candlestack.tech/problems/<slug>) names what went wrong and its detail says what to do; rate-limited also gives retry_after_s, the seconds to wait.\n\nDocs for agents: https://candlestack.tech/docs/agents/ and for this server: https://candlestack.tech/docs/mcp/. The resource candlestack://docs lists every docs page and reference.",
+    "instructions": "CandleStack is a lab for experiments on financial time series: a user uploads a trading model (Keras or ONNX), describes its input in a manifest and backtests it on market data, crypto from Binance and US stocks from Alpaca, then compares the results and publishes the good ones.\n\nYou act as the user who signed you in, with an API key or by allowing you on CandleStack (OAuth). The scopes of that sign-in decide which tools work: read (everything that only reads), backtests, models and publish. Call get_me first to see who you act for and what you may do. A tool that changes data says so in its annotations.\n\nA tool answers JSON; its text leaves out the fields that are null. A failed tool call answers a problem as JSON: its type (https://candlestack.tech/problems/<slug>) names what went wrong and its detail says what to do; rate-limited also gives retry_after_s, the seconds to wait.\n\nAnswers about a backtest or a model carry its `url`, its page in the app; a comparison and a sweep of 2 to 4 backtests (a ranked sweep: its best 4) carry `url`, the app's Compare page with them side by side. Give the user these links whenever you show results, so they can see the charts and the details themselves.\n\nDocs for agents: https://candlestack.tech/docs/agents/ and for this server: https://candlestack.tech/docs/mcp/. The resource candlestack://docs lists every docs page and reference.",
     "name": "candlestack",
     "title": "CandleStack"
   },
@@ -2188,7 +2188,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "The user's uploaded models, oldest first, in short: ID, name, format, state, star, the timeframe and session of the manifest, how many backtests used each and the best Sharpe ratio; and the storage they take of the user's quota. All of them unless per_page asks for a page; `total` counts them all.\n\nA model's state says what it can do: `needs_setup` has no manifest yet, so it cannot run (set_manifest gives it one); `ready` passed the manifest's checks and can be backtested; `verified` also gave the output of the manifest's example in a trial run. Use get_model for one model in full.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_models",
+      "description": "The user's uploaded models, oldest first, in short: ID, name, format, state, star, the timeframe and session of the manifest, how many backtests used each and the best Sharpe ratio, and its `url`, the page to show the user; and the storage they take of the user's quota. All of them unless per_page asks for a page; `total` counts them all.\n\nA model's state says what it can do: `needs_setup` has no manifest yet, so it cannot run (set_manifest gives it one); `ready` passed the manifest's checks and can be backtested; `verified` also gave the output of the manifest's example in a trial run. Use get_model for one model in full.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_models",
       "endpoints": [
         "GET /api/v1/models"
       ],
@@ -2207,7 +2207,8 @@
               "session": "regular",
               "starred": true,
               "state": "verified",
-              "timeframe": "30m"
+              "timeframe": "30m",
+              "url": "https://app.candlestack.tech/models/mdl_7f3k2m9qx4"
             }
           ],
           "quota_bytes": 104857600,
@@ -2337,6 +2338,11 @@
                   "30m"
                 ],
                 "title": "Timeframe"
+              },
+              "url": {
+                "description": "The model's page in the app, to show the user",
+                "title": "Url",
+                "type": "string"
               }
             },
             "required": [
@@ -2349,7 +2355,8 @@
               "session",
               "backtest_count",
               "best_sharpe",
-              "created_at"
+              "created_at",
+              "url"
             ],
             "title": "ModelBrief",
             "type": "object"
@@ -2418,7 +2425,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "One of the user's models in full: its file (format, size, weights, input and output shapes), its state, what its manifest says in short (representation, timeframe, session, input shape, warm-up), how many backtests used it (`backtest_count`) and the best Sharpe ratio of them, and how the trial run of its manifest went. The backtests themselves are list_backtests with `model` set to the model's name.\n\nAfter set_manifest, call it to see the trial run: `checked_at` is set when it ended, `state` is `verified` when it passed, and `check_failed` with `check_error` say why it failed (the model stays `ready`). get_manifest gives the whole manifest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_model",
+      "description": "One of the user's models in full: its file (format, size, weights, input and output shapes), its state, what its manifest says in short (representation, timeframe, session, input shape, warm-up), how many backtests used it (`backtest_count`) and the best Sharpe ratio of them, how the trial run of its manifest went, and its `url`, the page to show the user. The backtests themselves are list_backtests with `model` set to the model's name.\n\nAfter set_manifest, call it to see the trial run: `checked_at` is set when it ended, `state` is `verified` when it passed, and `check_failed` with `check_error` say why it failed (the model stays `ready`). get_manifest gives the whole manifest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_model",
       "endpoints": [
         "GET /api/v1/models"
       ],
@@ -2462,7 +2469,8 @@
           "parameters": 124000,
           "size_bytes": 1489779,
           "starred": true,
-          "state": "ready"
+          "state": "ready",
+          "url": "https://app.candlestack.tech/models/mdl_7f3k2m9qx4"
         }
       },
       "inputSchema": {
@@ -2621,6 +2629,7 @@
             "type": "object"
           }
         },
+        "description": "One of the user's models in full, with its page in the app.",
         "properties": {
           "backtest_count": {
             "description": "Backtests that used the model, failed ones included; 0 until backtests exist",
@@ -2790,6 +2799,11 @@
           },
           "state": {
             "$ref": "#/$defs/ModelState"
+          },
+          "url": {
+            "description": "The model's page in the app, to show the user",
+            "title": "Url",
+            "type": "string"
           }
         },
         "required": [
@@ -2808,9 +2822,10 @@
           "manifest_summary",
           "checked_at",
           "check_failed",
-          "check_error"
+          "check_error",
+          "url"
         ],
-        "title": "ModelOut",
+        "title": "ModelDetail",
         "type": "object"
       },
       "scopes": [
@@ -3633,7 +3648,8 @@
           "parameters": 124000,
           "size_bytes": 1489779,
           "starred": true,
-          "state": "ready"
+          "state": "ready",
+          "url": "https://app.candlestack.tech/models/mdl_7f3k2m9qx4"
         }
       },
       "inputSchema": {
@@ -3799,6 +3815,7 @@
             "type": "object"
           }
         },
+        "description": "One of the user's models in full, with its page in the app.",
         "properties": {
           "backtest_count": {
             "description": "Backtests that used the model, failed ones included; 0 until backtests exist",
@@ -3968,6 +3985,11 @@
           },
           "state": {
             "$ref": "#/$defs/ModelState"
+          },
+          "url": {
+            "description": "The model's page in the app, to show the user",
+            "title": "Url",
+            "type": "string"
           }
         },
         "required": [
@@ -3986,9 +4008,10 @@
           "manifest_summary",
           "checked_at",
           "check_failed",
-          "check_error"
+          "check_error",
+          "url"
         ],
-        "title": "ModelOut",
+        "title": "ModelDetail",
         "type": "object"
       },
       "scopes": [
@@ -4022,7 +4045,8 @@
           "session": "regular",
           "starred": true,
           "state": "verified",
-          "timeframe": "30m"
+          "timeframe": "30m",
+          "url": "https://app.candlestack.tech/models/mdl_7f3k2m9qx4"
         }
       },
       "inputSchema": {
@@ -4160,6 +4184,11 @@
               "30m"
             ],
             "title": "Timeframe"
+          },
+          "url": {
+            "description": "The model's page in the app, to show the user",
+            "title": "Url",
+            "type": "string"
           }
         },
         "required": [
@@ -4172,7 +4201,8 @@
           "session",
           "backtest_count",
           "best_sharpe",
-          "created_at"
+          "created_at",
+          "url"
         ],
         "title": "ModelBrief",
         "type": "object"
@@ -4208,7 +4238,8 @@
           "session": "regular",
           "starred": true,
           "state": "verified",
-          "timeframe": "30m"
+          "timeframe": "30m",
+          "url": "https://app.candlestack.tech/models/mdl_7f3k2m9qx4"
         }
       },
       "inputSchema": {
@@ -4340,6 +4371,11 @@
               "30m"
             ],
             "title": "Timeframe"
+          },
+          "url": {
+            "description": "The model's page in the app, to show the user",
+            "title": "Url",
+            "type": "string"
           }
         },
         "required": [
@@ -4352,7 +4388,8 @@
           "session",
           "backtest_count",
           "best_sharpe",
-          "created_at"
+          "created_at",
+          "url"
         ],
         "title": "ModelBrief",
         "type": "object"
@@ -4583,7 +4620,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "How the upload through a one-time link stands: `waiting` for the file, `checking` while it comes in and is checked, `done` with the new model's `model_id`, `failed` with the `problem` and the `error` to tell the user, or `expired` unused. A failed or expired link is spent: make a new one with create_model_upload.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_model_upload",
+      "description": "How the upload through a one-time link stands: `waiting` for the file, `checking` while it comes in and is checked, `done` with the new model's `model_id` and its page in the app (`model_url`, to show the user), `failed` with the `problem` and the `error` to tell the user, or `expired` unused. A failed or expired link is spent: make a new one with create_model_upload.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_model_upload",
       "endpoints": [
         "POST /api/v1/models",
         "GET /api/v1/models/uploads/{upload_id}"
@@ -4597,6 +4634,7 @@
           "expires_at": "2026-11-02T09:45:00Z",
           "id": "upl_7f3k2m9qx4",
           "model_id": "mdl_7f3k2m9qx4",
+          "model_url": "https://app.candlestack.tech/models/mdl_7f3k2m9qx4",
           "name": "lstm.keras",
           "problem": null,
           "status": "done"
@@ -4677,6 +4715,18 @@
             "description": "The model the upload made once `done`; else null",
             "title": "Model Id"
           },
+          "model_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The new model's page in the app once `done`, to show the user; else null",
+            "title": "Model Url"
+          },
           "name": {
             "description": "The name the model gets",
             "examples": [
@@ -4707,6 +4757,7 @@
           "status",
           "expires_at",
           "model_id",
+          "model_url",
           "problem",
           "error"
         ],
@@ -8423,7 +8474,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Compares backtests side by side, as the app's Compare page does: each of the 12 statistics of each with the best and the worst marked (values that read the same count as equal), their setups and which setup fields differ. Use it to pick the best of several runs; it reads only what each stored, so it is quick. A running or failed backtest is listed with its status and no values. Each backtest has its `url`, the page to show the user.\n\nFor the equity, drawdown and buy and hold of each on one time axis pass `curve_points` (up to 200); without it the curves are null and `times` empty. With many similar backtests pass `setup_mode=\"diff\"` to read the shared setup once.\n\nmax_drawdown is 0 or below and a smaller fall is better: -0.05 is better than -0.20, so its best value is the highest one; its `better` says `lower` as in a lower fall, by its size. The marks already account for it.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#compare_backtests",
+      "description": "Compares backtests side by side, as the app's Compare page does: each of the 12 statistics of each with the best and the worst marked (values that read the same count as equal), their setups and which setup fields differ. Use it to pick the best of several runs; it reads only what each stored, so it is quick. A running or failed backtest is listed with its status and no values. Each backtest has its `url`, the page to show the user, and `url` is the app's Compare page with 2 to 4 of them: give it to the user to see the curves and the table.\n\nFor the equity, drawdown and buy and hold of each on one time axis pass `curve_points` (up to 200); without it the curves are null and `times` empty. With many similar backtests pass `setup_mode=\"diff\"` to read the shared setup once.\n\nmax_drawdown is 0 or below and a smaller fall is better: -0.05 is better than -0.20, so its best value is the highest one; its `better` says `lower` as in a lower fall, by its size. The marks already account for it.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#compare_backtests",
       "endpoints": [
         "GET /api/v1/compare"
       ],
@@ -8530,7 +8581,8 @@
           "times": [
             1717372800,
             1725147000
-          ]
+          ],
+          "url": "https://app.candlestack.tech/backtests/compare?ids=bt_7f3k2m9qx4,bt_t9n8v7d6a5"
         }
       },
       "inputSchema": {
@@ -8921,13 +8973,26 @@
             },
             "title": "Times",
             "type": "array"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The app's Compare page with these backtests side by side, to show the user; null for one, or for more than 4, which the page does not show",
+            "title": "Url"
           }
         },
         "required": [
           "backtests",
           "metrics",
           "differs",
-          "times"
+          "times",
+          "url"
         ],
         "title": "CompareResult",
         "type": "object"
@@ -12704,7 +12769,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Starts a backtest for every combination of `base` (the setup of one backtest) and the values in `vary`: models (each model's manifest sets what it reads and its timeframe, so list models to vary those), instruments, periods and decision rules, 2 to 20 backtests. All go to the end of the user's queue, which runs one at a time, or none does. `metric` is the statistic the ranking orders by. Pass an `idempotency_key` (a UUID you make) to call it again safely after a timeout: the same call with the same key within 24 hours answers the first sweep instead of starting another.\n\nAnswers the sweep: its ID, each backtest's ID, status and setup, the progress and `eta_s`. Follow it with wait_for_sweep until `done`. The backtests are ordinary ones, with the sweep's ID.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#run_sweep",
+      "description": "Starts a backtest for every combination of `base` (the setup of one backtest) and the values in `vary`: models (each model's manifest sets what it reads and its timeframe, so list models to vary those), instruments, periods and decision rules, 2 to 20 backtests. All go to the end of the user's queue, which runs one at a time, or none does. `metric` is the statistic the ranking orders by. Pass an `idempotency_key` (a UUID you make) to call it again safely after a timeout: the same call with the same key within 24 hours answers the first sweep instead of starting another.\n\nAnswers the sweep: its ID, each backtest's ID, status and setup, the progress, `eta_s` and, for 4 backtests at most, `url`, the app's Compare page of them to show the user. Follow it with wait_for_sweep until `done`. The backtests are ordinary ones, with the sweep's ID.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#run_sweep",
       "endpoints": [
         "POST /api/v1/sweeps"
       ],
@@ -12812,7 +12877,8 @@
             "queued": 1,
             "running": 1
           },
-          "ranking": null
+          "ranking": null,
+          "url": "https://app.candlestack.tech/backtests/compare?ids=bt_7f3k2m9qx4,bt_t9n8v7d6a5"
         }
       },
       "inputSchema": {
@@ -13846,6 +13912,19 @@
               }
             ],
             "description": "Null until every backtest ended. For every statistic, the setups and the curves, ask `GET /api/v1/compare` with the IDs of `backtests`"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The app's Compare page with its backtests side by side, to show the user: once ranked its best 4, before that all of them when they are 4 at most; else null",
+            "title": "Url"
           }
         },
         "required": [
@@ -13874,7 +13953,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "A sweep of the user: how many of its backtests are queued, running, finished and failed, each backtest's ID, status and setup, and once none is queued or running (`done`) the ranking, best first, by `metric` or else the sweep's own. Values that read the same in the app share a rank, and the best and the worst are marked as the Compare page marks them.\n\nTo wait for it to end, call wait_for_sweep. For every statistic of the backtests, compare them with their IDs.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_sweep",
+      "description": "A sweep of the user: how many of its backtests are queued, running, finished and failed, each backtest's ID, status and setup, and once none is queued or running (`done`) the ranking, best first, by `metric` or else the sweep's own. Values that read the same in the app share a rank, and the best and the worst are marked as the Compare page marks them. `url` is the app's Compare page with the best 4 side by side: give it to the user.\n\nTo wait for it to end, call wait_for_sweep. For every statistic of the backtests, compare them with their IDs.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_sweep",
       "endpoints": [
         "GET /api/v1/sweeps/{sweep_id}"
       ],
@@ -13964,7 +14043,8 @@
             "better": "higher",
             "label": "Sharpe",
             "metric": "sharpe"
-          }
+          },
+          "url": "https://app.candlestack.tech/backtests/compare?ids=bt_t9n8v7d6a5,bt_7f3k2m9qx4"
         }
       },
       "inputSchema": {
@@ -14363,7 +14443,7 @@
             "type": "object"
           }
         },
-        "description": "A sweep: its backtests, how far they are, and once all ended the ranking.",
+        "description": "A sweep: its backtests, how far they are, once all ended the ranking, and its page.",
         "properties": {
           "backtests": {
             "description": "In the grid's order",
@@ -14416,6 +14496,19 @@
               }
             ],
             "description": "Null until every backtest ended. For every statistic, the setups and the curves, ask `GET /api/v1/compare` with the IDs of `backtests`"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The app's Compare page with its backtests side by side, to show the user: once ranked its best 4, before that all of them when they are 4 at most; else null",
+            "title": "Url"
           }
         },
         "required": [
@@ -14428,7 +14521,7 @@
           "backtests",
           "ranking"
         ],
-        "title": "SweepOut",
+        "title": "SweepResult",
         "type": "object"
       },
       "scopes": [
@@ -14704,7 +14797,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Waits until every backtest of a sweep of the user has ended or `timeout_s` seconds passed, then answers how many are queued, running, finished and failed, `eta_s`, and once `done` the ranking get_sweep gives. When `done` is false, call it again: a sweep's backtests run one after another.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#wait_for_sweep",
+      "description": "Waits until every backtest of a sweep of the user has ended or `timeout_s` seconds passed, then answers how many are queued, running, finished and failed, `eta_s`, and once `done` the ranking get_sweep gives with `url`, the app's Compare page of the best 4 to show the user. When `done` is false, call it again: a sweep's backtests run one after another.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#wait_for_sweep",
       "endpoints": [
         "GET /api/v1/sweeps/{sweep_id}"
       ],
@@ -14746,7 +14839,8 @@
             "better": "higher",
             "label": "Sharpe",
             "metric": "sharpe"
-          }
+          },
+          "url": "https://app.candlestack.tech/backtests/compare?ids=bt_t9n8v7d6a5,bt_7f3k2m9qx4"
         }
       },
       "inputSchema": {
@@ -14989,6 +15083,18 @@
               }
             ],
             "description": "Once done: as get_sweep ranks them, by the sweep's own metric"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Once done: the app's Compare page with its best 4 side by side, to show the user",
+            "title": "Url"
           }
         },
         "required": [
@@ -14997,7 +15103,8 @@
           "done",
           "progress",
           "eta_s",
-          "ranking"
+          "ranking",
+          "url"
         ],
         "title": "SweepWaitResult",
         "type": "object"

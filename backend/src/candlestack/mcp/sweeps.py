@@ -34,6 +34,7 @@ from candlestack.experiments import (
     sweep_problems,
 )
 from candlestack.mcp.convention import (
+    COMPARE_PAGE_MAX,
     POLL_S,
     WAIT_DEFAULT_S,
     WAIT_MAX_S,
@@ -42,6 +43,7 @@ from candlestack.mcp.convention import (
     ToolCall,
     ToolSpec,
     changes,
+    compare_url,
     reads,
     runner_of,
     tool_call,
@@ -53,7 +55,36 @@ _ETA = Field(
 )
 
 
-class SweepStarted(SweepOut):
+def _compare_url(
+    call: ToolCall, backtest_ids: Sequence[str], ranking: SweepRanking | None
+) -> str | None:
+    """The compare page of the sweep's best backtests once ranked (those with a value), else of
+    all of them when the page shows them all."""
+    if ranking is not None:
+        ranked = [backtest.id for backtest in ranking.backtests if backtest.rank is not None]
+        return compare_url(call, ranked[:COMPARE_PAGE_MAX])
+    return compare_url(call, backtest_ids)
+
+
+class SweepResult(SweepOut):
+    """A sweep: its backtests, how far they are, once all ended the ranking, and its page."""
+
+    # A default, as run_sweep answers a retry with its key from the first answer as it was kept,
+    # which may predate the field.
+    url: str | None = Field(
+        default=None,
+        description=f"The app's Compare page with its backtests side by side, to show the "
+        f"user: once ranked its best {COMPARE_PAGE_MAX}, before that all of them when they "
+        f"are {COMPARE_PAGE_MAX} at most; else null",
+    )
+
+
+def _result(call: ToolCall, sweep: SweepOut) -> SweepResult:
+    ids = [backtest.id for backtest in sweep.backtests]
+    return SweepResult(**sweep.model_dump(), url=_compare_url(call, ids, sweep.ranking))
+
+
+class SweepStarted(SweepResult):
     """The sweep just started."""
 
     eta_s: float | None = _ETA
@@ -72,6 +103,10 @@ class SweepWaitResult(BaseModel):
     eta_s: float | None = _ETA
     ranking: SweepRanking | None = Field(
         description="Once done: as get_sweep ranks them, by the sweep's own metric"
+    )
+    url: str | None = Field(
+        description=f"Once done: the app's Compare page with its best {COMPARE_PAGE_MAX} side "
+        "by side, to show the user"
     )
 
 
@@ -130,8 +165,9 @@ async def run_sweep(
     again safely after a timeout: the same call with the same key within 24 hours answers the
     first sweep instead of starting another.
 
-    Answers the sweep: its ID, each backtest's ID, status and setup, the progress and `eta_s`.
-    Follow it with wait_for_sweep until `done`. The backtests are ordinary ones, with the
+    Answers the sweep: its ID, each backtest's ID, status and setup, the progress, `eta_s` and,
+    for 4 backtests at most, `url`, the app's Compare page of them to show the user. Follow it
+    with wait_for_sweep until `done`. The backtests are ordinary ones, with the
     sweep's ID."""
     call = tool_call(ctx)
     body = SweepIn(base=base, vary=vary or SweepVary(), metric=metric)
@@ -145,7 +181,8 @@ async def run_sweep(
             eta = await _eta(call, [backtest.id for backtest in sweep.backtests])
         except DATABASE_ERRORS:
             eta = None  # started already: answered without the estimate
-        return SweepStarted(**sweep.model_dump(), eta_s=eta).model_dump_json().encode()
+        result = _result(call, sweep)
+        return SweepStarted(**result.model_dump(), eta_s=eta).model_dump_json().encode()
 
     async def again(sweep_id: str) -> bytes:
         async with call.db() as db:
@@ -153,7 +190,9 @@ async def run_sweep(
                 call.user.id, sweep_id
             )
         eta = await _eta(call, [backtest.id for backtest in sweep.backtests])
-        return SweepStarted(**sweep.model_dump(), eta_s=eta).model_dump_json().encode()
+        return (
+            SweepStarted(**_result(call, sweep).model_dump(), eta_s=eta).model_dump_json().encode()
+        )
 
     with sweep_problems():
         content, _ = await idempotent(
@@ -168,20 +207,22 @@ async def run_sweep(
     return SweepStarted.model_validate_json(content)
 
 
-async def get_sweep(sweep_id: str, ctx: Context, metric: SweepMetric | None = None) -> SweepOut:
+async def get_sweep(sweep_id: str, ctx: Context, metric: SweepMetric | None = None) -> SweepResult:
     """A sweep of the user: how many of its backtests are queued, running, finished and failed,
     each backtest's ID, status and setup, and once none is queued or running (`done`) the
     ranking, best first, by `metric` or else the sweep's own. Values that read the same in the
     app share a rank, and the best and the worst are marked as the Compare page marks them.
+    `url` is the app's Compare page with the best 4 side by side: give it to the user.
 
     To wait for it to end, call wait_for_sweep. For every statistic of the backtests, compare
     them with their IDs."""
     call = tool_call(ctx)
     async with call.db() as db:
         with sweep_problems():
-            return await build_sweeps(call.state, db, call.settings.app_version).sweep(
+            sweep = await build_sweeps(call.state, db, call.settings.app_version).sweep(
                 call.user.id, sweep_id, metric
             )
+    return _result(call, sweep)
 
 
 async def list_sweeps(
@@ -219,8 +260,8 @@ async def wait_for_sweep(
 ) -> SweepWaitResult:
     """Waits until every backtest of a sweep of the user has ended or `timeout_s` seconds
     passed, then answers how many are queued, running, finished and failed, `eta_s`, and once
-    `done` the ranking get_sweep gives. When `done` is false, call it again: a sweep's
-    backtests run one after another."""
+    `done` the ranking get_sweep gives with `url`, the app's Compare page of the best 4 to show
+    the user. When `done` is false, call it again: a sweep's backtests run one after another."""
     call = tool_call(ctx)
     deadline = anyio.current_time() + timeout_s
     ids, _ = await _progress(call, sweep_id)
@@ -249,6 +290,7 @@ async def wait_for_sweep(
         progress=progress,
         eta_s=None if done else await _eta(call, ids),
         ranking=ranking,
+        url=None if ranking is None else _compare_url(call, ids, ranking),
     )
 
 
@@ -276,7 +318,7 @@ def _setups() -> list[dict[str, object]]:
 
 
 _PLAN = SweepPlan.model_validate({"count": 2, "limit": 20, "queue_room": 20, "setups": _setups()})
-_SWEEP = SweepOut.model_validate(
+_SWEEP = SweepResult.model_validate(
     {
         "id": "sw_7f3k2m9qx4",
         "created_at": datetime(2026, 11, 8, 10, tzinfo=UTC),
@@ -323,6 +365,7 @@ _SWEEP = SweepOut.model_validate(
                 },
             ],
         },
+        "url": "https://app.candlestack.tech/backtests/compare?ids=bt_t9n8v7d6a5,bt_7f3k2m9qx4",
     }
 )
 _STARTED = SweepStarted.model_validate(
@@ -336,6 +379,7 @@ _STARTED = SweepStarted.model_validate(
             {**_SWEEP.backtests[1].model_dump(), "status": "queued", "queue_position": 1},
         ],
         "eta_s": 312.0,
+        "url": "https://app.candlestack.tech/backtests/compare?ids=bt_7f3k2m9qx4,bt_t9n8v7d6a5",
     }
 )
 _WAITED = SweepWaitResult(
@@ -345,6 +389,7 @@ _WAITED = SweepWaitResult(
     progress=_SWEEP.progress,
     eta_s=None,
     ranking=_SWEEP.ranking,
+    url=_SWEEP.url,
 )
 
 _LISTED = SweepsPage.model_validate(

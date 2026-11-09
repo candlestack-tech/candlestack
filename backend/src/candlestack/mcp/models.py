@@ -18,7 +18,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from candlestack.accounts import Scope
 from candlestack.core import ProblemError
-from candlestack.mcp.convention import Example, ToolCall, ToolSpec, changes, reads, tool_call
+from candlestack.mcp.convention import (
+    Example,
+    ToolCall,
+    ToolSpec,
+    changes,
+    model_url,
+    reads,
+    tool_call,
+)
 from candlestack.mcp.docs import MANIFEST_DOCS, MANIFEST_SCHEMA
 from candlestack.ml import (
     LINK_REFUSALS,
@@ -115,9 +123,10 @@ class ModelBrief(BaseModel):
         description="Best Sharpe ratio of its finished backtests; null without one"
     )
     created_at: datetime = Field(description="When it was uploaded (UTC)")
+    url: str = Field(description="The model's page in the app, to show the user")
 
 
-def _brief(model: ModelOut) -> ModelBrief:
+def _brief(call: ToolCall, model: ModelOut) -> ModelBrief:
     summary = model.manifest_summary
     return ModelBrief(
         id=model.id,
@@ -130,7 +139,18 @@ def _brief(model: ModelOut) -> ModelBrief:
         backtest_count=model.backtest_count,
         best_sharpe=model.best_sharpe,
         created_at=model.created_at,
+        url=model_url(call, model.id),
     )
+
+
+class ModelDetail(ModelOut):
+    """One of the user's models in full, with its page in the app."""
+
+    url: str = Field(description="The model's page in the app, to show the user")
+
+
+def _detail(call: ToolCall, model: ModelOut) -> ModelDetail:
+    return ModelDetail(**model.model_dump(), url=model_url(call, model.id))
 
 
 class ModelsResult(BaseModel):
@@ -158,8 +178,8 @@ async def list_models(
 ) -> ModelsResult:
     """The user's uploaded models, oldest first, in short: ID, name, format, state, star, the
     timeframe and session of the manifest, how many backtests used each and the best Sharpe
-    ratio; and the storage they take of the user's quota. All of them unless per_page asks for
-    a page; `total` counts them all.
+    ratio, and its `url`, the page to show the user; and the storage they take of the user's
+    quota. All of them unless per_page asks for a page; `total` counts them all.
 
     A model's state says what it can do: `needs_setup` has no manifest yet, so it cannot run
     (set_manifest gives it one); `ready` passed the manifest's checks and can be backtested;
@@ -170,7 +190,7 @@ async def list_models(
     async with call.db() as db:
         listed = await _service(call, db).models_page(call.user.id, offset=offset, limit=per_page)
     return ModelsResult(
-        models=[_brief(model) for model in listed.models],
+        models=[_brief(call, model) for model in listed.models],
         total=listed.total,
         used_bytes=listed.usage.used_bytes,
         quota_bytes=listed.usage.quota_bytes,
@@ -191,17 +211,18 @@ async def _model(call: ToolCall, model_id: str) -> ModelOut:
             raise model_not_found() from None
 
 
-async def get_model(model_id: ModelId, ctx: Context) -> ModelOut:
+async def get_model(model_id: ModelId, ctx: Context) -> ModelDetail:
     """One of the user's models in full: its file (format, size, weights, input and output
     shapes), its state, what its manifest says in short (representation, timeframe, session,
     input shape, warm-up), how many backtests used it (`backtest_count`) and the best Sharpe
-    ratio of them, and how the trial run of its manifest went. The backtests themselves are
-    list_backtests with `model` set to the model's name.
+    ratio of them, how the trial run of its manifest went, and its `url`, the page to show the
+    user. The backtests themselves are list_backtests with `model` set to the model's name.
 
     After set_manifest, call it to see the trial run: `checked_at` is set when it ended,
     `state` is `verified` when it passed, and `check_failed` with `check_error` say why it
     failed (the model stays `ready`). get_manifest gives the whole manifest."""
-    return await _model(tool_call(ctx), model_id)
+    call = tool_call(ctx)
+    return _detail(call, await _model(call, model_id))
 
 
 class ManifestResult(BaseModel):
@@ -283,7 +304,7 @@ async def validate_manifest(
     return manifest_checked(None)
 
 
-async def set_manifest(model_id: ModelId, manifest: ManifestDocument, ctx: Context) -> ModelOut:
+async def set_manifest(model_id: ModelId, manifest: ManifestDocument, ctx: Context) -> ModelDetail:
     """Gives one of the user's models its manifest, or replaces the one it has, when every
     check passes (the checks of validate_manifest); the model is then `ready` and can be
     backtested. A manifest that fails answers the problem manifest-check-failed, whose
@@ -308,7 +329,7 @@ async def set_manifest(model_id: ModelId, manifest: ManifestDocument, ctx: Conte
             logger.info("A manifest of user %s was refused (%s)", call.user.id, failed_checks)
             raise manifest_check_failed(failed) from None
     _checks(call).start(call.user.id, model.id)
-    return model
+    return _detail(call, model)
 
 
 async def _update(call: ToolCall, model_id: str, update: ModelUpdate) -> ModelBrief:
@@ -319,7 +340,7 @@ async def _update(call: ToolCall, model_id: str, update: ModelUpdate) -> ModelBr
             raise model_not_found() from None
         except ModelNameTaken as taken:
             raise rename_taken(taken) from None
-    return _brief(model)
+    return _brief(call, model)
 
 
 async def rename_model(
@@ -509,6 +530,9 @@ class UploadState(BaseModel):
     status: UploadStatus
     expires_at: datetime = Field(description="Until when the link takes its file (UTC)")
     model_id: str | None = Field(description="The model the upload made once `done`; else null")
+    model_url: str | None = Field(
+        description="The new model's page in the app once `done`, to show the user; else null"
+    )
     problem: str | None = Field(
         description="The problem the upload answered once `failed` (`model-check-failed`, "
         "`storage-full`, `upload-interrupted`, ...); else null"
@@ -531,7 +555,8 @@ async def get_model_upload(
     ctx: Context,
 ) -> UploadState:
     """How the upload through a one-time link stands: `waiting` for the file, `checking` while
-    it comes in and is checked, `done` with the new model's `model_id`, `failed` with the
+    it comes in and is checked, `done` with the new model's `model_id` and its page in the app
+    (`model_url`, to show the user), `failed` with the
     `problem` and the `error` to tell the user, or `expired` unused. A failed or expired link
     is spent: make a new one with create_model_upload."""
     call = tool_call(ctx)
@@ -546,6 +571,7 @@ async def get_model_upload(
         status=upload.status,
         expires_at=upload.expires_at,
         model_id=upload.model_id,
+        model_url=None if upload.model_id is None else model_url(call, upload.model_id),
         problem=upload.problem,
         error=upload.error,
     )
@@ -563,8 +589,9 @@ _LSTM = ModelBrief(
     backtest_count=4,
     best_sharpe=1.42,
     created_at=_CREATED,
+    url="https://app.candlestack.tech/models/mdl_7f3k2m9qx4",
 )
-_MODEL = ModelOut(
+_MODEL = ModelDetail(
     id="mdl_7f3k2m9qx4",
     name="lstm.keras",
     framework=Framework.keras,
@@ -589,6 +616,7 @@ _MODEL = ModelOut(
     checked_at=None,
     check_failed=None,
     check_error=None,
+    url="https://app.candlestack.tech/models/mdl_7f3k2m9qx4",
 )
 _MANIFEST_EXAMPLE: dict[str, Any] = {
     "version": 1,
@@ -757,6 +785,7 @@ TOOLS = (
                 status=UploadStatus.done,
                 expires_at=_EXPIRES,
                 model_id="mdl_7f3k2m9qx4",
+                model_url="https://app.candlestack.tech/models/mdl_7f3k2m9qx4",
                 problem=None,
                 error=None,
             ),

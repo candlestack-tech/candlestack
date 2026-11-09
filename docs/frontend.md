@@ -681,6 +681,18 @@ so its back link returns there (else "← Backtests").
   stays after a reload in this browser. A slot gives a backtest its colour, and removing another
   moves nothing. One that no longer exists leaves the choice when the comparison answers 404 with
   its `id`; the comparison of the rest names the next, if any.
+- The URL names the backtests compared, in the order of their slots:
+  `/backtests/compare?ids=bt_7f3k2m9qx4,bt_t9n8v7d6a5` (`src/routes/compareSearch.ts`; what is no
+  backtest ID, a repeat or one past the fourth is dropped). A link from elsewhere, such as the
+  `url` an agent gets from the MCP server or a copied address, chooses its backtests in place of
+  the choice before the page shows (the route's loader, `openInCompare`, after it gives the choice
+  to the signed-in account; a link naming the backtests compared already keeps their slots); the
+  comparison then
+  names them and gives another account's its author, and one that answers 404 leaves as above.
+  From then on every change of the choice rewrites the URL in place (`replace`, the history
+  state of the back link kept), so the address always reopens the same comparison. The page marks
+  the address it shows, a link's included (`comparedInUrl` in the history state): Back on it, the
+  choice stands.
 - Other accounts' backtests from Experiments can be compared too; their slot keeps the author's
   name. The panel asks for their documents (not on the compare page, whose comparison tells the
   same), and one that now answers 404 was unpublished: it leaves the comparison but keeps its slot, dashed in the

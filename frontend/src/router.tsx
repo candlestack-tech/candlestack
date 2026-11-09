@@ -40,6 +40,9 @@ declare module '@tanstack/react-router' {
     from?: 'dashboard' | 'backtests' | 'models' | 'model' | 'compare' | 'experiments';
     // What the back link of the compare page calls the page it was opened from.
     comparedFrom?: string;
+    // The compare page wrote the backtests of its URL from the choice: back on that address, the
+    // choice stands, and only a link from elsewhere chooses its backtests.
+    comparedInUrl?: true;
   }
   // A page of the signed-in app without the sidebar sets sidebar: false (the builder); one that
   // fills the height left under the header sets fill: true (the instrument page, for its chart).

@@ -17,8 +17,11 @@ export { ComparePicker } from './compare/ComparePicker';
 export { CompareTable, type CompareColumn } from './compare/CompareTable';
 export {
   SLOTS,
+  claimCompare,
   clearCompare,
   comparedFromOf,
+  comparedIds,
+  openInCompare,
   pickName,
   removeFromCompare,
   useComparedRow,

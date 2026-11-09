@@ -629,6 +629,8 @@ def test_compare_backtests_answers_the_comparison(mcp, runs) -> None:
         "http://testserver/backtests/bt_aaaaaaaaaa",
         "http://testserver/backtests/bt_bbbbbbbbbb",
     ]
+    # And the app's Compare page of both, in the order asked for.
+    assert answer["url"] == "http://testserver/backtests/compare?ids=bt_aaaaaaaaaa,bt_bbbbbbbbbb"
     assert answer["metrics"][0]["key"] == "total_return"
     # Without curve points no curves: an agent asks for them.
     assert answer["times"] == []
@@ -658,6 +660,21 @@ def test_compare_backtests_draws_curves_and_shows_the_setup_once_when_asked(mcp,
     assert answer["shared_setup"]["decision"] == {"rule": {"name": "threshold"}, "long_only": True}
     assert answer["shared_setup"]["instrument"] == "stock:AAPL"
     assert runs.compares == [(20, "diff")]
+
+
+@pytest.mark.parametrize("count", [1, 5])
+def test_the_compare_page_is_for_two_to_four_backtests(mcp, runs, count: int) -> None:
+    """The page shows 2 to 4 side by side: one backtest has its own page, more have none."""
+    ids = [f"bt_{index:010d}" for index in range(count)]
+    for backtest_id in ids:
+        runs.documents[backtest_id] = document(backtest_id)
+
+    result = mcp(call("compare_backtests", {"ids": ids}))
+
+    assert not result.is_error, result.content
+    assert result.structured_content["url"] is None
+    # Left out of the text, as every null.
+    assert "url" not in json.loads(result.content[0].text)
 
 
 def test_compare_says_how_to_read_the_max_drawdown() -> None:

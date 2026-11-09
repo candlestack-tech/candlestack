@@ -99,6 +99,9 @@ def test_an_agent_checks_runs_and_ranks_a_sweep(ada, key, mcp, worker) -> None:
     assert not started.is_error, started.content
     sweep = started.structured_content
     assert (sweep["count"], sweep["metric"]) == (2, "win_rate")
+    # The app's Compare page of both, in the grid's order, for the agent to give the user.
+    grid = ",".join(each["id"] for each in sweep["backtests"])
+    assert sweep["url"] == f"http://testserver/backtests/compare?ids={grid}"
     for each in sweep["backtests"]:
         ada.ended(each["id"])
     done = mcp(tool("get_sweep", sweep_id=sweep["id"]), secret)
@@ -107,8 +110,12 @@ def test_an_agent_checks_runs_and_ranks_a_sweep(ada, key, mcp, worker) -> None:
     ranking = done.structured_content["ranking"]
     assert ranking["metric"] == "win_rate"
     assert {each["id"] for each in ranking["backtests"]} == {b["id"] for b in sweep["backtests"]}
-    # What the API answers, to the letter.
-    assert ada.request("GET", f"/api/v1/sweeps/{sweep['id']}").json() == done.structured_content
+    # What the API answers, to the letter, and the Compare page of the ranked ones, best first.
+    answered = {**done.structured_content}
+    url = answered.pop("url")
+    assert ada.request("GET", f"/api/v1/sweeps/{sweep['id']}").json() == answered
+    ranked = [each["id"] for each in ranking["backtests"]]
+    assert url == f"http://testserver/backtests/compare?ids={','.join(ranked)}"
     assert worker.jobs
 
 
@@ -160,6 +167,7 @@ def test_an_agent_waits_for_a_sweep_until_it_is_ranked(ada, key, mcp, worker) ->
     assert not waiting.is_error, waiting.content
     assert waiting.structured_content["done"] is False
     assert waiting.structured_content["ranking"] is None
+    assert waiting.structured_content["url"] is None
     assert waiting.structured_content["progress"]["finished"] == 0
     assert done is not None
     assert done["done"] is True
@@ -167,6 +175,8 @@ def test_an_agent_waits_for_a_sweep_until_it_is_ranked(ada, key, mcp, worker) ->
     assert done["progress"] == {"queued": 0, "running": 0, "finished": 2, "failed": 0}
     gotten = ada.request("GET", f"/api/v1/sweeps/{sweep['id']}").json()
     assert done["ranking"] == gotten["ranking"]
+    best = ",".join(each["id"] for each in gotten["ranking"]["backtests"])
+    assert done["url"] == f"http://testserver/backtests/compare?ids={best}"
 
 
 @pytest.mark.usefixtures("market")
