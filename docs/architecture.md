@@ -987,8 +987,9 @@ The backtests users published, which every signed-in account (the beta list's) c
   published ones and the counts have `public`.
 - **Many at once**: `POST /api/v1/backtests/update` stars or publishes up to 100 backtests
   (`ids` with `starred` and/or `public`, as the PATCH takes them, without `name`) in one
-  transaction, with two queries (`BacktestStore.to_mark`, which locks the rows, and
-  `BacktestStore.mark`): IDs the user has no backtest with are listed in `not_found`, and with
+  transaction, with two queries (`BacktestStore.to_mark`, which locks the rows by number as a
+  delete does, so the two cannot deadlock, and `BacktestStore.mark`, which leaves the rows
+  already as asked unwritten): IDs the user has no backtest with are listed in `not_found`, and with
   `public` true the backtests that cannot be published in `cannot_publish` instead of a 409;
   nothing changes for those, the rest change. What is already as asked stays (a published one
   keeps its time), so the same request can be sent again. It counts as one request, as a
@@ -1134,12 +1135,14 @@ call, as the routes' dependencies do), never the API over HTTP.
 
 - **Transport**: Streamable HTTP, stateless, answers as JSON (`json_response`). Every request
   stands alone, so any process answers it and a deploy breaks no session; the SDK answers both
-  the 2026-07-28 protocol and the initialize handshake of the earlier ones. A `tools/call`
-  with a `progressToken` in its `_meta`, from a client that accepts `text/event-stream`, goes
-  to a second session manager that answers SSE (`http._streamed`), the only answer that can
-  carry the tool's `notifications/progress` before its result (a JSON answer drops them);
-  every other request keeps its JSON answer. `main` adds the
-  routes (`mount_mcp`) and runs the SDK's session manager in the lifespan (`serving_mcp`), last,
+  the 2026-07-28 protocol and the initialize handshake of the earlier ones. `serving_mcp` runs
+  two stateless session managers of the SDK on the one server: `mcp_sessions` answers JSON,
+  `mcp_streams` answers SSE. A `tools/call` of a tool that sends progress (`ToolSpec.progress`:
+  `wait_for_backtest`, `wait_for_sweep`) with a `progressToken` in its `_meta`, from a client
+  that accepts `text/event-stream`, goes to `mcp_streams` (`http._streamed`): only an SSE
+  answer carries the tool's `notifications/progress` before its result (a JSON answer drops
+  them). Every other request goes to `mcp_sessions` and keeps its JSON answer. `main` adds the
+  routes (`mount_mcp`) and runs the SDK's session managers in the lifespan (`serving_mcp`), last,
   so it stops first. The SDK's Host check is off (the edge sets the host); a request with an
   `Origin` other than `PUBLIC_URL` is `403 cross-origin-request`, against DNS rebinding.
 - **Sign-in**: an API key in `Authorization: Bearer`, checked by `accounts.key_caller` as on a
@@ -1336,7 +1339,9 @@ call, as the routes' dependencies do), never the API over HTTP.
     backtests, reading only their statuses (`Sweeps.progress`), until none is queued or
     running or `timeout_s` passed, and answers `done`, `progress`, `eta_s` and, once done, the
     ranking `get_sweep` gives with its Compare page's `url`; to a client that asks for progress
-    it sends how many backtests ended of all, with the counts in the message.
+    it sends, in backtests of all, those that ended plus how far each running one is by its
+    steps (the same read returns the steps of the running ones), with the counts in the
+    message.
   - `run` (#404): running and reading backtests, on `experiments.backtest_runs` and the problems
     of the routes (`experiments.backtest_problems`): `validate_backtest` (`read`,
     `POST /api/v1/backtests/check`) and `start_backtest` (`backtests`, not idempotent) take the

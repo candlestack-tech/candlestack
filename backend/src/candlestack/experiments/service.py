@@ -348,7 +348,7 @@ class BacktestsService:
         }
         updated = [i for i in wanted if i in found and i not in refused]
         if updated:
-            await self._store.mark(updated, starred=starred, public=public)
+            await self._store.mark(user_id, updated, starred=starred, public=public)
         await self._store.commit()
         return BacktestsUpdated(
             updated=updated,

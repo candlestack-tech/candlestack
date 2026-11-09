@@ -20,7 +20,7 @@ import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Annotated, Any
+from typing import Annotated, Any, Protocol
 
 from mcp.server.mcpserver import Context
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
@@ -49,6 +49,8 @@ COMPARE_PAGE_MAX = 4
 # How often a wait reads the backtests' rows again when nothing told it of a change: the runner
 # tells it when one starts, ends or is cancelled (``BacktestRunner.watch``).
 POLL_S = 2.5
+# A wait's progress in five equal stages: the user's queue, then the four steps of the run.
+STAGES = 5
 
 # The idempotency key of a tool that starts something (``experiments.idempotent``).
 IdempotencyKey = Annotated[
@@ -106,6 +108,9 @@ class ToolSpec:
     # The tool's ``_meta`` in tools/list: the link to the chat widget of one it shows
     # (``apps.tool_meta``).
     meta: dict[str, Any] | None = None
+    # Whether it sends progress to a client that asks for it, so the HTTP layer answers such a
+    # call as an SSE stream (``http``); every other call is answered as JSON.
+    progress: bool = False
     description: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -166,6 +171,32 @@ class ToolCall:
 def runner_of(call: ToolCall) -> BacktestRunner:
     """The app's backtest runner, which tells a wait when a backtest changed."""
     return call.state.backtest_runner
+
+
+class Step(Protocol):
+    """A step of a run as its progress reads it: the tools' ``StepOut`` or the stored
+    ``experiments.BacktestStep``."""
+
+    @property
+    def id(self) -> str: ...
+    @property
+    def state(self) -> str: ...
+    @property
+    def loaded(self) -> int | None: ...
+    @property
+    def total(self) -> int | None: ...
+
+
+def run_progress(steps: Sequence[Step]) -> float:
+    """How far a running backtest is, 0 to 1, by its steps, as its page shows them: the queue
+    before it ran is the first fifth, then each step a fifth, the candles' load by its
+    chunks."""
+    done = sum(step.state == "done" for step in steps)
+    running = next((step for step in steps if step.state == "running"), None)
+    part = 0.0
+    if running is not None and running.id == "candles" and running.total:
+        part = min((running.loaded or 0) / running.total, 1.0)
+    return (1 + done + part) / STAGES
 
 
 class Progress:

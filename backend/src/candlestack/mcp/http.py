@@ -196,12 +196,19 @@ def _call_id(message: dict[str, Any] | None) -> str | int | None:
 
 
 def _streamed(request: Request, message: dict[str, Any] | None) -> bool:
-    """Whether to answer the request as an SSE stream: a tools/call `message` with a
-    ``progressToken`` from a client that accepts one, so the tool's progress reaches it."""
+    """Whether to answer the request as an SSE stream: a tools/call `message` of a tool that
+    sends progress (``ToolSpec.progress``) with a ``progressToken``, from a client that accepts
+    one, so the tool's progress reaches it."""
     if message is None or message.get("method") != "tools/call":
         return False
     params = message.get("params")
-    meta = params.get("_meta") if isinstance(params, dict) else None
+    if not isinstance(params, dict):
+        return False
+    name = params.get("name")
+    spec = request.app.state.mcp_server.specs.get(name) if isinstance(name, str) else None
+    if spec is None or not spec.progress:
+        return False
+    meta = params.get("_meta")
     token = meta.get("progressToken") if isinstance(meta, dict) else None
     if not isinstance(token, str | int) or isinstance(token, bool):
         return False

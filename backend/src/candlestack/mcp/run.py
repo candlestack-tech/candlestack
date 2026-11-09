@@ -48,6 +48,7 @@ from candlestack.mcp.apps import attach, shows_widget, tool_meta
 from candlestack.mcp.convention import (
     COMPARE_PAGE_MAX,
     POLL_S,
+    STAGES,
     WAIT_DEFAULT_S,
     WAIT_MAX_S,
     Example,
@@ -59,6 +60,7 @@ from candlestack.mcp.convention import (
     changes,
     compare_url,
     reads,
+    run_progress,
     runner_of,
     tool_call,
 )
@@ -72,8 +74,6 @@ _ENDED = {"finished", "failed"}
 # Values of the curves to six decimals: a millionth of the starting capital.
 _DECIMALS = 6
 
-# A wait's progress in five equal stages: the user's queue, then the four steps of the run.
-_STAGES = 5
 # What each step but the candles' does while it runs, for the progress' message.
 _DOING = {
     "queue": "waiting for a worker",
@@ -647,20 +647,15 @@ async def start_backtest(  # noqa: PLR0913 (the setup's groups)
 
 
 def progress_of(status: BacktestStatusResult) -> float:
-    """How far the backtest is, 0 to 1, from where it stands, as its page shows it: the user's
-    queue is the first fifth, nearer its end the nearer its turn; then each step a fifth, the
-    candles' load by its chunks; 1 once it ended."""
+    """How far the backtest is, 0 to 1, from where it stands: the user's queue is the first
+    fifth, nearer its end the nearer its turn; then its steps (``run_progress``); 1 once it
+    ended."""
     if status.ended:
         return 1.0
     if status.status == "queued":
         position = status.queue_position
-        return 1 / (position + 1) / _STAGES if position else 0.0
-    done = sum(step.state == "done" for step in status.steps)
-    running = next((step for step in status.steps if step.state == "running"), None)
-    part = 0.0
-    if running is not None and running.id == "candles" and running.total:
-        part = min((running.loaded or 0) / running.total, 1.0)
-    return (1 + done + part) / _STAGES
+        return 1 / (position + 1) / STAGES if position else 0.0
+    return run_progress(status.steps)
 
 
 def stage_of(status: BacktestStatusResult) -> str:
@@ -1157,6 +1152,7 @@ TOOLS = (
             arguments={"backtest_id": _ID, "timeout_s": 50},
             result=BacktestWaitResult(**_FINISHED.model_dump(), done=True, backtests=None),
         ),
+        progress=True,
     ),
     ToolSpec(
         get_backtest_status,

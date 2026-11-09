@@ -384,20 +384,28 @@ def test_a_body_at_the_limit_reaches_the_server_whole(
 
 
 @pytest.mark.parametrize(
-    ("meta", "accept", "streamed"),
+    ("tool", "meta", "accept", "streamed"),
     [
-        ({"progressToken": "p1"}, ACCEPT["Accept"], True),
-        ({"progressToken": 7}, ACCEPT["Accept"], True),
-        (None, ACCEPT["Accept"], False),
-        ({"progressToken": True}, ACCEPT["Accept"], False),
-        ({"progressToken": "p1"}, "application/json", False),
+        ("wait_for_backtest", {"progressToken": "p1"}, ACCEPT["Accept"], True),
+        ("wait_for_sweep", {"progressToken": 7}, ACCEPT["Accept"], True),
+        ("wait_for_backtest", None, ACCEPT["Accept"], False),
+        ("wait_for_backtest", {"progressToken": True}, ACCEPT["Accept"], False),
+        ("wait_for_backtest", {"progressToken": "p1"}, "application/json", False),
+        ("get_backtest_status", {"progressToken": "p1"}, ACCEPT["Accept"], False),
+        ("no_such_tool", {"progressToken": "p1"}, ACCEPT["Accept"], False),
     ],
-    ids=["token", "integer-token", "no-token", "not-a-token", "no-sse"],
+    ids=["token", "integer-token", "no-token", "not-a-token", "no-sse", "no-progress", "unknown"],
 )
 def test_a_tool_call_that_asks_for_progress_is_answered_as_a_stream(
-    mcp_client: TestClient, keys, meta: dict[str, object] | None, accept: str, streamed: bool
+    mcp_client: TestClient,
+    keys,
+    tool: str,
+    meta: dict[str, object] | None,
+    accept: str,
+    streamed: bool,
 ) -> None:
-    params: dict[str, object] = {"name": "no_such_tool", "arguments": {}}
+    # Arguments that do not fit, so the tool answers its problem without reading anything.
+    params: dict[str, object] = {"name": tool, "arguments": {"timeout_s": 0}}
     if meta is not None:
         params["_meta"] = meta
     call = {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": params}
