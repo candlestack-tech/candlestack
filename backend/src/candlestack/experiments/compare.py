@@ -94,8 +94,8 @@ class ComparedBacktest(BaseModel):
     equity: list[float | None] | None = Field(
         description="Its cumulative return (a fraction of its starting capital) at each of "
         "`times`: its last value up to then, null outside its period; null without results "
-        "and with `curve_points` 0. A long backtest's series has a point per day, so its line "
-        "begins at the end of its first day, and its stored curve has at most 1,000 points. "
+        "and with `curve_points` 0. A long backtest's series has a point per day, from 0 at the "
+        "open of its first candle, and its stored curve has at most 1,000 points. "
         "One that finished before its curves were stored is drawn from its short series of at "
         "most 60 points, with buy and hold only when its benchmark held its own instrument"
     )
@@ -124,7 +124,7 @@ class CompareOut(BaseModel):
     times: list[int] = Field(
         description=f"The common time axis of the curves, at most {CURVE_POINTS} UTC epoch "
         "seconds (`curve_points`; none with 0): the first and the last time of each "
-        "backtest's series and times evenly spaced between the earliest and the latest"
+        "backtest's lines and times evenly spaced between the earliest and the latest"
     )
     shared_setup: dict[str, Any] | None = Field(
         default=None,
@@ -566,7 +566,18 @@ def _lines(document: dict[str, Any]) -> tuple[list[Point], list[Point], list[Poi
         for time, value in zip(ts, columns["drawdown"], strict=True)
         if value is not None
     ]
-    return _points(ts, columns["equity"], 1.0), fall, held
+    equity = _points(ts, columns["equity"], 1.0)
+    start = document["data"]["rows"]["first_ts"]
+    return _from_start(equity, start), _from_start(fall, start), _from_start(held, start)
+
+
+def _from_start(line: list[Point], start: int) -> list[Point]:
+    """The line from 0 at ``start``, the open of the backtest's first candle, when its first
+    point is later: a series of days has its first at the end of the first day, and before
+    that candle the backtest had its starting capital and held nothing (#466)."""
+    if line and line[0][0] > start:
+        return [(start, 0.0), *line]
+    return line
 
 
 def value_at(points: Sequence[Point], time: int) -> float | None:

@@ -1102,14 +1102,16 @@ a single backtest that way while it asks for one more.
   `setup_mode=diff` answers what all share once in `shared_setup` and in each backtest's
   `setup` only its fields of `differs` (default `full`: each whole, `shared_setup` null).
 - **Curves**: `times`, at most `curve_points` times shared by all (200 by default, 0 for no
-  curves, which are then not read; the first and the last of each series,
+  curves, which are then not read; the first and the last of each line,
   the rest evenly spaced from the earliest to the latest), and for each backtest `equity` (its
   cumulative return), `drawdown` (its fall from the top, 0 or below) and `buy_and_hold` (the
   return of holding its instrument) as fractions to 0.1 %, the precision of the page's charts,
   at those times: a line's last value up to a time, null outside its period, as the page's
   charts read a line (`chartLines.ts`, `valueAt`). The light document of a backtest of more than
-  10,000 candles has a point per UTC day (the day's last, the lowest drawdown), so its lines
-  begin at the end of its first day; buy and hold is measured from the price held from, so it
+  10,000 candles has a point per UTC day (the day's last, the lowest drawdown), the first at the
+  end of its first day, so its lines start at 0 at the open of its first candle
+  (`data.rows.first_ts`), before which it held only its starting capital: each line starts at 0
+  over its own whole period (#466). Buy and hold is measured from the price held from, so it
   ends at the `buy_and_hold_return` statistic either way. The run stores those columns of its
   light series (`ts`, `close`, `equity`, `drawdown`) as zstd Parquet in `curves`, cut to 1,000
   points (the first row, then of each of evenly sized runs of rows the last with its lowest

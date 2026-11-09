@@ -320,6 +320,44 @@ def test_a_comparison_lists_each_with_its_curves_on_one_axis() -> None:
     assert shown.differs == ["decision.rule.limit"]
 
 
+def test_backtests_of_periods_apart_each_have_their_whole_period_from_zero() -> None:
+    # Days from the open of the first candle at 1,000: the first point ends the first day.
+    early = document(
+        "bt_a",
+        ts=[87_000, 173_400, 259_800],
+        equity=[0.97, 0.5, 0.05],
+        drawdown=[-0.03, -0.5, -0.95],
+        close=[110.0, 99.0, 132.0],
+        stats={**STATS, "buy_and_hold_return": 0.32},
+        resolution="day",
+    )
+    early["data"]["rows"]["first_ts"] = 1_000
+    late = document("bt_b", ts=[1_000_000, 1_000_010, 1_000_020])
+
+    shown = compared([early, late])
+
+    assert {1_000, 259_800, 1_000_000, 1_000_020} <= set(shown.times)
+    first, second = shown.backtests
+
+    def line(curve: list[float | None] | None) -> list[float]:
+        assert curve is not None
+        return [value for value in curve if value is not None]
+
+    def span(curve: list[float | None] | None) -> tuple[int, int]:
+        assert curve is not None
+        drawn = [time for time, value in zip(shown.times, curve, strict=True) if value is not None]
+        return drawn[0], drawn[-1]
+
+    for curve in (first.equity, first.drawdown, first.buy_and_hold):
+        assert span(curve) == (1_000, 259_800)
+        assert line(curve)[0] == 0.0
+    assert (line(first.equity)[-1], line(first.drawdown)[-1]) == (-0.95, -0.95)
+    # A series of candles starts at its first candle already.
+    for curve in (second.equity, second.drawdown):
+        assert span(curve) == (1_000_000, 1_000_020)
+        assert line(curve)[0] == 0.0
+
+
 def test_a_comparison_without_curve_points_has_no_curves() -> None:
     shown = compared([document("bt_a"), document("bt_b", limit=0.2)], points=0)
 

@@ -27,10 +27,21 @@ export const charts = {
   crosshair: [] as Handler[],
   // The options the charts' own price scales were given, by their id ('right'), the latest kept.
   scales: {} as Record<string, Options>,
+  // What the page did to each chart, in order: `data 0` when it set a series' data on the first
+  // chart made, `fit 1` when it fitted the second to its content.
+  steps: [] as string[],
   // The user zooming or scrolling the last chart made to a logical range.
   scroll: (_range: { from: number; to: number }) => {},
   reset() {
-    Object.assign(charts, { made: 0, options: [], series: [], shown: [], crosshair: [], scales: {} });
+    Object.assign(charts, {
+      made: 0,
+      options: [],
+      series: [],
+      shown: [],
+      crosshair: [],
+      scales: {},
+      steps: [],
+    });
   },
   // The series of a type, in the order the chart added them.
   of(type: string) {
@@ -53,13 +64,16 @@ export const CrosshairMode = { Normal: 0, Magnet: 1 };
 export const LineStyle = { Solid: 0, Dotted: 1, Dashed: 2 };
 export const LineType = { Simple: 0, WithSteps: 1 };
 
-function addSeries(type: string, options: Options = {}, pane = 0) {
+function addSeries(chart: number, type: string, options: Options = {}, pane = 0) {
   const series: FakeSeries = { type, pane, options: { visible: true, ...options }, data: [], markers: [] };
   charts.series.push(series);
   const lines: { applyOptions: () => void }[] = [];
   return {
     fake: series,
-    setData: (data: Point[]) => (series.data = data),
+    setData: (data: Point[]) => {
+      charts.steps.push(`data ${String(chart)}`);
+      return (series.data = data);
+    },
     applyOptions: (more: Options) => Object.assign(series.options, more),
     priceScale: () => ({ applyOptions: vi.fn() }),
     createPriceLine: () => {
@@ -85,7 +99,7 @@ function timeOf(position: number): number {
 }
 
 // One chart's time axis: the logical range in view, the parts of time it was put on recorded.
-function timeAxis() {
+function timeAxis(chart: number) {
   const ranges: RangeHandler[] = [];
   let logical: { from: number; to: number } | null = null;
   const moved = () => {
@@ -109,7 +123,10 @@ function timeAxis() {
   const api = {
     getVisibleLogicalRange: () => logical,
     setVisibleLogicalRange: setRange,
-    fitContent: () => setRange({ from: 0, to: points().length - 1 }),
+    fitContent: () => {
+      charts.steps.push(`fit ${String(chart)}`);
+      setRange({ from: 0, to: points().length - 1 });
+    },
     subscribeVisibleLogicalRangeChange: (handler: RangeHandler) => ranges.push(handler),
     unsubscribeVisibleLogicalRangeChange: vi.fn(),
     subscribeSizeChange: vi.fn(),
@@ -119,9 +136,10 @@ function timeAxis() {
 }
 
 export function createChart(box: HTMLElement, options: Options) {
+  const chart = charts.made;
   charts.made += 1;
   charts.options.push(options);
-  const axis = timeAxis();
+  const axis = timeAxis(chart);
   charts.scroll = axis.scroll;
   return {
     removeSeries: vi.fn(),
@@ -130,7 +148,7 @@ export function createChart(box: HTMLElement, options: Options) {
     paneSize: () => ({ width: 100, height: 100 }),
     applyOptions: vi.fn(),
     addSeries: (type: string, options?: Options, pane?: number) => {
-      const series = addSeries(type, options, pane);
+      const series = addSeries(chart, type, options, pane);
       if (type !== 'Candlestick') return series;
       const setData = series.setData;
       series.setData = (data: Point[]) => {

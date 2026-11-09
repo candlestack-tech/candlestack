@@ -324,6 +324,41 @@ describe('the charts of the compare page', () => {
   });
 });
 
+describe('the charts of backtests whose periods do not overlap (#466)', () => {
+  const YEAR = 365 * 86_400;
+  // The backtest of this number, its series moved by `shift` seconds.
+  const moved = (number: number, shift: number) => {
+    const base = doc(number);
+    if (!base.results) throw new Error('A finished backtest has results');
+    const { series } = base.results;
+    const ts = series.columns.ts.map((time) => time + shift);
+    return { ...base, results: { ...base.results, series: { ...series, columns: { ...series.columns, ts } } } };
+  };
+
+  it('draw each over its whole period from 0 %, and fit both charts once both have their lines', async () => {
+    const earlier = moved(12, -2 * YEAR);
+    const later = moved(11, 0);
+    stubApi({ ...LISTS, ...choose(earlier, later) });
+    await renderApp('/backtests/compare');
+    await vi.waitFor(() => {
+      expect(charts.of('Line')).toHaveLength(4);
+    });
+    const [early, late, earlyFall, lateFall] = charts.of('Line');
+    const span = (points: { time: number }[] | undefined) => [points?.[0]?.time, points?.at(-1)?.time];
+    const ts = (each: typeof earlier) => each.results?.series.columns.ts ?? [];
+    expect(span(early?.data)).toEqual([ts(earlier)[0], ts(earlier).at(-1)]);
+    expect(span(late?.data)).toEqual([ts(later)[0], ts(later).at(-1)]);
+    expect(span(earlyFall?.data)).toEqual(span(early?.data));
+    expect(span(lateFall?.data)).toEqual(span(late?.data));
+    for (const line of [early, late, earlyFall, lateFall]) expect(line?.data[0]).toMatchObject({ value: 0 });
+    // A chart's fit waits for its next frame: fitted before the other had its lines, the view the
+    // other copied back undid it.
+    const last = charts.steps.slice(-6);
+    expect(last.map((step) => step.split(' ')[0])).toEqual(['data', 'data', 'data', 'data', 'fit', 'fit']);
+    expect(new Set(last.slice(-2)).size).toBe(2);
+  });
+});
+
 describe('a value on a line of the charts', () => {
   const points = [
     { time: 10, value: 1 },
