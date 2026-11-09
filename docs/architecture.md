@@ -16,7 +16,10 @@ Redis is a cache that can be lost at any time. The backtest itself is `signals`,
 `experiments` runs for the API and the `candlestack-bt` command of `cli` from files. A second
 process, the worker (`python -m candlestack.worker`), runs the models users upload in a
 container without network; the backend hands it jobs through a queue in Redis (`jobs`, see
-[Worker](#worker)).
+[Worker](#worker)). In prod and stage the backend's image runs twice: the API in two granian
+processes (`backend`), and the backtests' runner with the work in the background in one
+process of its own (`runner`), which the API's processes ask through Redis
+([Backtests](#backtests), "Where the runner runs").
 
 ## Runtime
 
@@ -31,21 +34,26 @@ flowchart LR
         tunnel --> cloudflared["cloudflared"]
         cloudflared --> caddy["edge Caddy<br/>routes by hostname"]
         subgraph envbox["one environment: prod or stage"]
-            caddy -->|"/api/*, /mcp"| backend["backend<br/>FastAPI on granian :8000"]
+            caddy -->|"/api/*, /mcp"| backend["backend<br/>FastAPI on granian :8000<br/>2 processes, APP_ROLE=api"]
             caddy -->|"everything else"| frontend["frontend<br/>static page, Caddy :8080"]
-            backend --> redis[("redis<br/>cache only")]
+            backend --> redis[("redis<br/>cache, the runner's channel")]
+            runner["runner<br/>the backend's image, APP_ROLE=runner<br/>runs the backtests"] --> redis
+            runner --> postgres
             backend --> postgres[("postgres<br/>users, sessions, settings, models, backtests")]
             backend --> models[("models volume<br/>uploaded model files")]
             modelsbackup["models-backup<br/>weekly archive"] -.->|"read-only"| models
             subgraph jobsnet["jobs network (internal, no way out)"]
                 backend -->|"jobs, results"| queue[("queue<br/>Redis of the jobs")]
+                runner -->|"predict jobs"| queue
                 worker["worker<br/>runs the models, one job at a time"] -->|"takes jobs"| queue
             end
             worker -.->|"read-only"| models
             backend <-->|"candles, predictions"| jobfiles[("jobs volume<br/>the jobs' files")]
             worker <--> jobfiles
+            runner <--> jobfiles
         end
     end
+    runner -->|"HTTPS, candles"| binance
     backend -->|HTTPS| binance["Binance<br/>REST + data.binance.vision"]
     backend -->|HTTPS| alpaca["Alpaca<br/>trading API + market data"]
     backend -->|"HTTPS, sign-in"| oauth["GitHub and Google<br/>OAuth"]
@@ -54,7 +62,8 @@ flowchart LR
 
 | Container | Image | Notes |
 | --- | --- | --- |
-| `backend` | `ghcr.io/candlestack-tech/candlestack/backend` | calls Binance and Alpaca; gets the environment's Alpaca keys at deploy time; keeps the uploaded model files in the volume `models` (`/data/models`, its only writable path) |
+| `backend` | `ghcr.io/candlestack-tech/candlestack/backend` | serves the API and MCP in two granian processes (`APP_ROLE=api`, `WEB_WORKERS=2`); calls Binance and Alpaca; gets the environment's Alpaca keys at deploy time; keeps the uploaded model files in the volume `models` (`/data/models`, its only writable path) |
+| `runner` | the backend's image | runs the backtests and the work in the background in one process (`APP_ROLE=runner`): not on the edge network, reached by nobody; the API's processes ask it through Redis ([Backtests](#backtests)) |
 | `frontend` | `ghcr.io/candlestack-tech/candlestack/frontend` | the web app, static files served by Caddy |
 | `redis` | `redis:8-alpine` | private network of the environment, no persistence, `allkeys-lru` |
 | `postgres` | `postgres:18-alpine` | private network of the environment, data in a volume; migrated by a one-shot `migrate` container (the backend image, `alembic upgrade head`) before the backend starts; prod and stage dump it every Sunday and keep the newest dump (`backup`) |
@@ -1698,6 +1707,7 @@ Environment variables, read by pydantic-settings without a prefix. All are docum
 | `APP_COMMIT` | `unknown` | commit sha, baked into the image at build time |
 | `LOG_LEVEL` | `INFO` | |
 | `APP_ROLE` | `all` | what the process does: `all` the API, the backtests' runner and the work in the background; `api` only the API (as many processes as needed); `runner` only the runner and the background work (one process) ([Backtests](#backtests)) |
+| `WEB_WORKERS` | `1` | read by the image's command, not by the app: how many granian processes serve the app; more than one only with `APP_ROLE` `api` (prod and stage: 2, and the container `runner` with `runner`) |
 | `PUBLIC_URL` | prod `https://app.candlestack.tech`, stage `https://stage.candlestack.tech`, local `http://localhost:5173`, test `http://testserver` | where the app is reached: OAuth callbacks, cookies (`Secure` and `__Host-` over https), the same-origin check |
 | `REDIS_URL` | `redis://127.0.0.1:6379/0` | |
 | `DATABASE_URL` | `postgresql+asyncpg://candlestack:candlestack@127.0.0.1:5432/candlestack` | Postgres (whitespace stripped); the pool of each process holds at most 10 connections |
