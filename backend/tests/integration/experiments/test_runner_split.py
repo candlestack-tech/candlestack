@@ -13,6 +13,7 @@ from typing import Any
 
 import anyio
 import pytest
+import redis
 from fastapi.testclient import TestClient
 from redis.asyncio import Redis
 
@@ -248,6 +249,28 @@ def test_a_runner_that_stops_fails_its_runs_and_leaves_the_queued_ones(
     assert stopped["status"] == "failed"
     assert "restarted" in stopped["error"]
     assert ada.document(queued).json()["backtest"]["status"] == "queued"
+
+
+def test_the_health_of_an_api_process_says_whether_the_runner_is_alive(
+    client, settings, market, redis_url
+) -> None:
+    key = f"candlestack:{settings.app_env}:runner:alive"
+    with redis.Redis.from_url(redis_url) as direct:
+        direct.delete(key)
+    without = client.get("/api/health")
+
+    process = RunnerProcess(settings, market)
+    process.start()
+    try:
+        soon(lambda: client.get("/api/health").json()["runner"] == "ok")
+        with redis.Redis.from_url(redis_url) as direct:
+            ttl = direct.ttl(key)
+    finally:
+        process.stop()
+
+    assert without.status_code == 200
+    assert (without.json()["status"], without.json()["runner"]) == ("ok", "error")
+    assert 0 < ttl <= 30
 
 
 # --- The channel itself ---------------------------------------------------------------------

@@ -4193,6 +4193,15 @@
             "title": "Redis",
             "type": "string"
           },
+          "runner": {
+            "description": "Whether the backtests' runner is alive: in a process of its own, as its key in Redis says; always `ok` where the API process runs it itself",
+            "enum": [
+              "ok",
+              "error"
+            ],
+            "title": "Runner",
+            "type": "string"
+          },
           "status": {
             "enum": [
               "ok",
@@ -4212,7 +4221,8 @@
           "version",
           "commit",
           "redis",
-          "postgres"
+          "postgres",
+          "runner"
         ],
         "title": "Health",
         "type": "object"
@@ -8256,7 +8266,7 @@
   "paths": {
     "/api/health": {
       "get": {
-        "description": "200 when the app, its Redis and its Postgres work, 503 with the same body when one of\nthem does not.\n\nThe body is compact JSON: deploy checks look for `\"version\":\"<version>\"` and the commit.",
+        "description": "200 when the app, its Redis and its Postgres work, 503 with the same body when one of\nthem does not. `runner` says whether the backtests' runner is alive; it does not change\nthe status, as the API answers without it (a deploy's checks look at it).\n\nThe body is compact JSON: deploy checks look for `\"version\":\"<version>\"` and the commit.",
         "operationId": "health_api_health_get",
         "responses": {
           "200": {

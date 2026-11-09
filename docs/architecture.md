@@ -66,7 +66,7 @@ flowchart LR
 
 | Path | What |
 | --- | --- |
-| `GET /api/health` | liveness + Redis + Postgres; used by deploys and the ops page; not versioned |
+| `GET /api/health` | liveness + Redis + Postgres, and `runner`: whether the backtests' runner is alive (in an `APP_ROLE` `api` process, while the runner's key `candlestack:<APP_ENV>:runner:alive` is in Redis: the runner writes it every 10 s, it expires after 30 s; it does not change `status`); used by deploys (the smoke test waits for `runner` `ok`) and the ops page; not versioned |
 | `GET /api/health/sources` | reachability of Binance and Alpaca (cached 60 s) |
 | `GET /api/v1/data/instruments`, `/instruments/{instrument_id}`, `/instruments/{instrument_id}/candles` | the instrument list, an instrument and its candles, for signed-in accounts only (401 `not-signed-in` otherwise), see [data.md](data.md) |
 | `GET /api/v1/data/instruments/{instrument_id}/icon` | the instrument's logo, or a fallback image; public ([data.md](data.md#icons)) |
@@ -686,7 +686,9 @@ lock of the user's models and only while the stored manifest has the result's
 Replacing the manifest clears all four. A user's checks run one after the other, as their
 backtests do: a manifest set while one of the user's checks runs waits for it (a model set
 again before its turn is checked once, with the manifest it has then), so a user who keeps
-replacing manifests holds at most one job in the worker's queue. A worker that cannot be reached or does not answer
+replacing manifests holds at most one job in the worker's queue. The user's queue of checks lives in the API process that answered
+(`ModelChecks._waiting`), so with several API processes (`APP_ROLE` `api`) a user has one check
+at a time per process: at most as many jobs in the worker's queue as there are processes. A worker that cannot be reached or does not answer
 says nothing about the model, so it stays `ready` and unchecked: prod has no queue yet (its
 `queue` host is not there, the job fails at once with a warning), and on stage a stopped
 worker costs one wait of 180 s per check. `checked_at` null with a manifest marks a model whose
@@ -694,7 +696,9 @@ check never came to an end, as when the process stopped while it waited (a proce
 checks across a restart): at its start the runner's process (`APP_ROLE` `runner` or `all`, not
 `api`) checks those one after the other, oldest first, and stops at the first that finds no
 worker (unreachable or `expired`), so they wait for the next start. A check an API process
-still runs then is made twice, which keeps the same result. On shutdown the checks in progress stop; their models are
+still runs then is made twice, which keeps the same result. An API process that stops (a
+crash, a restart of its container alone) loses its checks until the runner's next start, which
+every deploy makes. On shutdown the checks in progress stop; their models are
 checked at the next start.
 
 ## Backtests

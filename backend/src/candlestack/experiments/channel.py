@@ -34,7 +34,7 @@ import asyncio
 import logging
 import secrets
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
-from contextlib import AbstractContextManager, contextmanager, suppress
+from contextlib import AbstractContextManager, contextmanager
 from typing import Protocol
 
 import anyio
@@ -51,8 +51,10 @@ WAKE = "wake"
 STOP = "stop"
 CHANGED = "changed"
 FILLED = "filled"
-# How long a start waits for the runner's fill before it answers what is stored, in seconds.
+# How long a start waits for the runner's fill before it answers what is stored, and for the
+# wake to be sent, in seconds.
 FILL_WAIT = 1.0
+WAKE_WAIT = 0.5
 # How long a subscription waits for a message in one read, in seconds: below the socket
 # timeout of the app's Redis client (``core.create_redis``).
 READ_WAIT = 1.0
@@ -137,17 +139,21 @@ class RunnerChannel:
         self._redis = redis
         self._prefix = prefix
         # The messages being sent, so none is collected before it is.
-        self._sending: set[asyncio.Task[None]] = set()
+        self._sending: set[asyncio.Task[bool]] = set()
 
     def _channel(self, kind: str) -> str:
         return f"{self._prefix}:{kind}"
 
-    async def publish(self, kind: str, words: Iterable[str]) -> None:
-        """Sends the words; Redis out of reach is a warning, as each message has its net."""
+    async def publish(self, kind: str, words: Iterable[str], *, wait: float | None = None) -> bool:
+        """Sends the words, within ``wait`` seconds when given; whether they were sent. Redis
+        out of reach (or too slow) is a warning, as each message has its net."""
         try:
-            await self._redis.publish(self._channel(kind), " ".join(words))
-        except (RedisError, OSError) as error:
+            with anyio.fail_after(wait):
+                await self._redis.publish(self._channel(kind), " ".join(words))
+        except (RedisError, OSError, TimeoutError) as error:
             logger.warning("The runner's %s was not sent (%s)", kind, type(error).__name__)
+            return False
+        return True
 
     def send(self, kind: str, words: Iterable[str]) -> None:
         """``publish`` in a task of its own, for those that cannot wait for it."""
@@ -167,8 +173,9 @@ class RunnerChannel:
     ) -> None:
         """Hands each message of the kinds to its handler, until cancelled, and calls
         ``subscribed`` each time the subscription is (again) in place, as what was sent while
-        it was not is lost. Redis out of reach is a warning: it subscribes again, after a
-        pause that grows up to ``RETRY_LAST``."""
+        it was not is lost. Redis out of reach is a warning, and anything else a bug of ours (a
+        Sentry issue): either way it subscribes again, after a pause that grows up to
+        ``RETRY_LAST``, so the subscription never ends but by its cancellation."""
         by_channel = {self._channel(kind).encode(): handle for kind, handle in handlers.items()}
         pause = RETRY_FIRST
         while True:
@@ -187,6 +194,8 @@ class RunnerChannel:
                     type(error).__name__,
                     pause,
                 )
+            except Exception:
+                logger.exception("The runner's messages are not heard; trying again")
             await anyio.sleep(pause)
             pause = min(pause * 2, RETRY_LAST)
 
@@ -237,10 +246,11 @@ class RemoteRunner:
         )
 
     async def close(self) -> None:
+        """Stops listening (the shutdown goes on whatever the task ended with) and sends what
+        is being sent."""
         if self._listening is not None:
             self._listening.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._listening
+            await asyncio.gather(self._listening, return_exceptions=True)
         await self._channel.close()
 
     async def ping(self) -> None:
@@ -253,14 +263,15 @@ class RemoteRunner:
 
     async def fill(self) -> None:
         """Asks the runner to fill the slots and waits until it did, ``fill_wait`` at most:
-        a runner that is away (restarting) fills them when it is back."""
+        a runner that is away (restarting) fills them when it is back. A wake that could not be
+        sent within ``WAKE_WAIT`` waits for nothing: the runner's next check fills them."""
         token = secrets.token_hex(8)
         answered = asyncio.Event()
         self._asked[token] = answered
         try:
-            await self._channel.publish(WAKE, [token])
-            with anyio.move_on_after(self._fill_wait):
-                await answered.wait()
+            if await self._channel.publish(WAKE, [token], wait=WAKE_WAIT):
+                with anyio.move_on_after(self._fill_wait):
+                    await answered.wait()
         finally:
             del self._asked[token]
 

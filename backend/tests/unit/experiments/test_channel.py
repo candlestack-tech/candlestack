@@ -24,9 +24,13 @@ class FakeChannel:
 
     def __init__(self) -> None:
         self.sent: list[tuple[str, list[str]]] = []
+        self.up = True
 
-    async def publish(self, kind: str, words: Any) -> None:
-        self.sent.append((kind, list(words)))
+    async def publish(self, kind: str, words: Any, *, wait: float | None = None) -> bool:
+        assert wait is None or wait > 0
+        if self.up:
+            self.sent.append((kind, list(words)))
+        return self.up
 
     def send(self, kind: str, words: Any) -> None:
         self.sent.append((kind, list(words)))
@@ -58,18 +62,20 @@ class FakePubSub:
 
 
 class FlakyRedis:
-    """A Redis whose first subscription fails, and whose second hands out ``messages``."""
+    """A Redis whose first subscription fails with ``failure``, and whose second hands out
+    ``messages``."""
 
-    def __init__(self, messages: list[dict[str, Any]]) -> None:
+    def __init__(self, messages: list[dict[str, Any]], failure: Exception | None = None) -> None:
         self.tries = 0
         self.pubsubs: list[FakePubSub] = []
         self._messages = messages
+        self._failure = failure or RedisConnectionError("Connection refused")
 
     @asynccontextmanager
     async def pubsub(self, **_options: Any) -> AsyncIterator[FakePubSub]:
         self.tries += 1
         if self.tries == 1:
-            raise RedisConnectionError("Connection refused")
+            raise self._failure
         pubsub = FakePubSub(self._messages)
         self.pubsubs.append(pubsub)
         yield pubsub
@@ -214,3 +220,65 @@ async def test_the_runner_answers_a_wake_once_its_fill_ended() -> None:
 
     assert filled == ["turn"]
     assert channel.sent == [("filled", ["one", "two"]), ("changed", ["bt_7f3k2m9qx4"])]
+
+
+class SlowRedis:
+    async def publish(self, *_args: Any) -> int:
+        await anyio.sleep(10)
+        return 1
+
+
+async def test_a_word_that_takes_too_long_is_not_sent(caplog: pytest.LogCaptureFixture) -> None:
+    channel = RunnerChannel(SlowRedis(), "test")  # ty: ignore[invalid-argument-type]
+
+    with anyio.fail_after(5):
+        sent = await channel.publish("wake", ["token"], wait=0.05)
+
+    assert sent is False
+    assert "The runner's wake was not sent (TimeoutError)" in caplog.text
+
+
+async def test_a_fill_whose_wake_was_not_sent_waits_for_nothing() -> None:
+    channel = FakeChannel()
+    channel.up = False
+    api = remote(channel, fill_wait=30)
+
+    with anyio.fail_after(1):
+        await api.fill()
+
+    assert api._asked == {}
+
+
+async def test_a_subscription_that_fails_on_a_bug_is_reported_and_subscribes_again(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(channel_module, "RETRY_FIRST", 0.01)
+    redis = FlakyRedis([{"channel": b"test:wake", "data": b"token"}], RuntimeError("boom"))
+    heard: list[list[str]] = []
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(
+            RunnerChannel(redis, "test").listen,  # ty: ignore[invalid-argument-type]
+            {"wake": heard.append},
+        )
+        with anyio.fail_after(5):
+            while not heard:  # noqa: ASYNC110 (the fake tells nobody)
+                await anyio.sleep(0.01)
+        group.cancel_scope.cancel()
+
+    assert "The runner's messages are not heard; trying again" in caplog.text
+    assert caplog.records[0].exc_info is not None
+    assert heard == [["token"]]
+
+
+async def test_an_api_process_closes_whatever_its_subscription_ended_with() -> None:
+    async def fails() -> None:
+        raise RuntimeError("boom")
+
+    api = remote(FakeChannel())
+    api._listening = asyncio.create_task(fails())
+    await asyncio.sleep(0)
+
+    await api.close()
+
+    assert api._listening.done()

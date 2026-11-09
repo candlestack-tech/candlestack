@@ -31,6 +31,7 @@ from candlestack.core import (
     get_settings,
     health_router,
     install_error_handlers,
+    keep_runner_alive,
     problem_doc,
     sentry_check_router,
     setup_logging,
@@ -134,6 +135,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 _background(data_service, stats=settings.stats_refresh and alone),
                 _sweeping(model_storage) if alone else nullcontext(),
                 _checking(app.state.model_checks, recover=alone),
+                _saying_alive(app),
                 # Last, so it stops first: the tools use everything above.
                 nullcontext() if settings.app_role == "runner" else serving_mcp(app),
             ):
@@ -205,6 +207,15 @@ async def _running(work: Coroutine[Any, Any, None], what: str) -> AsyncIterator[
 def _sweeping(storage: ModelStorage) -> AbstractAsyncContextManager[None]:
     """Sweeps what crashed uploads left while the app runs."""
     return _running(keep_incoming_swept(storage), "The sweep of incoming model files")
+
+
+def _saying_alive(app: FastAPI) -> AbstractAsyncContextManager[None]:
+    """In a ``runner`` process, keeps the key that tells the API processes' health the runner
+    is alive while the app runs."""
+    settings: Settings = app.state.settings
+    if settings.app_role != "runner":
+        return nullcontext()
+    return _running(keep_runner_alive(app.state.redis, settings.app_env), "The runner's key")
 
 
 @asynccontextmanager

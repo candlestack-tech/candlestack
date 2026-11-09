@@ -111,6 +111,7 @@ def test_an_api_process_leaves_the_background_work_to_the_runner(
     monkeypatch.setattr(ModelChecks, "recover", lambda _checks: started.append("checks"))
     monkeypatch.setattr(DataService, "keep_stats_fresh", lambda _service: started.append("stats"))
     monkeypatch.setattr(main, "keep_incoming_swept", lambda _storage: started.append("sweep"))
+    monkeypatch.setattr(main, "keep_runner_alive", lambda *_args: started.append("alive"))
     app = create_app(settings.model_copy(update={"app_role": "api", "stats_refresh": True}))
     app.dependency_overrides[get_redis] = lambda: fake_redis
 
@@ -139,10 +140,14 @@ def test_a_runner_process_runs_the_backtests_and_the_background_work_but_no_mcp(
     async def keep_incoming_swept(_storage: Any) -> None:
         started.append("sweep")
 
+    async def keep_runner_alive(_redis: Any, app_env: str) -> None:
+        started.append(f"alive in {app_env}")
+
     monkeypatch.setattr(BacktestRunner, "recover", recover)
     monkeypatch.setattr(ModelChecks, "recover", lambda _checks: started.append("checks"))
     monkeypatch.setattr(DataService, "keep_stats_fresh", keep_stats_fresh)
     monkeypatch.setattr(main, "keep_incoming_swept", keep_incoming_swept)
+    monkeypatch.setattr(main, "keep_runner_alive", keep_runner_alive)
     app = create_app(settings.model_copy(update={"app_role": "runner", "stats_refresh": True}))
     app.dependency_overrides[get_redis] = lambda: fake_redis
 
@@ -152,7 +157,7 @@ def test_a_runner_process_runs_the_backtests_and_the_background_work_but_no_mcp(
         assert runner._channel is not None
         assert not hasattr(app.state, "mcp_sessions")
 
-    assert sorted(started) == ["checks", "runner", "stats", "sweep"]
+    assert sorted(started) == ["alive in test", "checks", "runner", "stats", "sweep"]
 
 
 def test_one_process_does_everything_by_default(app: FastAPI) -> None:
