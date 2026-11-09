@@ -2,11 +2,15 @@
 search, filters, sorts, pages and counts, starring, the Dashboard, the models' usage, and what
 happens to backtests when their model or their account goes."""
 
+import asyncio
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import event
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 
 pytestmark = pytest.mark.integration
 
@@ -166,6 +170,69 @@ def test_search_finds_the_models_current_name(ada) -> None:
 
     assert numbers(ada.backtests(q="renamed")) == [1]
     assert numbers(ada.backtests(q="original")) == []
+
+
+def test_search_matches_within_one_field_not_across_them(ada) -> None:
+    ada.backtest(1, symbols=("MSFT", "AAPL"), model_name="lstm.keras")
+    ada.backtest(2, name="Mine", generated_name="Ember Lynx")
+
+    # The text the trigram index holds runs the fields together (#1, the names, the model's
+    # name, the symbols as JSON); the search does not.
+    for query in ("A lstm", 'keras ["MSFT', 'MSFT", "AAPL', "Mine Ember", "Ember"):
+        assert numbers(ada.backtests(q=query)) == [], query
+    assert numbers(ada.backtests(q="Backtest A")) == [1]
+    assert numbers(ada.backtests(q="mine")) == [2]
+
+
+async def _explain(database_url: str, statement: str, parameters: Any) -> str:
+    engine = create_async_engine(database_url, poolclass=NullPool)
+    try:
+        async with engine.connect() as connection:
+            result = await connection.exec_driver_sql(f"EXPLAIN {statement}", parameters)
+            return "\n".join(row[0] for row in result)
+    finally:
+        await engine.dispose()
+
+
+def test_the_search_looks_the_backtests_up_by_the_trigram_index(
+    ada, sql, app, database_url: str
+) -> None:
+    model_id = ada.model("renamed.keras")
+    ada.backtest(1, symbols=("MSFT",))
+    # 1999 more like #1, every hundredth of the renamed model.
+    sql(
+        "INSERT INTO backtests (id, user_id, number, status, instruments, representation, "
+        "model_id, model_name, model_framework, setup, generated_name, created_at) "
+        "SELECT 'bt_' || lpad(n::text, 10, '0'), user_id, n, status, instruments, "
+        "representation, CASE WHEN n % 100 = 0 THEN :model_id END, model_name, "
+        "model_framework, setup, 'Backtest ' || n, created_at "
+        "FROM backtests, generate_series(2, 2000) n WHERE number = 1",
+        model_id=model_id,
+    )
+    sql(
+        "UPDATE backtests SET instruments = CAST(:aapl AS jsonb) WHERE number = 7",
+        aapl='[{"market": "stock", "symbol": "AAPL"}]',
+    )
+    sql("ANALYZE backtests")
+    sent: list[tuple[str, Any]] = []
+
+    def record(_connection, _cursor, statement, parameters, *_args) -> None:
+        if "ILIKE" in statement and "FROM backtests" in statement:
+            sent.append((statement, parameters))
+
+    engine = app.state.db.engine.sync_engine
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        found = {query: numbers(ada.backtests(q=query)) for query in ("aapl", "renamed")}
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    assert found == {"aapl": [7], "renamed": list(range(2000, 0, -100))[:10]}
+    # Each query as the app sent it (its count and its page, parameters and all) finds its rows
+    # by the index.
+    assert len(sent) == 4
+    for statement, parameters in sent:
+        assert "ix_backtests_search" in asyncio.run(_explain(database_url, statement, parameters))
 
 
 def test_show(ada) -> None:

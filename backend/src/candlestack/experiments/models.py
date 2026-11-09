@@ -234,3 +234,26 @@ Index(
     Backtest.published_at,
     postgresql_where=Backtest.published_at.is_not(None),
 )
+# What the search of the list (``store.search``) can find in a backtest's own row, in one text
+# (the SQL function ``backtest_search_text`` of the migration that added it): the number as #N,
+# both names, the model's name of when it ran and the instruments' symbols as a JSON array (a
+# symbol is letters, digits and dots, ``data.InstrumentId``, so it shows as it is). A backtest
+# whose field contains the query contains it here too, so its trigram index (pg_trgm) lets
+# Postgres look those rows up instead of reading all of the user's.
+SEARCH_TEXT = func.backtest_search_text(
+    Backtest.number,
+    Backtest.name,
+    Backtest.generated_name,
+    Backtest.model_name,
+    Backtest.instruments,
+    type_=Text,
+)
+Index(
+    "ix_backtests_search",
+    SEARCH_TEXT.label("search"),
+    postgresql_using="gin",
+    postgresql_ops={"search": "gin_trgm_ops"},
+    # New rows go straight into the index rather than a pending list until the next vacuum,
+    # which Postgres would scan in every search: backtests are written seldom, searched often.
+    postgresql_with={"fastupdate": "off"},
+)

@@ -62,6 +62,7 @@ from candlestack.experiments.store import (
     experiment_ordering,
     experiment_scope,
     filters,
+    indexed,
     ordering,
 )
 
@@ -266,8 +267,14 @@ class BacktestsService:
         return BacktestsPage(**found._asdict(), **facets._asdict())
 
     async def find(self, user_id: str, query: ListQuery) -> FoundBacktests:
-        """A page of the user's backtests that match the query: two queries."""
-        conditions = filters(query=query.query, show=query.show, model=query.model, more=query.more)
+        """A page of the user's backtests that match the query: two queries, and one more first
+        for a search the trigram index can look up (the user's models of the name)."""
+        models = None
+        if indexed(query.query):
+            models = await self._store.models_named(user_id, query.query)
+        conditions = filters(
+            query=query.query, models=models, show=query.show, model=query.model, more=query.more
+        )
         total = await self._store.count(user_id, conditions)
         rows = await self._store.backtests(
             user_id,
