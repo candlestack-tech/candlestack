@@ -387,7 +387,7 @@ const EXAMPLE_DECISION: BacktestDocument['decision'] = {
 };
 
 const EXAMPLE_SOFTWARE: BacktestDocument['software'] = {
-  engine_version: '0.3.0',
+  engine_version: '0.4.0',
   app_version: 'dev',
   runner: { format: 'keras', keras: '3.15.1', backend: 'jax 0.7.2' },
 };

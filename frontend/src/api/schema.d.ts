@@ -4548,7 +4548,7 @@ export interface components {
             app_version: string;
             /**
              * Engine Version
-             * @example 0.3.0
+             * @example 0.4.0
              */
             engine_version: string;
             runner: components["schemas"]["RunnerOut"] | null;

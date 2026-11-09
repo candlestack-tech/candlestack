@@ -104,8 +104,9 @@ jobs:
           if grep -qE '^(infra/|frontend/|\.github/|backend/uv\.lock$)' <<<"$changed"; then
             infra=true
           fi
-          # docs/openapi.json: src/api/schema.d.ts is generated from it.
-          if grep -qE '^(frontend/|docs/openapi\.json$|\.github/workflows/ci\.yml$)' <<<"$changed"; then
+          # docs/openapi.json: src/api/schema.d.ts is generated from it. The MCP widget page is built
+          # from src/widget/: src/widget/build.test.ts keeps the committed file current.
+          if grep -qE '^(frontend/|docs/openapi\.json$|backend/src/candlestack/mcp/widget\.html$|\.github/workflows/ci\.yml$)' <<<"$changed"; then
             frontend=true
           fi
           if grep -qE '^(docs/(openapi\.json|api-breaking-changes\.txt)|\.github/(scripts/api-changes\.sh|actions/oasdiff/.*))$' <<<"$changed"; then

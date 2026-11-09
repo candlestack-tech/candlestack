@@ -40,6 +40,8 @@ from candlestack.data import (
     SearchResult,
     Timeframe,
 )
+from candlestack.data.progress import tracker, waiting
+from candlestack.data.sources.base import Period
 from candlestack.experiments import BacktestIn
 from candlestack.mcp import market, run
 from candlestack.mcp.convention import ToolSpec
@@ -110,6 +112,8 @@ class FakeDataService:
     unavailable: list[Market] = field(default_factory=list)
     missing: set[int] = field(default_factory=set)
     calls: list[tuple[Any, ...]] = field(default_factory=list)
+    # The chunks each load of last_candles reports to a watched load, as the service's do.
+    loads: list[int] = field(default_factory=list)
 
     def _called(self, *call: Any) -> None:
         self.calls.append(call)
@@ -154,6 +158,16 @@ class FakeDataService:
     ) -> CandleSet:
         """The last `limit` hours before `end`, missing ones counted, from ``DAY`` on."""
         self._called("last_candles", instrument_id, timeframe, end, limit)
+        if (watched := tracker()) is not None:
+            for chunks in self.loads:
+                watched.plan(
+                    [Period("closed", DAY, DAY + 1, f"c{index}", 0) for index in range(chunks)]
+                )
+                for index in range(chunks):
+                    if index == 1:
+                        waiting(30)
+                        waiting(None)
+                    watched.loaded(index, cached=False)
         return hourly(instrument_id, max(end - limit * HOUR, DAY), end, self.missing)
 
 
@@ -364,6 +378,37 @@ def test_without_start_the_newest_candles_and_where_the_earlier_end(
     assert page["instrument"] == "crypto:BTCUSDT"
     assert page["timeframe"] == "1h"
     assert limiter.keys == ["data:rl:client:127.0.0.1"]
+
+
+def test_candles_report_the_chunks_they_load_to_a_client_that_asks(
+    mcp, service: FakeDataService
+) -> None:
+    """Two loads of 2 and 3 chunks: the second counts on from the first, and a wait for the
+    source's limit says so."""
+    service.loads = [2, 3]
+    reported: list[tuple[float, Any, Any]] = []
+
+    async def run(session: Client) -> CallToolResult:
+        async def report(progress: float, total: float | None, message: str | None) -> None:
+            reported.append((progress, total, message))
+
+        arguments = {"instrument_id": "crypto:BTCUSDT", "timeframe": "1h", "limit": 3}
+        return await session.call_tool("get_candles", arguments, progress_callback=report)
+
+    result = mcp(run)
+
+    assert not result.is_error
+    waits = ", waiting for the data source's limit"
+    assert reported == [
+        (0, 2, "loading candles, 0 of 2 chunks"),
+        (1, 2, "loading candles, 1 of 2 chunks"),
+        (1.5, 2, f"loading candles, 1 of 2 chunks{waits}"),
+        (2, 2, "loading candles, 2 of 2 chunks"),
+        (3, 5, "loading candles, 3 of 5 chunks"),
+        (3.5, 5, f"loading candles, 3 of 5 chunks{waits}"),
+        (4, 5, "loading candles, 4 of 5 chunks"),
+        (5, 5, "loading candles, 5 of 5 chunks"),
+    ]
 
 
 def test_without_start_missing_candles_do_not_end_the_paging(mcp, service: FakeDataService) -> None:

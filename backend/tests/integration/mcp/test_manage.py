@@ -188,6 +188,7 @@ def test_list_sweeps(mcp, keys, ada, sql) -> None:
     [sweep] = listed["sweeps"]
     assert (sweep["id"], sweep["count"], sweep["done"]) == ("sw_aaaaaaaaaa", 2, False)
     assert (sweep["best"]["number"], sweep["best"]["value"]) == (1, 0.5)
+    assert sweep["best"]["url"].endswith(f"/backtests/{sweep['best']['id']}")
     assert (listed["total"], listed["pages"]) == (1, 1)
 
 
