@@ -103,6 +103,9 @@ class ToolSpec:
     # What a call costs of the caller's rate limits (``accounts.charge_rate``), or what works
     # it out from the call's arguments (a short answer from stored data costs less).
     cost: int | Callable[[dict[str, Any]], int] = 1
+    # The tool's ``_meta`` in tools/list: the link to the chat widget of one it shows
+    # (``apps.tool_meta``).
+    meta: dict[str, Any] | None = None
     description: str = field(init=False)
 
     def __post_init__(self) -> None:

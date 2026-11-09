@@ -720,6 +720,23 @@ so its back link returns there (else "← Backtests").
   Time in market, Buy and hold); `rows.ts` only writes the values. The setup follows, written as
   a backtest's page writes it (`setupGroups`), with a dash where a backtest has no such row.
 
+## Chat widget of the MCP server
+
+`src/widget/` is not part of the app: it is the page chat clients (Claude, ChatGPT) show a
+tool's answer with ([#457](https://github.com/candlestack-tech/candlestack/issues/457);
+`docs/architecture.md`, MCP, Chat widget). `npm run build:widget` (`vite.widget.config.ts`)
+builds it into one HTML file with its script and styles inline and writes it into the backend
+package (`backend/src/candlestack/mcp/widget.html`), which serves it; `src/widget/build.test.ts`
+fails when the committed file is not what the sources build, or grows past 150 KB, or loads a
+file. A chat client loads it each time it shows a result, so it is plain TypeScript building
+its elements and SVG charts itself, without React or Lightweight Charts (about 25 KB, 10 KB
+gzipped), in the system's fonts. It takes the app's palette (both themes, as the host says) and
+its number formats (`src/lib/results.ts`) and model names (`src/features/models/manifest.ts`).
+Three cards, after the mockups of the issue: a backtest (equity against its benchmark, drawdown,
+eight statistics), a comparison (up to four backtests on one time axis, six statistics with the
+best marked) and a model (its pipeline, four numbers, the returns of its best backtests). Its
+buttons ask the host to open the app's pages.
+
 ## Experiments
 
 `/experiments` (#368, `src/pages/ExperimentsPage.tsx`, the parts in

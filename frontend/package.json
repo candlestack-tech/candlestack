@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:widget": "vite build --config vite.widget.config.ts",
     "lint": "oxlint --type-aware && prettier --check . && knip",
     "preview": "vite preview",
     "api:types": "openapi-typescript ../docs/openapi.json -o src/api/schema.d.ts",

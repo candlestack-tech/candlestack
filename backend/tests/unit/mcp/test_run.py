@@ -12,6 +12,7 @@ from typing import Any
 import anyio
 import pytest
 from mcp import Client
+from mcp.types import RequestParamsMeta
 
 from candlestack import experiments
 from candlestack.data import InstrumentId, InstrumentNotFound
@@ -24,6 +25,7 @@ from candlestack.experiments.errors import (
 )
 from candlestack.experiments.runs import Standing
 from candlestack.mcp import convention, run
+from candlestack.mcp.apps import CHART_KEY
 
 PROBLEMS = "https://candlestack.tech/problems/"
 ADA = "usr_adaaaaaaaa"
@@ -675,6 +677,126 @@ def test_the_compare_page_is_for_two_to_four_backtests(mcp, runs, count: int) ->
     assert result.structured_content["url"] is None
     # Left out of the text, as every null.
     assert "url" not in json.loads(result.content[0].text)
+
+
+# --- The chat widget's charts -----------------------------------------------------------------
+
+CHATGPT: RequestParamsMeta = {"openai/subject": "v1/abc"}
+
+
+def widget_call(name: str, arguments: dict[str, Any], *, chatgpt: bool):
+    """The call as a client that shows the widget sends it: ChatGPT marks it in its _meta,
+    Claude says so in its capabilities (``apps=True`` on the session)."""
+
+    async def send(session: Client):
+        return await session.call_tool(name, arguments, meta=CHATGPT if chatgpt else None)
+
+    return send
+
+
+def shown(mcp, name: str, arguments: dict[str, Any], *, chatgpt: bool):
+    return mcp(widget_call(name, arguments, chatgpt=chatgpt), apps=not chatgpt)
+
+
+def chart(result) -> Any:
+    return (result.meta or {}).get(CHART_KEY)
+
+
+@pytest.mark.parametrize("chatgpt", [False, True])
+def test_get_backtest_gives_the_widget_its_stored_curves_and_the_model_the_same_answer(
+    mcp, runs, chatgpt: bool
+) -> None:
+    runs.documents["bt_7f3k2m9qx4"] = document()
+    arguments = {"backtest_id": "bt_7f3k2m9qx4"}
+
+    plain = mcp(call("get_backtest", arguments))
+    widget = shown(mcp, "get_backtest", arguments, chatgpt=chatgpt)
+
+    # What a model reads, the text and the structured content, is the same for both.
+    assert widget.content == plain.content
+    assert widget.structured_content == plain.structured_content
+    assert widget.structured_content["equity"] is None
+    assert chart(plain) is None
+    curves = chart(widget)
+    [own] = curves["backtests"]
+    assert set(own) == {"id", "equity", "drawdown", "buy_and_hold"}
+    assert 2 <= len(curves["times"]) <= run.CURVE_POINTS
+    assert len(own["equity"]) == len(curves["times"])
+    # From the small curves its run stored for comparisons, not from its whole series: the
+    # call still reads no series and costs what the light answer costs.
+    assert runs.asked == [(False, False), (False, False)]
+    assert runs.compares == [(run.CURVE_POINTS, "full")]
+
+
+def test_a_backtest_without_results_gives_the_widget_no_chart(mcp, runs) -> None:
+    unfinished = document()
+    unfinished["backtest"] = header(status="running")
+    unfinished["results"] = None
+    runs.documents["bt_7f3k2m9qx4"] = unfinished
+
+    result = shown(mcp, "get_backtest", {"backtest_id": "bt_7f3k2m9qx4"}, chatgpt=False)
+
+    assert not result.is_error, result.content
+    assert chart(result) is None
+    assert runs.compares == []
+
+
+def test_a_backtest_without_stored_curves_still_answers(mcp, runs) -> None:
+    """Test data without a document cannot be compared: the answer comes without a chart."""
+    runs.documents["bt_seedseedse"] = document("bt_seedseedse")
+
+    result = shown(mcp, "get_backtest", {"backtest_id": "bt_seedseedse"}, chatgpt=True)
+
+    assert not result.is_error, result.content
+    assert chart(result) is None
+
+
+@pytest.mark.parametrize("chatgpt", [False, True])
+def test_compare_backtests_gives_the_widget_the_curves_and_the_model_the_same_answer(
+    mcp, runs, chatgpt: bool
+) -> None:
+    runs.documents["bt_aaaaaaaaaa"] = document("bt_aaaaaaaaaa")
+    runs.documents["bt_bbbbbbbbbb"] = document("bt_bbbbbbbbbb", rows=300)
+    arguments = {"ids": ["bt_aaaaaaaaaa", "bt_bbbbbbbbbb"]}
+
+    plain = mcp(call("compare_backtests", arguments))
+    widget = shown(mcp, "compare_backtests", arguments, chatgpt=chatgpt)
+
+    assert widget.content == plain.content
+    assert widget.structured_content == plain.structured_content
+    assert widget.structured_content["times"] == []
+    curves = chart(widget)
+    assert 2 <= len(curves["times"]) <= run.CURVE_POINTS
+    assert curves["backtests"] == [
+        {"id": backtest_id, "equity": curves["backtests"][index]["equity"]}
+        for index, backtest_id in enumerate(["bt_aaaaaaaaaa", "bt_bbbbbbbbbb"])
+    ]
+    assert all(len(item["equity"]) == len(curves["times"]) for item in curves["backtests"])
+    assert chart(plain) is None
+    # The widget's call compares once, with the curves.
+    assert runs.compares == [(0, "full"), (run.CURVE_POINTS, "full")]
+
+
+def test_the_widget_gets_the_curves_of_the_four_it_draws(mcp, runs) -> None:
+    ids = [f"bt_{index:010d}" for index in range(6)]
+    for backtest_id in ids:
+        runs.documents[backtest_id] = document(backtest_id)
+
+    result = shown(mcp, "compare_backtests", {"ids": ids}, chatgpt=True)
+
+    assert [item["id"] for item in chart(result)["backtests"]] == ids[:4]
+
+
+def test_curves_the_model_asked_for_are_the_widget_s_too(mcp, runs) -> None:
+    runs.documents["bt_aaaaaaaaaa"] = document("bt_aaaaaaaaaa")
+    arguments = {"ids": ["bt_aaaaaaaaaa"], "curve_points": 20}
+
+    plain = mcp(call("compare_backtests", arguments))
+    widget = shown(mcp, "compare_backtests", arguments, chatgpt=True)
+
+    assert widget.structured_content == plain.structured_content
+    assert chart(widget) is None
+    assert runs.compares == [(20, "full"), (20, "full")]
 
 
 def test_compare_says_how_to_read_the_max_drawdown() -> None:

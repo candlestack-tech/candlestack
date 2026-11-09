@@ -44,6 +44,7 @@ from candlestack.experiments import (
     check_ids,
     idempotent,
 )
+from candlestack.mcp.apps import attach, shows_widget, tool_meta
 from candlestack.mcp.convention import (
     COMPARE_PAGE_MAX,
     POLL_S,
@@ -438,6 +439,50 @@ def _setup(document: dict[str, Any]) -> SetupOut:
     )
 
 
+# What the widget draws of a backtest of a comparison, and of the one backtest of get_backtest.
+_COMPARED_CURVE = frozenset({"id", "equity"})
+_BACKTEST_CURVES = frozenset({"id", "equity", "drawdown", "buy_and_hold"})
+
+
+def _curves(
+    compared: CompareOut, fields: frozenset[str] = _COMPARED_CURVE, shown: int = COMPARE_PAGE_MAX
+) -> dict[str, Any]:
+    """The curves of the first `shown` backtests of a comparison on its times, as the widget
+    draws them."""
+    return {
+        "times": compared.times,
+        "backtests": [
+            backtest.model_dump(include=set(fields)) for backtest in compared.backtests[:shown]
+        ],
+    }
+
+
+async def _backtest_curves(call: ToolCall, backtest_id: str) -> dict[str, Any] | None:
+    """The widget's chart of a finished backtest: its equity, drawdown and buy and hold at
+    ``CURVE_POINTS`` times, from the small curves its run stored for comparisons (as the
+    Compare page draws them), not from its whole series; None for one that has none (test
+    data without a document)."""
+    try:
+        async with _runs(call) as runs:
+            compared = await experiments.compare_backtests(
+                runs, call.user.id, [backtest_id], curve_points=CURVE_POINTS, setup_mode="full"
+            )
+    except ProblemError:
+        return None
+    return _curves(compared, _BACKTEST_CURVES, shown=1)
+
+
+def _without_curves(compared: CompareOut) -> CompareOut:
+    """The comparison as ``curve_points`` 0 answers it: no times and no curves."""
+    empty = {"equity": None, "drawdown": None, "buy_and_hold": None}
+    return compared.model_copy(
+        update={
+            "times": [],
+            "backtests": [backtest.model_copy(update=empty) for backtest in compared.backtests],
+        }
+    )
+
+
 def backtest_result(
     document: dict[str, Any],
     url: str,
@@ -684,6 +729,11 @@ async def get_backtest(
         _, document = await runs.light(
             call.user.id, backtest_id, series=equity_points > 0, trades=trades_per_page > 0
         )
+    # A client that shows the widget gets the curves for its chart, not for the model.
+    if document["results"] is not None and shows_widget(ctx):
+        chart = await _backtest_curves(call, backtest_id)
+        if chart is not None:
+            attach(ctx, chart)
     return backtest_result(
         document,
         backtest_url(call, backtest_id),
@@ -737,10 +787,20 @@ async def compare_backtests(
     best value is the highest one; its `better` says `lower` as in a lower fall, by its size.
     The marks already account for it."""
     call = tool_call(ctx)
+    # A client that shows the widget gets the curves of those it draws, not for the model; the
+    # widget draws the ones the model asked for (`curve_points`) as they are.
+    chart = curve_points == 0 and shows_widget(ctx)
     async with _runs(call) as runs:
         compared = await experiments.compare_backtests(
-            runs, call.user.id, check_ids(ids), curve_points=curve_points, setup_mode=setup_mode
+            runs,
+            call.user.id,
+            check_ids(ids),
+            curve_points=CURVE_POINTS if chart else curve_points,
+            setup_mode=setup_mode,
         )
+    if chart:
+        attach(ctx, _curves(compared))
+        compared = _without_curves(compared)
     return CompareResult(
         **compared.model_dump(exclude={"backtests"}),
         backtests=[
@@ -1041,6 +1101,7 @@ TOOLS = (
             result=_RESULT,
         ),
         cost=_get_backtest_cost,
+        meta=tool_meta("Reading the backtest", "Read the backtest"),
     ),
     ToolSpec(
         compare_backtests,
@@ -1052,5 +1113,6 @@ TOOLS = (
             arguments={"ids": [_ID, "bt_t9n8v7d6a5"], "curve_points": 2}, result=_COMPARE
         ),
         cost=HEAVY,
+        meta=tool_meta("Comparing the backtests", "Compared the backtests"),
     ),
 )

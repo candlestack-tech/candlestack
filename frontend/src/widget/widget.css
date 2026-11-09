@@ -1,0 +1,444 @@
+/* The widget's look: the app's palette (src/index.css), dark and light, as the chat client's theme
+   says (data-theme on <html>). The system's fonts: the frame loads no font, and Geist would make
+   the file several times larger. */
+
+:root {
+  --bg: #fafaf9;
+  --ink: #141414;
+  --muted: #686868;
+  --faint: #8a8a8a;
+  --rule: #e7e5e2;
+  --edge: #dcd9d5;
+  --accent: #0f766e;
+  --on-accent: #fafaf9;
+  --up: #1a7f37;
+  --down: #b42318;
+  --warn: #a15c07;
+  --compare-1: #1d5fd1;
+  --compare-2: #b86e00;
+  --compare-3: #7a4fd0;
+  --compare-4: #3a3a3a;
+  --font: var(--font-sans, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif);
+  --mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --bg: #0d0f11;
+  --ink: #ecedee;
+  --muted: #9ba1a6;
+  --faint: #686e74;
+  --rule: #23272b;
+  --edge: #2b3035;
+  --accent: #3cc7a6;
+  --on-accent: #0d0f11;
+  --up: #43b049;
+  --down: #f0616d;
+  --warn: #e8b45a;
+  --compare-1: #5b9cf6;
+  --compare-2: #f2a33c;
+  --compare-3: #b794f6;
+  --compare-4: #e8e8e8;
+  color-scheme: dark;
+}
+
+:root {
+  --surface: color-mix(in srgb, var(--ink) 4%, var(--bg));
+  --track: color-mix(in srgb, var(--ink) 8%, var(--bg));
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  --accent-edge: color-mix(in srgb, var(--accent) 38%, var(--bg));
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: transparent;
+  color: var(--ink);
+  font: 13px/1.4 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+.card {
+  overflow: hidden;
+  border: 1px solid var(--edge);
+  border-radius: 14px;
+  background: var(--bg);
+}
+
+.head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.logo {
+  flex: none;
+}
+.logo-tile {
+  fill: var(--accent);
+}
+.logo-candles {
+  fill: var(--bg);
+}
+
+.head-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title,
+.sub,
+.bar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pill {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+}
+.pill.warn {
+  background: color-mix(in srgb, var(--warn) 14%, var(--bg));
+  color: var(--warn);
+}
+.pill.down {
+  background: color-mix(in srgb, var(--down) 14%, var(--bg));
+  color: var(--down);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  padding: 14px 18px 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.legend > span {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.key {
+  width: 16px;
+  height: 3px;
+  background: currentcolor;
+}
+.key.benchmark {
+  background: repeating-linear-gradient(90deg, var(--muted) 0 5px, transparent 5px 8px);
+}
+
+.chart {
+  display: block;
+  margin: 0 auto;
+}
+
+.base {
+  stroke: var(--edge);
+  stroke-dasharray: 3 4;
+}
+
+.axis {
+  fill: var(--faint);
+  font: 10px var(--mono);
+}
+
+.line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.line.strategy {
+  stroke: var(--accent);
+  stroke-width: 2.2;
+}
+.line.benchmark {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.key.strategy {
+  color: var(--accent);
+}
+.slot-1 {
+  color: var(--compare-1);
+  stroke: var(--compare-1);
+}
+.slot-2 {
+  color: var(--compare-2);
+  stroke: var(--compare-2);
+}
+.slot-3 {
+  color: var(--compare-3);
+  stroke: var(--compare-3);
+}
+.slot-4 {
+  color: var(--compare-4);
+  stroke: var(--compare-4);
+}
+
+.fall {
+  fill: color-mix(in srgb, var(--down) 22%, transparent);
+  stroke: var(--down);
+  stroke-width: 1.2;
+}
+
+.drawdown {
+  margin-bottom: 10px;
+}
+
+.caption {
+  padding: 14px 18px 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.caption.rule {
+  border-top: 1px solid var(--rule);
+}
+.chart + .caption {
+  padding-top: 4px;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  border-top: 1px solid var(--rule);
+  background: var(--rule);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--bg);
+}
+
+.tile-label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tile-value {
+  font: 500 18px var(--mono);
+}
+
+.up {
+  color: var(--up);
+}
+.down {
+  color: var(--down);
+}
+
+.note {
+  margin: 0;
+  padding: 14px 18px;
+  color: var(--muted);
+}
+
+.table {
+  overflow-x: auto;
+  margin-top: 6px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 9px 8px;
+  border-top: 1px solid var(--rule);
+  text-align: left;
+  white-space: nowrap;
+}
+th:first-child {
+  padding-left: 18px;
+}
+th:last-child,
+td:last-child {
+  padding-right: 18px;
+}
+thead th {
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 500;
+}
+tbody th {
+  font-weight: 400;
+}
+
+.num {
+  font-family: var(--mono);
+  text-align: right;
+}
+thead .num {
+  font-family: var(--font);
+}
+
+.best {
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: 10px var(--font);
+}
+
+.steps {
+  display: flex;
+  gap: 16px;
+  margin: 0;
+  padding: 0 18px 16px;
+  list-style: none;
+}
+
+.step {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.step + .step::before {
+  position: absolute;
+  top: 50%;
+  left: -13px;
+  color: var(--faint);
+  content: '›';
+  transform: translateY(-50%);
+}
+.step.hot {
+  border-color: var(--accent-edge);
+  background: var(--accent-soft);
+}
+
+.kicker {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.step-title {
+  font-weight: 600;
+}
+
+.step-detail {
+  color: var(--muted);
+  font: 11px/1.4 var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 18px 14px;
+  font-size: 12px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 70px;
+  gap: 10px;
+  align-items: center;
+}
+
+.bar-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--track);
+}
+
+.bar {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: currentcolor;
+}
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 18px;
+  border-top: 1px solid var(--rule);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: 13px;
+  text-decoration: none;
+}
+.button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.aside {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+/* A phone: two tiles a row, the steps one under another. */
+@media (width < 520px) {
+  .tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .steps {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .step + .step::before {
+    content: none;
+  }
+}

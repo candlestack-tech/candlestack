@@ -18,10 +18,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from candlestack.accounts import Scope
 from candlestack.core import ProblemError
+from candlestack.experiments import (
+    BacktestFilters,
+    BacktestSort,
+    BacktestStatus,
+    ListQuery,
+    SortOrder,
+    get_backtests_service,
+)
+from candlestack.mcp.apps import attach, shows_widget, tool_meta
 from candlestack.mcp.convention import (
     Example,
     ToolCall,
     ToolSpec,
+    backtest_url,
     changes,
     model_url,
     reads,
@@ -100,6 +110,10 @@ def _checks(call: ToolCall) -> ModelChecks:
 async def _chunks(document: dict[str, Any]) -> AsyncIterator[bytes]:
     """The manifest as the JSON text a route reads, in one chunk."""
     yield json.dumps(document, ensure_ascii=False).encode()
+
+
+# The most backtests of a model the widget shows, the best by the Sharpe ratio.
+WIDGET_BACKTESTS = 6
 
 
 class ModelBrief(BaseModel):
@@ -222,7 +236,41 @@ async def get_model(model_id: ModelId, ctx: Context) -> ModelDetail:
     `state` is `verified` when it passed, and `check_failed` with `check_error` say why it
     failed (the model stays `ready`). get_manifest gives the whole manifest."""
     call = tool_call(ctx)
-    return _detail(call, await _model(call, model_id))
+    detail = _detail(call, await _model(call, model_id))
+    if shows_widget(ctx):
+        attach(ctx, await _model_chart(call, detail.id))
+    return detail
+
+
+async def _model_chart(call: ToolCall, model_id: str) -> dict[str, Any]:
+    """What the widget shows of a model beyond get_model's answer: its best finished backtests
+    by the Sharpe ratio with their returns, and the best one's decision rule as the last step
+    of the model's pipeline."""
+    query = ListQuery(
+        sort=BacktestSort.sharpe,
+        order=SortOrder.desc,
+        per_page=WIDGET_BACKTESTS,
+        more=BacktestFilters(statuses=(BacktestStatus.finished,), model_id=model_id),
+    )
+    async with call.db() as db:
+        found = await get_backtests_service(db).find(call.user.id, query)
+    best = found.backtests[0].setup if found.backtests else None
+    return {
+        "backtests": [
+            {
+                "id": backtest.id,
+                "name": backtest.name,
+                "symbols": [instrument.symbol for instrument in backtest.instruments],
+                "total_return": backtest.total_return,
+                "sharpe": backtest.sharpe,
+                "url": backtest_url(call, backtest.id),
+            }
+            for backtest in found.backtests
+        ],
+        "decision": None
+        if best is None
+        else {"threshold": best.threshold, "direction": best.direction.value},
+    }
 
 
 class ManifestResult(BaseModel):
@@ -662,6 +710,7 @@ TOOLS = (
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(arguments={"model_id": "mdl_7f3k2m9qx4"}, result=_MODEL),
+        meta=tool_meta("Reading the model", "Read the model"),
     ),
     ToolSpec(
         get_manifest,

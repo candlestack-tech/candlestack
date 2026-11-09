@@ -1182,6 +1182,41 @@ call, as the routes' dependencies do), never the API over HTTP.
   `https://candlestack.tech/docs/backtest-json/` (website#63, #64); a unit test fails when the
   instructions, the resource, a tool's description or a description in its schemas links a
   page that is not in its list of known pages.
+- **Chat widget** (`mcp/apps.py`, #457): clients that show interactive UI (Claude and ChatGPT
+  both implement [MCP Apps](https://github.com/modelcontextprotocol/ext-apps), spec 2026-01-26)
+  draw `get_backtest`, `compare_backtests` and `get_model` as cards. The server registers the
+  SDK's MCP Apps extension (`mcp.server.apps.Apps`, so the 2026-07-28 capabilities name
+  `io.modelcontextprotocol/ui`) with one resource, `ui://candlestack/widget-<sha>.html`
+  (`text/html;profile=mcp-app`, its name the first 12 hex digits of the page's SHA-256, so a
+  client that keeps resources fetches a new page after a deploy; the template
+  `ui://candlestack/widget-{version}.html` answers the current page at an older address, for a
+  client's list of tools from before a deploy or a past conversation), whose `_meta.ui.csp`
+  names no domain: the frame loads and connects to nothing. The three tools carry
+  `_meta.ui.resourceUri` (ChatGPT reads the standard key too) and ChatGPT's
+  `openai/toolInvocation/*` status lines. The page is `mcp/widget.html`, one file with its
+  script and styles inline (about 25 KB, 10 KB gzipped), built from `frontend/src/widget/` by
+  `npm run build:widget` and committed; a frontend test fails when it is not what the sources
+  build. It is plain TypeScript and SVG (no React, no chart library), the app's palette in both
+  themes, and speaks the bridge itself: `ui/initialize`, then the result
+  (`ui/notifications/tool-result`), the theme (`hostContext.theme`,
+  `host-context-changed`), `ui/open-link` for its buttons and `ui/notifications/size-changed`
+  for its height; ChatGPT's older `window.openai` serves as a fallback. The text and the
+  structured content of every answer stay as they are, for clients without UI and for the
+  model alike. What a card draws beyond the answer goes in the result's `_meta` under
+  `candlestack.tech/chart` (`apps.attach`), which hosts give the widget and not the model:
+  for a backtest its equity, drawdown and buy and hold at 200 times, from the small curves its
+  run stored for comparisons (one backtest's `compare_backtests`, never its whole series, so
+  `get_backtest` still costs 1); for a comparison asked without `curve_points` the equity of
+  the first four (the page's most) at 200 times, while one asked with curves draws those; for a
+  model its six best finished backtests by Sharpe with the best one's decision rule (the page
+  is the answer's `url`). A tool adds it only for a client that shows the widget
+  (`apps.shows_widget`: MCP Apps in the call's capabilities, which only the 2026-07-28 protocol
+  sends with each call of this stateless server, or ChatGPT's `openai/` keys in the call's
+  `_meta`). Without it the widget asks for it itself through the host (`tools/call`, signed in
+  by the host): `compare_backtests` with `curve_points` of the backtest or of the four it
+  draws, `list_backtests` of the model. It keeps finished backtests' curves in the frame's
+  storage for a week, so a conversation opened again asks no more, and draws the answer alone
+  if asking fails. Its buttons open only HTTPS pages of the app the card's links name.
 - **Tools**: one module per area, each with its `TOOLS`, which `server.TOOLS` puts together.
   - `account`: `get_me` (scope `read`): the key's user (ID, name, email, created) and the
     key's scopes.

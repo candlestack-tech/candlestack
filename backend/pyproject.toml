@@ -409,7 +409,7 @@ layers = [
 # (one module per area), then the convention they follow, the docs it links and the parity
 # table, which names tools and endpoints but imports neither.
 [[tool.importlinter.contracts]]
-name = "Inside mcp: reference and HTTP -> server -> tools -> convention -> docs and parity"
+name = "Inside mcp: reference and HTTP -> server -> tools -> convention -> apps, docs and parity"
 type = "layers"
 containers = ["candlestack.mcp"]
 layers = [
@@ -417,7 +417,7 @@ layers = [
     "server",
     "account | manage | market | models | run | sweeps",
     "convention",
-    "docs | parity",
+    "apps | docs | parity",
 ]
 
 # The API checks an uploaded model by reading its file, never by loading it: a load could run

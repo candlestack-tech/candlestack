@@ -23,6 +23,7 @@ from pydantic import BaseModel, ValidationError
 from candlestack.accounts import charge_rate
 from candlestack.core import ProblemError
 from candlestack.mcp import account, deletes, manage, market, models, run, sweeps
+from candlestack.mcp.apps import add_widget_versions, attached, widget_extension
 from candlestack.mcp.convention import ToolSpec, problem_result, tool_call
 from candlestack.mcp.docs import DOCS_TEXT, DOCS_URI, INSTRUCTIONS
 
@@ -98,6 +99,7 @@ class CandleStackMCP(MCPServer):
             website_url=WEBSITE,
             icons=ICONS,
             version=version,
+            extensions=[widget_extension()],
         )
         self.specs = {spec.name: spec for spec in specs}
         # Each tool's output model, the return type of its function.
@@ -112,6 +114,7 @@ class CandleStackMCP(MCPServer):
                 description=spec.description,
                 annotations=spec.annotations,
                 structured_output=True,
+                meta=spec.meta,
             )
         self.resource(
             DOCS_URI,
@@ -121,6 +124,7 @@ class CandleStackMCP(MCPServer):
             "backtest result references",
             mime_type="text/markdown",
         )(_docs)
+        add_widget_versions(self)
 
     @override
     async def call_tool(
@@ -144,7 +148,12 @@ class CandleStackMCP(MCPServer):
         if not isinstance(result, CallToolResult) or result.structured_content is None:
             return result
         text = compact_text(self.outputs[name], result.structured_content)
-        return result.model_copy(update={"content": [TextContent(type="text", text=text)]})
+        update: dict[str, Any] = {"content": [TextContent(type="text", text=text)]}
+        # The series of the widget's charts, which only the widget reads (``apps``).
+        meta = None if context is None else attached(context)
+        if meta is not None:
+            update["meta"] = {**(result.meta or {}), **meta}
+        return result.model_copy(update=update)
 
     @staticmethod
     def _problem(name: str, error: ToolError) -> ProblemError:

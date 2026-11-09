@@ -1,6 +1,20 @@
 {
   "resources": [
     {
+      "_meta": {
+        "openai/widgetDescription": "Draws a CandleStack backtest, comparison or model: the equity and drawdown charts, the statistics, how the model reads the market, and links to open them in the app. It shows what the tool answered and adds no finding of its own.",
+        "ui": {
+          "csp": {},
+          "prefersBorder": true
+        }
+      },
+      "description": "Draws a CandleStack backtest, comparison or model: the equity and drawdown charts, the statistics, how the model reads the market, and links to open them in the app. It shows what the tool answered and adds no finding of its own.",
+      "mimeType": "text/html;profile=mcp-app",
+      "name": "widget",
+      "title": "CandleStack widget",
+      "uri": "ui://candlestack/widget-f30ecc5682d4.html"
+    },
+    {
       "description": "Links to the docs for agents, the tool reference, the manifest and the backtest result references",
       "mimeType": "text/markdown",
       "name": "docs",
@@ -2419,6 +2433,13 @@
       "title": "List models"
     },
     {
+      "_meta": {
+        "openai/toolInvocation/invoked": "Read the model",
+        "openai/toolInvocation/invoking": "Reading the model",
+        "ui": {
+          "resourceUri": "ui://candlestack/widget-f30ecc5682d4.html"
+        }
+      },
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": true,
@@ -7232,6 +7253,13 @@
       "title": "Backtest status"
     },
     {
+      "_meta": {
+        "openai/toolInvocation/invoked": "Read the backtest",
+        "openai/toolInvocation/invoking": "Reading the backtest",
+        "ui": {
+          "resourceUri": "ui://candlestack/widget-f30ecc5682d4.html"
+        }
+      },
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": true,
@@ -8468,6 +8496,13 @@
       "title": "Read a backtest"
     },
     {
+      "_meta": {
+        "openai/toolInvocation/invoked": "Compared the backtests",
+        "openai/toolInvocation/invoking": "Comparing the backtests",
+        "ui": {
+          "resourceUri": "ui://candlestack/widget-f30ecc5682d4.html"
+        }
+      },
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": true,

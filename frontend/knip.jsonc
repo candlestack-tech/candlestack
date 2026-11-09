@@ -3,4 +3,6 @@
   // Generated from docs/openapi.json: it exports the whole API, used or not.
   "ignore": ["src/api/schema.d.ts"],
   "ignoreExportsUsedInFile": true,
+  // The chat widget of the MCP server, its own page (vite.widget.config.ts, npm run build:widget).
+  "entry": ["src/widget/main.ts"],
 }
