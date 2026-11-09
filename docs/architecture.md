@@ -1229,10 +1229,14 @@ call, as the routes' dependencies do), never the API over HTTP.
   `schemas/backtest-result`, built from the code as `docs/*.schema.json` is) and `api/errors`,
   the page of every problem type. With `page` it answers `https://candlestack.tech/docs/<page>.md`,
   fetched only when `llms.txt` lists the page (a `page` is lowercase words and slashes, so no
-  other address is ever fetched), with the app's HTTP client, no redirects, in 5 s and at most
-  1 MiB. Each answer of the website is cached in the process for 5 minutes; while the website
-  fails, a copy up to an hour old answers, else `503 docs-unavailable`, whose detail gives the
-  user the page's address and tells the agent not to answer from memory. A page longer than
+  other address is ever fetched), with a client of its own (`app.state.docs_http`, opened by
+  `serving_mcp`: 2 connections, no proxy from the environment, no redirects, no compression),
+  so a website that hangs never holds the connections of the market data or the sign-in; in 5 s
+  and at most 1 MiB. Each answer of the website is cached in the process for 5 minutes, and calls
+  that miss it at once share one fetch. After a failed fetch (an `llms.txt` without pages counts
+  as one) the website is left alone for 30 s; meanwhile, and while it fails, a copy up to an hour
+  old answers at once, else `503 docs-unavailable`, whose detail gives the user the page's
+  address and tells the agent not to answer from memory. A page longer than
   20,000 characters (about 5,000 tokens) comes in `parts`, cut before a heading where one fits;
   `section` answers one `##` or `###` section with its subsections, and `sections` lists the
   headings. Tool descriptions that an agent would otherwise guess from (`validate_backtest`,

@@ -70,15 +70,16 @@ def test_a_prompt_is_the_plan_with_the_arguments_and_the_rules(mcp) -> None:
 
 @pytest.mark.parametrize("prompt", PROMPTS, ids=lambda p: p.name)
 def test_every_prompt_reads_the_docs_and_names_tools_that_exist(prompt) -> None:
-    tools = {tool.name for tool in asyncio.run(build_server("prompts").list_tools())}
-    arguments = {"backtest": "bt_7f3k2m9qx4"} if "backtest" in prompt.fn.__annotations__ else {}
-    text = prompt.fn(**arguments)
+    listed = asyncio.run(build_server("prompts").list_tools())
+    tools = {tool.name for tool in listed}
+    parameters = {name for tool in listed for name in tool.input_schema.get("properties", {})}
+    text = prompt.fn(**{"backtest": "bt_x"} if "backtest" in prompt.fn.__annotations__ else {})
 
-    named = set(re.findall(r"\b[a-z]+(?:_[a-z0-9]+){1,3}\b", text))
+    named = set(re.findall(r"\b[a-z]+(?:_[a-z0-9]+){1,3}\b", text)) - {"bt_x"}
     assert "get_docs" in text
     assert named & tools, "A prompt names the tools to call"
-    unknown = {name for name in named - tools if name.startswith(("get_", "list_", "run_"))}
-    assert not unknown
+    # Every snake_case name is a tool or a parameter of one: a typo or a renamed tool fails.
+    assert not sorted(named - tools - parameters)
     assert _pages(text) <= PAGES
 
 

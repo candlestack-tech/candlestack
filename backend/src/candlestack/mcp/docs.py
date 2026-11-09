@@ -50,7 +50,8 @@ resource {DOCS_URI} links them."""
 DOCS_TEXT = f"""\
 # CandleStack docs for agents
 
-The tool get_docs lists these pages and answers each one as Markdown.
+The tool get_docs lists the docs pages of candlestack.tech and answers each one as Markdown, with
+the JSON Schemas below and the problem types (page api/errors).
 
 - Agents: {AGENTS_DOCS} (what the MCP server and the API can do, which to pick)
 - MCP server: {MCP_DOCS} (address, sign-in, scopes, what is web only and why)

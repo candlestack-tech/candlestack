@@ -4,11 +4,13 @@ cannot open the website.
 The pages come from the website as it is published, never from a copy here, so they cannot drift
 from it: the list from its index for agents (``DOCS_INDEX``, llms.txt) and each page from its
 Markdown version (``/docs/<page>.md``). Only the pages the index lists are fetched, from that one
-host, so the tool reaches no other address. Each answer is cached for a few minutes; when the
-website cannot be reached, a copy at most an hour old still answers, else the problem
-docs-unavailable. The JSON Schemas of the manifest and the result document come from the code
-that checks them, as ``docs/*.schema.json`` does. A page longer than ``PART_CHARS`` comes in
-parts, and ``section`` answers one ``##`` section of it.
+host, with a client of its own (``docs_client``), so the tool reaches no other address and
+never holds the app's connections. Each answer is cached for a few minutes, and calls that miss
+it at once share one fetch; when the website cannot be reached, a copy at most an hour old
+still answers, else the problem docs-unavailable, and the website is left alone for a while.
+The JSON Schemas of the manifest and the result document come from the code that checks them,
+as ``docs/*.schema.json`` does. A page longer than ``PART_CHARS`` comes in parts, and
+``section`` answers one section of it (a ``##`` or ``###`` heading and what is under it).
 """
 
 import asyncio
@@ -36,8 +38,11 @@ logger = logging.getLogger(__name__)
 # How long a page stays fresh, and how old a copy may be to answer while the website is down.
 FRESH_S = 300.0
 STALE_S = 3600.0
-# One fetch, connection included; the largest page the website may answer.
+# How long the website is left alone after a failed fetch.
+RETRY_S = 30.0
+# One fetch, connection included; the connections to the website at most; the largest page.
 FETCH_S = 5.0
+CONNECTIONS = 2
 MAX_BYTES = 1024 * 1024
 # The text of one answer: about 5,000 tokens.
 PART_CHARS = 20_000
@@ -144,6 +149,19 @@ class DocsUnavailable(Exception):
     """The website did not answer the page."""
 
 
+def docs_client() -> httpx.AsyncClient:
+    """The client get_docs reads the website with, apart from the app's shared one: a website
+    that hangs holds at most ``CONNECTIONS`` connections, never those of the market data and
+    the sign-in. No proxy from the environment and no redirects; ``_fetch`` asks for no
+    compression, so a small answer cannot inflate past the size cap."""
+    return httpx.AsyncClient(
+        trust_env=False,
+        follow_redirects=False,
+        timeout=httpx.Timeout(FETCH_S),
+        limits=httpx.Limits(max_connections=CONNECTIONS, max_keepalive_connections=CONNECTIONS),
+    )
+
+
 @dataclass(slots=True)
 class _Copy:
     text: str
@@ -152,29 +170,66 @@ class _Copy:
 
 class DocsCache:
     """The website's answers by URL, fresh for ``FRESH_S`` and kept ``STALE_S`` for when the
-    website is down. One per process: the pages are the same for everyone."""
+    website is down. One per process: the pages are the same for everyone.
+
+    Calls that miss the same URL at once share one fetch. After a failed fetch the website is
+    left alone for ``RETRY_S``: the older copy answers at once, or the failure."""
 
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
         self._copies: dict[str, _Copy] = {}
+        self._fetching: dict[str, asyncio.Future[str]] = {}
+        self._retry_at: dict[str, float] = {}
         self._clock = clock
 
     def clear(self) -> None:
         self._copies.clear()
+        self._retry_at.clear()
 
-    async def get(self, http: httpx.AsyncClient, url: str) -> str:
+    async def get(
+        self, http: httpx.AsyncClient, url: str, valid: Callable[[str], bool] = bool
+    ) -> str:
+        """The text at `url`; a text `valid` refuses counts as a failed fetch."""
         now = self._clock()
         copy = self._copies.get(url)
         if copy is not None and now - copy.fetched < FRESH_S:
             return copy.text
+        stale = copy if copy is not None and now - copy.fetched < STALE_S else None
         try:
-            text = await _fetch(http, url)
+            if now < self._retry_at.get(url, now):
+                raise DocsUnavailable("it failed less than a minute ago")
+            return await self._shared(http, url, valid)
         except DocsUnavailable as error:
-            if copy is not None and now - copy.fetched < STALE_S:
+            if stale is not None:
                 logger.warning("Answering an older copy of %s: %s", url, error)
-                return copy.text
+                return stale.text
             logger.warning("The docs at %s are unavailable: %s", url, error)
             raise
-        self._copies[url] = _Copy(text, now)
+
+    async def _shared(self, http: httpx.AsyncClient, url: str, valid: Callable[[str], bool]) -> str:
+        """The fetch of `url` in progress, or a new one; a caller that gives up leaves it running
+        for the others."""
+        fetching = self._fetching.get(url)
+        if fetching is None:
+            fetching = asyncio.ensure_future(self._load(http, url, valid))
+            self._fetching[url] = fetching
+            fetching.add_done_callback(lambda done: self._done(url, done))
+        return await asyncio.shield(fetching)
+
+    def _done(self, url: str, fetch: "asyncio.Future[str]") -> None:
+        self._fetching.pop(url, None)
+        if not fetch.cancelled():
+            fetch.exception()  # retrieved here when every caller gave up
+
+    async def _load(self, http: httpx.AsyncClient, url: str, valid: Callable[[str], bool]) -> str:
+        try:
+            text = await _fetch(http, url)
+            if not valid(text):
+                raise DocsUnavailable("the website answered no docs")
+        except DocsUnavailable:
+            self._retry_at[url] = self._clock() + RETRY_S
+            raise
+        self._retry_at.pop(url, None)
+        self._copies[url] = _Copy(text, self._clock())
         return text
 
 
@@ -185,7 +240,9 @@ async def _fetch(http: httpx.AsyncClient, url: str) -> str:
     """The text at `url`, one of the website's: no redirect, at most ``MAX_BYTES``."""
     try:
         async with asyncio.timeout(FETCH_S):
-            async with http.stream("GET", url, follow_redirects=False) as response:
+            async with http.stream(
+                "GET", url, follow_redirects=False, headers={"Accept-Encoding": "identity"}
+            ) as response:
                 if response.status_code != 200:
                     raise DocsUnavailable(f"HTTP {response.status_code}")
                 body = bytearray()
@@ -296,29 +353,28 @@ def _no_page(page: str) -> ProblemError:
     return ProblemError(
         404,
         "not-found",
-        "Not found",
+        "Not Found",
         f"There is no docs page {page!r}. Call get_docs without a page for the list.",
     )
 
 
 def _no_section(page: str, section: str, sections: list[str]) -> ProblemError:
+    known = f"Its sections: {', '.join(sections)}." if sections else "It has no sections."
     return ProblemError(
-        404,
-        "not-found",
-        "Not found",
-        f"The page {page!r} has no section {section!r}. Its sections: {', '.join(sections)}.",
+        404, "not-found", "Not Found", f"The page {page!r} has no section {section!r}. {known}"
     )
 
 
 def _no_part(part: int, parts: int) -> ProblemError:
     return ProblemError(
-        404, "not-found", "Not found", f"There is no part {part}: this text has {parts}."
+        404, "not-found", "Not Found", f"There is no part {part}: this text has {parts}."
     )
 
 
 async def _listed(http: httpx.AsyncClient) -> list[DocsPage]:
     try:
-        return _index(await CACHE.get(http, DOCS_INDEX))
+        # An index without pages is a broken build of the website, not the docs.
+        return _index(await CACHE.get(http, DOCS_INDEX, valid=lambda text: bool(_index(text))))
     except DocsUnavailable:
         raise docs_unavailable(f"{DOCS}/") from None
 
@@ -375,7 +431,7 @@ async def get_docs(
     Schemas of the manifest and the result document, and the page of every problem type).
     With `page`: its text as Markdown and its `sections`. A long page comes in `parts`: ask for
     the next with `part`, or for one section with `section`."""
-    http = tool_call(ctx).state.http
+    http = tool_call(ctx).state.docs_http
     if page is None:
         return DocsResult(pages=await _listed(http), references=_REFERENCE_PAGES)
     title, url, text = await _page(http, page)

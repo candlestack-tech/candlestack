@@ -20,6 +20,7 @@ from candlestack.mcp.library import (
     FRESH_S,
     MAX_BYTES,
     PART_CHARS,
+    RETRY_S,
     STALE_S,
     DocsCache,
     DocsUnavailable,
@@ -199,14 +200,11 @@ def test_the_schemas_come_from_the_code_as_the_repository_has_them(mcp) -> None:
         ("schemas/backtest-result", "backtest.schema.json"),
     ):
         text = (DOCS / file).read_text(encoding="utf-8")
-        parts = [
-            result(docs(mcp, page=page, part=part))
-            for part in range(1, len(text) // PART_CHARS + 2)
-        ]
+        first = result(docs(mcp, page=page))
+        rest = [result(docs(mcp, page=page, part=n)) for n in range(2, first["parts"] + 1)]
 
-        assert {answer["parts"] for answer in parts} == {len(parts)}
-        assert "".join(answer["content"] for answer in parts) == text
-        assert parts[0]["sections"] is None
+        assert "".join(answer["content"] for answer in [first, *rest]) == text
+        assert first["sections"] is None
 
 
 def test_a_long_page_comes_in_parts_cut_before_a_heading(mcp, website) -> None:
@@ -269,6 +267,97 @@ def test_an_older_copy_answers_while_the_website_is_down(website) -> None:
         asyncio.run(read())
 
 
+def test_calls_that_miss_at_once_share_one_fetch(website) -> None:
+    async def slow(_request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.05)
+        return httpx.Response(200, text=MANIFEST)
+
+    route = website.get(MANIFEST_URL).mock(side_effect=slow)
+    cache = DocsCache()
+
+    async def read_at_once() -> list[str]:
+        async with httpx.AsyncClient() as http:
+            return await asyncio.gather(*(cache.get(http, MANIFEST_URL) for _ in range(20)))
+
+    assert asyncio.run(read_at_once()) == [MANIFEST] * 20
+    assert route.call_count == 1
+
+
+def test_a_caller_that_gives_up_leaves_the_fetch_to_the_others(website) -> None:
+    async def slow(_request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.05)
+        return httpx.Response(200, text=MANIFEST)
+
+    route = website.get(MANIFEST_URL).mock(side_effect=slow)
+    cache = DocsCache()
+
+    async def one_gives_up() -> str:
+        async with httpx.AsyncClient() as http:
+            impatient = asyncio.ensure_future(cache.get(http, MANIFEST_URL))
+            patient = asyncio.ensure_future(cache.get(http, MANIFEST_URL))
+            await asyncio.sleep(0.01)
+            impatient.cancel()
+            return await patient
+
+    assert asyncio.run(one_gives_up()) == MANIFEST
+    assert route.call_count == 1
+
+
+def test_after_a_failure_the_website_is_left_alone_for_a_while(website) -> None:
+    now = [0.0]
+    cache = DocsCache(clock=lambda: now[0])
+
+    async def read() -> str:
+        async with httpx.AsyncClient() as http:
+            return await cache.get(http, MANIFEST_URL)
+
+    asyncio.run(read())
+    route = website.get(MANIFEST_URL).respond(503)
+    now[0] = FRESH_S + 1
+    assert asyncio.run(read()) == MANIFEST
+    now[0] = FRESH_S + RETRY_S
+    # The older copy answers at once, without asking the website again: the route (one per
+    # address) saw the first read and the failed one only.
+    assert asyncio.run(read()) == MANIFEST
+    assert route.call_count == 2
+
+    website.get(MANIFEST_URL).respond(200, text="# Back\n")
+    now[0] = FRESH_S + RETRY_S + 2
+    assert asyncio.run(read()) == "# Back\n"
+
+
+def test_without_a_copy_a_recent_failure_answers_at_once(website) -> None:
+    cache = DocsCache(clock=lambda: 0.0)
+    route = website.get(MANIFEST_URL).respond(503)
+
+    async def read() -> str:
+        async with httpx.AsyncClient() as http:
+            return await cache.get(http, MANIFEST_URL)
+
+    for _ in range(3):
+        with pytest.raises(DocsUnavailable):
+            asyncio.run(read())
+
+    assert route.call_count == 1
+
+
+def test_an_index_without_pages_is_unavailable(mcp, website) -> None:
+    website.get(INDEX_URL).respond(200, text="# CandleStack\n\nNothing here.\n")
+
+    answer = problem(docs(mcp))
+
+    assert answer["type"] == "https://candlestack.tech/problems/docs-unavailable"
+
+
+def test_a_page_without_sections_says_so(mcp, website) -> None:
+    website.get(MANIFEST_URL).respond(200, text="# The model manifest\n\nJust text.\n")
+
+    answer = problem(docs(mcp, page="manifest", section="Fields"))
+
+    assert answer["detail"] == "The page 'manifest' has no section 'Fields'. It has no sections."
+    assert answer["title"] == "Not Found"
+
+
 @pytest.mark.parametrize(
     ("response", "reason"),
     [
@@ -289,6 +378,17 @@ def test_a_page_the_website_does_not_answer_well_is_unavailable(
 
     with pytest.raises(DocsUnavailable, match=reason):
         asyncio.run(read())
+
+
+def test_a_fetch_asks_for_no_compression(website) -> None:
+    route = website.get(MANIFEST_URL).respond(200, text=MANIFEST)
+
+    async def read() -> str:
+        async with library.docs_client() as http:
+            return await library._fetch(http, MANIFEST_URL)
+
+    assert asyncio.run(read()) == MANIFEST
+    assert route.calls.last.request.headers["Accept-Encoding"] == "identity"
 
 
 def test_a_website_that_does_not_answer_in_time_is_unavailable(
