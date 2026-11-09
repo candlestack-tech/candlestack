@@ -291,7 +291,13 @@ describe('the dashboard of an account with backtests', () => {
       '★draft.kerasKeras–3 backtests',
       '★other.kerasin 25×23 → 1 · Keras–0 backtests',
     ]);
-    expect(starred.getByRole('link', { name: 'my-tsmixer.keras' }).getAttribute('href')).toBe('/models');
+    // Each row opens its model's page (#467).
+    expect(rows.map((row) => within(row!).getByRole('link').getAttribute('href'))).toEqual([
+      '/models/mdl_7f3k2m9qx4',
+      '/models/mdl_a2b3c4d5e6',
+      '/models/mdl_q7r8s9t2u3',
+      '/models/mdl_o',
+    ]);
     expect(starred.queryByRole('link', { name: /More/ })).toBeNull();
   });
 
