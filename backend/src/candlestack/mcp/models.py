@@ -80,18 +80,17 @@ ModelId = Annotated[
     Field(
         min_length=1,
         max_length=64,
-        description="Public ID of the model, as list_models gives it",
+        description="As list_models gives it",
         examples=["mdl_7f3k2m9qx4"],
     ),
 ]
 ManifestDocument = Annotated[
     dict[str, Any],
     Field(
-        description=f"The manifest as a JSON object, version 1: `version`, `input` (timeframe, "
-        f"session, representation, features with their normalization, window), `signature` "
-        f"(input and output shapes) and optionally `example` and `about`. Guide: "
-        f"{MANIFEST_DOCS}; JSON Schema: {MANIFEST_SCHEMA}. At most "
-        f"{MANIFEST_MAX_BYTES // 1024 // 1024} MB as JSON."
+        description="The manifest, version 1: `version`, `input` (timeframe, session, "
+        "representation, features with their normalization, window), `signature` (input and "
+        "output shapes), optionally `example` and `about`. At most "
+        f"{MANIFEST_MAX_BYTES // 1024 // 1024} MB as JSON"
     ),
 ]
 
@@ -180,25 +179,19 @@ class ModelsResult(BaseModel):
 async def list_models(
     ctx: Context,
     *,
-    page: Annotated[int, Field(ge=1, description="The page, from 1, when per_page is given")] = 1,
+    page: Annotated[int, Field(ge=1, description="With per_page")] = 1,
     per_page: Annotated[
         int | None,
         Field(
             ge=1,
             le=MODELS_MAX,
-            description=f"Models per page; all of them (at most {MODELS_MAX}) when left out",
+            description="All of them when left out",
         ),
     ] = None,
 ) -> ModelsResult:
-    """The user's uploaded models, oldest first, in short: ID, name, format, state, star, the
-    timeframe and session of the manifest, how many backtests used each and the best Sharpe
-    ratio, and its `url`, the page to show the user; and the storage they take of the user's
-    quota. All of them unless per_page asks for a page; `total` counts them all.
-
-    A model's state says what it can do: `needs_setup` has no manifest yet, so it cannot run
-    (set_manifest gives it one); `ready` passed the manifest's checks and can be backtested;
-    `verified` also gave the output of the manifest's example in a trial run. Use get_model for
-    one model in full."""
+    """The user's models in short, oldest first, and the storage they take. State:
+    `needs_setup` has no manifest and cannot run (set_manifest); `ready` can be backtested;
+    `verified` also passed the trial run of its manifest's example. One in full: get_model."""
     call = tool_call(ctx)
     offset = 0 if per_page is None else (page - 1) * per_page
     async with call.db() as db:
@@ -226,15 +219,12 @@ async def _model(call: ToolCall, model_id: str) -> ModelOut:
 
 
 async def get_model(model_id: ModelId, ctx: Context) -> ModelDetail:
-    """One of the user's models in full: its file (format, size, weights, input and output
-    shapes), its state, what its manifest says in short (representation, timeframe, session,
-    input shape, warm-up), how many backtests used it (`backtest_count`) and the best Sharpe
-    ratio of them, how the trial run of its manifest went, and its `url`, the page to show the
-    user. The backtests themselves are list_backtests with `model` set to the model's name.
+    """One of the user's models in full: file, state, its manifest in short, how many backtests
+    used it (`backtest_count`) and their best Sharpe ratio. The backtests: list_backtests with
+    `model` set to the model's name.
 
-    After set_manifest, call it to see the trial run: `checked_at` is set when it ended,
-    `state` is `verified` when it passed, and `check_failed` with `check_error` say why it
-    failed (the model stays `ready`). get_manifest gives the whole manifest."""
+    After set_manifest, the trial run: ended when `checked_at` is set, passed when `state` is
+    `verified`, else `check_failed` and `check_error` say why (the model stays `ready`)."""
     call = tool_call(ctx)
     detail = _detail(call, await _model(call, model_id))
     if shows_widget(ctx):
@@ -295,19 +285,12 @@ async def get_manifest(
     *,
     include_example: Annotated[
         bool,
-        Field(
-            description="Include the example, a small input with the output the model must "
-            "give for it, which can be large"
-        ),
+        Field(description="Include the example, which can be large"),
     ] = False,
 ) -> ManifestResult:
-    """The manifest of one of the user's models: how CandleStack builds the model's input
-    from candles (the timeframe, the session, the representation, the features and their
-    normalization, the window) and the shapes of its input and output.
-
-    The example is left out unless you ask for it. set_manifest replaces the whole manifest, so
-    to change a manifest and keep its example, read it with include_example true and send the
-    example back. A model without a manifest answers the problem no-manifest."""
+    """The manifest of one of the user's models: how its input is built from candles and the
+    shapes of its input and output. set_manifest replaces the whole manifest: to change one and
+    keep its example, read it with include_example true and send the example back."""
     call = tool_call(ctx)
     async with call.db() as db:
         try:
@@ -329,17 +312,10 @@ async def get_manifest(
 async def validate_manifest(
     model_id: ModelId, manifest: ManifestDocument, ctx: Context
 ) -> ManifestCheckOut:
-    """Checks a manifest for one of the user's models without keeping it: a dry run of
-    set_manifest, which changes nothing. It runs every check set_manifest runs: the form, the
-    catalog (every block exists and sits in its step), the blocks' parameters, the names of the
-    columns, the signature against the window and the columns, the shapes of the example, and
-    the signature against the input and output read from the model file.
-
-    `valid` says whether every check passed. Else each of `problems` (at most 10;
-    `more_problems` counts the rest) names its `field` (a path such as input.features[2].id),
-    says what is wrong in `detail` and, when the check knows them, lists the values that fit
-    there in `allowed`: fix those fields and check again, then call set_manifest. The format,
-    every field and check: get_docs page manifest."""
+    """Runs every check of set_manifest on a manifest for one of the user's models and keeps
+    nothing. Unless `valid`, each of `problems` names its `field`, the `detail` and the
+    `allowed` values: fix those and check again, then set_manifest. The format and every
+    check: get_docs page manifest."""
     call = tool_call(ctx)
     async with call.db() as db:
         try:
@@ -354,15 +330,10 @@ async def validate_manifest(
 
 
 async def set_manifest(model_id: ModelId, manifest: ManifestDocument, ctx: Context) -> ModelDetail:
-    """Gives one of the user's models its manifest, or replaces the one it has, when every
-    check passes (the checks of validate_manifest); the model is then `ready` and can be
-    backtested. A manifest that fails answers the problem manifest-check-failed, whose
-    `problems` name the `field`, the `detail` and the `allowed` values of each thing wrong:
-    fix them and call it again, or try a manifest with validate_manifest first.
-
-    The whole manifest is replaced: what you leave out is gone, the example included. A trial
-    run of the model with the manifest follows in the background: get_model shows it `verified`
-    when the model gave the output of the manifest's example, or `check_error` when it failed."""
+    """Gives one of the user's models its manifest when every check of validate_manifest
+    passes; the model is then `ready`. A failing one answers manifest-check-failed with
+    `problems` as validate_manifest names them. The whole manifest is replaced, the example
+    included. A trial run follows in the background: see it with get_model."""
     call = tool_call(ctx)
     async with call.db() as db:
         try:
@@ -400,15 +371,14 @@ async def rename_model(
             min_length=1,
             max_length=NAME_MAX,
             pattern=r"^[^/\\\x00-\x1f\x7f]+$",
-            description="The new name without the extension, which stays (`.keras` or "
-            "`.onnx`); no slashes or control characters",
+            description="Without the extension, which stays",
             examples=["lstm-v2"],
         ),
     ],
     ctx: Context,
 ) -> ModelBrief:
-    """Renames one of the user's models; its extension stays, so `lstm-v2` makes
-    `lstm-v2.keras`. A name the user has for another model, in any case, answers the problem
+    """Renames one of the user's models; its extension stays (`lstm-v2` makes
+    `lstm-v2.keras`). A name of another of the user's models, in any case, answers
     model-name-taken."""
     try:
         update = ModelUpdate(name=name)
@@ -426,10 +396,9 @@ async def star_model(
     model_id: ModelId,
     ctx: Context,
     *,
-    starred: Annotated[bool, Field(description="true stars the model, false unstars it")] = True,
+    starred: Annotated[bool, Field(description="false unstars it")] = True,
 ) -> ModelBrief:
-    """Stars or unstars one of the user's models; the app lists starred models first in its
-    pickers."""
+    """Stars or unstars one of the user's models."""
     return await _update(tool_call(ctx), model_id, ModelUpdate(starred=starred))
 
 
@@ -447,16 +416,14 @@ async def delete_model(
         str,
         Field(
             min_length=1,
-            description="The model's name, extension included, exactly as list_models gives "
-            "it, as the confirmation that this is the model to delete",
+            description="The model's name with its extension, exactly as list_models gives it",
             examples=["lstm.keras"],
         ),
     ],
     ctx: Context,
 ) -> DeletedModel:
-    """Deletes one of the user's models and its file for good, which frees its storage; its
-    backtests stay. It cannot be undone, so ask the user first and give the model's name back
-    in confirm_name: a name that is not the model's answers the problem
+    """Deletes one of the user's models and its file for good; its backtests stay. It cannot
+    be undone: ask the user first. A confirm_name that is not the model's answers
     confirmation-mismatch and deletes nothing."""
     call = tool_call(ctx)
     model = await _model(call, model_id)
@@ -519,32 +486,25 @@ async def create_model_upload(
         Field(
             min_length=1,
             max_length=4096,
-            description="The model file's path on the user's computer, or only its name, "
-            "extension included (`.keras` or `.onnx`); the model gets the base name. With a "
-            "path, `command` runs as it is; with a name, its path is a placeholder",
+            description="The file's path on the user's computer, or only its name, with the "
+            "extension; the model gets the base name",
             examples=["lstm.keras"],
         ),
     ],
     size_bytes: Annotated[
         int,
-        Field(gt=0, description="The file's size in bytes: the link takes no larger file"),
+        Field(gt=0, description="The link takes no larger file"),
     ],
     ctx: Context,
 ) -> UploadLink:
-    """Makes a one-time link to upload a model file (Keras `.keras` or ONNX `.onnx`, at most
-    50 MB) into the user's models. You never send the file through a tool: the file goes from
-    the user's computer to the link, either by running `command` (curl), or by opening
-    `page_url` in the browser and dropping the file there.
+    """Makes a one-time link to upload a model file (`.keras` or `.onnx`, at most 50 MB). The
+    file never goes through a tool: run `command` (curl) on the user's computer, or the user
+    opens `page_url` and drops it there. Given only a name, `command` reads ./path/to/<name>:
+    replace ./path/to/ with the folder the file is in before it runs.
 
-    `command` sends the file at the path given as `file_name`. Given only a name, it reads
-    ./path/to/<name>: replace ./path/to/ with the folder the file is in (the file on disk may
-    have another name than the model gets) before it runs.
-
-    The link takes one file within 15 minutes and counts against the user's
-    storage; the file is checked as any upload (a real model with trained weights, nothing
-    from it run). Treat `url` and `command` like a key until the upload is done. Then call
-    get_model_upload with the link's `id` to see how it went and get the new model's ID; give
-    the model a manifest with set_manifest before backtesting it."""
+    The link takes one file within 15 minutes; treat `url` and `command` like a key. Then
+    get_model_upload with the link's `id` gives the new model's ID; set_manifest before a
+    backtest."""
     call = tool_call(ctx)
     async with call.db() as db:
         try:
@@ -597,17 +557,15 @@ async def get_model_upload(
         Field(
             min_length=1,
             max_length=64,
-            description="Public ID of the link, as create_model_upload gave it",
+            description="As create_model_upload gave it",
             examples=["upl_7f3k2m9qx4"],
         ),
     ],
     ctx: Context,
 ) -> UploadState:
-    """How the upload through a one-time link stands: `waiting` for the file, `checking` while
-    it comes in and is checked, `done` with the new model's `model_id` and its page in the app
-    (`model_url`, to show the user), `failed` with the
-    `problem` and the `error` to tell the user, or `expired` unused. A failed or expired link
-    is spent: make a new one with create_model_upload."""
+    """How an upload through a one-time link stands: `waiting`, `checking`, `done` (with
+    `model_id` and `model_url`, the page to show the user), `failed` (with the `error` to tell
+    the user) or `expired`. A failed or expired link is spent: make a new one."""
     call = tool_call(ctx)
     async with call.db() as db:
         try:
@@ -691,6 +649,13 @@ TOOLS = (
         list_models,
         name="list_models",
         title="List models",
+        details="""
+            Each model in short: ID, name, format, state, star, the timeframe and session of
+            the manifest, how many backtests used it and their best Sharpe ratio, and its `url`.
+            All of them unless per_page asks for a page (at most 100); `total` counts them all.
+            `needs_setup` has no manifest yet, so it cannot run (set_manifest gives it one);
+            `ready` passed the manifest's checks; `verified` also gave the output of the
+            manifest's example in a trial run.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(
@@ -708,6 +673,12 @@ TOOLS = (
         get_model,
         name="get_model",
         title="Get a model",
+        details="""
+            In full: its file (format, size, weights, input and output shapes), its state, what
+            its manifest says in short (representation, timeframe, session, input shape,
+            warm-up), how many backtests used it (`backtest_count`) and the best Sharpe ratio of
+            them, how the trial run of its manifest went, and its `url`. get_manifest gives the
+            whole manifest.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(arguments={"model_id": "mdl_7f3k2m9qx4"}, result=_MODEL),
@@ -717,6 +688,11 @@ TOOLS = (
         get_manifest,
         name="get_manifest",
         title="Get a model's manifest",
+        details="""
+            The manifest says the timeframe, the session, the representation, the features and
+            their normalization, and the window. The example, a small input with the output the
+            model must give for it, is left out unless you ask for it. A model without a
+            manifest answers the problem no-manifest.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(
@@ -732,6 +708,17 @@ TOOLS = (
         validate_manifest,
         name="validate_manifest",
         title="Check a manifest",
+        details=f"""
+            A dry run of set_manifest, which changes nothing. The checks: the form, the catalog
+            (every block exists and sits in its step), the blocks' parameters, the names of the
+            columns, the signature against the window and the columns, the shapes of the
+            example, and the signature against the input and output read from the model file.
+
+            Each problem names its `field` (a path such as input.features[2].id), says what is
+            wrong in `detail` and, when the check knows them, lists the values that fit there in
+            `allowed`; at most 10, `more_problems` counts the rest.
+
+            The manifest's guide: {MANIFEST_DOCS}; its JSON Schema: {MANIFEST_SCHEMA}.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(
@@ -761,6 +748,13 @@ TOOLS = (
         set_manifest,
         name="set_manifest",
         title="Set a model's manifest",
+        details="""
+            It gives the model its first manifest or replaces the one it has: what you leave
+            out is gone. A failing manifest answers manifest-check-failed, whose `problems`
+            name the `field`, the `detail` and the `allowed` values of each thing wrong: fix them
+            and call it again, or try it with validate_manifest first. After the trial run,
+            get_model shows the model `verified` when it gave the output of the manifest's
+            example, or `check_error` when it failed.""",
         scopes=(Scope.models,),
         # It replaces the manifest the model had.
         annotations=changes(destructive=True, idempotent=True),
@@ -773,6 +767,9 @@ TOOLS = (
         rename_model,
         name="rename_model",
         title="Rename a model",
+        details="""
+            The new name has no slashes or control characters; the extension (`.keras` or
+            `.onnx`) stays.""",
         scopes=(Scope.models,),
         annotations=changes(destructive=False, idempotent=True),
         example=Example(
@@ -784,6 +781,7 @@ TOOLS = (
         star_model,
         name="star_model",
         title="Star a model",
+        details="The app lists starred models first in its pickers.",
         scopes=(Scope.models,),
         annotations=changes(destructive=False, idempotent=True),
         example=Example(arguments={"model_id": "mdl_7f3k2m9qx4", "starred": True}, result=_LSTM),
@@ -792,6 +790,9 @@ TOOLS = (
         delete_model,
         name="delete_model",
         title="Delete a model",
+        details="""
+            Deleting frees the model's storage. confirm_name is the confirmation that this is
+            the model to delete.""",
         scopes=(Scope.models,),
         annotations=changes(destructive=True, idempotent=True),
         example=Example(
@@ -803,6 +804,13 @@ TOOLS = (
         create_model_upload,
         name="create_model_upload",
         title="Make an upload link",
+        details="""
+            Keras `.keras` or ONNX `.onnx`. `command` sends the file at the path given as
+            `file_name`, so with a path it runs as it is; with a name, its path is a placeholder
+            (the file on disk may have another name than the model gets). The link counts
+            against the user's storage, and the file is checked as any upload: a real model with
+            trained weights, nothing from it run. Treat `url` and `command` like a key until the
+            upload is done.""",
         scopes=(Scope.models,),
         annotations=changes(destructive=False, idempotent=False),
         example=Example(
@@ -825,6 +833,10 @@ TOOLS = (
         get_model_upload,
         name="get_model_upload",
         title="Check an upload",
+        details="""
+            `waiting` for the file, `checking` while it comes in and is checked, `done` with the
+            new model's `model_id` and its page in the app (`model_url`), `failed` with the
+            `problem` and the `error` to tell the user, or `expired` unused.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(

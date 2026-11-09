@@ -43,7 +43,8 @@ charts and the details themselves.
 
 Read the docs with get_docs (without a page it lists them) before you explain how the engine, \
 a manifest, a metric or an error works, and answer from them: never invent a formula or a \
-behaviour, and say so when CandleStack does not do something. Show metrics in a table. The \
+behaviour, and say so when CandleStack does not do something. A tool's full entry, with an \
+example call: get_docs page mcp/tools, section <tool name>. Show metrics in a table. The \
 server's prompts walk through common tasks. On the web: {AGENTS_DOCS} and {MCP_DOCS}; the \
 resource {DOCS_URI} links them."""
 

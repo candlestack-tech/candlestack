@@ -11,6 +11,9 @@ A result's text is its structured content as compact JSON without the null field
 models (``compact_text``): what a model reads costs tokens, and the SDK writes it indented. A
 null in a list or as the value of a map stays. The structured content itself stays whole, nulls
 included, so it fits the output schema.
+
+tools/list sends the schemas shorter than Pydantic writes them (``schema``): a client sends the
+tools to the model with every turn.
 """
 
 import logging
@@ -19,7 +22,7 @@ from typing import Any, get_type_hints, override
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.server.mcpserver.prompts import Prompt
-from mcp.types import CallToolResult, Icon, InputRequiredResult, TextContent
+from mcp.types import CallToolResult, Icon, InputRequiredResult, TextContent, Tool
 from pydantic import BaseModel, ValidationError
 
 from candlestack.accounts import charge_rate
@@ -29,6 +32,7 @@ from candlestack.mcp.apps import add_widget_versions, attached, widget_extension
 from candlestack.mcp.convention import ToolSpec, problem_result, tool_call
 from candlestack.mcp.docs import DOCS_TEXT, DOCS_URI, INSTRUCTIONS
 from candlestack.mcp.prompts import PROMPTS
+from candlestack.mcp.schema import compact_input, compact_output
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +135,22 @@ class CandleStackMCP(MCPServer):
         add_widget_versions(self)
         for prompt in PROMPTS:
             self.add_prompt(Prompt.from_function(prompt.fn, name=prompt.name, title=prompt.title))
+        self._listed: list[Tool] | None = None
+
+    @override
+    async def list_tools(self) -> list[Tool]:
+        """The tools with their schemas shortened (``schema``), worked out once."""
+        if self._listed is None:
+            self._listed = [
+                tool.model_copy(
+                    update={
+                        "input_schema": compact_input(tool.input_schema),
+                        "output_schema": compact_output(tool.output_schema),
+                    }
+                )
+                for tool in await super().list_tools()
+            ]
+        return self._listed
 
     @override
     async def call_tool(

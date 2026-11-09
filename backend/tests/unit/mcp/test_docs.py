@@ -80,8 +80,7 @@ def test_the_manifest_and_result_links_are_named(named: tuple[set[str], set[str]
     assert not [url for url in urls if url.startswith("https://github.com/")]
 
 
-def test_the_catalog_links_the_manifest_docs() -> None:
+def test_the_catalog_sends_to_the_manifest_docs() -> None:
     [catalog] = [spec for spec in market.TOOLS if spec.name == "preprocessing_catalog"]
 
-    assert f"The manifest format: {MANIFEST_DOCS}." in catalog.description
-    assert "{manifest_docs}" not in catalog.description
+    assert "The manifest format: get_docs page manifest." in catalog.description

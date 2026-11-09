@@ -45,7 +45,6 @@ from candlestack.data import (
 )
 from candlestack.experiments import Decision, Execution, Period
 from candlestack.mcp.convention import Example, ToolCall, ToolSpec, changes, reads, tool_call
-from candlestack.mcp.docs import MANIFEST_DOCS
 from candlestack.preprocessing import BlockOut, Step, describe_catalog
 
 # Rows of one get_candles call. Clients show a result a second time as indented text, so a full
@@ -65,8 +64,7 @@ InstrumentIdArg = Annotated[
     Field(
         min_length=3,
         max_length=40,
-        description="Instrument ID, <market>:<symbol>, as search_instruments answers it: "
-        "crypto:BTCUSDT, stock:AAPL",
+        description="<market>:<symbol>, such as crypto:BTCUSDT or stock:AAPL",
     ),
 ]
 
@@ -143,8 +141,7 @@ async def search_instruments(
         Field(
             min_length=1,
             max_length=50,
-            description="Symbol or name, any case; separators are ignored (btc/usdt finds "
-            "BTCUSDT, brkb finds BRK.B)",
+            description="Symbol or name, any case; separators are ignored (btc/usdt finds BTCUSDT)",
         ),
     ],
     ctx: Context,
@@ -155,17 +152,12 @@ async def search_instruments(
         Field(description="Only instruments that trade there: BINANCE for crypto pairs"),
     ] = None,
     limit: Annotated[int, Field(ge=1, le=50, description="Most items to answer")] = 10,
-    offset: Annotated[int, Field(ge=0, description="Matches to skip, for the next page")] = 0,
+    offset: Annotated[int, Field(ge=0, description="Matches to skip")] = 0,
 ) -> InstrumentsFound:
-    """Finds instruments by symbol or name: every Binance spot pair that trades (market crypto)
-    and every tradable US stock and ETF at Alpaca (market stock). Use it to turn what the user
-    names (bitcoin, Apple, SPY) into the instrument ID the other tools take.
-
-    The best match comes first: the most traded pair of a crypto asset equal to the query (btc
-    finds crypto:BTCUSDT), then the exact symbol, symbol prefixes, words of the name. Each item
-    has its last price, 24 h change and volume, and since when it has candles. Page with offset
-    while next_offset is not null. For the most traded instruments or the top gainers without
-    a query, use top_instruments."""
+    """Finds instruments by symbol or name and gives the instrument ID the other tools take
+    (btc finds crypto:BTCUSDT, apple stock:AAPL): Binance spot pairs (market crypto), US stocks
+    and ETFs at Alpaca (market stock). Best match first; page with offset while next_offset is
+    not null. To browse without a query (most traded, top gainers): top_instruments."""
     call = tool_call(ctx)
     with data_problems():
         found = await _data(call).search(query, market, limit, offset, exchange=exchange)
@@ -194,20 +186,18 @@ _TOP_SORTS = {
 
 async def top_instruments(
     ctx: Context,
-    market: Annotated[Market | None, Field(description="Only this market; both without")] = None,
+    market: Annotated[Market | None, Field(description="Both when left out")] = None,
     sort: Annotated[
         Literal["volume", "change", "-change"],
         Field(
-            description="volume: the most traded (24 h volume in USD) first; change: the top "
-            "gainers (24 h change) first; -change: the top losers first"
+            description="volume: the most traded (24 h, in USD); change: the top gainers; "
+            "-change: the top losers"
         ),
     ] = "volume",
     limit: Annotated[int, Field(ge=1, le=25, description="How many")] = 10,
 ) -> TopInstruments:
-    """The most traded instruments, or the top gainers or losers of the last 24 hours, of one
-    market or both, with their last price, 24 h change and volume. Use it when the user asks
-    what moves or what is liquid enough to test, or wants ideas for instruments without naming
-    one; to find a named instrument, use search_instruments."""
+    """The most traded instruments, or the top gainers or losers of the last 24 hours, for
+    ideas when the user names none; to find a named one: search_instruments."""
     call = tool_call(ctx)
     with data_problems():
         found = await _data(call).search(None, market, limit, sort=_TOP_SORTS[sort])
@@ -240,9 +230,8 @@ class InstrumentDetail(BaseModel):
 
 
 async def get_instrument(instrument_id: InstrumentIdArg, ctx: Context) -> InstrumentDetail:
-    """One instrument and the period its candles cover: from the first candle to the newest
-    closed one, in which timeframes. Use it before get_candles or a backtest to pick a period
-    that has data; a period outside it fails with period-out-of-range."""
+    """One instrument, the timeframes of its candles and the period they cover. Check it
+    before get_candles or a backtest: a period outside it fails with period-out-of-range."""
     call = tool_call(ctx)
     await _limit_source_requests(ctx, call)
     with data_problems():
@@ -340,40 +329,34 @@ async def _from_start(
 
 async def get_candles(
     instrument_id: InstrumentIdArg,
-    timeframe: Annotated[Timeframe, Field(description="Length of one candle")],
+    timeframe: Timeframe,
     ctx: Context,
     *,
     start: Annotated[
         TimeParam | None,
         Field(
-            description="Start of the period, inclusive: an ISO 8601 date or date-time (UTC "
-            "unless it says another offset), 2024-06-03 or 2024-06-03T13:30:00Z, or epoch "
-            "seconds. Without it, the newest candles before end"
+            description="Inclusive: an ISO 8601 date or date-time (UTC unless it gives an "
+            "offset) or epoch seconds. Without it, the newest candles before end"
         ),
     ] = None,
     end: Annotated[
         TimeParam | None,
-        Field(description="End of the period, exclusive, in the same forms; default now"),
+        Field(description="Exclusive, in the same forms; default now"),
     ] = None,
     limit: Annotated[
         int, Field(ge=1, le=CANDLES_MAX, description="Most candles in this page")
     ] = CANDLES_DEFAULT,
 ) -> CandlesPage:
-    """Closed OHLCV candles of one instrument in one timeframe, in pages of at most 500. Use
-    it to look at the price around a trade, check a period before a backtest or compute
-    something the backtest result does not say; a backtest loads its own candles, so do not
-    fetch them for it.
+    """Closed OHLCV candles of one instrument and timeframe, up to 500 a page. A backtest
+    loads its own candles: do not fetch them for it.
 
-    With start: the candles from start on, oldest first; while next_start is not null, call
-    again with start=next_start for the next page. Without start: the newest limit candles
-    before end; call again with end=next_end for the earlier ones. Stocks have candles of the
-    regular session only (09:30-16:00 New York); missing candles are never filled in (gaps).
-    Counts against a per-minute limit of candle requests; ask for a longer timeframe rather
-    than many pages.
+    With start: from start on, oldest first; the next page with start=next_start. Without
+    start: the newest before end; earlier ones with end=next_end. Stocks have the regular
+    session only (09:30-16:00 New York); missing candles stay gaps. A per-minute limit applies:
+    ask for a longer timeframe rather than many pages.
 
-    Data terms: crypto comes from Binance spot, stocks from Alpaca (SIP, every US exchange,
-    15 minutes delayed). Alpaca allows its data for the user's personal, noncommercial use
-    only: use it for the user's analysis here, never publish or pass on the stock candles."""
+    Data terms: stocks come from Alpaca (15 minutes delayed) for the user's personal,
+    noncommercial use only: never publish or pass on the stock candles."""
     call = tool_call(ctx)
     await _limit_source_requests(ctx, call)
     until = int(_time()) if end is None else end
@@ -452,27 +435,16 @@ async def preprocessing_catalog(
     ctx: Context,
     step: Annotated[
         Step | None,
-        Field(
-            description="Only the blocks of this step: representation (which rows: candles, "
-            "Renko bricks, a Kagi line), feature (the columns), normalization, window"
-        ),
+        Field(description="Only the blocks of this step"),
     ] = None,
 ) -> Catalog:
-    """Every block a model's manifest can name, by step: the representation (which rows the
-    model sees), the features (its columns, in order), their normalization and the window
-    (rows to samples), each with its versioned ID, what it does, its warm-up and its parameters
-    with types, ranges and defaults. Use it to write or check a manifest, or to explain what
-    a model's input is made of. The manifest format: {manifest_docs}."""
+    """Every block a manifest can name, by step (representation, feature, normalization,
+    window), with its versioned ID, warm-up and parameters. Use it to write or check a
+    manifest. The manifest format: get_docs page manifest."""
     tool_call(ctx)
     return Catalog(
         blocks=[CatalogBlock.of(block) for block in _CATALOG.blocks if step in (None, block.step)]
     )
-
-
-# The link of the docs module, so the page moves in one place.
-preprocessing_catalog.__doc__ = (preprocessing_catalog.__doc__ or "").replace(
-    "{manifest_docs}", MANIFEST_DOCS
-)
 
 
 # --- The user's defaults and preferences -------------------------------------------------------
@@ -556,30 +528,27 @@ def defaults_out(defaults: BacktestDefaults) -> BacktestDefaultsOut:
 
 
 async def get_backtest_defaults(ctx: Context) -> BacktestDefaultsOut:
-    """How the user's new backtests start, as saved in Settings, Backtest defaults (or the
-    app's defaults): timeframe, period, direction (long only or both), the signal threshold,
-    stop loss, fees, slippage and the benchmark. Use these for every setting of a backtest
-    the user does not name, so it runs as the app would start it.
+    """The user's defaults for new backtests (Settings, Backtest defaults): use them for every
+    setting of a backtest the user does not name.
 
-    The settings come twice. As Settings shows them: `stop_loss_pct`, `fees_pct` and
-    `slippage_pct` in percent, the period in days. And in the units start_backtest takes, to
-    pass through unchanged: `period` (data.period, UTC epoch seconds), `decision`, `execution`
-    (stop_loss a fraction, fee_bps and slippage_bps in basis points) and `benchmark_instrument`
-    (the instrument of the buy and hold benchmark; null for the backtest's own). The timeframe
-    is not an argument of start_backtest: a backtest runs at its model's."""
+    They come twice: as Settings shows them, `stop_loss_pct`, `fees_pct` and `slippage_pct` in
+    percent, the period in days; and in start_backtest's units, to pass through unchanged:
+    `period` (as data.period), `decision`, `execution` (stop_loss a fraction, fee_bps and
+    slippage_bps in basis points) and `benchmark_instrument` (null: the backtest's own). The
+    timeframe is not an argument of start_backtest: a backtest runs at its model's."""
     call = tool_call(ctx)
     async with call.db() as db:
         preferences = await _accounts(call, db).preferences(call.user)
     return defaults_out(preferences.backtest_defaults)
 
 
-_DERIVED = "Ignored: get_backtest_defaults derives it from the settings above"
+_DERIVED = "Ignored"
 
 
 class BacktestDefaultsArg(BacktestDefaultsIn):
-    """The backtest defaults to save, in Settings' units. The settings in start_backtest's
-    units that get_backtest_defaults adds are taken and ignored, so its answer can come back
-    with one setting changed."""
+    # The backtest defaults to save, in Settings' units. The settings in start_backtest's units
+    # that get_backtest_defaults adds are taken and ignored, so its answer can come back with
+    # one setting changed. No docstring: the argument's description says it to a model.
 
     period: Any = Field(default=None, exclude=True, description=_DERIVED)
     decision: Any = Field(default=None, exclude=True, description=_DERIVED)
@@ -591,20 +560,15 @@ async def update_backtest_defaults(
     defaults: Annotated[
         BacktestDefaultsArg,
         Field(
-            description="Every setting in Settings' units, as get_backtest_defaults answers "
-            "them in percent and days: timeframe, period_start, period_end, direction, "
-            "threshold, stop_loss_pct, fees_pct, slippage_pct and benchmark. Its answer can "
-            "be sent back as it is: `period`, `decision`, `execution` and "
-            "`benchmark_instrument` are ignored"
+            description="Every setting in Settings' units (percent, days); "
+            "get_backtest_defaults' answer can be sent back as it is"
         ),
     ],
     ctx: Context,
 ) -> BacktestDefaults:
-    """Saves how the user's new backtests start, as Save defaults in Settings, Backtest
-    defaults does: every setting as a whole, replacing the saved ones. Use it only when the
-    user asks to change their defaults; to run one backtest with other settings, pass them when
-    you start it instead. Call get_backtest_defaults first and change only what the user
-    named. Answers the saved defaults."""
+    """Saves the user's defaults for new backtests, all of them, replacing the saved ones.
+    Only when the user asks to change their defaults (for one backtest, pass the settings to
+    start_backtest): read get_backtest_defaults, change only what the user named."""
     call = tool_call(ctx)
     async with call.db() as db:
         return await _accounts(call, db).save_backtest_defaults(
@@ -624,10 +588,8 @@ class Preferences(BaseModel):
 
 
 async def get_preferences(ctx: Context) -> Preferences:
-    """How the user reads dates and times in the app: the time zone (exchange time or their
-    own), the date format and 12 or 24 hour time. Use it to write dates and times in your
-    answers the way the app shows them to the user. The backtest defaults are
-    get_backtest_defaults."""
+    """How the user reads dates and times in the app (time zone, date format, 12 or 24
+    hour): write them that way in your answers."""
     call = tool_call(ctx)
     async with call.db() as db:
         preferences = await _accounts(call, db).preferences(call.user)
@@ -666,6 +628,12 @@ TOOLS = (
         search_instruments,
         name="search_instruments",
         title="Search instruments",
+        details="""
+            The order: the most traded pair of a crypto asset equal to the query, then the
+            exact symbol, symbol prefixes, words of the name; separators are ignored (brkb finds
+            BRK.B). Crypto is every Binance spot pair that trades, stocks every tradable US
+            stock and ETF at Alpaca. Each item has its last price, 24 h change and volume, and
+            since when it has candles.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(
@@ -677,6 +645,10 @@ TOOLS = (
         top_instruments,
         name="top_instruments",
         title="Top instruments",
+        details="""
+            Use it when the user asks what moves or what is liquid enough to test, or wants
+            ideas for instruments without naming one. Of one market, or both without `market`;
+            each with its last price, 24 h change and volume.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(
@@ -706,6 +678,19 @@ TOOLS = (
         get_candles,
         name="get_candles",
         title="Candles",
+        details="""
+            Use it to look at the price around a trade, check a period before a backtest or
+            compute something the backtest result does not say.
+
+            `start` and `end` take an ISO 8601 date or date-time, such as 2024-06-03 or
+            2024-06-03T13:30:00Z, or epoch seconds. While `next_start` is not null, call again
+            with start set to it for the next page. Every call counts against a per-minute
+            limit of candle requests.
+
+            Data terms: crypto comes from Binance spot, stocks from Alpaca (SIP, every US
+            exchange, 15 minutes delayed). Alpaca allows its data for the user's personal,
+            noncommercial use only: use it for the user's analysis here, never publish or pass
+            on the stock candles.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(
@@ -735,6 +720,12 @@ TOOLS = (
         preprocessing_catalog,
         name="preprocessing_catalog",
         title="Preprocessing catalog",
+        details="""
+            The steps: the representation (which rows the model sees: candles, Renko bricks, a
+            Kagi line), the features (its columns, in order), their normalization and the
+            window (rows to samples). Each block has its versioned ID, what it does, its warm-up
+            and its parameters with types, ranges and defaults. Use it also to explain what a
+            model's input is made of.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(
@@ -750,6 +741,12 @@ TOOLS = (
         get_backtest_defaults,
         name="get_backtest_defaults",
         title="Backtest defaults",
+        details="""
+            The settings: timeframe, period, direction (long only or both), the signal
+            threshold, stop loss, fees, slippage and the benchmark, as saved in Settings,
+            Backtest defaults, or the app's defaults. With them a backtest runs as the app
+            would start it. `period` is in UTC epoch seconds; `benchmark_instrument` is the
+            instrument of the buy and hold benchmark.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(arguments={}, result=defaults_out(BacktestDefaults())),
@@ -758,6 +755,12 @@ TOOLS = (
         update_backtest_defaults,
         name="update_backtest_defaults",
         title="Save backtest defaults",
+        details="""
+            It saves as Save defaults in Settings, Backtest defaults does: every setting as a
+            whole (timeframe, period_start, period_end, direction, threshold, stop_loss_pct,
+            fees_pct, slippage_pct and benchmark). The settings in start_backtest's units that
+            get_backtest_defaults adds (`period`, `decision`, `execution`,
+            `benchmark_instrument`) are taken and ignored. Answers the saved defaults.""",
         scopes=(Scope.backtests,),
         annotations=changes(destructive=True, idempotent=True),
         example=Example(
@@ -769,6 +772,9 @@ TOOLS = (
         get_preferences,
         name="get_preferences",
         title="Date and time preferences",
+        details="""
+            The time zone is exchange time or the user's own. The backtest defaults are
+            get_backtest_defaults.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(

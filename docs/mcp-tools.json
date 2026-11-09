@@ -112,7 +112,7 @@
     }
   ],
   "server": {
-    "instructions": "CandleStack is a lab for experiments on financial time series: a user uploads a trading model (Keras or ONNX), describes its input in a manifest and backtests it on market data, crypto from Binance and US stocks from Alpaca, then compares the results and publishes the good ones.\n\nYou act as the user who signed you in, with an API key or by allowing you on CandleStack (OAuth). The scopes of that sign-in decide which tools work: read (everything that only reads), backtests, models and publish. Call get_me first to see who you act for and what you may do. A tool that changes data says so in its annotations.\n\nA tool answers JSON; its text leaves out the fields that are null. A failed tool call answers a problem as JSON: its type (https://candlestack.tech/problems/<slug>) names what went wrong and its detail says what to do; rate-limited also gives retry_after_s, the seconds to wait.\n\nAnswers about a backtest or a model carry its `url`, its page in the app; a comparison and a sweep of 2 to 4 backtests (a ranked sweep: its best 4) carry `url`, the app's Compare page with them side by side. Give the user these links whenever you show results, so they can see the charts and the details themselves.\n\nRead the docs with get_docs (without a page it lists them) before you explain how the engine, a manifest, a metric or an error works, and answer from them: never invent a formula or a behaviour, and say so when CandleStack does not do something. Show metrics in a table. The server's prompts walk through common tasks. On the web: https://candlestack.tech/docs/agents/ and https://candlestack.tech/docs/mcp/; the resource candlestack://docs links them.",
+    "instructions": "CandleStack is a lab for experiments on financial time series: a user uploads a trading model (Keras or ONNX), describes its input in a manifest and backtests it on market data, crypto from Binance and US stocks from Alpaca, then compares the results and publishes the good ones.\n\nYou act as the user who signed you in, with an API key or by allowing you on CandleStack (OAuth). The scopes of that sign-in decide which tools work: read (everything that only reads), backtests, models and publish. Call get_me first to see who you act for and what you may do. A tool that changes data says so in its annotations.\n\nA tool answers JSON; its text leaves out the fields that are null. A failed tool call answers a problem as JSON: its type (https://candlestack.tech/problems/<slug>) names what went wrong and its detail says what to do; rate-limited also gives retry_after_s, the seconds to wait.\n\nAnswers about a backtest or a model carry its `url`, its page in the app; a comparison and a sweep of 2 to 4 backtests (a ranked sweep: its best 4) carry `url`, the app's Compare page with them side by side. Give the user these links whenever you show results, so they can see the charts and the details themselves.\n\nRead the docs with get_docs (without a page it lists them) before you explain how the engine, a manifest, a metric or an error works, and answer from them: never invent a formula or a behaviour, and say so when CandleStack does not do something. A tool's full entry, with an example call: get_docs page mcp/tools, section <tool name>. Show metrics in a table. The server's prompts walk through common tasks. On the web: https://candlestack.tech/docs/agents/ and https://candlestack.tech/docs/mcp/; the resource candlestack://docs links them.",
     "name": "candlestack",
     "title": "CandleStack"
   },
@@ -124,7 +124,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Who you act for: the CandleStack user who signed you in (an API key or OAuth), and the scopes of that sign-in, which decide the tools you may call. Call it first to check the connection, and when a tool answers the problem missing-scope.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_me",
+      "description": "Who you act for and the scopes of the sign-in, which decide the tools you may call. Call it first, and when a tool answers missing-scope.",
+      "details": "The user is the one who signed you in, with an API key or OAuth. Call it first to check the connection.",
       "endpoints": [
         "GET /api/v1/me"
       ],
@@ -216,7 +217,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "CandleStack's official docs, as published on candlestack.tech/docs: how the backtest engine, the manifest, the metrics, the result document, the problems, the MCP server and the API work. Read the page before you explain any of these, and answer from it instead of from memory.\n\nWithout `page`: the list of pages (page, title, summary) and the references (the JSON Schemas of the manifest and the result document, and the page of every problem type). With `page`: its text as Markdown and its `sections`. A long page comes in `parts`: ask for the next with `part`, or for one section with `section`.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_docs",
+      "description": "CandleStack's docs: the engine, manifest, metrics, result document, problems, MCP server and API. Read the page before you explain any of these and answer from it. Without `page`: the list of pages. With it: its Markdown and `sections`; a long one comes in `parts`, or ask for one `section`.",
+      "details": "The docs as published on candlestack.tech/docs. Without `page`: the list of pages (page, title, summary) and the references (the JSON Schemas of the manifest and the result document, and the page of every problem type). With `page`: its text as Markdown and its `sections`. A long page comes in `parts`: ask for the next with `part`, from 1, or for one section with `section`, its subsections included.",
       "endpoints": [],
       "example": {
         "arguments": {
@@ -255,7 +257,7 @@
               }
             ],
             "default": null,
-            "description": "A page from the list, such as manifest; leave it out for the list",
+            "description": "Leave it out for the list",
             "examples": [
               "manifest"
             ],
@@ -263,7 +265,7 @@
           },
           "part": {
             "default": 1,
-            "description": "The part to read, from 1, of a long page",
+            "description": "Of a long page",
             "maximum": 100,
             "minimum": 1,
             "title": "Part",
@@ -281,7 +283,7 @@
               }
             ],
             "default": null,
-            "description": "One section of the page, by its heading from `sections` (such as Metrics, or a tool's name on mcp/tools), its subsections included",
+            "description": "A heading from `sections`, such as Metrics or a tool's name on mcp/tools",
             "title": "Section"
           }
         },
@@ -494,7 +496,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Finds instruments by symbol or name: every Binance spot pair that trades (market crypto) and every tradable US stock and ETF at Alpaca (market stock). Use it to turn what the user names (bitcoin, Apple, SPY) into the instrument ID the other tools take.\n\nThe best match comes first: the most traded pair of a crypto asset equal to the query (btc finds crypto:BTCUSDT), then the exact symbol, symbol prefixes, words of the name. Each item has its last price, 24 h change and volume, and since when it has candles. Page with offset while next_offset is not null. For the most traded instruments or the top gainers without a query, use top_instruments.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#search_instruments",
+      "description": "Finds instruments by symbol or name and gives the instrument ID the other tools take (btc finds crypto:BTCUSDT, apple stock:AAPL): Binance spot pairs (market crypto), US stocks and ETFs at Alpaca (market stock). Best match first; page with offset while next_offset is not null. To browse without a query (most traded, top gainers): top_instruments.",
+      "details": "The order: the most traded pair of a crypto asset equal to the query, then the exact symbol, symbol prefixes, words of the name; separators are ignored (brkb finds BRK.B). Crypto is every Binance spot pair that trades, stocks every tradable US stock and ETF at Alpaca. Each item has its last price, 24 h change and volume, and since when it has candles.",
       "endpoints": [
         "GET /api/v1/data/instruments"
       ],
@@ -579,13 +582,13 @@
           },
           "offset": {
             "default": 0,
-            "description": "Matches to skip, for the next page",
+            "description": "Matches to skip",
             "minimum": 0,
             "title": "Offset",
             "type": "integer"
           },
           "query": {
-            "description": "Symbol or name, any case; separators are ignored (btc/usdt finds BTCUSDT, brkb finds BRK.B)",
+            "description": "Symbol or name, any case; separators are ignored (btc/usdt finds BTCUSDT)",
             "maxLength": 50,
             "minLength": 1,
             "title": "Query",
@@ -753,7 +756,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "The most traded instruments, or the top gainers or losers of the last 24 hours, of one market or both, with their last price, 24 h change and volume. Use it when the user asks what moves or what is liquid enough to test, or wants ideas for instruments without naming one; to find a named instrument, use search_instruments.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#top_instruments",
+      "description": "The most traded instruments, or the top gainers or losers of the last 24 hours, for ideas when the user names none; to find a named one: search_instruments.",
+      "details": "Use it when the user asks what moves or what is liquid enough to test, or wants ideas for instruments without naming one. Of one market, or both without `market`; each with its last price, 24 h change and volume.",
       "endpoints": [
         "GET /api/v1/data/instruments",
         "GET /api/v1/data/top-instruments"
@@ -817,11 +821,11 @@
               }
             ],
             "default": null,
-            "description": "Only this market; both without"
+            "description": "Both when left out"
           },
           "sort": {
             "default": "volume",
-            "description": "volume: the most traded (24 h volume in USD) first; change: the top gainers (24 h change) first; -change: the top losers first",
+            "description": "volume: the most traded (24 h, in USD); change: the top gainers; -change: the top losers",
             "enum": [
               "volume",
               "change",
@@ -970,7 +974,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "One instrument and the period its candles cover: from the first candle to the newest closed one, in which timeframes. Use it before get_candles or a backtest to pick a period that has data; a period outside it fails with period-out-of-range.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_instrument",
+      "description": "One instrument, the timeframes of its candles and the period they cover. Check it before get_candles or a backtest: a period outside it fails with period-out-of-range.",
       "endpoints": [
         "GET /api/v1/data/instruments/{instrument_id}"
       ],
@@ -998,7 +1002,7 @@
       "inputSchema": {
         "properties": {
           "instrument_id": {
-            "description": "Instrument ID, <market>:<symbol>, as search_instruments answers it: crypto:BTCUSDT, stock:AAPL",
+            "description": "<market>:<symbol>, such as crypto:BTCUSDT or stock:AAPL",
             "maxLength": 40,
             "minLength": 3,
             "title": "Instrument Id",
@@ -1104,7 +1108,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Closed OHLCV candles of one instrument in one timeframe, in pages of at most 500. Use it to look at the price around a trade, check a period before a backtest or compute something the backtest result does not say; a backtest loads its own candles, so do not fetch them for it.\n\nWith start: the candles from start on, oldest first; while next_start is not null, call again with start=next_start for the next page. Without start: the newest limit candles before end; call again with end=next_end for the earlier ones. Stocks have candles of the regular session only (09:30-16:00 New York); missing candles are never filled in (gaps). Counts against a per-minute limit of candle requests; ask for a longer timeframe rather than many pages.\n\nData terms: crypto comes from Binance spot, stocks from Alpaca (SIP, every US exchange, 15 minutes delayed). Alpaca allows its data for the user's personal, noncommercial use only: use it for the user's analysis here, never publish or pass on the stock candles.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_candles",
+      "description": "Closed OHLCV candles of one instrument and timeframe, up to 500 a page. A backtest loads its own candles: do not fetch them for it.\n\nWith start: from start on, oldest first; the next page with start=next_start. Without start: the newest before end; earlier ones with end=next_end. Stocks have the regular session only (09:30-16:00 New York); missing candles stay gaps. A per-minute limit applies: ask for a longer timeframe rather than many pages.\n\nData terms: stocks come from Alpaca (15 minutes delayed) for the user's personal, noncommercial use only: never publish or pass on the stock candles.",
+      "details": "Use it to look at the price around a trade, check a period before a backtest or compute something the backtest result does not say.\n\n`start` and `end` take an ISO 8601 date or date-time, such as 2024-06-03 or 2024-06-03T13:30:00Z, or epoch seconds. While `next_start` is not null, call again with start set to it for the next page. Every call counts against a per-minute limit of candle requests.\n\nData terms: crypto comes from Binance spot, stocks from Alpaca (SIP, every US exchange, 15 minutes delayed). Alpaca allows its data for the user's personal, noncommercial use only: use it for the user's analysis here, never publish or pass on the stock candles.",
       "endpoints": [
         "GET /api/v1/data/instruments/{instrument_id}/candles"
       ],
@@ -1193,11 +1198,11 @@
               }
             ],
             "default": null,
-            "description": "End of the period, exclusive, in the same forms; default now",
+            "description": "Exclusive, in the same forms; default now",
             "title": "End"
           },
           "instrument_id": {
-            "description": "Instrument ID, <market>:<symbol>, as search_instruments answers it: crypto:BTCUSDT, stock:AAPL",
+            "description": "<market>:<symbol>, such as crypto:BTCUSDT or stock:AAPL",
             "maxLength": 40,
             "minLength": 3,
             "title": "Instrument Id",
@@ -1235,12 +1240,11 @@
               }
             ],
             "default": null,
-            "description": "Start of the period, inclusive: an ISO 8601 date or date-time (UTC unless it says another offset), 2024-06-03 or 2024-06-03T13:30:00Z, or epoch seconds. Without it, the newest candles before end",
+            "description": "Inclusive: an ISO 8601 date or date-time (UTC unless it gives an offset) or epoch seconds. Without it, the newest candles before end",
             "title": "Start"
           },
           "timeframe": {
-            "$ref": "#/$defs/Timeframe",
-            "description": "Length of one candle"
+            "$ref": "#/$defs/Timeframe"
           }
         },
         "required": [
@@ -1390,7 +1394,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Every block a model's manifest can name, by step: the representation (which rows the model sees), the features (its columns, in order), their normalization and the window (rows to samples), each with its versioned ID, what it does, its warm-up and its parameters with types, ranges and defaults. Use it to write or check a manifest, or to explain what a model's input is made of. The manifest format: https://candlestack.tech/docs/manifest/.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#preprocessing_catalog",
+      "description": "Every block a manifest can name, by step (representation, feature, normalization, window), with its versioned ID, warm-up and parameters. Use it to write or check a manifest. The manifest format: get_docs page manifest.",
+      "details": "The steps: the representation (which rows the model sees: candles, Renko bricks, a Kagi line), the features (its columns, in order), their normalization and the window (rows to samples). Each block has its versioned ID, what it does, its warm-up and its parameters with types, ranges and defaults. Use it also to explain what a model's input is made of.",
       "endpoints": [
         "GET /api/v1/preprocessing/catalog"
       ],
@@ -1448,7 +1453,7 @@
               }
             ],
             "default": null,
-            "description": "Only the blocks of this step: representation (which rows: candles, Renko bricks, a Kagi line), feature (the columns), normalization, window",
+            "description": "Only the blocks of this step",
             "title": "Step"
           }
         },
@@ -1676,7 +1681,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "How the user's new backtests start, as saved in Settings, Backtest defaults (or the app's defaults): timeframe, period, direction (long only or both), the signal threshold, stop loss, fees, slippage and the benchmark. Use these for every setting of a backtest the user does not name, so it runs as the app would start it.\n\nThe settings come twice. As Settings shows them: `stop_loss_pct`, `fees_pct` and `slippage_pct` in percent, the period in days. And in the units start_backtest takes, to pass through unchanged: `period` (data.period, UTC epoch seconds), `decision`, `execution` (stop_loss a fraction, fee_bps and slippage_bps in basis points) and `benchmark_instrument` (the instrument of the buy and hold benchmark; null for the backtest's own). The timeframe is not an argument of start_backtest: a backtest runs at its model's.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_backtest_defaults",
+      "description": "The user's defaults for new backtests (Settings, Backtest defaults): use them for every setting of a backtest the user does not name.\n\nThey come twice: as Settings shows them, `stop_loss_pct`, `fees_pct` and `slippage_pct` in percent, the period in days; and in start_backtest's units, to pass through unchanged: `period` (as data.period), `decision`, `execution` (stop_loss a fraction, fee_bps and slippage_bps in basis points) and `benchmark_instrument` (null: the backtest's own). The timeframe is not an argument of start_backtest: a backtest runs at its model's.",
+      "details": "The settings: timeframe, period, direction (long only or both), the signal threshold, stop loss, fees, slippage and the benchmark, as saved in Settings, Backtest defaults, or the app's defaults. With them a backtest runs as the app would start it. `period` is in UTC epoch seconds; `benchmark_instrument` is the instrument of the buy and hold benchmark.",
       "endpoints": [
         "GET /api/v1/me/preferences"
       ],
@@ -2198,7 +2204,8 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Saves how the user's new backtests start, as Save defaults in Settings, Backtest defaults does: every setting as a whole, replacing the saved ones. Use it only when the user asks to change their defaults; to run one backtest with other settings, pass them when you start it instead. Call get_backtest_defaults first and change only what the user named. Answers the saved defaults.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#update_backtest_defaults",
+      "description": "Saves the user's defaults for new backtests, all of them, replacing the saved ones. Only when the user asks to change their defaults (for one backtest, pass the settings to start_backtest): read get_backtest_defaults, change only what the user named.",
+      "details": "It saves as Save defaults in Settings, Backtest defaults does: every setting as a whole (timeframe, period_start, period_end, direction, threshold, stop_loss_pct, fees_pct, slippage_pct and benchmark). The settings in start_backtest's units that get_backtest_defaults adds (`period`, `decision`, `execution`, `benchmark_instrument`) are taken and ignored. Answers the saved defaults.",
       "endpoints": [
         "PUT /api/v1/me/preferences/backtest-defaults"
       ],
@@ -2232,7 +2239,6 @@
         "$defs": {
           "BacktestDefaultsArg": {
             "additionalProperties": false,
-            "description": "The backtest defaults to save, in Settings' units. The settings in start_backtest's\nunits that get_backtest_defaults adds are taken and ignored, so its answer can come back\nwith one setting changed.",
             "properties": {
               "benchmark": {
                 "$ref": "#/$defs/Benchmark",
@@ -2240,12 +2246,12 @@
               },
               "benchmark_instrument": {
                 "default": null,
-                "description": "Ignored: get_backtest_defaults derives it from the settings above",
+                "description": "Ignored",
                 "title": "Benchmark Instrument"
               },
               "decision": {
                 "default": null,
-                "description": "Ignored: get_backtest_defaults derives it from the settings above",
+                "description": "Ignored",
                 "title": "Decision"
               },
               "direction": {
@@ -2254,7 +2260,7 @@
               },
               "execution": {
                 "default": null,
-                "description": "Ignored: get_backtest_defaults derives it from the settings above",
+                "description": "Ignored",
                 "title": "Execution"
               },
               "fees_pct": {
@@ -2266,7 +2272,7 @@
               },
               "period": {
                 "default": null,
-                "description": "Ignored: get_backtest_defaults derives it from the settings above",
+                "description": "Ignored",
                 "title": "Period"
               },
               "period_end": {
@@ -2359,7 +2365,7 @@
         "properties": {
           "defaults": {
             "$ref": "#/$defs/BacktestDefaultsArg",
-            "description": "Every setting in Settings' units, as get_backtest_defaults answers them in percent and days: timeframe, period_start, period_end, direction, threshold, stop_loss_pct, fees_pct, slippage_pct and benchmark. Its answer can be sent back as it is: `period`, `decision`, `execution` and `benchmark_instrument` are ignored"
+            "description": "Every setting in Settings' units (percent, days); get_backtest_defaults' answer can be sent back as it is"
           }
         },
         "required": [
@@ -2485,7 +2491,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "How the user reads dates and times in the app: the time zone (exchange time or their own), the date format and 12 or 24 hour time. Use it to write dates and times in your answers the way the app shows them to the user. The backtest defaults are get_backtest_defaults.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_preferences",
+      "description": "How the user reads dates and times in the app (time zone, date format, 12 or 24 hour): write them that way in your answers.",
+      "details": "The time zone is exchange time or the user's own. The backtest defaults are get_backtest_defaults.",
       "endpoints": [
         "GET /api/v1/me/preferences"
       ],
@@ -2569,7 +2576,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "The user's uploaded models, oldest first, in short: ID, name, format, state, star, the timeframe and session of the manifest, how many backtests used each and the best Sharpe ratio, and its `url`, the page to show the user; and the storage they take of the user's quota. All of them unless per_page asks for a page; `total` counts them all.\n\nA model's state says what it can do: `needs_setup` has no manifest yet, so it cannot run (set_manifest gives it one); `ready` passed the manifest's checks and can be backtested; `verified` also gave the output of the manifest's example in a trial run. Use get_model for one model in full.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_models",
+      "description": "The user's models in short, oldest first, and the storage they take. State: `needs_setup` has no manifest and cannot run (set_manifest); `ready` can be backtested; `verified` also passed the trial run of its manifest's example. One in full: get_model.",
+      "details": "Each model in short: ID, name, format, state, star, the timeframe and session of the manifest, how many backtests used it and their best Sharpe ratio, and its `url`. All of them unless per_page asks for a page (at most 100); `total` counts them all. `needs_setup` has no manifest yet, so it cannot run (set_manifest gives it one); `ready` passed the manifest's checks; `verified` also gave the output of the manifest's example in a trial run.",
       "endpoints": [
         "GET /api/v1/models"
       ],
@@ -2601,7 +2609,7 @@
         "properties": {
           "page": {
             "default": 1,
-            "description": "The page, from 1, when per_page is given",
+            "description": "With per_page",
             "minimum": 1,
             "title": "Page",
             "type": "integer"
@@ -2618,7 +2626,7 @@
               }
             ],
             "default": null,
-            "description": "Models per page; all of them (at most 100) when left out",
+            "description": "All of them when left out",
             "title": "Per Page"
           }
         },
@@ -2813,7 +2821,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "One of the user's models in full: its file (format, size, weights, input and output shapes), its state, what its manifest says in short (representation, timeframe, session, input shape, warm-up), how many backtests used it (`backtest_count`) and the best Sharpe ratio of them, how the trial run of its manifest went, and its `url`, the page to show the user. The backtests themselves are list_backtests with `model` set to the model's name.\n\nAfter set_manifest, call it to see the trial run: `checked_at` is set when it ended, `state` is `verified` when it passed, and `check_failed` with `check_error` say why it failed (the model stays `ready`). get_manifest gives the whole manifest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_model",
+      "description": "One of the user's models in full: file, state, its manifest in short, how many backtests used it (`backtest_count`) and their best Sharpe ratio. The backtests: list_backtests with `model` set to the model's name.\n\nAfter set_manifest, the trial run: ended when `checked_at` is set, passed when `state` is `verified`, else `check_failed` and `check_error` say why (the model stays `ready`).",
+      "details": "In full: its file (format, size, weights, input and output shapes), its state, what its manifest says in short (representation, timeframe, session, input shape, warm-up), how many backtests used it (`backtest_count`) and the best Sharpe ratio of them, how the trial run of its manifest went, and its `url`. get_manifest gives the whole manifest.",
       "endpoints": [
         "GET /api/v1/models"
       ],
@@ -2864,7 +2873,7 @@
       "inputSchema": {
         "properties": {
           "model_id": {
-            "description": "Public ID of the model, as list_models gives it",
+            "description": "As list_models gives it",
             "examples": [
               "mdl_7f3k2m9qx4"
             ],
@@ -3228,7 +3237,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "The manifest of one of the user's models: how CandleStack builds the model's input from candles (the timeframe, the session, the representation, the features and their normalization, the window) and the shapes of its input and output.\n\nThe example is left out unless you ask for it. set_manifest replaces the whole manifest, so to change a manifest and keep its example, read it with include_example true and send the example back. A model without a manifest answers the problem no-manifest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_manifest",
+      "description": "The manifest of one of the user's models: how its input is built from candles and the shapes of its input and output. set_manifest replaces the whole manifest: to change one and keep its example, read it with include_example true and send the example back.",
+      "details": "The manifest says the timeframe, the session, the representation, the features and their normalization, and the window. The example, a small input with the output the model must give for it, is left out unless you ask for it. A model without a manifest answers the problem no-manifest.",
       "endpoints": [
         "GET /api/v1/models/{model_id}/manifest"
       ],
@@ -3325,12 +3335,12 @@
         "properties": {
           "include_example": {
             "default": false,
-            "description": "Include the example, a small input with the output the model must give for it, which can be large",
+            "description": "Include the example, which can be large",
             "title": "Include Example",
             "type": "boolean"
           },
           "model_id": {
-            "description": "Public ID of the model, as list_models gives it",
+            "description": "As list_models gives it",
             "examples": [
               "mdl_7f3k2m9qx4"
             ],
@@ -3710,7 +3720,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Checks a manifest for one of the user's models without keeping it: a dry run of set_manifest, which changes nothing. It runs every check set_manifest runs: the form, the catalog (every block exists and sits in its step), the blocks' parameters, the names of the columns, the signature against the window and the columns, the shapes of the example, and the signature against the input and output read from the model file.\n\n`valid` says whether every check passed. Else each of `problems` (at most 10; `more_problems` counts the rest) names its `field` (a path such as input.features[2].id), says what is wrong in `detail` and, when the check knows them, lists the values that fit there in `allowed`: fix those fields and check again, then call set_manifest. The format, every field and check: get_docs page manifest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#validate_manifest",
+      "description": "Runs every check of set_manifest on a manifest for one of the user's models and keeps nothing. Unless `valid`, each of `problems` names its `field`, the `detail` and the `allowed` values: fix those and check again, then set_manifest. The format and every check: get_docs page manifest.",
+      "details": "A dry run of set_manifest, which changes nothing. The checks: the form, the catalog (every block exists and sits in its step), the blocks' parameters, the names of the columns, the signature against the window and the columns, the shapes of the example, and the signature against the input and output read from the model file.\n\nEach problem names its `field` (a path such as input.features[2].id), says what is wrong in `detail` and, when the check knows them, lists the values that fit there in `allowed`; at most 10, `more_problems` counts the rest.\n\nThe manifest's guide: https://candlestack.tech/docs/manifest/; its JSON Schema: https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/manifest.schema.json.",
       "endpoints": [
         "POST /api/v1/models/{model_id}/manifest/check"
       ],
@@ -3790,12 +3801,12 @@
         "properties": {
           "manifest": {
             "additionalProperties": true,
-            "description": "The manifest as a JSON object, version 1: `version`, `input` (timeframe, session, representation, features with their normalization, window), `signature` (input and output shapes) and optionally `example` and `about`. Guide: https://candlestack.tech/docs/manifest/; JSON Schema: https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/manifest.schema.json. At most 1 MB as JSON.",
+            "description": "The manifest, version 1: `version`, `input` (timeframe, session, representation, features with their normalization, window), `signature` (input and output shapes), optionally `example` and `about`. At most 1 MB as JSON",
             "title": "Manifest",
             "type": "object"
           },
           "model_id": {
-            "description": "Public ID of the model, as list_models gives it",
+            "description": "As list_models gives it",
             "examples": [
               "mdl_7f3k2m9qx4"
             ],
@@ -3941,7 +3952,8 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Gives one of the user's models its manifest, or replaces the one it has, when every check passes (the checks of validate_manifest); the model is then `ready` and can be backtested. A manifest that fails answers the problem manifest-check-failed, whose `problems` name the `field`, the `detail` and the `allowed` values of each thing wrong: fix them and call it again, or try a manifest with validate_manifest first.\n\nThe whole manifest is replaced: what you leave out is gone, the example included. A trial run of the model with the manifest follows in the background: get_model shows it `verified` when the model gave the output of the manifest's example, or `check_error` when it failed.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#set_manifest",
+      "description": "Gives one of the user's models its manifest when every check of validate_manifest passes; the model is then `ready`. A failing one answers manifest-check-failed with `problems` as validate_manifest names them. The whole manifest is replaced, the example included. A trial run follows in the background: see it with get_model.",
+      "details": "It gives the model its first manifest or replaces the one it has: what you leave out is gone. A failing manifest answers manifest-check-failed, whose `problems` name the `field`, the `detail` and the `allowed` values of each thing wrong: fix them and call it again, or try it with validate_manifest first. After the trial run, get_model shows the model `verified` when it gave the output of the manifest's example, or `check_error` when it failed.",
       "endpoints": [
         "PUT /api/v1/models/{model_id}/manifest"
       ],
@@ -4044,12 +4056,12 @@
         "properties": {
           "manifest": {
             "additionalProperties": true,
-            "description": "The manifest as a JSON object, version 1: `version`, `input` (timeframe, session, representation, features with their normalization, window), `signature` (input and output shapes) and optionally `example` and `about`. Guide: https://candlestack.tech/docs/manifest/; JSON Schema: https://raw.githubusercontent.com/candlestack-tech/candlestack/main/docs/manifest.schema.json. At most 1 MB as JSON.",
+            "description": "The manifest, version 1: `version`, `input` (timeframe, session, representation, features with their normalization, window), `signature` (input and output shapes), optionally `example` and `about`. At most 1 MB as JSON",
             "title": "Manifest",
             "type": "object"
           },
           "model_id": {
-            "description": "Public ID of the model, as list_models gives it",
+            "description": "As list_models gives it",
             "examples": [
               "mdl_7f3k2m9qx4"
             ],
@@ -4414,7 +4426,8 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Renames one of the user's models; its extension stays, so `lstm-v2` makes `lstm-v2.keras`. A name the user has for another model, in any case, answers the problem model-name-taken.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#rename_model",
+      "description": "Renames one of the user's models; its extension stays (`lstm-v2` makes `lstm-v2.keras`). A name of another of the user's models, in any case, answers model-name-taken.",
+      "details": "The new name has no slashes or control characters; the extension (`.keras` or `.onnx`) stays.",
       "endpoints": [
         "PATCH /api/v1/models/{model_id}"
       ],
@@ -4440,7 +4453,7 @@
       "inputSchema": {
         "properties": {
           "model_id": {
-            "description": "Public ID of the model, as list_models gives it",
+            "description": "As list_models gives it",
             "examples": [
               "mdl_7f3k2m9qx4"
             ],
@@ -4450,7 +4463,7 @@
             "type": "string"
           },
           "name": {
-            "description": "The new name without the extension, which stays (`.keras` or `.onnx`); no slashes or control characters",
+            "description": "Without the extension, which stays",
             "examples": [
               "lstm-v2"
             ],
@@ -4607,7 +4620,8 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Stars or unstars one of the user's models; the app lists starred models first in its pickers.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#star_model",
+      "description": "Stars or unstars one of the user's models.",
+      "details": "The app lists starred models first in its pickers.",
       "endpoints": [
         "PATCH /api/v1/models/{model_id}"
       ],
@@ -4633,7 +4647,7 @@
       "inputSchema": {
         "properties": {
           "model_id": {
-            "description": "Public ID of the model, as list_models gives it",
+            "description": "As list_models gives it",
             "examples": [
               "mdl_7f3k2m9qx4"
             ],
@@ -4644,7 +4658,7 @@
           },
           "starred": {
             "default": true,
-            "description": "true stars the model, false unstars it",
+            "description": "false unstars it",
             "title": "Starred",
             "type": "boolean"
           }
@@ -4794,7 +4808,8 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Deletes one of the user's models and its file for good, which frees its storage; its backtests stay. It cannot be undone, so ask the user first and give the model's name back in confirm_name: a name that is not the model's answers the problem confirmation-mismatch and deletes nothing.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#delete_model",
+      "description": "Deletes one of the user's models and its file for good; its backtests stay. It cannot be undone: ask the user first. A confirm_name that is not the model's answers confirmation-mismatch and deletes nothing.",
+      "details": "Deleting frees the model's storage. confirm_name is the confirmation that this is the model to delete.",
       "endpoints": [
         "DELETE /api/v1/models/{model_id}"
       ],
@@ -4812,7 +4827,7 @@
       "inputSchema": {
         "properties": {
           "confirm_name": {
-            "description": "The model's name, extension included, exactly as list_models gives it, as the confirmation that this is the model to delete",
+            "description": "The model's name with its extension, exactly as list_models gives it",
             "examples": [
               "lstm.keras"
             ],
@@ -4821,7 +4836,7 @@
             "type": "string"
           },
           "model_id": {
-            "description": "Public ID of the model, as list_models gives it",
+            "description": "As list_models gives it",
             "examples": [
               "mdl_7f3k2m9qx4"
             ],
@@ -4884,7 +4899,8 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Makes a one-time link to upload a model file (Keras `.keras` or ONNX `.onnx`, at most 50 MB) into the user's models. You never send the file through a tool: the file goes from the user's computer to the link, either by running `command` (curl), or by opening `page_url` in the browser and dropping the file there.\n\n`command` sends the file at the path given as `file_name`. Given only a name, it reads ./path/to/<name>: replace ./path/to/ with the folder the file is in (the file on disk may have another name than the model gets) before it runs.\n\nThe link takes one file within 15 minutes and counts against the user's storage; the file is checked as any upload (a real model with trained weights, nothing from it run). Treat `url` and `command` like a key until the upload is done. Then call get_model_upload with the link's `id` to see how it went and get the new model's ID; give the model a manifest with set_manifest before backtesting it.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#create_model_upload",
+      "description": "Makes a one-time link to upload a model file (`.keras` or `.onnx`, at most 50 MB). The file never goes through a tool: run `command` (curl) on the user's computer, or the user opens `page_url` and drops it there. Given only a name, `command` reads ./path/to/<name>: replace ./path/to/ with the folder the file is in before it runs.\n\nThe link takes one file within 15 minutes; treat `url` and `command` like a key. Then get_model_upload with the link's `id` gives the new model's ID; set_manifest before a backtest.",
+      "details": "Keras `.keras` or ONNX `.onnx`. `command` sends the file at the path given as `file_name`, so with a path it runs as it is; with a name, its path is a placeholder (the file on disk may have another name than the model gets). The link counts against the user's storage, and the file is checked as any upload: a real model with trained weights, nothing from it run. Treat `url` and `command` like a key until the upload is done.",
       "endpoints": [
         "POST /api/v1/models",
         "POST /api/v1/models/uploads"
@@ -4908,7 +4924,7 @@
       "inputSchema": {
         "properties": {
           "file_name": {
-            "description": "The model file's path on the user's computer, or only its name, extension included (`.keras` or `.onnx`); the model gets the base name. With a path, `command` runs as it is; with a name, its path is a placeholder",
+            "description": "The file's path on the user's computer, or only its name, with the extension; the model gets the base name",
             "examples": [
               "lstm.keras"
             ],
@@ -4918,7 +4934,7 @@
             "type": "string"
           },
           "size_bytes": {
-            "description": "The file's size in bytes: the link takes no larger file",
+            "description": "The link takes no larger file",
             "exclusiveMinimum": 0,
             "title": "Size Bytes",
             "type": "integer"
@@ -5008,7 +5024,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "How the upload through a one-time link stands: `waiting` for the file, `checking` while it comes in and is checked, `done` with the new model's `model_id` and its page in the app (`model_url`, to show the user), `failed` with the `problem` and the `error` to tell the user, or `expired` unused. A failed or expired link is spent: make a new one with create_model_upload.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_model_upload",
+      "description": "How an upload through a one-time link stands: `waiting`, `checking`, `done` (with `model_id` and `model_url`, the page to show the user), `failed` (with the `error` to tell the user) or `expired`. A failed or expired link is spent: make a new one.",
+      "details": "`waiting` for the file, `checking` while it comes in and is checked, `done` with the new model's `model_id` and its page in the app (`model_url`), `failed` with the `problem` and the `error` to tell the user, or `expired` unused.",
       "endpoints": [
         "POST /api/v1/models",
         "GET /api/v1/models/uploads/{upload_id}"
@@ -5031,7 +5048,7 @@
       "inputSchema": {
         "properties": {
           "upload_id": {
-            "description": "Public ID of the link, as create_model_upload gave it",
+            "description": "As create_model_upload gave it",
             "examples": [
               "upl_7f3k2m9qx4"
             ],
@@ -5164,7 +5181,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Checks a backtest setup without starting anything: the same checks as start_backtest (the model is the user's and has a manifest, the instrument fits the model, the period with the candles the model needs before it fits the market data, the queue has room). Call it before start_backtest when you built the setup yourself.\n\nAnswers what would run (the model, the instrument, the model's timeframe and session, the warm-up) and whether it would wait in the user's queue; a setup that fails a check answers the problem start_backtest would, with what to change in its detail. The arguments are those of start_backtest.\n\nWhat each setting does to the trades: get_docs page engine (sections Decision steps and Execution settings).\n\nDocs: https://candlestack.tech/docs/mcp/tools/#validate_backtest",
+      "description": "Runs the checks of start_backtest, with its arguments, without starting anything: the model has a manifest, the instrument fits it, the period has the candles it needs, the queue has room. Call it first when you built the setup yourself. A failing check answers the problem start_backtest would.",
+      "details": "The checks: the model is the user's and has a manifest, the instrument fits the model, the period with the candles the model needs before it fits the market data, the queue has room. Answers what would run (the model, the instrument, the model's timeframe and session, the warm-up) and whether it would wait in the user's queue; the problem of a failing check says what to change in its detail. What each setting does to the trades: get_docs page engine (sections Decision steps and Execution settings).",
       "endpoints": [
         "POST /api/v1/backtests/check"
       ],
@@ -5987,7 +6005,8 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Starts a backtest of one of the user's models on one instrument and period. One backtest of a user runs at a time and up to 20 more wait in the queue, and a few run at once over all users, taking turns; so it starts running at once or waits (queued, with its place and `eta_s`).\n\nThe arguments are the body of POST /api/v1/backtests: model.id (one of the user's models with a manifest), data.instrument.id (<market>:<symbol>: a stock for a model of US trading hours, a crypto pair for one of 24/7) and data.period ([start, end) in UTC epoch seconds), and optionally decision (how the predictions become a signal: threshold 0 by default), execution (fills, stop loss, position size, fees and slippage) and benchmarks (buy and hold of the instrument, or of SPY, QQQ or DIA for a stock). The `setup` get_backtest answers has this shape, so a backtest can be run again with changes.\n\nUnits: execution.stop_loss and position_size are fractions (0.07 is 7 %), fee_bps and slippage_bps basis points (10 is 0.1 %), not the percent of the app's Settings. get_backtest_defaults answers the user's defaults in these units too (`period`, `decision`, `execution`, `benchmark_instrument`): pass them through for every setting the user does not name.\n\nPass an `idempotency_key` (a UUID you make) to call it again safely after a timeout: the same call with the same key within 24 hours answers the first backtest instead of starting another.\n\nAnswers its ID and status at once; the run takes from seconds to minutes. Then call wait_for_backtest with the ID until it has ended, and get_backtest for the results.\n\nHow the settings become trades: get_docs page engine; how the results are computed: get_docs page metrics. Read them before you explain a setting or a result.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#start_backtest",
+      "description": "Starts a backtest of one of the user's models (with a manifest) on one instrument and period: it runs at once or waits in the user's queue (one runs at a time, 20 wait). It answers at once: follow it with wait_for_backtest, then get_backtest.\n\nThe instrument: a stock for a model of US trading hours, a crypto pair for one of 24/7. decision is a threshold of 0 by default. get_backtest's `setup` has this shape, to run it again with changes.\n\nUnits: execution.stop_loss and position_size are fractions (0.07 is 7 %), fee_bps and slippage_bps basis points (10 is 0.1 %), not Settings' percent. get_backtest_defaults answers the user's defaults in these units too: pass them through for every setting the user does not name. Settings: get_docs page engine; results: get_docs page metrics.",
+      "details": "One backtest of a user runs at a time and up to 20 more wait in the queue, and a few run at once over all users, taking turns; a queued one answers its place and `eta_s`. The run takes from seconds to minutes.\n\nThe arguments are the body of POST /api/v1/backtests: model.id (one of the user's models with a manifest), data.instrument.id (<market>:<symbol>) and data.period ([start, end) in UTC epoch seconds), and optionally decision (how the predictions become a signal), execution (fills, stop loss, position size, fees and slippage) and benchmarks (buy and hold of the instrument, or of SPY, QQQ or DIA for a stock). get_backtest_defaults gives the user's defaults as `period`, `decision`, `execution` and `benchmark_instrument`.\n\nPass an `idempotency_key` (a UUID you make) to call it again safely after a timeout: the same call with the same key within 24 hours answers the first backtest instead of starting another. Read the engine and metrics pages before you explain a setting or a result.",
       "endpoints": [
         "POST /api/v1/backtests"
       ],
@@ -6777,7 +6796,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Waits until a backtest has ended (finished or failed) or `timeout_s` seconds passed, then answers where it stands. Give `ids` instead of `backtest_id` to wait for several at once, until any or all of them ended (`until`); `backtests` then has each one. When `done` is false, call it again: a backtest can wait in the queue and run for several minutes, and `eta_s` says about how long. Once it finished, read it with get_backtest. A client that asks for progress gets where it stands while it waits.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#wait_for_backtest",
+      "description": "Waits until a backtest ended or `timeout_s` passed, then answers where it stands; with `ids`, several at once, until any or all ended. Not `done`: call it again (a backtest can wait and run for minutes; `eta_s` says about how long). Then get_backtest.",
+      "details": "A backtest has ended when it finished or failed. `timeout_s` is at most 60 seconds; `ids` takes up to 20 backtests, and `backtests` then has each one. A client that asks for progress gets where it stands while it waits.",
       "endpoints": [
         "GET /api/v1/backtests/{backtest_id}"
       ],
@@ -6850,7 +6870,7 @@
               }
             ],
             "default": null,
-            "description": "Public ID of the backtest; or give `ids`",
+            "description": "Or give `ids`",
             "examples": [
               "bt_7f3k2m9qx4"
             ],
@@ -6871,12 +6891,12 @@
               }
             ],
             "default": null,
-            "description": "Instead of `backtest_id`: up to 20 backtest IDs to wait for at once",
+            "description": "Instead of `backtest_id`",
             "title": "Ids"
           },
           "timeout_s": {
             "default": 50,
-            "description": "How long to wait at most, in seconds (up to 60)",
+            "description": "Seconds to wait at most",
             "maximum": 60,
             "minimum": 1,
             "title": "Timeout S",
@@ -6884,7 +6904,7 @@
           },
           "until": {
             "default": "all",
-            "description": "With `ids`: wait until any of them ended, or all of them",
+            "description": "With `ids`",
             "enum": [
               "any",
               "all"
@@ -7307,7 +7327,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Where a backtest stands right now: queued with its place in the queue, running with its steps (loading candles, waiting for the worker, the model, the trades), finished or failed with the error. It does not wait; to wait for the end, call wait_for_backtest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_backtest_status",
+      "description": "Where a backtest stands now (its place in the queue, its steps or its error), without waiting; to wait: wait_for_backtest.",
+      "details": "Queued with its place in the queue, running with its steps (loading candles, waiting for the worker, the model, the trades), finished, or failed with the error.",
       "endpoints": [
         "GET /api/v1/backtests/{backtest_id}"
       ],
@@ -7633,7 +7654,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Reads a backtest, the user's own or one another account published: its status, its setup (which can be sent to start_backtest again, changed or not) and, once it finished, the 12 statistics and the benchmarks' returns, with a link to its page in the app.\n\nThat light answer is the default. For its trades (oldest first) pass `trades_per_page` (e.g. 50) and `trades_page`; a page past the last one is empty. For the equity curve pass `equity_points` (up to 200). Call it after wait_for_backtest answered finished, or for a backtest the user names; it reads what the run stored, so it is quick.\n\nWhat each statistic means and how it is computed: get_docs page metrics; the problem of a failed backtest: get_docs page api/errors.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_backtest",
+      "description": "Reads a backtest, the user's own or a published one: status, setup (start_backtest takes it back) and, once finished, the 12 statistics and the benchmarks' returns. Trades: `trades_per_page` (such as 50) and `trades_page`; the equity curve: `equity_points`. Statistics: get_docs page metrics; a failed one's problem: get_docs page api/errors.",
+      "details": "The light answer, without trades and curve, is the default. Trades come oldest first, up to 500 a page; a page past the last one is empty. The equity curve has up to 200 points. Call it after wait_for_backtest answered finished, or for a backtest the user names; it reads what the run stored, so it is quick. It links the backtest's page in the app.",
       "endpoints": [
         "GET /api/v1/backtests/{backtest_id}"
       ],
@@ -7801,7 +7823,7 @@
           },
           "equity_points": {
             "default": 0,
-            "description": "Points of the equity curve, up to 200; 0 for no curve",
+            "description": "0 for no curve",
             "maximum": 200,
             "minimum": 0,
             "title": "Equity Points",
@@ -7816,7 +7838,7 @@
           },
           "trades_per_page": {
             "default": 0,
-            "description": "Trades per page, up to 500; 0 for no trades",
+            "description": "0 for no trades",
             "maximum": 500,
             "minimum": 0,
             "title": "Trades Per Page",
@@ -8876,7 +8898,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Compares backtests side by side, as the app's Compare page does: each of the 12 statistics of each with the best and the worst marked (values that read the same count as equal), their setups and which setup fields differ. Use it to pick the best of several runs; it reads only what each stored, so it is quick. A running or failed backtest is listed with its status and no values. Each backtest has its `url`, the page to show the user, and `url` is the app's Compare page with 2 to 4 of them: give it to the user to see the curves and the table.\n\nFor the equity, drawdown and buy and hold of each on one time axis pass `curve_points` (up to 200); without it the curves are null and `times` empty. With many similar backtests pass `setup_mode=\"diff\"` to read the shared setup once.\n\nmax_drawdown is 0 or below and a smaller fall is better: -0.05 is better than -0.20, so its best value is the highest one; its `better` says `lower` as in a lower fall, by its size. The marks already account for it.\n\nWhat each statistic means and how it is computed: get_docs page metrics; how sweeps and comparisons rank: get_docs page sweeps.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#compare_backtests",
+      "description": "Compares backtests side by side, as the app's Compare page does: the 12 statistics with the best and the worst marked, and the setups with the fields that differ (a running or failed one has no values). `curve_points` adds the curves; with many similar backtests, `setup_mode=\"diff\"` gives their shared setup once.\n\nmax_drawdown is 0 or below and a smaller fall is better: -0.05 is better than -0.20; the marks account for it. Statistics: get_docs page metrics; ranks: get_docs page sweeps.",
+      "details": "1 to 20 backtests. Use it to pick the best of several runs; it reads only what each stored, so it is quick. Values that read the same count as equal. Each backtest has its `url`, and `url` is the app's Compare page with 2 to 4 of them: give it to the user to see the curves and the table.\n\n`curve_points` (up to 200) gives the equity, drawdown and buy and hold of each on one time axis; without it the curves are null and `times` empty. setup_mode full gives each backtest's whole setup.\n\nmax_drawdown's best value is the highest one; its `better` says `lower` as in a lower fall, by its size. How sweeps and comparisons rank: get_docs page sweeps.",
       "endpoints": [
         "GET /api/v1/compare"
       ],
@@ -8991,14 +9014,14 @@
         "properties": {
           "curve_points": {
             "default": 0,
-            "description": "Times of the curves, up to 200; 0 for none",
+            "description": "0 for no curves",
             "maximum": 200,
             "minimum": 0,
             "title": "Curve Points",
             "type": "integer"
           },
           "ids": {
-            "description": "1 to 20 backtest IDs: the user's own and published ones",
+            "description": "The user's own and published ones",
             "examples": [
               [
                 "bt_7f3k2m9qx4",
@@ -9015,7 +9038,7 @@
           },
           "setup_mode": {
             "default": "full",
-            "description": "full: each backtest's whole setup. diff: what all share once in `shared_setup`, each backtest's `setup` only its fields of `differs`",
+            "description": "diff: what all share once in `shared_setup`, each `setup` only its fields of `differs`",
             "enum": [
               "full",
               "diff"
@@ -9411,7 +9434,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Lists the user's backtests: search, filters (status, sweep, model, instrument, timeframe, representation, start time, least Sharpe ratio or return, deepest drawdown, starred, published; all must hold), sort by a result, 10 a page or up to 100. Use it to find a backtest's ID by its name, number, instrument or model, a sweep's backtests, or the best ones by a result. Answers the page and how many match, and on page 1 the counts of all, starred, failed and published backtests and the models used; each backtest has its `url`, the page to show the user. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_backtests",
+      "description": "Lists the user's backtests with search, filters (all must hold) and a sort by a result: to find a backtest's ID by name, number, instrument or model, a sweep's backtests, or the best by a result.",
+      "details": "The filters: status, sweep, model, instrument, timeframe, representation, start time, least Sharpe ratio or return, deepest drawdown, starred, published. The search finds part of the name, of the number (#12 or 12), of an instrument's symbol or of the model's name, in any case. 10 a page, up to 100; a page past the last one is empty. Answers the page and how many match, and on page 1 the counts of all, starred, failed and published backtests and the models used; each backtest has its `url`. `show` is all, the starred, the failed or the published ones. The default sort is newest first, whatever the `order`.",
       "endpoints": [
         "GET /api/v1/backtests"
       ],
@@ -9567,7 +9591,7 @@
               }
             ],
             "default": null,
-            "description": "Only those started at or after this time (UTC)",
+            "description": "Started at or after (UTC)",
             "title": "Created After"
           },
           "created_before": {
@@ -9581,7 +9605,7 @@
               }
             ],
             "default": null,
-            "description": "Only those started before this time (UTC)",
+            "description": "Started before (UTC)",
             "title": "Created Before"
           },
           "include_facets": {
@@ -9594,7 +9618,7 @@
               }
             ],
             "default": null,
-            "description": "Answer the counts and the values the filters offer: true on every page, false never; left out, only on page 1",
+            "description": "The counts and the values the filters offer: true on every page, false never; left out, on page 1",
             "title": "Include Facets"
           },
           "instrument": {
@@ -9608,7 +9632,7 @@
               }
             ],
             "default": null,
-            "description": "Only this instrument's, <market>:<symbol>",
+            "description": "<market>:<symbol>",
             "title": "Instrument"
           },
           "min_max_drawdown": {
@@ -9622,7 +9646,7 @@
               }
             ],
             "default": null,
-            "description": "Largest fall no deeper than this, 0 or below: -0.2 keeps falls of up to 20 percent",
+            "description": "0 or below: -0.2 keeps falls of up to 20 percent",
             "title": "Min Max Drawdown"
           },
           "min_sharpe": {
@@ -9648,7 +9672,7 @@
               }
             ],
             "default": null,
-            "description": "Return at least this, a fraction",
+            "description": "A fraction",
             "title": "Min Total Return"
           },
           "model": {
@@ -9662,7 +9686,7 @@
               }
             ],
             "default": null,
-            "description": "Only the backtests of the model with this name (one of `models`)",
+            "description": "A model's name (one of `models`)",
             "title": "Model"
           },
           "model_id": {
@@ -9676,13 +9700,13 @@
               }
             ],
             "default": null,
-            "description": "Only the backtests of this model's ID",
+            "description": "Only the backtests of this model",
             "title": "Model Id"
           },
           "order": {
             "$ref": "#/$defs/SortOrder",
             "default": "desc",
-            "description": "Direction of the sort; the default sort is newest first anyway"
+            "description": "Direction of the sort"
           },
           "page": {
             "default": 1,
@@ -9710,12 +9734,12 @@
               }
             ],
             "default": null,
-            "description": "Only published (true) or not",
+            "description": "Published",
             "title": "Public"
           },
           "query": {
             "default": "",
-            "description": "Search: part of the name, of the number (#12 or 12), of an instrument's symbol or of the model's name, in any case",
+            "description": "Part of the name, the number (#12), a symbol or the model's name",
             "maxLength": 100,
             "title": "Query",
             "type": "string"
@@ -9730,17 +9754,16 @@
               }
             ],
             "default": null,
-            "description": "Only models that read this"
+            "description": "What the model reads"
           },
           "show": {
             "$ref": "#/$defs/BacktestShow",
-            "default": "all",
-            "description": "All, the starred, the failed or the published ones"
+            "default": "all"
           },
           "sort": {
             "$ref": "#/$defs/BacktestSort",
             "default": "default",
-            "description": "What to sort by; those without the value (failed ones) come last"
+            "description": "Those without the value (failed ones) come last"
           },
           "starred": {
             "anyOf": [
@@ -9768,7 +9791,7 @@
               }
             ],
             "default": null,
-            "description": "Only backtests with one of these statuses",
+            "description": "Any of these",
             "title": "Status"
           },
           "sweep_id": {
@@ -10305,7 +10328,8 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Renames one of the user's backtests, or with a name of null gives it back the name it got when it was created. Answers the problem name-taken when another backtest of the user has the name, in any case.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#rename_backtest",
+      "description": "Renames one of the user's backtests; a name of another of them answers name-taken.",
+      "details": "The new name has 1 to 80 characters and is unique in the account, ignoring case; a name of null gives the backtest back the name it got when it was created.",
       "endpoints": [
         "PATCH /api/v1/backtests/{backtest_id}"
       ],
@@ -10326,7 +10350,7 @@
       "inputSchema": {
         "properties": {
           "backtest_id": {
-            "description": "Public ID of the backtest, from list_backtests",
+            "description": "Public ID of the backtest",
             "examples": [
               "bt_7f3k2m9qx4"
             ],
@@ -10345,7 +10369,7 @@
                 "type": "null"
               }
             ],
-            "description": "The new name, 1 to 80 characters, unique in the account ignoring case; null goes back to the name it got when it was created",
+            "description": "Unique in the account, ignoring case; null restores the first name",
             "title": "Name"
           }
         },
@@ -10422,7 +10446,8 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Stars one of the user's backtests, or unstars it with starred false. Starred backtests are listed with show starred in list_backtests and on the Dashboard.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#star_backtest",
+      "description": "Stars or unstars one of the user's backtests.",
+      "details": "Starred backtests are listed with show starred in list_backtests and on the Dashboard.",
       "endpoints": [
         "PATCH /api/v1/backtests/{backtest_id}"
       ],
@@ -10442,7 +10467,7 @@
       "inputSchema": {
         "properties": {
           "backtest_id": {
-            "description": "Public ID of the backtest, from list_backtests",
+            "description": "Public ID of the backtest",
             "examples": [
               "bt_7f3k2m9qx4"
             ],
@@ -10451,7 +10476,7 @@
           },
           "starred": {
             "default": true,
-            "description": "true stars it, false unstars it",
+            "description": "false unstars it",
             "title": "Starred",
             "type": "boolean"
           }
@@ -10528,7 +10553,8 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Stars up to 100 of the user's backtests at once, or unstars them with starred false, as star_backtest does one. Answers the IDs now as asked in `updated` (those that already were included, so calling it again changes nothing) and the IDs the user has no backtest with in `not_found`, which change nothing.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#star_backtests",
+      "description": "Stars or unstars many of the user's backtests at once. Unknown IDs come back in `not_found` and change nothing.",
+      "details": "Up to 100 backtests, as star_backtest does one. Answers the IDs now as asked in `updated` (those that already were included, so calling it again changes nothing) and the IDs the user has no backtest with in `not_found`.",
       "endpoints": [
         "POST /api/v1/backtests/update"
       ],
@@ -10555,7 +10581,7 @@
       "inputSchema": {
         "properties": {
           "ids": {
-            "description": "1 to 100 IDs of the user's backtests, from list_backtests",
+            "description": "The user's backtests",
             "items": {
               "examples": [
                 "bt_7f3k2m9qx4"
@@ -10571,7 +10597,7 @@
           },
           "starred": {
             "default": true,
-            "description": "true stars them, false unstars them",
+            "description": "false unstars them",
             "title": "Starred",
             "type": "boolean"
           }
@@ -10659,7 +10685,8 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Cancels one of the user's queued backtests, so it never runs: it becomes failed, with an error that says it was cancelled, and stays in the list. Only a queued backtest can be cancelled; a running or ended one answers the problem backtest-not-queued.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#cancel_backtest",
+      "description": "Cancels one of the user's queued backtests: it never runs and becomes failed. A running or ended one answers backtest-not-queued.",
+      "details": "The cancelled backtest becomes failed, with an error that says it was cancelled, and stays in the list.",
       "endpoints": [
         "POST /api/v1/backtests/{backtest_id}/cancel"
       ],
@@ -10678,7 +10705,7 @@
       "inputSchema": {
         "properties": {
           "backtest_id": {
-            "description": "Public ID of the backtest, from list_backtests",
+            "description": "Public ID of the backtest",
             "examples": [
               "bt_7f3k2m9qx4"
             ],
@@ -10758,7 +10785,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Lists Experiments: the backtests that accounts of the beta published, which every signed-in account can see, with search, filters (author, market, symbol, representation, timeframe), sort and 12 a page. Use it to find what others tried and how it did, then read one with its ID. Answers the page, how many match, and on page 1 the counts and the values each filter offers; each backtest has its `url`, the page to show the user. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_experiments",
+      "description": "Lists Experiments, the backtests every account of the beta published, with search, filters and sort: to find what others tried and how it did.",
+      "details": "Every signed-in account can see Experiments. The filters: author, market, symbol, representation, timeframe; the search finds part of the backtest's name, of an instrument's symbol, of the model's name or of the author's name, in any case. 12 a page; a page past the last one is empty. Read one with get_backtest and its ID. Answers the page, how many match, and on page 1 the counts and the values each filter offers; each backtest has its `url`.",
       "endpoints": [
         "GET /api/v1/experiments"
       ],
@@ -10914,7 +10942,7 @@
               }
             ],
             "default": null,
-            "description": "Only this account's (`author.id`, usr_...)",
+            "description": "An `author.id`",
             "title": "Author"
           },
           "include_facets": {
@@ -10927,7 +10955,7 @@
               }
             ],
             "default": null,
-            "description": "Answer the counts and the values the filters offer: true on every page, false never; left out, only on page 1",
+            "description": "The counts and the values the filters offer: true on every page, false never; left out, on page 1",
             "title": "Include Facets"
           },
           "market": {
@@ -10944,14 +10972,14 @@
           },
           "mine": {
             "default": false,
-            "description": "Only the user's own published backtests",
+            "description": "The user's own",
             "title": "Mine",
             "type": "boolean"
           },
           "order": {
             "$ref": "#/$defs/SortOrder",
             "default": "desc",
-            "description": "Direction of the sort; the default sort is newest first anyway"
+            "description": "Direction of the sort"
           },
           "page": {
             "default": 1,
@@ -10963,7 +10991,7 @@
           },
           "query": {
             "default": "",
-            "description": "Search: part of the backtest's name, of an instrument's symbol, of the model's name or of the author's name, in any case",
+            "description": "Part of the name, a symbol, the model's or the author's name",
             "maxLength": 100,
             "title": "Query",
             "type": "string"
@@ -10978,12 +11006,11 @@
               }
             ],
             "default": null,
-            "description": "Only models that read this"
+            "description": "What the model reads"
           },
           "sort": {
             "$ref": "#/$defs/ExperimentSort",
-            "default": "newest",
-            "description": "What to sort by; newest is the newest published first"
+            "default": "newest"
           },
           "symbol": {
             "anyOf": [
@@ -11536,7 +11563,8 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Publishes one of the user's finished backtests in Experiments: it becomes visible to every account of the beta, with its name, the user's display name, its setup, results, charts and trades and its model's name and input (never the model file), and others can compare with it. Ask the user before publishing. Publishing one that is published already changes nothing. A queued, running or failed backtest answers backtest-not-finished.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#publish_backtest",
+      "description": "Publishes one of the user's finished backtests in Experiments: visible to every account of the beta with the user's display name, setup, results and trades, its model's name and input (never the file). Ask the user first.",
+      "details": "Published, it shows the backtest's name, the user's display name, its setup, results, charts and trades and its model's name and input, never the model file, and others can compare with it. Publishing one that is published already changes nothing. A queued, running or failed backtest answers backtest-not-finished.",
       "endpoints": [
         "PATCH /api/v1/backtests/{backtest_id}"
       ],
@@ -11556,7 +11584,7 @@
       "inputSchema": {
         "properties": {
           "backtest_id": {
-            "description": "Public ID of the backtest, from list_backtests",
+            "description": "Public ID of the backtest",
             "examples": [
               "bt_7f3k2m9qx4"
             ],
@@ -11636,7 +11664,8 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Takes one of the user's backtests out of Experiments: no other account can see it any more, and it leaves their comparisons. The backtest itself stays. Ask the user first.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#unpublish_backtest",
+      "description": "Takes one of the user's backtests out of Experiments; the backtest stays. Ask the user first.",
+      "details": "No other account can see it any more, and it leaves their comparisons.",
       "endpoints": [
         "PATCH /api/v1/backtests/{backtest_id}"
       ],
@@ -11656,7 +11685,7 @@
       "inputSchema": {
         "properties": {
           "backtest_id": {
-            "description": "Public ID of the backtest, from list_backtests",
+            "description": "Public ID of the backtest",
             "examples": [
               "bt_7f3k2m9qx4"
             ],
@@ -11736,7 +11765,8 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Publishes up to 100 of the user's finished backtests in Experiments at once, or with published false takes them out, as publish_backtest and unpublish_backtest do one: a published backtest is visible to every account of the beta with its name, the user's display name, setup, results, charts, trades and its model's name and input (never the model file). Ask the user before publishing or unpublishing. Answers the IDs now as asked in `updated` (those that already were included, so calling it again changes nothing), the IDs the user has no backtest with in `not_found`, and when publishing those that cannot be published (queued, running or failed) in `cannot_publish`; nothing changes for those two.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#publish_backtests",
+      "description": "Publishes many of the user's finished backtests in Experiments at once, as publish_backtest does one, or takes them out. Ask the user first. Unknown IDs (`not_found`) and unfinished ones (`cannot_publish`) change nothing.",
+      "details": "Up to 100 backtests, as publish_backtest and unpublish_backtest do one: a published backtest is visible to every account of the beta with its name, the user's display name, setup, results, charts, trades and its model's name and input (never the model file). Answers the IDs now as asked in `updated` (those that already were included, so calling it again changes nothing), the IDs the user has no backtest with in `not_found`, and when publishing those that cannot be published (queued, running or failed) in `cannot_publish`.",
       "endpoints": [
         "POST /api/v1/backtests/update"
       ],
@@ -11761,7 +11791,7 @@
       "inputSchema": {
         "properties": {
           "ids": {
-            "description": "1 to 100 IDs of the user's backtests, from list_backtests",
+            "description": "The user's backtests",
             "items": {
               "examples": [
                 "bt_7f3k2m9qx4"
@@ -11777,7 +11807,7 @@
           },
           "published": {
             "default": true,
-            "description": "true publishes them, false takes them out of Experiments",
+            "description": "false takes them out of Experiments",
             "title": "Published",
             "type": "boolean"
           }
@@ -11865,7 +11895,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "The user's Dashboard in one call: the counts of all, starred, failed and published backtests, the 6 newest that ended, the 5 best finished ones by Sharpe ratio, return, drawdown (the smallest fall) and win rate with the value, and the 4 best starred ones. Each list gives IDs; `backtests` has each backtest once, by ID, with its `url`, the page to show the user. Call it for an overview before digging in with list_backtests.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_dashboard",
+      "description": "The user's Dashboard: backtest counts, the newest that ended, the best by Sharpe ratio, return, drawdown (the smallest fall) and win rate, and the best starred. For an overview before list_backtests.",
+      "details": "The counts of all, starred, failed and published backtests, the 6 newest that ended, the 5 best finished ones by Sharpe ratio, return, drawdown and win rate with the value, and the 4 best starred ones. Each list gives IDs; `backtests` has each backtest once, by ID, with its `url`.",
       "endpoints": [
         "GET /api/v1/dashboard"
       ],
@@ -12471,7 +12502,8 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Deletes the user's backtests for good, with their results: up to 100 by their ids, or every backtest of a sweep with sweep_id, which deletes the sweep too. A queued one leaves the queue, a running one is stopped, a published one leaves Experiments and its page is gone. It cannot be undone, so ask the user first and give how many backtests you delete in confirm_count: when another number matches (some were deleted already, or the sweep has more), it answers the problem confirmation-mismatch with the real `count` and deletes nothing. IDs the user has no backtest with are listed in `not_found`.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#delete_backtests",
+      "description": "Deletes the user's backtests for good, by ids or a whole sweep; running ones stop, published ones leave Experiments. It cannot be undone: ask the user first. When another number than confirm_count matches, it answers confirmation-mismatch with the real `count` and deletes nothing.",
+      "details": "Up to 100 backtests by their ids, with their results, or every backtest of a sweep with sweep_id, which deletes the sweep too. A queued one leaves the queue, a running one is stopped, a published one leaves Experiments and its page is gone. Another number matches when some were deleted already, or the sweep has more. IDs the user has no backtest with are listed in `not_found`.",
       "endpoints": [
         "DELETE /api/v1/backtests/{backtest_id}",
         "POST /api/v1/backtests/delete"
@@ -12496,7 +12528,7 @@
       "inputSchema": {
         "properties": {
           "confirm_count": {
-            "description": "How many backtests this deletes, as the user agreed: the IDs given, or the sweep's `count` from get_sweep",
+            "description": "How many it deletes, as the user agreed: the IDs given, or the sweep's `count` from get_sweep",
             "minimum": 1,
             "title": "Confirm Count",
             "type": "integer"
@@ -12521,7 +12553,7 @@
               }
             ],
             "default": null,
-            "description": "1 to 100 IDs of the user's backtests, from list_backtests",
+            "description": "The user's backtests",
             "title": "Ids"
           },
           "sweep_id": {
@@ -12536,7 +12568,7 @@
               }
             ],
             "default": null,
-            "description": "Every backtest of this sweep and the sweep itself, instead of ids",
+            "description": "Instead of ids: the sweep and all its backtests",
             "title": "Sweep Id"
           }
         },
@@ -12604,7 +12636,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Checks a sweep without starting anything: every combination of `base` (the setup of one backtest: model, data, decision, execution, benchmarks) and the values in `vary` (models, instruments, periods, decision rules) passes the checks of a new backtest, and the user's queue has room for all of them. Use it before run_sweep to see how many backtests a grid makes and what each one runs.\n\nAnswers the count, the limit of 20, the queue's room and each setup in the grid's order. A setup that fails a check is the problem of that check with `setup`, its place from 1. How a sweep varies and ranks: get_docs page sweeps; the shape of `vary`, with an example: get_docs page mcp/tools (section run_sweep).\n\nDocs: https://candlestack.tech/docs/mcp/tools/#validate_sweep",
+      "description": "Checks a sweep without starting anything: every combination of `base` and `vary` passes a new backtest's checks and the queue has room for all. Use it before run_sweep to see what a grid runs. A failing setup answers its check's problem with `setup`, its place from 1. Sweeps: get_docs page sweeps.",
+      "details": "`base` is the setup of one backtest (model, data, decision, execution, benchmarks); `vary` takes models, instruments, periods and decision rules. Answers the count, the limit of 20, the queue's room and each setup in the grid's order. The shape of `vary`, with an example: run_sweep.",
       "endpoints": [
         "POST /api/v1/sweeps"
       ],
@@ -13431,7 +13464,8 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Starts a backtest for every combination of `base` (the setup of one backtest) and the values in `vary`: models (each model's manifest sets what it reads and its timeframe, so list models to vary those), instruments, periods and decision rules, 2 to 20 backtests. All go to the end of the user's queue, which runs one at a time, or none does. `metric` is the statistic the ranking orders by. Pass an `idempotency_key` (a UUID you make) to call it again safely after a timeout: the same call with the same key within 24 hours answers the first sweep instead of starting another.\n\nHow a sweep varies, ranks and compares: get_docs page sweeps; the shape of `vary`: get_docs page mcp/tools (section run_sweep).\n\nAnswers the sweep: its ID, each backtest's ID, status and setup, the progress, `eta_s` and, for 4 backtests at most, `url`, the app's Compare page of them to show the user. Follow it with wait_for_sweep until `done`. The backtests are ordinary ones, with the sweep's ID.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#run_sweep",
+      "description": "Starts a backtest for every combination of `base` (one backtest's setup) and the values in `vary`, 2 to 20; all join the user's queue, or none does. `metric` ranks them. Follow it with wait_for_sweep until `done`. Sweeps: get_docs page sweeps; an example of `vary`: get_docs page mcp/tools (section run_sweep).",
+      "details": "`vary` takes models (each model's manifest sets what it reads and its timeframe, so list models to vary those), instruments, periods and decision rules. The backtests go to the end of the user's queue, which runs one at a time. `metric` is the statistic the ranking orders by.\n\nPass an `idempotency_key` (a UUID you make) to call it again safely after a timeout: the same call with the same key within 24 hours answers the first sweep instead of starting another.\n\nAnswers the sweep: its ID, each backtest's ID, status and setup, the progress, `eta_s` and, for 4 backtests at most, `url`, the app's Compare page of them. The backtests are ordinary ones, with the sweep's ID.",
       "endpoints": [
         "POST /api/v1/sweeps"
       ],
@@ -14615,7 +14649,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "A sweep of the user: how many of its backtests are queued, running, finished and failed, each backtest's ID, status and setup, and once none is queued or running (`done`) the ranking, best first, by `metric` or else the sweep's own. Values that read the same in the app share a rank, and the best and the worst are marked as the Compare page marks them. `url` is the app's Compare page with the best 4 side by side: give it to the user.\n\nTo wait for it to end, call wait_for_sweep. For every statistic of the backtests, compare them with their IDs.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_sweep",
+      "description": "A sweep of the user: its backtests' statuses and setups and, once `done`, the ranking by `metric` (else the sweep's own). To wait: wait_for_sweep; every statistic: compare_backtests.",
+      "details": "How many of its backtests are queued, running, finished and failed, and each backtest's ID, status and setup. The ranking comes once none is queued or running (`done`), best first. Values that read the same in the app share a rank, and the best and the worst are marked as the Compare page marks them. `url` is the app's Compare page with the best 4 side by side: give it to the user.",
       "endpoints": [
         "GET /api/v1/sweeps/{sweep_id}"
       ],
@@ -15198,7 +15233,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Lists the user's sweeps, newest first: each one's ID, metric, how many of its backtests are queued, running, finished and failed, whether it is done, and its best finished backtest so far by the metric. Use it to find a sweep again; get_sweep ranks one, and list_backtests with `sweep_id` lists its backtests. A page past the last one is empty.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#list_sweeps",
+      "description": "Lists the user's sweeps, newest first, with their progress and best backtest so far. get_sweep ranks one; list_backtests with `sweep_id` lists its backtests.",
+      "details": "Each one's ID, metric, how many of its backtests are queued, running, finished and failed, whether it is done, and its best finished backtest so far by the metric. Use it to find a sweep again. A page past the last one is empty.",
       "endpoints": [
         "GET /api/v1/sweeps"
       ],
@@ -15459,7 +15495,8 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Waits until every backtest of a sweep of the user has ended or `timeout_s` seconds passed, then answers how many are queued, running, finished and failed, `eta_s`, and once `done` the ranking get_sweep gives with `url`, the app's Compare page of the best 4 to show the user. When `done` is false, call it again: a sweep's backtests run one after another. A client that asks for progress gets how many ended while it waits.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#wait_for_sweep",
+      "description": "Waits until every backtest of a sweep ended or `timeout_s` passed, then answers the counts, `eta_s` and, once `done`, get_sweep's ranking. Not `done`: call it again (the backtests run one after another).",
+      "details": "It answers how many backtests are queued, running, finished and failed. Once `done`, the ranking comes with `url`, the app's Compare page of the best 4. `timeout_s` is at most 60 seconds. A client that asks for progress gets how many ended while it waits.",
       "endpoints": [
         "GET /api/v1/sweeps/{sweep_id}"
       ],
@@ -15517,7 +15554,7 @@
           },
           "timeout_s": {
             "default": 50,
-            "description": "How long to wait at most, in seconds (up to 60)",
+            "description": "Seconds to wait at most",
             "maximum": 60,
             "minimum": 1,
             "title": "Timeout S",

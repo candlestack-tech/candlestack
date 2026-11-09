@@ -3,11 +3,14 @@ tool's body gets about its call (``tool_call``).
 
 A tool is an async function that takes its arguments, typed, and ``ctx: Context``, and returns
 a Pydantic model, which becomes its output schema. Its docstring is the description a model
-reads: what the tool does, when to use it and what it answers. ``ToolSpec`` adds a short
-``verb_noun`` name, a title for people, the scopes an API key needs, the annotations (read-only,
-destructive, idempotent, always all three), an example call for the tool reference, and what a
-call costs of the rate limits (``cost``: 1, or ``HEAVY`` for one that builds or reruns much,
-or what works it out from the arguments).
+reads with every turn, so it stays short: what the tool does, when to use it instead of its
+siblings, what its arguments mean beyond their schema, its side effects and what agents got
+wrong. What a model needs only now and then goes in ``details``, which the tool reference
+(``docs/mcp-tools.json``, the website's ``mcp/tools`` page, which get_docs reads) shows under the
+description. ``ToolSpec`` adds a short ``verb_noun`` name, a title for people, the scopes an API
+key needs, the annotations (read-only, destructive, idempotent, always all three), an example
+call for the tool reference, and what a call costs of the rate limits (``cost``: 1, or
+``HEAVY`` for one that builds or reruns much, or what works it out from the arguments).
 
 A tool raises ``ProblemError`` for what the agent should see, as a route does; the server turns
 it and every other failure into a tool error whose text is the problem as JSON
@@ -32,7 +35,6 @@ from starlette.requests import Request
 from candlestack.accounts import Caller, Scope, User
 from candlestack.core import PROBLEM_TYPE_BASE, ProblemError, Settings
 from candlestack.experiments import IDEMPOTENCY_KEY_MAX, IDEMPOTENCY_KEY_PATTERN, BacktestRunner
-from candlestack.mcp.docs import TOOLS_DOCS
 
 # A verb and what it acts on, lowercase: get_me, start_backtest, list_models.
 _NAME = re.compile(r"[a-z]+(_[a-z0-9]+){1,3}")
@@ -62,6 +64,12 @@ IdempotencyKey = Annotated[
         "hours answers the first one instead of starting again",
     ),
 ]
+
+
+def unwrap(text: str) -> str:
+    """`text` with its paragraphs on one line each: the lines are wrapped for the code, a model
+    reads its paragraphs whole."""
+    return "\n\n".join(" ".join(part.split()) for part in text.split("\n\n"))
 
 
 def reads() -> ToolAnnotations:
@@ -111,6 +119,8 @@ class ToolSpec:
     # Whether it sends progress to a client that asks for it, so the HTTP layer answers such a
     # call as an SSE stream (``http``); every other call is answered as JSON.
     progress: bool = False
+    # What the tool reference adds to the description, which a model reads only on demand.
+    details: str | None = None
     description: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -129,10 +139,9 @@ class ToolSpec:
                 f"Tool {self.name}: a tool that only reads needs the scope read alone, one that "
                 "changes data the scope of what it changes"
             )
-        # The docstring's lines are wrapped for the code; a model reads its paragraphs whole.
-        paragraphs = [" ".join(part.split()) for part in doc.split("\n\n")]
-        paragraphs.append(f"Docs: {TOOLS_DOCS}#{self.name}")
-        object.__setattr__(self, "description", "\n\n".join(paragraphs))
+        object.__setattr__(self, "description", unwrap(doc))
+        if self.details is not None:
+            object.__setattr__(self, "details", unwrap(inspect.cleandoc(self.details)))
 
     def cost_of(self, arguments: dict[str, Any]) -> int:
         """What the call with `arguments` costs of the caller's rate limits."""

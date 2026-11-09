@@ -53,10 +53,22 @@ def spec(**fields: Any) -> ToolSpec:
     return ToolSpec(**given)
 
 
-def test_the_description_is_the_docstring_and_the_docs_link() -> None:
+def test_the_description_is_the_docstring_with_its_paragraphs_unwrapped() -> None:
     assert spec().description == (
-        "Does a thing for the tests, wrapped over two lines.\n\nA second paragraph.\n\n"
-        "Docs: https://candlestack.tech/docs/mcp/tools/#do_thing"
+        "Does a thing for the tests, wrapped over two lines.\n\nA second paragraph."
+    )
+    assert spec().details is None
+
+
+def test_the_details_are_unwrapped_as_the_description() -> None:
+    details = """
+        What the reference adds,
+        over two lines.
+
+        And a second paragraph."""
+
+    assert spec(details=details).details == (
+        "What the reference adds, over two lines.\n\nAnd a second paragraph."
     )
 
 

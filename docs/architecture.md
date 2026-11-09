@@ -1168,12 +1168,24 @@ call, as the routes' dependencies do), never the API over HTTP.
   read); the server checks them before the tool runs and answers `missing-scope` as the
   routes do.
 - **Tool convention** (`mcp/convention.py`, checked when the server is built): a `verb_noun`
-  name of at most 32 characters, a title, the docstring as the description a model reads (what
-  it does, when to use it, what it answers; the link to its docs page is added), typed
-  arguments and a Pydantic output model (the input and output schemas), the annotations
+  name of at most 32 characters, a title, the docstring as the description a model reads with
+  every turn, kept short (what it does, when to use it instead of its siblings, what the
+  arguments mean beyond their schema, side effects and what agents got wrong), `details` for
+  what a model needs only now and then (the tool reference shows them under the description),
+  typed arguments and a Pydantic output model (the input and output schemas), the annotations
   `readOnlyHint`, `destructiveHint` and `idempotentHint` always set (`openWorldHint` false), and
   an example call for the tool reference. A tool that only reads needs `read` alone, one that
   changes data the scope of what it changes.
+- **Short schemas** (`mcp/schema.py`, #459): `tools/list` sends the input schemas without what
+  tells a model nothing new: Pydantic's titles, the OpenAPI `discriminator`, examples, an
+  object default that is the defaults of its model's fields, and the `null` of a tool's own
+  optional argument (inside a model the null stays: a `setup` or the defaults sent back with
+  a step that is off still fit); the shared backtest models take a shorter description than
+  the API's (`SHORTER`). The output schemas lose only titles and the discriminator, as clients
+  check the structured content against them. The arguments are still checked against the
+  tool's signature, and the tool reference keeps the schemas whole. A unit test keeps the
+  names, descriptions and input schemas of all tools under a budget of characters: they cost
+  about 12,800 tokens, down from 21,900.
 - **Answers**: a tool's `structuredContent` is its output model whole, nulls included, so it
   fits the output schema; its text, which a model reads, is the same as compact JSON without
   the null fields of its models (`server.compact_text`, once for every tool, in place of the
@@ -1193,7 +1205,8 @@ call, as the routes' dependencies do), never the API over HTTP.
 - **Instructions and docs**: the server's `instructions` say what CandleStack is, how keys and
   scopes work, how errors read, that answers link the app's pages (`url`) for the agent to give
   the user, to read the docs with `get_docs` before explaining the engine, a manifest, a metric
-  or an error (never inventing a formula or a behaviour, saying what is not supported) and to
+  or an error (never inventing a formula or a behaviour, saying what is not supported), where a
+  tool's full entry is (`get_docs` page `mcp/tools`, its section) and to
   show metrics in a table, and link `https://candlestack.tech/docs/agents/` and
   `https://candlestack.tech/docs/mcp/`; a unit test keeps them under 2,000 characters, as
   clients send them with every turn. The resource `candlestack://docs` (Markdown) lists the
@@ -1419,8 +1432,9 @@ call, as the routes' dependencies do), never the API over HTTP.
   download). A unit test fails when an endpoint has no entry, an entry names an endpoint or
   tool that does not exist, or a planned tool exists already.
 - **Tool reference**: `uv run python -m candlestack.mcp.reference > ../docs/mcp-tools.json`
-  writes each tool as `tools/list` sends it (name, title, description, annotations, input and
-  output schemas) with its scopes, example and endpoints, the instructions, resources and
+  writes each tool as `tools/list` sends it (name, title, description, annotations), with its
+  input and output schemas whole (as Pydantic writes them), its details, scopes, example and
+  endpoints, the instructions, resources and
   prompts (as `prompts/list` sends them), and the web only endpoints with their reasons. The file is committed, a unit test fails when it
   is stale (like `openapi.json`), and the website builds `candlestack.tech/docs/mcp/tools/` from
   it (website#76).

@@ -137,16 +137,10 @@ _VARY = {"rules": [{"name": "threshold", "limit": 0.05}, {"name": "threshold", "
 async def validate_sweep(
     base: BacktestIn, ctx: Context, vary: SweepVary | None = None
 ) -> SweepPlan:
-    """Checks a sweep without starting anything: every combination of `base` (the setup of one
-    backtest: model, data, decision, execution, benchmarks) and the values in `vary` (models,
-    instruments, periods, decision rules) passes the checks of a new backtest, and the user's
-    queue has room for all of them. Use it before run_sweep to see how many backtests a grid
-    makes and what each one runs.
-
-    Answers the count, the limit of 20, the queue's room and each setup in the grid's order. A
-    setup that fails a check is the problem of that check with `setup`, its place from 1.
-    How a sweep varies and ranks: get_docs page sweeps; the shape of `vary`, with an example:
-    get_docs page mcp/tools (section run_sweep)."""
+    """Checks a sweep without starting anything: every combination of `base` and `vary`
+    passes a new backtest's checks and the queue has room for all. Use it before run_sweep to
+    see what a grid runs. A failing setup answers its check's problem with `setup`, its place
+    from 1. Sweeps: get_docs page sweeps."""
     call = tool_call(ctx)
     body = SweepIn(base=base, vary=vary or SweepVary(), validate_only=True)
     async with call.db() as db:
@@ -163,21 +157,10 @@ async def run_sweep(
     metric: SweepMetric = SweepMetric.sharpe,
     idempotency_key: IdempotencyKey = None,
 ) -> SweepStarted:
-    """Starts a backtest for every combination of `base` (the setup of one backtest) and the
-    values in `vary`: models (each model's manifest sets what it reads and its timeframe, so
-    list models to vary those), instruments, periods and decision rules, 2 to 20 backtests. All
-    go to the end of the user's queue, which runs one at a time, or none does. `metric` is the
-    statistic the ranking orders by. Pass an `idempotency_key` (a UUID you make) to call it
-    again safely after a timeout: the same call with the same key within 24 hours answers the
-    first sweep instead of starting another.
-
-    How a sweep varies, ranks and compares: get_docs page sweeps; the shape of `vary`:
-    get_docs page mcp/tools (section run_sweep).
-
-    Answers the sweep: its ID, each backtest's ID, status and setup, the progress, `eta_s` and,
-    for 4 backtests at most, `url`, the app's Compare page of them to show the user. Follow it
-    with wait_for_sweep until `done`. The backtests are ordinary ones, with the
-    sweep's ID."""
+    """Starts a backtest for every combination of `base` (one backtest's setup) and the values
+    in `vary`, 2 to 20; all join the user's queue, or none does. `metric` ranks them. Follow it
+    with wait_for_sweep until `done`. Sweeps: get_docs page sweeps; an example of `vary`:
+    get_docs page mcp/tools (section run_sweep)."""
     call = tool_call(ctx)
     body = SweepIn(base=base, vary=vary or SweepVary(), metric=metric)
 
@@ -217,14 +200,9 @@ async def run_sweep(
 
 
 async def get_sweep(sweep_id: str, ctx: Context, metric: SweepMetric | None = None) -> SweepResult:
-    """A sweep of the user: how many of its backtests are queued, running, finished and failed,
-    each backtest's ID, status and setup, and once none is queued or running (`done`) the
-    ranking, best first, by `metric` or else the sweep's own. Values that read the same in the
-    app share a rank, and the best and the worst are marked as the Compare page marks them.
-    `url` is the app's Compare page with the best 4 side by side: give it to the user.
-
-    To wait for it to end, call wait_for_sweep. For every statistic of the backtests, compare
-    them with their IDs."""
+    """A sweep of the user: its backtests' statuses and setups and, once `done`, the ranking
+    by `metric` (else the sweep's own). To wait: wait_for_sweep; every statistic:
+    compare_backtests."""
     call = tool_call(ctx)
     async with call.db() as db:
         with sweep_problems():
@@ -241,11 +219,8 @@ async def list_sweeps(
         int, Field(ge=1, le=PER_PAGE_MAX, description="Sweeps per page")
     ] = PAGE_SIZE,
 ) -> SweepsPage:
-    """Lists the user's sweeps, newest first: each one's ID, metric, how many of its
-    backtests are queued, running, finished and failed, whether it is done, and its best
-    finished backtest so far by the metric. Use it to find a sweep again; get_sweep ranks one,
-    and list_backtests with `sweep_id` lists its backtests. A page past the last one is
-    empty."""
+    """Lists the user's sweeps, newest first, with their progress and best backtest so far.
+    get_sweep ranks one; list_backtests with `sweep_id` lists its backtests."""
     call = tool_call(ctx)
     async with call.db() as db:
         return await build_sweeps(call.state, db, call.settings.app_version).sweeps(
@@ -260,18 +235,12 @@ async def wait_for_sweep(
     ctx: Context,
     timeout_s: Annotated[
         int,
-        Field(
-            ge=1,
-            le=WAIT_MAX_S,
-            description=f"How long to wait at most, in seconds (up to {WAIT_MAX_S})",
-        ),
+        Field(ge=1, le=WAIT_MAX_S, description="Seconds to wait at most"),
     ] = WAIT_DEFAULT_S,
 ) -> SweepWaitResult:
-    """Waits until every backtest of a sweep of the user has ended or `timeout_s` seconds
-    passed, then answers how many are queued, running, finished and failed, `eta_s`, and once
-    `done` the ranking get_sweep gives with `url`, the app's Compare page of the best 4 to show
-    the user. When `done` is false, call it again: a sweep's backtests run one after another. A
-    client that asks for progress gets how many ended while it waits."""
+    """Waits until every backtest of a sweep ended or `timeout_s` passed, then answers the
+    counts, `eta_s` and, once `done`, get_sweep's ranking. Not `done`: call it again (the
+    backtests run one after another)."""
     call = tool_call(ctx)
     deadline = anyio.current_time() + timeout_s
     ids, _, _ = await _progress(call, sweep_id)
@@ -444,6 +413,11 @@ TOOLS = (
         validate_sweep,
         name="validate_sweep",
         title="Check a sweep",
+        details="""
+            `base` is the setup of one backtest (model, data, decision, execution, benchmarks);
+            `vary` takes models, instruments, periods and decision rules. Answers the count, the
+            limit of 20, the queue's room and each setup in the grid's order. The shape of
+            `vary`, with an example: run_sweep.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(arguments={"base": _BASE, "vary": _VARY}, result=_PLAN),
@@ -452,6 +426,19 @@ TOOLS = (
         run_sweep,
         name="run_sweep",
         title="Run a sweep",
+        details="""
+            `vary` takes models (each model's manifest sets what it reads and its timeframe, so
+            list models to vary those), instruments, periods and decision rules. The backtests
+            go to the end of the user's queue, which runs one at a time. `metric` is the
+            statistic the ranking orders by.
+
+            Pass an `idempotency_key` (a UUID you make) to call it again safely after a
+            timeout: the same call with the same key within 24 hours answers the first sweep
+            instead of starting another.
+
+            Answers the sweep: its ID, each backtest's ID, status and setup, the progress,
+            `eta_s` and, for 4 backtests at most, `url`, the app's Compare page of them. The
+            backtests are ordinary ones, with the sweep's ID.""",
         scopes=(Scope.backtests,),
         annotations=changes(destructive=False, idempotent=False),
         example=Example(
@@ -463,6 +450,12 @@ TOOLS = (
         get_sweep,
         name="get_sweep",
         title="Get a sweep",
+        details="""
+            How many of its backtests are queued, running, finished and failed, and each
+            backtest's ID, status and setup. The ranking comes once none is queued or running
+            (`done`), best first. Values that read the same in the app share a rank, and the
+            best and the worst are marked as the Compare page marks them. `url` is the app's
+            Compare page with the best 4 side by side: give it to the user.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(arguments={"sweep_id": "sw_7f3k2m9qx4"}, result=_SWEEP),
@@ -471,6 +464,10 @@ TOOLS = (
         list_sweeps,
         name="list_sweeps",
         title="List sweeps",
+        details="""
+            Each one's ID, metric, how many of its backtests are queued, running, finished and
+            failed, whether it is done, and its best finished backtest so far by the metric.
+            Use it to find a sweep again. A page past the last one is empty.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(arguments={}, result=_LISTED),
@@ -479,6 +476,11 @@ TOOLS = (
         wait_for_sweep,
         name="wait_for_sweep",
         title="Wait for a sweep",
+        details="""
+            It answers how many backtests are queued, running, finished and failed. Once `done`,
+            the ranking comes with `url`, the app's Compare page of the best 4.
+            `timeout_s` is at most 60 seconds. A client that asks for progress gets how many
+            ended while it waits.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(arguments={"sweep_id": "sw_7f3k2m9qx4", "timeout_s": 50}, result=_WAITED),

@@ -67,27 +67,21 @@ from candlestack.mcp.convention import (
 
 BacktestId = Annotated[
     str,
-    Field(description="Public ID of the backtest, from list_backtests", examples=["bt_7f3k2m9qx4"]),
-]
-Page = Annotated[int, Field(ge=1, le=PAGE_MAX, description="The page, from 1")]
-Order = Annotated[
-    SortOrder, Field(description="Direction of the sort; the default sort is newest first anyway")
+    Field(description="Public ID of the backtest", examples=["bt_7f3k2m9qx4"]),
 ]
 # The IDs a bulk change takes, as delete_backtests does.
 BacktestIds = Annotated[
     list[Annotated[str, Field(min_length=1, max_length=32, examples=["bt_7f3k2m9qx4"])]],
-    Field(
-        min_length=1,
-        max_length=UPDATE_MAX,
-        description=f"1 to {UPDATE_MAX} IDs of the user's backtests, from list_backtests",
-    ),
+    Field(min_length=1, max_length=UPDATE_MAX, description="The user's backtests"),
 ]
+Page = Annotated[int, Field(ge=1, le=PAGE_MAX, description="The page, from 1")]
+Order = Annotated[SortOrder, Field(description="Direction of the sort")]
 # Whether a list answers its counts and filter values, which cost queries of their own.
 IncludeFacets = Annotated[
     bool | None,
     Field(
-        description="Answer the counts and the values the filters offer: true on every page, "
-        "false never; left out, only on page 1"
+        description="The counts and the values the filters offer: true on every page, false "
+        "never; left out, on page 1"
     ),
 ]
 # What the Rename field takes; surrounding spaces are dropped first, as the app does.
@@ -289,69 +283,65 @@ async def list_backtests(  # noqa: PLR0913 (one argument per filter, as GET /bac
         str,
         Field(
             max_length=QUERY_MAX,
-            description="Search: part of the name, of the number (#12 or 12), of an "
-            "instrument's symbol or of the model's name, in any case",
+            description="Part of the name, the number (#12), a symbol or the model's name",
         ),
     ] = "",
-    show: Annotated[
-        BacktestShow, Field(description="All, the starred, the failed or the published ones")
-    ] = BacktestShow.all,
+    show: BacktestShow = BacktestShow.all,
     model: Annotated[
         str | None,
         Field(
             max_length=MODEL_NAME_MAX,
-            description="Only the backtests of the model with this name (one of `models`)",
+            description="A model's name (one of `models`)",
         ),
     ] = None,
     status: Annotated[
         list[BacktestStatus] | None,
-        Field(description="Only backtests with one of these statuses"),
+        Field(description="Any of these"),
     ] = None,
     sweep_id: Annotated[
         str | None, Field(max_length=32, description="Only the backtests of this sweep")
     ] = None,
     model_id: Annotated[
-        str | None, Field(max_length=32, description="Only the backtests of this model's ID")
+        str | None, Field(max_length=32, description="Only the backtests of this model")
     ] = None,
     instrument: Annotated[
         str | None,
-        Field(max_length=64, description="Only this instrument's, <market>:<symbol>"),
+        Field(max_length=64, description="<market>:<symbol>"),
         AfterValidator(instrument_filter),
     ] = None,
     timeframe: Annotated[SetupTimeframe | None, Field(description="Only this timeframe")] = None,
     representation: Annotated[
-        Representation | None, Field(description="Only models that read this")
+        Representation | None, Field(description="What the model reads")
     ] = None,
     created_after: Annotated[
         datetime | None,
-        Field(description="Only those started at or after this time (UTC)"),
+        Field(description="Started at or after (UTC)"),
         AfterValidator(as_utc),
     ] = None,
     created_before: Annotated[
         datetime | None,
-        Field(description="Only those started before this time (UTC)"),
+        Field(description="Started before (UTC)"),
         AfterValidator(as_utc),
     ] = None,
     min_sharpe: Annotated[
         float | None, Field(allow_inf_nan=False, description="Sharpe ratio at least this")
     ] = None,
     min_total_return: Annotated[
-        float | None, Field(allow_inf_nan=False, description="Return at least this, a fraction")
+        float | None, Field(allow_inf_nan=False, description="A fraction")
     ] = None,
     min_max_drawdown: Annotated[
         float | None,
         Field(
             le=0,
             allow_inf_nan=False,
-            description="Largest fall no deeper than this, 0 or below: -0.2 keeps falls of up "
-            "to 20 percent",
+            description="0 or below: -0.2 keeps falls of up to 20 percent",
         ),
     ] = None,
     starred: Annotated[bool | None, Field(description="Only starred (true) or not")] = None,
-    public: Annotated[bool | None, Field(description="Only published (true) or not")] = None,
+    public: Annotated[bool | None, Field(description="Published")] = None,
     sort: Annotated[
         BacktestSort,
-        Field(description="What to sort by; those without the value (failed ones) come last"),
+        Field(description="Those without the value (failed ones) come last"),
     ] = BacktestSort.default,
     order: Order = SortOrder.desc,
     page: Page = 1,
@@ -360,13 +350,9 @@ async def list_backtests(  # noqa: PLR0913 (one argument per filter, as GET /bac
     ] = PAGE_SIZE,
     include_facets: IncludeFacets = None,
 ) -> BacktestList:
-    """Lists the user's backtests: search, filters (status, sweep, model, instrument,
-    timeframe, representation, start time, least Sharpe ratio or return, deepest drawdown,
-    starred, published; all must hold), sort by a result, 10 a page or up to 100. Use it to
-    find a backtest's ID by its name, number, instrument or model, a sweep's backtests, or the
-    best ones by a result. Answers the page and how many match, and on page 1 the counts of
-    all, starred, failed and published backtests and the models used; each backtest has its
-    `url`, the page to show the user. A page past the last one is empty."""
+    """Lists the user's backtests with search, filters (all must hold) and a sort by a
+    result: to find a backtest's ID by name, number, instrument or model, a sweep's backtests,
+    or the best by a result."""
     call = tool_call(ctx)
     more = BacktestFilters(
         statuses=tuple(status or ()),
@@ -422,15 +408,12 @@ async def rename_backtest(
     name: Annotated[
         BacktestName | None,
         Field(
-            description=f"The new name, 1 to {BACKTEST_NAME_MAX} characters, unique in the "
-            "account ignoring case; null goes back to the name it got when it was created",
+            description="Unique in the account, ignoring case; null restores the first name",
         ),
     ],
     ctx: Context,
 ) -> BacktestState:
-    """Renames one of the user's backtests, or with a name of null gives it back the name it
-    got when it was created. Answers the problem name-taken when another backtest of the user
-    has the name, in any case."""
+    """Renames one of the user's backtests; a name of another of them answers name-taken."""
     return await _update(ctx, backtest_id, BacktestUpdate(name=name))
 
 
@@ -438,10 +421,9 @@ async def star_backtest(
     backtest_id: BacktestId,
     ctx: Context,
     *,
-    starred: Annotated[bool, Field(description="true stars it, false unstars it")] = True,
+    starred: Annotated[bool, Field(description="false unstars it")] = True,
 ) -> BacktestState:
-    """Stars one of the user's backtests, or unstars it with starred false. Starred backtests
-    are listed with show starred in list_backtests and on the Dashboard."""
+    """Stars or unstars one of the user's backtests."""
     return await _update(ctx, backtest_id, BacktestUpdate(starred=starred))
 
 
@@ -449,21 +431,18 @@ async def star_backtests(
     ids: BacktestIds,
     ctx: Context,
     *,
-    starred: Annotated[bool, Field(description="true stars them, false unstars them")] = True,
+    starred: Annotated[bool, Field(description="false unstars them")] = True,
 ) -> BacktestsUpdated:
-    """Stars up to 100 of the user's backtests at once, or unstars them with starred false, as
-    star_backtest does one. Answers the IDs now as asked in `updated` (those that already were
-    included, so calling it again changes nothing) and the IDs the user has no backtest with in
-    `not_found`, which change nothing."""
+    """Stars or unstars many of the user's backtests at once. Unknown IDs come back in
+    `not_found` and change nothing."""
     call = tool_call(ctx)
     async with call.db() as db:
         return await get_backtests_service(db).update_many(call.user.id, ids, starred=starred)
 
 
 async def cancel_backtest(backtest_id: BacktestId, ctx: Context) -> CancelledBacktest:
-    """Cancels one of the user's queued backtests, so it never runs: it becomes failed, with an
-    error that says it was cancelled, and stays in the list. Only a queued backtest can be
-    cancelled; a running or ended one answers the problem backtest-not-queued."""
+    """Cancels one of the user's queued backtests: it never runs and becomes failed. A running
+    or ended one answers backtest-not-queued."""
     call = tool_call(ctx)
     async with call.db() as db:
         runs = backtest_runs(call.state, db)
@@ -479,37 +458,29 @@ async def list_experiments(  # noqa: PLR0913 (one argument per filter, as GET /e
         str,
         Field(
             max_length=QUERY_MAX,
-            description="Search: part of the backtest's name, of an instrument's symbol, of "
-            "the model's name or of the author's name, in any case",
+            description="Part of the name, a symbol, the model's or the author's name",
         ),
     ] = "",
-    mine: Annotated[bool, Field(description="Only the user's own published backtests")] = False,
+    mine: Annotated[bool, Field(description="The user's own")] = False,
     author: Annotated[
         str | None,
-        Field(max_length=32, description="Only this account's (`author.id`, usr_...)"),
+        Field(max_length=32, description="An `author.id`"),
     ] = None,
     market: Annotated[InstrumentMarket | None, Field(description="Only this market")] = None,
     symbol: Annotated[
         str | None, Field(max_length=32, description="Only this instrument's symbol")
     ] = None,
     representation: Annotated[
-        Representation | None, Field(description="Only models that read this")
+        Representation | None, Field(description="What the model reads")
     ] = None,
     timeframe: Annotated[SetupTimeframe | None, Field(description="Only this timeframe")] = None,
-    sort: Annotated[
-        ExperimentSort,
-        Field(description="What to sort by; newest is the newest published first"),
-    ] = ExperimentSort.newest,
+    sort: ExperimentSort = ExperimentSort.newest,
     order: Order = SortOrder.desc,
     page: Page = 1,
     include_facets: IncludeFacets = None,
 ) -> ExperimentList:
-    """Lists Experiments: the backtests that accounts of the beta published, which every
-    signed-in account can see, with search, filters (author, market, symbol, representation,
-    timeframe), sort and 12 a page. Use it to find what others tried and how it did, then
-    read one with its ID. Answers the page, how many match, and on page 1 the counts and the
-    values each filter offers; each backtest has its `url`, the page to show the user. A page
-    past the last one is empty."""
+    """Lists Experiments, the backtests every account of the beta published, with search,
+    filters and sort: to find what others tried and how it did."""
     call = tool_call(ctx)
     experiments_query = ExperimentsQuery(
         query=query,
@@ -542,17 +513,15 @@ async def list_experiments(  # noqa: PLR0913 (one argument per filter, as GET /e
 
 
 async def publish_backtest(backtest_id: BacktestId, ctx: Context) -> BacktestState:
-    """Publishes one of the user's finished backtests in Experiments: it becomes visible to
-    every account of the beta, with its name, the user's display name, its setup, results,
-    charts and trades and its model's name and input (never the model file), and others can
-    compare with it. Ask the user before publishing. Publishing one that is published already
-    changes nothing. A queued, running or failed backtest answers backtest-not-finished."""
+    """Publishes one of the user's finished backtests in Experiments: visible to every account
+    of the beta with the user's display name, setup, results and trades, its model's name and
+    input (never the file). Ask the user first."""
     return await _update(ctx, backtest_id, BacktestUpdate(public=True))
 
 
 async def unpublish_backtest(backtest_id: BacktestId, ctx: Context) -> BacktestState:
-    """Takes one of the user's backtests out of Experiments: no other account can see it any
-    more, and it leaves their comparisons. The backtest itself stays. Ask the user first."""
+    """Takes one of the user's backtests out of Experiments; the backtest stays. Ask the user
+    first."""
     return await _update(ctx, backtest_id, BacktestUpdate(public=False))
 
 
@@ -560,18 +529,11 @@ async def publish_backtests(
     ids: BacktestIds,
     ctx: Context,
     *,
-    published: Annotated[
-        bool, Field(description="true publishes them, false takes them out of Experiments")
-    ] = True,
+    published: Annotated[bool, Field(description="false takes them out of Experiments")] = True,
 ) -> BacktestsUpdated:
-    """Publishes up to 100 of the user's finished backtests in Experiments at once, or with
-    published false takes them out, as publish_backtest and unpublish_backtest do one: a
-    published backtest is visible to every account of the beta with its name, the user's
-    display name, setup, results, charts, trades and its model's name and input (never the
-    model file). Ask the user before publishing or unpublishing. Answers the IDs now as asked
-    in `updated` (those that already were included, so calling it again changes nothing), the
-    IDs the user has no backtest with in `not_found`, and when publishing those that cannot be
-    published (queued, running or failed) in `cannot_publish`; nothing changes for those two."""
+    """Publishes many of the user's finished backtests in Experiments at once, as
+    publish_backtest does one, or takes them out. Ask the user first. Unknown IDs (`not_found`)
+    and unfinished ones (`cannot_publish`) change nothing."""
     call = tool_call(ctx)
     async with call.db() as db:
         return await get_backtests_service(db).update_many(call.user.id, ids, public=published)
@@ -584,11 +546,9 @@ def _ranked(backtests: list[BacktestOut], result: str) -> list[RankedBacktest]:
 
 
 async def get_dashboard(ctx: Context) -> Dashboard:
-    """The user's Dashboard in one call: the counts of all, starred, failed and published
-    backtests, the 6 newest that ended, the 5 best finished ones by Sharpe ratio, return,
-    drawdown (the smallest fall) and win rate with the value, and the 4 best starred ones.
-    Each list gives IDs; `backtests` has each backtest once, by ID, with its `url`, the page to
-    show the user. Call it for an overview before digging in with list_backtests."""
+    """The user's Dashboard: backtest counts, the newest that ended, the best by Sharpe
+    ratio, return, drawdown (the smallest fall) and win rate, and the best starred. For an
+    overview before list_backtests."""
     call = tool_call(ctx)
     async with call.db() as db:
         found = await get_backtests_service(db).own_dashboard(call.user.id)
@@ -670,6 +630,15 @@ TOOLS = (
         list_backtests,
         name="list_backtests",
         title="List backtests",
+        details="""
+            The filters: status, sweep, model, instrument, timeframe, representation, start time,
+            least Sharpe ratio or return, deepest drawdown, starred, published. The search finds
+            part of the name, of the number (#12 or 12), of an instrument's symbol or of the
+            model's name, in any case. 10 a page, up to 100; a page past the last one is empty.
+            Answers the page and how many match, and on page 1 the counts of all, starred,
+            failed and published backtests and the models used; each backtest has its `url`.
+            `show` is all, the starred, the failed or the published ones. The default sort is
+            newest first, whatever the `order`.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(
@@ -688,6 +657,9 @@ TOOLS = (
         rename_backtest,
         name="rename_backtest",
         title="Rename a backtest",
+        details="""
+            The new name has 1 to 80 characters and is unique in the account, ignoring case; a
+            name of null gives the backtest back the name it got when it was created.""",
         scopes=(Scope.backtests,),
         annotations=changes(destructive=False, idempotent=True),
         example=Example(
@@ -699,6 +671,9 @@ TOOLS = (
         star_backtest,
         name="star_backtest",
         title="Star a backtest",
+        details="""
+            Starred backtests are listed with show starred in list_backtests and on the
+            Dashboard.""",
         scopes=(Scope.backtests,),
         annotations=changes(destructive=False, idempotent=True),
         example=Example(arguments={"backtest_id": "bt_7f3k2m9qx4"}, result=_ORION_STATE),
@@ -707,6 +682,10 @@ TOOLS = (
         star_backtests,
         name="star_backtests",
         title="Star backtests",
+        details="""
+            Up to 100 backtests, as star_backtest does one. Answers the IDs now as asked in
+            `updated` (those that already were included, so calling it again changes nothing)
+            and the IDs the user has no backtest with in `not_found`.""",
         scopes=(Scope.backtests,),
         annotations=changes(destructive=False, idempotent=True),
         example=Example(
@@ -720,6 +699,9 @@ TOOLS = (
         cancel_backtest,
         name="cancel_backtest",
         title="Cancel a queued backtest",
+        details="""
+            The cancelled backtest becomes failed, with an error that says it was cancelled, and
+            stays in the list.""",
         scopes=(Scope.backtests,),
         annotations=changes(destructive=True, idempotent=True),
         example=Example(
@@ -737,6 +719,13 @@ TOOLS = (
         list_experiments,
         name="list_experiments",
         title="List Experiments",
+        details="""
+            Every signed-in account can see Experiments. The filters: author, market, symbol,
+            representation, timeframe; the search finds part of the backtest's name, of an
+            instrument's symbol, of the model's name or of the author's name, in any case. 12 a
+            page; a page past the last one is empty. Read one with get_backtest and its ID.
+            Answers the page, how many match, and on page 1 the counts and the values each
+            filter offers; each backtest has its `url`.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(
@@ -782,6 +771,11 @@ TOOLS = (
         publish_backtest,
         name="publish_backtest",
         title="Publish a backtest",
+        details="""
+            Published, it shows the backtest's name, the user's display name, its setup,
+            results, charts and trades and its model's name and input, never the model file,
+            and others can compare with it. Publishing one that is published already changes
+            nothing. A queued, running or failed backtest answers backtest-not-finished.""",
         scopes=(Scope.publish,),
         annotations=changes(destructive=True, idempotent=True),
         example=Example(
@@ -793,6 +787,7 @@ TOOLS = (
         unpublish_backtest,
         name="unpublish_backtest",
         title="Unpublish a backtest",
+        details="No other account can see it any more, and it leaves their comparisons.",
         scopes=(Scope.publish,),
         annotations=changes(destructive=True, idempotent=True),
         example=Example(arguments={"backtest_id": "bt_7f3k2m9qx4"}, result=_ORION_STATE),
@@ -801,6 +796,14 @@ TOOLS = (
         publish_backtests,
         name="publish_backtests",
         title="Publish backtests",
+        details="""
+            Up to 100 backtests, as publish_backtest and unpublish_backtest do one: a published
+            backtest is visible to every account of the beta with its name, the user's display
+            name, setup, results, charts, trades and its model's name and input (never the
+            model file). Answers the IDs now as asked in `updated` (those that already were
+            included, so calling it again changes nothing), the IDs the user has no backtest
+            with in `not_found`, and when publishing those that cannot be published (queued,
+            running or failed) in `cannot_publish`.""",
         scopes=(Scope.publish,),
         annotations=changes(destructive=True, idempotent=True),
         example=Example(
@@ -817,6 +820,11 @@ TOOLS = (
         get_dashboard,
         name="get_dashboard",
         title="Dashboard",
+        details="""
+            The counts of all, starred, failed and published backtests, the 6 newest that
+            ended, the 5 best finished ones by Sharpe ratio, return, drawdown and win rate with
+            the value, and the 4 best starred ones. Each list gives IDs; `backtests` has each
+            backtest once, by ID, with its `url`.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(
