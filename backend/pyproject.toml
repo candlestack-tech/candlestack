@@ -417,7 +417,7 @@ layers = [
     "server",
     "account | library | manage | market | models | prompts | run | sweeps",
     "convention",
-    "apps | docs | parity",
+    "apps | docs | parity | schema",
 ]
 
 # The API checks an uploaded model by reading its file, never by loading it: a load could run

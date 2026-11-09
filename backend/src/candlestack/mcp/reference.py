@@ -6,9 +6,9 @@ The website builds its tool reference (``candlestack.tech/docs/mcp/tools/``) fro
     uv run python -m candlestack.mcp.reference > ../docs/mcp-tools.json
 
 For each tool: what ``tools/list`` sends (name, title, description, annotations, input and
-output schema), the scopes an API key needs, an example call and answer, and the endpoints of
-the API it does the work of; then the server's instructions, resources and prompts, and the
-endpoints that stay web only, with the reason.
+output schema), the details its description leaves out, the scopes an API key needs, an example
+call and answer, and the endpoints of the API it does the work of; then the server's
+instructions, resources and prompts, and the endpoints that stay web only, with the reason.
 """
 
 import asyncio
@@ -31,6 +31,7 @@ async def _reference() -> dict[str, Any]:
         tools.append(
             {
                 **tool.model_dump(mode="json", by_alias=True, exclude_none=True),
+                **({"details": spec.details} if spec.details else {}),
                 "scopes": [scope.value for scope in spec.scopes],
                 "example": {
                     "arguments": spec.example.arguments,

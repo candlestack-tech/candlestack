@@ -165,7 +165,7 @@ def test_a_client_gets_the_instructions_and_the_tools(mcp, mode: str, protocol: 
         "created_at",
         "scopes",
     ]
-    assert get_me.description.endswith("Docs: https://candlestack.tech/docs/mcp/tools/#get_me")
+    assert get_me.description.startswith("Who you act for")
 
 
 def test_the_docs_resource_links_the_docs(mcp) -> None:

@@ -19,8 +19,8 @@ async def delete_backtests(
         int,
         Field(
             ge=1,
-            description="How many backtests this deletes, as the user agreed: the IDs given, "
-            "or the sweep's `count` from get_sweep",
+            description="How many it deletes, as the user agreed: the IDs given, or the "
+            "sweep's `count` from get_sweep",
         ),
     ],
     ctx: Context,
@@ -30,7 +30,7 @@ async def delete_backtests(
         Field(
             min_length=1,
             max_length=DELETE_MAX,
-            description=f"1 to {DELETE_MAX} IDs of the user's backtests, from list_backtests",
+            description="The user's backtests",
         ),
     ] = None,
     sweep_id: Annotated[
@@ -38,17 +38,14 @@ async def delete_backtests(
         Field(
             min_length=1,
             max_length=32,
-            description="Every backtest of this sweep and the sweep itself, instead of ids",
+            description="Instead of ids: the sweep and all its backtests",
         ),
     ] = None,
 ) -> BacktestsDeleted:
-    """Deletes the user's backtests for good, with their results: up to 100 by their ids, or
-    every backtest of a sweep with sweep_id, which deletes the sweep too. A queued one leaves
-    the queue, a running one is stopped, a published one leaves Experiments and its page is
-    gone. It cannot be undone, so ask the user first and give how many backtests you delete in
-    confirm_count: when another number matches (some were deleted already, or the sweep has
-    more), it answers the problem confirmation-mismatch with the real `count` and deletes
-    nothing. IDs the user has no backtest with are listed in `not_found`."""
+    """Deletes the user's backtests for good, by ids or a whole sweep; running ones stop,
+    published ones leave Experiments. It cannot be undone: ask the user first. When another
+    number than confirm_count matches, it answers confirmation-mismatch with the real `count`
+    and deletes nothing."""
     if (ids is None) == (sweep_id is None):
         raise ProblemError(
             422, "validation", "Invalid arguments", "Give ids or sweep_id, one of the two."
@@ -66,6 +63,12 @@ TOOLS = (
         delete_backtests,
         name="delete_backtests",
         title="Delete backtests",
+        details="""
+            Up to 100 backtests by their ids, with their results, or every backtest of a sweep
+            with sweep_id, which deletes the sweep too. A queued one leaves the queue, a running
+            one is stopped, a published one leaves Experiments and its page is gone. Another
+            number matches when some were deleted already, or the sweep has more. IDs the user
+            has no backtest with are listed in `not_found`.""",
         scopes=(Scope.backtests,),
         annotations=changes(destructive=True, idempotent=True),
         example=Example(

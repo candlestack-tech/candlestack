@@ -402,7 +402,7 @@ async def get_docs(
         Field(
             max_length=PAGE_MAX,
             pattern=PAGE_PATTERN,
-            description="A page from the list, such as manifest; leave it out for the list",
+            description="Leave it out for the list",
             examples=["manifest"],
         ),
     ] = None,
@@ -411,26 +411,20 @@ async def get_docs(
         Field(
             min_length=1,
             max_length=SECTION_MAX,
-            description="One section of the page, by its heading from `sections` (such as Metrics, "
-            "or a tool's name on mcp/tools), its subsections included",
+            description="A heading from `sections`, such as Metrics or a tool's name on mcp/tools",
         ),
     ] = None,
     part: Annotated[
         int,
-        Field(ge=1, le=PARTS_MAX, description="The part to read, from 1, of a long page"),
+        Field(ge=1, le=PARTS_MAX, description="Of a long page"),
     ] = 1,
     *,
     ctx: Context,
 ) -> DocsResult:
-    """CandleStack's official docs, as published on candlestack.tech/docs: how the backtest
-    engine, the manifest, the metrics, the result document, the problems, the MCP server and
-    the API work. Read the page before you explain any of these, and answer from it instead of
-    from memory.
-
-    Without `page`: the list of pages (page, title, summary) and the references (the JSON
-    Schemas of the manifest and the result document, and the page of every problem type).
-    With `page`: its text as Markdown and its `sections`. A long page comes in `parts`: ask for
-    the next with `part`, or for one section with `section`."""
+    """CandleStack's docs: the engine, manifest, metrics, result document, problems, MCP
+    server and API. Read the page before you explain any of these and answer from it. Without
+    `page`: the list of pages. With it: its Markdown and `sections`; a long one comes in
+    `parts`, or ask for one `section`."""
     http = tool_call(ctx).state.docs_http
     if page is None:
         return DocsResult(pages=await _listed(http), references=_REFERENCE_PAGES)
@@ -467,6 +461,12 @@ TOOLS = (
         get_docs,
         name="get_docs",
         title="Read the docs",
+        details="""
+            The docs as published on candlestack.tech/docs. Without `page`: the list of pages
+            (page, title, summary) and the references (the JSON Schemas of the manifest and the
+            result document, and the page of every problem type). With `page`: its text as
+            Markdown and its `sections`. A long page comes in `parts`: ask for the next with
+            `part`, from 1, or for one section with `section`, its subsections included.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(
