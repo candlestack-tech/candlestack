@@ -111,6 +111,10 @@ RUN mkdir -p /data/models /data/jobs && chown 65534:65534 /data/models /data/job
 USER 65534:65534
 EXPOSE 8000
 ARG APP_COMMIT=unknown
-ENV APP_COMMIT=$APP_COMMIT
-CMD ["granian", "--interface", "asgi", "--host", "0.0.0.0", "--port", "8000", \
-     "--no-access-log", "--log-config", "granian-logging.json", "candlestack.main:app"]
+# WEB_WORKERS: how many processes granian serves the app with. More than one only with
+# APP_ROLE=api, the runner in a process of its own (APP_ROLE=runner, one worker): every process
+# of APP_ROLE=all would run the backtests' runner (docs/architecture.md, "Backtests"). The shell
+# only reads it: exec leaves granian the container's first process, which gets the stop signal.
+ENV APP_COMMIT=$APP_COMMIT \
+    WEB_WORKERS=1
+CMD ["sh", "-c", "exec granian --interface asgi --host 0.0.0.0 --port 8000 --workers \"$WEB_WORKERS\" --no-access-log --log-config granian-logging.json candlestack.main:app"]

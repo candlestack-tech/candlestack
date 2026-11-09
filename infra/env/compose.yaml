@@ -20,32 +20,45 @@
 # backend on the internal network <ENV_NAME>_jobs (infra/README.md, "Worker"). The queue
 # requires QUEUE_PASSWORD, which the backend's and the worker's JOBS_REDIS_URL carry; without
 # one (empty) it runs without a password.
+# The backend serves the API in WEB_WORKERS granian processes (APP_ROLE=api); the runner, the
+# same image, runs the backtests and the work in the background in one process
+# (APP_ROLE=runner), which the backend's processes ask through Redis (docs/architecture.md,
+# "Backtests"). Only the backend is on the edge network.
+
+# What the backend and the runner both read: the data sources, Postgres, Redis, the model files
+# and the job queue. The sign-in's keys only the backend gets.
+x-backend-environment: &backend-environment
+  APP_ENV: ${ENV_NAME:?}
+  APP_VERSION: ${APP_VERSION:?}
+  REDIS_URL: redis://redis:6379/0
+  ALPACA_KEY_ID: ${ALPACA_KEY_ID:-}
+  ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:-}
+  LOGO_DEV_KEY: ${LOGO_DEV_KEY:-}
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  DATABASE_URL: postgresql+asyncpg://candlestack:${POSTGRES_PASSWORD:?}@postgres:5432/candlestack
+  MODEL_STORAGE_DIR: /data/models
+  JOBS_REDIS_URL: redis://:${QUEUE_PASSWORD:-}@queue:6379/0
+  JOB_FILES_DIR: /data/jobs
+
 services:
   backend:
     image: ${BACKEND_IMAGE:?}
     restart: unless-stopped
     environment:
-      APP_ENV: ${ENV_NAME:?}
-      APP_VERSION: ${APP_VERSION:?}
-      REDIS_URL: redis://redis:6379/0
-      ALPACA_KEY_ID: ${ALPACA_KEY_ID:-}
-      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:-}
-      LOGO_DEV_KEY: ${LOGO_DEV_KEY:-}
-      SENTRY_DSN: ${SENTRY_DSN:-}
-      DATABASE_URL: postgresql+asyncpg://candlestack:${POSTGRES_PASSWORD:?}@postgres:5432/candlestack
+      <<: *backend-environment
+      APP_ROLE: api
+      WEB_WORKERS: "2"
       OAUTH_GITHUB_CLIENT_ID: ${OAUTH_GITHUB_CLIENT_ID:-}
       OAUTH_GITHUB_CLIENT_SECRET: ${OAUTH_GITHUB_CLIENT_SECRET:-}
       OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID:-}
       OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET:-}
       BETA_ALLOWLIST: ${BETA_ALLOWLIST:-}
-      MODEL_STORAGE_DIR: /data/models
-      JOBS_REDIS_URL: redis://:${QUEUE_PASSWORD:-}@queue:6379/0
-      JOB_FILES_DIR: /data/jobs
     # Read by the server agent: ops tells deploys (new version) from redeploys (same version).
     labels:
       candlestack.version: ${APP_VERSION:?}
-    # The app, and the child process that checks an upload (infra/README.md, "Memory").
-    mem_limit: 384m
+    # Two processes of the app, and the child process that checks an upload (infra/README.md,
+    # "Memory").
+    mem_limit: 640m
     read_only: true
     # The files of the uploaded models, and the jobs' files shared with the worker; the image's
     # /data/models and /data/jobs are owned by the app's user, so a new volume is too.
@@ -76,6 +89,55 @@ services:
       edge:
         aliases:
           - ${ENV_NAME}-backend
+
+  # The backtests' runner: the backend's image in one process with APP_ROLE=runner, which runs
+  # the backtests (their candles, the worker's job, the engine), fails those a stopped runner
+  # left running, refreshes the instrument stats, sweeps the incoming model files and checks the
+  # models left unchecked. Nothing reaches it: it is on the environment's network and the jobs
+  # network, not on the edge. It starts after the backend, so on the first deploy with it the
+  # old backend, which ran the backtests itself, has stopped before; a stop stops it first.
+  # Stopped, it fails the runs it stops ("The server restarted..."), and the queued backtests
+  # wait in Postgres for its next start.
+  runner:
+    image: ${BACKEND_IMAGE:?}
+    restart: unless-stopped
+    environment:
+      <<: *backend-environment
+      APP_ROLE: runner
+      WEB_WORKERS: "1"
+    labels:
+      candlestack.version: ${APP_VERSION:?}
+    # The app and the runs: two at once (BACKTEST_SLOTS), each up to 50000 candles with their
+    # predictions and the engine's rows (infra/README.md, "Memory").
+    mem_limit: 384m
+    read_only: true
+    # The sweep of the incoming model files, and the jobs' files shared with the worker.
+    volumes:
+      - models:/data/models
+      - jobs:/data/jobs
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # 503 while Redis or Postgres is unreachable, as the backend's.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      backend:
+        condition: service_started
+    networks:
+      default: {}
+      jobs: {}
 
   frontend:
     image: ${FRONTEND_IMAGE:?}
@@ -121,13 +183,14 @@ services:
     networks:
       - default
 
-  # The users' data, sized for a few connections (the backend's pool of at most 10, the
-  # migration, the backup); the container limit leaves room for them above shared_buffers. Runs
-  # as the image's postgres user, which owns the data volume, so it needs no capabilities.
+  # The users' data, sized for a few dozen connections (a pool of at most 10 in each of the
+  # backend's two processes and the runner's, the migration, the backup); the container limit
+  # leaves room for them above shared_buffers. Runs as the image's postgres user, which owns the
+  # data volume, so it needs no capabilities.
   postgres:
     image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
     restart: unless-stopped
-    command: ["postgres", "-c", "shared_buffers=32MB", "-c", "max_connections=20", "-c", "maintenance_work_mem=16MB", "-c", "effective_cache_size=96MB"]
+    command: ["postgres", "-c", "shared_buffers=32MB", "-c", "max_connections=40", "-c", "maintenance_work_mem=16MB", "-c", "effective_cache_size=96MB"]
     environment:
       POSTGRES_USER: candlestack
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
