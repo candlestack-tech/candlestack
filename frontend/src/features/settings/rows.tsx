@@ -10,15 +10,21 @@ import { cn } from '@/lib/utils';
 // it, so a form goes around the card, not inside it.
 const RULED = 'border-t [[data-slot=card-head]+&]:border-t-0';
 
-type RowProps = { label: string; hint?: ReactNode; top?: boolean; children: ReactNode };
+type RowProps = { label: string; hint?: ReactNode; top?: boolean; stack?: boolean; children: ReactNode };
 
 // A 128 px label (13.5 px, its hint 11.5 px under it), 12 px, then the control. `top` lines the
-// label up with the top of a tall control instead of its middle.
-export function SettingsRow({ label, hint, top = false, children }: RowProps) {
+// label up with the top of a tall control instead of its middle. `stack` puts the label above a
+// wide control on a phone (up to 480 px), so the control has the card's whole width.
+export function SettingsRow({ label, hint, top = false, stack = false, children }: RowProps) {
   return (
     <div
       data-slot="settings-row"
-      className={cn('grid grid-cols-[128px_minmax(0,1fr)] gap-3 py-[9px]', top ? 'items-start' : 'items-center', RULED)}
+      className={cn(
+        'grid grid-cols-[128px_minmax(0,1fr)] gap-3 py-[9px]',
+        top ? 'items-start' : 'items-center',
+        stack && 'max-[480px]:grid-cols-[minmax(0,1fr)] max-[480px]:gap-1.5',
+        RULED,
+      )}
     >
       <span className="flex flex-col text-[13.5px]">
         {label}

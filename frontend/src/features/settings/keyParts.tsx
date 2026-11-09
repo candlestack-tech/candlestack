@@ -26,7 +26,8 @@ export function KeyTile({ className }: { className?: string }) {
   );
 }
 
-// .kr-n: the name, cut short when long, then the start of the key in mono ("cs_7hq2lmzx…").
+// .kr-n: the name, cut short when long, then the start of the key in mono ("cs_7hq2lmzx…"); where
+// both do not fit, the start of the key goes under the name.
 export function KeyName({
   apiKey,
   muted = false,
@@ -37,7 +38,7 @@ export function KeyName({
   children?: ReactNode;
 }) {
   return (
-    <span className="flex min-w-0 items-baseline gap-2">
+    <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
       <b className={cn('min-w-0 truncate font-medium', muted && 'text-muted-foreground')}>{apiKey.name}</b>
       <code className="font-mono text-[12px] whitespace-nowrap text-muted-foreground">{apiKey.prefix}…</code>
       {children}

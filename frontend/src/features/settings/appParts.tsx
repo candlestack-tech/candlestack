@@ -17,10 +17,10 @@ export function ConnectedAppTile({ app, className }: { app: ConnectedApp; classN
 }
 
 // .kr-n: the app's name, cut short when long, then the host it returns to (anyone can call an app
-// Claude, only Claude returns to claude.ai).
+// Claude, only Claude returns to claude.ai); where both do not fit, the host goes under the name.
 export function ConnectedAppName({ app }: { app: ConnectedApp }) {
   return (
-    <span className="flex min-w-0 items-baseline gap-2">
+    <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
       <b className="min-w-0 truncate font-medium">{app.client.name}</b>
       <span className="text-[12px] whitespace-nowrap text-muted-foreground">{app.client.redirect_host}</span>
     </span>

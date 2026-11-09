@@ -2,13 +2,25 @@
 import { cleanup, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ADA, MB, dashboardAnswer, model, modelsAnswer, session, stubApi } from '@/test/api';
+import { ADA, MB, dashboardAnswer, model, modelsAnswer, session, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
+
+// The row of sections as a 360 px phone lays it out (#465): 326 px wide, 763 px of sections,
+// Settings at its end from 650 px on.
+function layOutAsPhone() {
+  vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(763);
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(326);
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return this.getAttribute('href') === '/settings' ? new DOMRect(650, 0, 100, 34) : new DOMRect(16, 0, 326, 42);
+  });
+  return vi.spyOn(Element.prototype, 'scrollLeft', 'set');
+}
 
 const sidebar = () => screen.getByRole('navigation', { name: 'Workspace' });
 
@@ -62,5 +74,22 @@ describe('the sidebar', () => {
     expect(within(sidebar()).getByRole('link', { name: 'Models' }).textContent).toBe('Models');
     expect(within(sidebar()).queryByText('Storage')).toBeNull();
     expect(within(sidebar()).getByText('Market data delayed 15 min')).toBeDefined();
+  });
+
+  it('scrolls the open section into the middle of the row on a phone (#465)', async () => {
+    const scrolled = layOutAsPhone();
+    stubApi(sessionWithPreferences(ADA));
+    await renderApp('/settings/api-and-mcp');
+    expect(within(sidebar()).getByRole('link', { name: 'Settings' }).getAttribute('aria-current')).toBe('page');
+    // Its middle (700 px) to the row's (179 px).
+    expect(scrolled).toHaveBeenLastCalledWith(521);
+  });
+
+  it('scrolls nothing where the sections fit, as in the column beside the page', async () => {
+    const scrolled = layOutAsPhone();
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(326);
+    stubApi(sessionWithPreferences(ADA));
+    await renderApp('/settings/api-and-mcp');
+    expect(scrolled).not.toHaveBeenCalled();
   });
 });

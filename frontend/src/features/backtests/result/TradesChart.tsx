@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 
 import { exchangeLabel, type BacktestDocument } from '@/api';
 import { HINT } from '@/components/Hint';
@@ -142,7 +142,34 @@ function HeadNote({ prices }: { prices: Chart['prices'] }) {
   );
 }
 
+// The legend's top (top-2) and a gap under it.
+const LEGEND_ROOM = 8 + 8;
+
+// The price pane keeps the legend's height free at its top, so no candle or arrow lies under it
+// (on a phone it wraps to four lines). It is measured while the cursor is off the chart, so what
+// the cursor shows in it never moves the chart under the cursor.
+function useLegendRoom({ view, events }: Chart, legend: RefObject<HTMLDivElement | null>) {
+  const [height, setHeight] = useState(0);
+  const resting = events.cursor === null;
+  useEffect(() => {
+    const box = legend.current;
+    if (!box || !resting) return;
+    const measure = () => setHeight(box.offsetHeight);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    return () => {
+      observer.disconnect();
+    };
+  }, [legend, resting]);
+  useEffect(() => {
+    view?.keepTop(height + LEGEND_ROOM);
+  }, [view, height, events.paneHeight]);
+}
+
 type LegendsProps = {
+  legend: RefObject<HTMLDivElement | null>;
   doc: BacktestDocument;
   chart: Chart;
   controls: ReturnType<typeof useControls>;
@@ -151,12 +178,13 @@ type LegendsProps = {
   inView: number;
 };
 
-function Legends({ doc, chart, controls, trades, highlighted, inView }: LegendsProps) {
+// Where the instrument trades, else its source: "NASDAQ", "Binance".
+const exchangeOf = ({ exchange, source }: BacktestDocument['data']['instrument']) =>
+  exchange ? exchangeLabel(exchange) : source.charAt(0).toUpperCase() + source.slice(1);
+
+function Legends({ legend: box, doc, chart, controls, trades, highlighted, inView }: LegendsProps) {
   const legend = legendAt(chart);
   const { instrument } = doc.data;
-  const exchange = instrument.exchange
-    ? exchangeLabel(instrument.exchange)
-    : instrument.source.charAt(0).toUpperCase() + instrument.source.slice(1);
   // The line drawn is the first benchmark's (returnsOn).
   const benchmark = doc.benchmarks[0];
   const line = (name: 'strategy' | 'benchmark', value: number | undefined) => ({
@@ -167,7 +195,8 @@ function Legends({ doc, chart, controls, trades, highlighted, inView }: LegendsP
   return (
     <>
       <PriceLegend
-        title={`${instrument.symbol} · ${levelLabel(chart.level)} · ${exchange}`}
+        ref={box}
+        title={`${instrument.symbol} · ${levelLabel(chart.level)} · ${exchangeOf(instrument)}`}
         bar={legend.bar}
         before={legend.before}
         decimals={chart.drawn?.decimals ?? 2}
@@ -199,6 +228,8 @@ export function TradesChart(props: Props) {
   const controls = useControls(chart.view);
   const { highlighted, card, unpin } = useHighlight(chart, controls.showTrades, props);
   const inView = useTradeMarks(chart, controls, trades, highlighted);
+  const legend = useRef<HTMLDivElement>(null);
+  useLegendRoom(chart, legend);
   return (
     <ResultBox ref={card} title="Price and trades" aside={<HeadNote prices={chart.prices} />} className="pb-0">
       <div className="relative -mx-4 h-[420px]">
@@ -207,7 +238,7 @@ export function TradesChart(props: Props) {
           aria-label={`${doc.data.instrument.symbol} price with the trades`}
           className="absolute inset-0 m-0"
         />
-        <Legends {...{ doc, chart, controls, trades, highlighted, inView }} />
+        <Legends {...{ legend, doc, chart, controls, trades, highlighted, inView }} />
       </div>
       <div className="-mx-4">
         <ChartBar

@@ -25,10 +25,12 @@ export const charts = {
   // The parts of time the chart was put on, `[from, to)`.
   shown: [] as { from: number; to: number }[],
   crosshair: [] as Handler[],
+  // The options the charts' own price scales were given, by their id ('right'), the latest kept.
+  scales: {} as Record<string, Options>,
   // The user zooming or scrolling the last chart made to a logical range.
   scroll: (_range: { from: number; to: number }) => {},
   reset() {
-    Object.assign(charts, { made: 0, options: [], series: [], shown: [], crosshair: [] });
+    Object.assign(charts, { made: 0, options: [], series: [], shown: [], crosshair: [], scales: {} });
   },
   // The series of a type, in the order the chart added them.
   of(type: string) {
@@ -139,7 +141,11 @@ export function createChart(box: HTMLElement, options: Options) {
       return series;
     },
     chartElement: () => box,
-    priceScale: () => ({ applyOptions: vi.fn() }),
+    priceScale: (id: string) => ({
+      applyOptions: (more: Options) => {
+        charts.scales[id] = { ...charts.scales[id], ...more };
+      },
+    }),
     panes: () => [
       { setHeight: vi.fn(), getHeight: () => 300 },
       { setHeight: vi.fn(), getHeight: () => 110 },

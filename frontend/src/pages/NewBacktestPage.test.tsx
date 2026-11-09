@@ -296,6 +296,10 @@ describe('the backtest builder', () => {
     expect(
       screen.getByText('Data', { selector: 'dt' }).nextElementSibling?.querySelector('img')?.getAttribute('src'),
     ).toBe('/api/v1/data/instruments/crypto%3ABTCUSDT/icon');
+    // #465: a 24 px target at least, its padding taking no room from the line.
+    expect(screen.getByRole('button', { name: 'Edit decision' }).className.split(' ')).toEqual(
+      expect.arrayContaining(['-m-1', 'p-1']),
+    );
     await user.click(screen.getByRole('button', { name: 'Edit decision' }));
     expect(step()).toBe('Decision');
     await user.click(screen.getByRole('button', { name: 'Run' }));

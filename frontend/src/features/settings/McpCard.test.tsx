@@ -85,6 +85,20 @@ describe('MCP server card', () => {
     expect(card().getByRole('button', { name: 'Copied' })).toBeDefined();
   });
 
+  // #465: at 360 px the address showed as "https:…" and the clients' words wrapped one by one.
+  it('puts the labels above the address and the clients on a phone, and shows the whole address', async () => {
+    await open(appsAnswer(APPS));
+    for (const label of ['Server URL', 'Connect']) {
+      const row = card().getByText(label).closest('[data-slot="settings-row"]')!;
+      expect(row.className).toContain('max-[480px]:grid-cols-[minmax(0,1fr)]');
+    }
+    const address = card().getByText(`${window.location.origin}/mcp`).parentElement!;
+    expect(address.className.split(' ')).toEqual(['min-w-0', '[overflow-wrap:anywhere]']);
+    // An app's host goes under its name rather than cut it ("ChatG…").
+    const name = await card().findByText('ChatGPT', { selector: 'b' });
+    expect(name.parentElement!.className.split(' ')).toContain('flex-wrap');
+  });
+
   it('lists each client with its mark, how it connects and its guide', async () => {
     await open(appsAnswer([]));
     const clients: [string, string][] = [

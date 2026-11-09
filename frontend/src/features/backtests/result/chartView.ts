@@ -68,6 +68,10 @@ export function withAlpha(hex: string, alpha: number): string {
 // The strategy pane's height in pixels.
 export const RETURNS_PANE = 110;
 
+// The room above and below the price, as parts of its pane: the legend at the top, the volume at
+// the bottom.
+const PRICE_MARGINS = { top: 0.24, bottom: 0.2 };
+
 const TRANSPARENT = 'rgba(0, 0, 0, 0)';
 const at = (time: number) => time as UTCTimestamp;
 
@@ -164,7 +168,7 @@ export class TradesChartView {
       autoSize: true,
       // The TradingView attribution is a line in the footer instead (#166).
       layout: { attributionLogo: false, fontSize: 11, background: { type: ColorType.Solid, color: TRANSPARENT } },
-      rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.24, bottom: 0.2 } },
+      rightPriceScale: { borderVisible: false, scaleMargins: PRICE_MARGINS },
       timeScale: { borderVisible: false, rightOffset: 4, minBarSpacing: 0.02 },
       crosshair: { mode: CrosshairMode.Normal },
     });
@@ -314,6 +318,16 @@ export class TradesChartView {
   setLines({ strategy, benchmark }: { strategy: boolean; benchmark: boolean }) {
     this.series.strategy.applyOptions({ visible: strategy });
     this.series.benchmark.applyOptions({ visible: benchmark });
+  }
+
+  // Room at the top of the price pane for the legend over it, in pixels: the candles and their
+  // arrows start under it (on a phone the legend takes four lines), never higher than they do
+  // without one, never lower than half way down.
+  keepTop(pixels: number) {
+    const pane = this.pricePaneHeight();
+    if (pane <= 0) return;
+    const top = Math.min(0.5, Math.max(PRICE_MARGINS.top, pixels / pane));
+    this.chart.priceScale('right').applyOptions({ scaleMargins: { ...PRICE_MARGINS, top } });
   }
 
   // How high the price pane is: the strategy's legend goes right under it.

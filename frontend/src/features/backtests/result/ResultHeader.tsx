@@ -27,8 +27,9 @@ import { PublicPill, PublishActions } from './PublishActions';
 // What every field of the downloaded file means, on the main website.
 export const RESULT_DOCS = 'https://candlestack.tech/docs/backtest-json/';
 
+// A model's name in "← <the model>" breaks anywhere too.
 const BACK =
-  'mb-3.5 inline-flex items-center gap-1.5 text-[13px] text-muted-foreground outline-none hover:text-foreground focus-visible:text-foreground focus-visible:underline';
+  'mb-3.5 inline-flex items-center gap-1.5 text-[13px] text-muted-foreground outline-none [overflow-wrap:anywhere] hover:text-foreground focus-visible:text-foreground focus-visible:underline';
 
 // A way back through the history, to the page as it was left (its search and filters).
 function BackButton({ children }: { children: string }) {
@@ -162,11 +163,12 @@ function FinishedActions(props: ActionProps) {
 }
 
 // The model it ran with beside its framework's mark, a link to its page while it exists. Another
-// account's is its name only, in ink: the file stays with its author.
+// account's is its name only, in ink: the file stays with its author. A long name without spaces
+// breaks anywhere, as in the Setup card, instead of running past a phone's edge.
 function ModelLink({ model }: { model: BacktestDocument['model'] }) {
   const framework = frameworkOf(model.framework);
   return (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
+    <span className="inline-flex min-w-0 items-center gap-1.5 [overflow-wrap:anywhere]">
       {framework && <FrameworkTile framework={framework} size="sm" />}
       <ModelName model={model} />
     </span>
@@ -303,7 +305,7 @@ export function ResultHeader({ doc }: { doc: BacktestDocument }) {
           <InstrumentSymbol id={doc.data.instrument.id} symbol={doc.data.instrument.symbol} size={20} />
           {reads && ` · ${reads}`}
         </span>
-        <span className={cn(others && 'text-foreground')}>
+        <span className={cn('min-w-0', others && 'text-foreground')}>
           <ModelLink model={doc.model} />
         </span>
         <span>{periodText(doc.data.period, dateStyle)}</span>

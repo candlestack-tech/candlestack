@@ -188,15 +188,16 @@ export function McpCard() {
         Use CandleStack from Claude, ChatGPT, Cursor or any MCP client. Ask about your backtests, start new ones and
         compare them in a chat.
       </SettingsLead>
-      <SettingsRow label="Server URL">
+      <SettingsRow label="Server URL" stack>
         <div className="flex min-w-0 items-center gap-2">
-          <span className="min-w-0 truncate">
+          {/* The whole address, on two lines where one has no room for it. */}
+          <span className="min-w-0 [overflow-wrap:anywhere]">
             <Code>{url}</Code>
           </span>
           <CopyButton text={url} />
         </div>
       </SettingsRow>
-      <SettingsRow label="Connect" hint="Step by step for each app" top>
+      <SettingsRow label="Connect" hint="Step by step for each app" top stack>
         <ClientLines />
       </SettingsRow>
       <ConnectedApps />

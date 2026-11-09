@@ -43,4 +43,12 @@ describe('Footer', () => {
       expect(link(html, name)).toContain('rel="noreferrer"');
     }
   });
+
+  // #465: 24 px high for a finger (WCAG 2.5.8), the padding taking no room from the line.
+  it('gives every link a target 24 px high', () => {
+    const html = renderToStaticMarkup(<Footer />);
+    for (const name of ['API docs', 'Status', 'candlestack.tech'])
+      expect(link(html, name)).toContain('-my-[3px] py-[3px]');
+    for (const name of ['TradingView Lightweight Charts™', 'Logo.dev']) expect(link(html, name)).toContain('py-[3px]');
+  });
 });

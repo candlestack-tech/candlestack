@@ -177,7 +177,7 @@ export function ApiKeysCard() {
       {error && <LoadError error={error} retrying={isFetching} onRetry={() => void refetch()} />}
       {any && <KeyList keys={keys} now={now} onRevoke={(key) => setRevoking({ key, open: true })} />}
       {keys?.items.length === 0 && <NoKeys onCreate={create} />}
-      <SettingsRow label="Docs" hint="Every endpoint, with examples">
+      <SettingsRow label="Docs" hint="Every endpoint, with examples" stack>
         <GuideLink />
       </SettingsRow>
       <CreateKeyDialog open={creating} onOpenChange={setCreating} />

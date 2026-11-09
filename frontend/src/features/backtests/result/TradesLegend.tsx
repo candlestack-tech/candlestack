@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 
 import type { Bar } from '@/features/instrument';
 import { formatDate, formatShortDay, formatTime, type DateStyle } from '@/lib/dates';
@@ -24,10 +24,15 @@ function Value({ label, value, tone }: { label: string; value: string; tone: str
   );
 }
 
+// The colour of a candle's numbers: the text green and red (4.5:1 on the page in both themes, as
+// the instrument chart's legend has them), not the candles' own, whose red is 3.7:1 on the light
+// background.
+const toneOf = (bar: Bar) => (bar.close >= bar.open ? 'text-up' : 'text-down');
+
 // "O 334.20 H 335.10 L 333.80 C 334.90 +1.10 (+0.33%)" in the colour of the candle, the change
 // against the candle before.
 function Prices({ bar, before, decimals }: { bar: Bar; before: Bar | undefined; decimals: number }) {
-  const tone = bar.close >= bar.open ? 'text-candle-up' : 'text-candle-down';
+  const tone = toneOf(bar);
   const price = (value: number) => formatPriceWith(value, decimals);
   const base = before?.close ?? bar.open;
   const change = bar.close - base;
@@ -100,13 +105,17 @@ type PriceProps = {
   before: Bar | undefined;
   decimals: number;
   trades: ReactNode;
+  ref?: Ref<HTMLDivElement>;
 };
 
 const ROW = 'flex flex-wrap items-center gap-x-2.5';
 
-export function PriceLegend({ title, bar, before, decimals, trades }: PriceProps) {
+export function PriceLegend({ title, bar, before, decimals, trades, ref }: PriceProps) {
   return (
-    <div className="pointer-events-none absolute top-2 left-3 z-10 flex max-w-[calc(100%-6rem)] flex-col text-xs/5">
+    <div
+      ref={ref}
+      className="pointer-events-none absolute top-2 left-3 z-10 flex max-w-[calc(100%-6rem)] flex-col text-xs/5"
+    >
       <div className={ROW}>
         <span className="font-sans text-[13px] font-medium">{title}</span>
         {bar && (
@@ -117,11 +126,7 @@ export function PriceLegend({ title, bar, before, decimals, trades }: PriceProps
       </div>
       {bar && (
         <div className="font-mono">
-          <Value
-            label="Vol"
-            value={formatCompact(bar.volume)}
-            tone={bar.close >= bar.open ? 'text-candle-up' : 'text-candle-down'}
-          />
+          <Value label="Vol" value={formatCompact(bar.volume)} tone={toneOf(bar)} />
         </div>
       )}
       {trades}

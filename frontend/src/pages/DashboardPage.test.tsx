@@ -312,6 +312,28 @@ describe('the dashboard of an account with backtests', () => {
     expect(mono('Best backtests')).toEqual(['Sharpe ↓', 'Return', 'Drawdown', 'Win rate']);
   });
 
+  // #465: on a phone the page never scrolls sideways and the names stay readable.
+  it('keeps the tables’ hidden words inside the boxes they scroll in', async () => {
+    await open({ ...dashboardAnswer(FULL), ...modelsAnswer([]) });
+    await screen.findByRole('region', { name: 'Best backtests' });
+    for (const name of ['Last backtests', 'Best backtests']) {
+      const box = widget(name).getByRole('table').parentElement;
+      expect(box?.className.split(' ')).toEqual(expect.arrayContaining(['relative', 'overflow-x-auto']));
+    }
+  });
+
+  it('hides the instruments of Last backtests in a narrow card, and keeps When on one line', async () => {
+    await open({ ...dashboardAnswer(FULL), ...modelsAnswer([]) });
+    await screen.findByRole('region', { name: 'Last backtests' });
+    const classes = (index: number) =>
+      widget('Last backtests')
+        .getAllByRole('row')
+        .map((row) => row.children[index]?.className.split(' '));
+    for (const cell of classes(1)) expect(cell).toContain('@max-[440px]:hidden');
+    for (const cell of classes(4)) expect(cell).toContain('@max-[520px]:hidden');
+    expect(classes(4)[0]).toContain('min-w-[104px]');
+  });
+
   it('writes the widgets’ hints in the design’s hint style', async () => {
     await open({ ...dashboardAnswer(FULL), ...modelsAnswer([]) });
     const hint = within(await screen.findByRole('region', { name: 'Best backtests' })).getByText('by Sharpe');
