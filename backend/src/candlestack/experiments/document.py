@@ -357,7 +357,7 @@ class RunnerOut(BaseModel):
 
 
 class Software(BaseModel):
-    engine_version: str = Field(examples=["0.3.0"])
+    engine_version: str = Field(examples=["0.4.0"])
     app_version: str = Field(examples=["2026.10.24-3f2a1c9"])
     runner: RunnerOut | None
 

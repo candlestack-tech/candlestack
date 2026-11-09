@@ -6,7 +6,7 @@ integration tests (tests/integration/experiments/test_mcp_run.py)."""
 import copy
 import json
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import anyio
@@ -555,6 +555,34 @@ def test_the_progress_of_a_backtest_follows_its_stages(
 ) -> None:
     assert run.stage_of(status) == stage
     assert run.progress_of(status) == pytest.approx(progress)
+
+
+@pytest.mark.parametrize(
+    ("states", "elapsed_s", "eta_s", "progress"),
+    [
+        # A quarter of the run went by while the model predicts: still its step's start.
+        (("done", "done", "running", "pending"), 25, 75.0, 0.6),
+        # Most of it: the clock moves it into the model's fifth.
+        (("done", "done", "running", "pending"), 60, 40.0, 0.68),
+        # Past its run's estimate: short of the step's end until the step ends.
+        (("done", "done", "running", "pending"), 200, 0.0, 0.6 + 0.9 / 5),
+        (("done", "done", "done", "running"), 90, 10.0, 0.92),
+        # Without an estimate, by its steps only.
+        (("done", "done", "running", "pending"), 75, None, 0.6),
+        # The candles report their own progress.
+        (("running", "pending", "pending", "pending"), 75, 25.0, 0.2),
+    ],
+)
+def test_the_model_and_the_trades_move_by_the_clock(
+    states: tuple[str, ...], elapsed_s: int, eta_s: float | None, progress: float
+) -> None:
+    started = datetime(2026, 11, 2, 9, 30, tzinfo=UTC)
+    status = status_of("running", steps(*states), started_at=started).model_copy(
+        update={"eta_s": eta_s}
+    )
+
+    now = started + timedelta(seconds=elapsed_s)
+    assert run.progress_of(status, now) == pytest.approx(progress)
 
 
 @pytest.mark.parametrize(

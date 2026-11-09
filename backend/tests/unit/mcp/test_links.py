@@ -88,3 +88,23 @@ def test_a_sweep_kept_before_its_link_still_answers_a_retry() -> None:
     kept = sweeps._STARTED.model_dump(mode="json", exclude={"url"})
 
     assert sweeps.SweepStarted.model_validate(kept).url is None
+
+
+def test_a_listed_sweep_has_the_page_of_its_best_backtest() -> None:
+    listed = sweeps.SweepsPage.model_validate(
+        sweeps._LISTED.model_dump(mode="json")
+        | {
+            "sweeps": [
+                sweeps._LISTED.sweeps[0].model_dump(mode="json", exclude={"best"})
+                | {"best": {"id": "bt_b", "number": 2, "name": "Bright Vega", "value": 1.0}},
+                sweeps._LISTED.sweeps[0].model_dump(mode="json", exclude={"best"}) | {"best": None},
+            ]
+        }
+    )
+
+    linked = sweeps._linked(CALL, listed)
+
+    assert [sweep.best and sweep.best.url for sweep in linked.sweeps] == [
+        f"{APP}/backtests/bt_b",
+        None,
+    ]

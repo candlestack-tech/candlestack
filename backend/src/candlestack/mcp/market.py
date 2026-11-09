@@ -9,10 +9,13 @@ of at most ``CANDLES_MAX`` rows, so one call never floods the model's context. S
 backtest defaults needs the scope ``backtests``, as its route does.
 """
 
+import math
 import time
+from collections.abc import Awaitable
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any, Literal
 
+import anyio
 from mcp.server.mcpserver import Context
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,15 +39,25 @@ from candlestack.data import (
     InstrumentId,
     InstrumentSort,
     InstrumentStats,
+    LoadProgress,
     Market,
     SearchResult,
     Timeframe,
     TimeParam,
     client_rate_limit,
     data_problems,
+    watch_load,
 )
 from candlestack.experiments import Decision, Execution, Period
-from candlestack.mcp.convention import Example, ToolCall, ToolSpec, changes, reads, tool_call
+from candlestack.mcp.convention import (
+    Example,
+    Progress,
+    ToolCall,
+    ToolSpec,
+    changes,
+    reads,
+    tool_call,
+)
 from candlestack.preprocessing import BlockOut, Step, describe_catalog
 
 # Rows of one get_candles call. Clients show a result a second time as indented text, so a full
@@ -327,6 +340,56 @@ async def _from_start(
     return _page(found, next_start=found.end if found.end < end else None, next_end=None)
 
 
+class _ChunksLoaded:
+    """The chunks a page's loads fetched, over every load of the page: a load that starts again
+    from its first chunk counts on from the ones before it, so the progress only grows. A wait
+    for the source's limit is half a chunk."""
+
+    def __init__(self) -> None:
+        self.before = 0
+        self.last = LoadProgress()
+
+    def add(self, progress: LoadProgress) -> tuple[float, float, str]:
+        if progress.loaded < self.last.loaded:
+            self.before += self.last.loaded
+        self.last = progress
+        loaded, total = self.before + progress.loaded, self.before + progress.total
+        message = f"loading candles, {loaded} of {total} chunks"
+        if progress.waiting_until is None:
+            return loaded, total, message
+        # Half a chunk on, as MCP's progress must grow for the client to hear of the wait.
+        return loaded + 0.5, total, f"{message}, waiting for the data source's limit"
+
+
+async def _reporting_loads[T](ctx: Context, load: Awaitable[T]) -> T:
+    """Awaits `load` and reports how many chunks of candles it fetched to a client that asked
+    for progress: a page the cache does not hold may take a while, a stock waiting for the
+    source's limit longer."""
+    progress = Progress(ctx)
+    chunks = _ChunksLoaded()
+    send, receive = anyio.create_memory_object_stream[LoadProgress](math.inf)
+
+    async def forward() -> None:
+        async with receive:
+            async for loaded in receive:
+                if loaded.total:
+                    await progress.report(*chunks.add(loaded))
+
+    # The load's own error goes out as it is, not in the task group's exception group, so
+    # data_problems() still makes it the problem it is.
+    failed: Exception | None = None
+    async with anyio.create_task_group() as group:
+        group.start_soon(forward)
+        with send, watch_load(send.send_nowait):
+            try:
+                page = await load
+            except Exception as error:  # noqa: BLE001 (re-raised below, as it is)
+                failed = error
+    if failed is not None:
+        raise failed
+    return page
+
+
 async def get_candles(
     instrument_id: InstrumentIdArg,
     timeframe: Timeframe,
@@ -363,10 +426,12 @@ async def get_candles(
     with data_problems():
         instrument = InstrumentId.parse(instrument_id)
         if start is None:
-            return await _newest(_data(call), instrument, timeframe, until, limit)
-        return await _from_start(
-            _data(call), instrument, timeframe, start=start, end=until, limit=limit
-        )
+            load = _newest(_data(call), instrument, timeframe, until, limit)
+        else:
+            load = _from_start(
+                _data(call), instrument, timeframe, start=start, end=until, limit=limit
+            )
+        return await _reporting_loads(ctx, load)
 
 
 # --- Preprocessing catalog ---------------------------------------------------------------------
@@ -685,7 +750,8 @@ TOOLS = (
             `start` and `end` take an ISO 8601 date or date-time, such as 2024-06-03 or
             2024-06-03T13:30:00Z, or epoch seconds. While `next_start` is not null, call again
             with start set to it for the next page. Every call counts against a per-minute
-            limit of candle requests.
+            limit of candle requests. A client that asks for progress gets how many chunks of
+            candles a page the cache does not hold has loaded.
 
             Data terms: crypto comes from Binance spot, stocks from Alpaca (SIP, every US
             exchange, 15 minutes delayed). Alpaca allows its data for the user's personal,
@@ -693,6 +759,7 @@ TOOLS = (
             on the stock candles.""",
         scopes=(Scope.read,),
         annotations=reads(),
+        progress=True,
         example=Example(
             arguments={
                 "instrument_id": "crypto:BTCUSDT",

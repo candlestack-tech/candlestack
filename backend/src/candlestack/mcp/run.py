@@ -622,16 +622,32 @@ async def start_backtest(  # noqa: PLR0913 (the setup's groups)
     return BacktestStatusResult.model_validate_json(content)
 
 
-def progress_of(status: BacktestStatusResult) -> float:
+# How far into its fifth a step that reports nothing of its own may get by the clock: the
+# rest waits for the step to end.
+_STEP_BY_TIME_MAX = 0.9
+
+
+def progress_of(status: BacktestStatusResult, now: datetime | None = None) -> float:
     """How far the backtest is, 0 to 1, from where it stands: the user's queue is the first
     fifth, nearer its end the nearer its turn; then its steps (``run_progress``); 1 once it
-    ended."""
+    ended. The model and the trades report nothing while they run, so within their fifth it
+    moves by the clock: the share of its run that went by, as `eta_s` estimates the run."""
     if status.ended:
         return 1.0
     if status.status == "queued":
         position = status.queue_position
         return 1 / (position + 1) / STAGES if position else 0.0
-    return run_progress(status.steps)
+    steps = run_progress(status.steps)
+    running = next((step for step in status.steps if step.state == "running"), None)
+    if running is None or running.id not in {"model", "trades"}:
+        return steps
+    if status.eta_s is None or status.started_at is None:
+        return steps
+    elapsed = ((now or datetime.now(UTC)) - status.started_at).total_seconds()
+    if elapsed <= 0:
+        return steps
+    by_time = (1 + (STAGES - 1) * elapsed / (elapsed + status.eta_s)) / STAGES
+    return min(max(steps, by_time), steps + _STEP_BY_TIME_MAX / STAGES)
 
 
 def stage_of(status: BacktestStatusResult) -> str:

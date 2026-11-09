@@ -1138,7 +1138,7 @@ call, as the routes' dependencies do), never the API over HTTP.
   the 2026-07-28 protocol and the initialize handshake of the earlier ones. `serving_mcp` runs
   two stateless session managers of the SDK on the one server: `mcp_sessions` answers JSON,
   `mcp_streams` answers SSE. A `tools/call` of a tool that sends progress (`ToolSpec.progress`:
-  `wait_for_backtest`, `wait_for_sweep`) with a `progressToken` in its `_meta`, from a client
+  `wait_for_backtest`, `wait_for_sweep`, `get_candles`) with a `progressToken` in its `_meta`, from a client
   that accepts `text/event-stream`, goes to `mcp_streams` (`http._streamed`): only an SSE
   answer carries the tool's `notifications/progress` before its result (a JSON answer drops
   them). Every other request goes to `mcp_sessions` and keeps its JSON answer. `main` adds the
@@ -1307,7 +1307,10 @@ call, as the routes' dependencies do), never the API over HTTP.
     earlier page; it is null only when the page's candles and gaps are fewer than `limit`,
     that is when the data begins in it. With `start`: the first `limit` candles from there
     (`DataService.first_candles`, which counts the session candles of a stock exactly with
-    `latest_end`) and `next_start`, where they end, for the next page. Its description says
+    `latest_end`) and `next_start`, where they end, for the next page. To a client that sent a
+    `progressToken` it sends the chunks its loads fetched (`watch_load`), counted on over every
+    load of the page, a wait for the source's limit as half a chunk so the value still grows
+    (`market._reporting_loads`). Its description says
     the data terms (Alpaca's data for the user's personal, noncommercial use only).
   - `models` (#403), on the models service and its problems (`ml.problems`):
     `list_models` (the models in short: ID, name, format, state, star, the manifest's
@@ -1346,7 +1349,8 @@ call, as the routes' dependencies do), never the API over HTTP.
     errors as problems through `experiments.sweep_problems`), answering what the routes answer
     ([Sweeps](#sweeps)) with `url` besides, the app's Compare page of its backtests: once ranked
     the best 4 that have a value, before that all of them when they are 4 at most, else null
-    (`sweeps._compare_url`); `run_sweep` adds `eta_s` (the latest of its backtests') and takes an
+    (`sweeps._compare_url`), and `list_sweeps` the page of each sweep's best backtest so far
+    (`best.url`); `run_sweep` adds `eta_s` (the latest of its backtests') and takes an
     optional `idempotency_key`, kept as the route's `Idempotency-Key`. `wait_for_sweep`
     (`read`) waits as `wait_for_backtest` does, on the runner's word for any of the sweep's
     backtests, reading only their statuses (`Sweeps.progress`), until none is queued or
@@ -1384,7 +1388,9 @@ call, as the routes' dependencies do), never the API over HTTP.
     `Silent Orion (#12): loading candles, 3 of 12 chunks`; each value higher than the last
     (`convention.Progress` leaves out one that is not), as MCP asks. It comes from the steps
     the run stores, which the backtest's page shows, so the app and the agent read the same
-    thing; the model's and the trades' steps have no progress of their own.
+    thing. The model's and the trades' steps report nothing while they run, so within their
+    fifth the value moves by the clock: the run's elapsed share of its estimate (`eta_s`),
+    at most 90% of the step's fifth until the step ends (`run.progress_of`).
     `get_backtest` (`read`) answers the light result document cut down, from what the run
     stored (`BacktestRuns.light`, no candles, no engine): the summary with the link, the setup
     in the shape of `start_backtest`'s arguments (so it runs again as it is, or changed), the

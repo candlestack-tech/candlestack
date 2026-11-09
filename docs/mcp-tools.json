@@ -1109,7 +1109,7 @@
         "readOnlyHint": true
       },
       "description": "Closed OHLCV candles of one instrument and timeframe, up to 500 a page. A backtest loads its own candles: do not fetch them for it.\n\nWith start: from start on, oldest first; the next page with start=next_start. Without start: the newest before end; earlier ones with end=next_end. Stocks have the regular session only (09:30-16:00 New York); missing candles stay gaps. A per-minute limit applies: ask for a longer timeframe rather than many pages.\n\nData terms: stocks come from Alpaca (15 minutes delayed) for the user's personal, noncommercial use only: never publish or pass on the stock candles.",
-      "details": "Use it to look at the price around a trade, check a period before a backtest or compute something the backtest result does not say.\n\n`start` and `end` take an ISO 8601 date or date-time, such as 2024-06-03 or 2024-06-03T13:30:00Z, or epoch seconds. While `next_start` is not null, call again with start set to it for the next page. Every call counts against a per-minute limit of candle requests.\n\nData terms: crypto comes from Binance spot, stocks from Alpaca (SIP, every US exchange, 15 minutes delayed). Alpaca allows its data for the user's personal, noncommercial use only: use it for the user's analysis here, never publish or pass on the stock candles.",
+      "details": "Use it to look at the price around a trade, check a period before a backtest or compute something the backtest result does not say.\n\n`start` and `end` take an ISO 8601 date or date-time, such as 2024-06-03 or 2024-06-03T13:30:00Z, or epoch seconds. While `next_start` is not null, call again with start set to it for the next page. Every call counts against a per-minute limit of candle requests. A client that asks for progress gets how many chunks of candles a page the cache does not hold has loaded.\n\nData terms: crypto comes from Binance spot, stocks from Alpaca (SIP, every US exchange, 15 minutes delayed). Alpaca allows its data for the user's personal, noncommercial use only: use it for the user's analysis here, never publish or pass on the stock candles.",
       "endpoints": [
         "GET /api/v1/data/instruments/{instrument_id}/candles"
       ],
@@ -15234,7 +15234,7 @@
         "readOnlyHint": true
       },
       "description": "Lists the user's sweeps, newest first, with their progress and best backtest so far. get_sweep ranks one; list_backtests with `sweep_id` lists its backtests.",
-      "details": "Each one's ID, metric, how many of its backtests are queued, running, finished and failed, whether it is done, and its best finished backtest so far by the metric. Use it to find a sweep again. A page past the last one is empty.",
+      "details": "Each one's ID, metric, how many of its backtests are queued, running, finished and failed, whether it is done, and its best finished backtest so far by the metric with `url`, its page in the app. Use it to find a sweep again. A page past the last one is empty.",
       "endpoints": [
         "GET /api/v1/sweeps"
       ],
@@ -15249,6 +15249,7 @@
                 "id": "bt_t9n8v7d6a5",
                 "name": "Bright Vega",
                 "number": 13,
+                "url": "https://app.candlestack.tech/backtests/bt_t9n8v7d6a5",
                 "value": 1.42
               },
               "count": 2,
@@ -15292,8 +15293,7 @@
       "name": "list_sweeps",
       "outputSchema": {
         "$defs": {
-          "SweepBest": {
-            "description": "The sweep's best backtest so far by its `metric`, as its ranking would put it first.",
+          "LinkedBest": {
             "properties": {
               "id": {
                 "examples": [
@@ -15316,6 +15316,11 @@
                 "title": "Number",
                 "type": "integer"
               },
+              "url": {
+                "description": "The backtest's page in the app, to show the user",
+                "title": "Url",
+                "type": "string"
+              },
               "value": {
                 "description": "The statistic, as in `results.stats`",
                 "examples": [
@@ -15329,24 +15334,24 @@
               "id",
               "number",
               "name",
-              "value"
+              "value",
+              "url"
             ],
-            "title": "SweepBest",
+            "title": "LinkedBest",
             "type": "object"
           },
-          "SweepListed": {
-            "description": "A sweep in the list: how far it is and its best backtest so far.",
+          "LinkedSweep": {
             "properties": {
               "best": {
                 "anyOf": [
                   {
-                    "$ref": "#/$defs/SweepBest"
+                    "$ref": "#/$defs/LinkedBest"
                   },
                   {
                     "type": "null"
                   }
                 ],
-                "description": "The finished backtest with the best `metric` so far; null until one has a value. `GET /api/v1/sweeps/{sweep_id}` ranks them all"
+                "description": "The finished backtest with the best `metric` so far, with its page; null until one has a value. get_sweep ranks them all"
               },
               "count": {
                 "description": "Its backtests",
@@ -15391,7 +15396,7 @@
               "progress",
               "best"
             ],
-            "title": "SweepListed",
+            "title": "LinkedSweep",
             "type": "object"
           },
           "SweepMetric": {
@@ -15460,7 +15465,7 @@
           "sweeps": {
             "description": "The page, newest first",
             "items": {
-              "$ref": "#/$defs/SweepListed"
+              "$ref": "#/$defs/LinkedSweep"
             },
             "title": "Sweeps",
             "type": "array"
@@ -15480,7 +15485,7 @@
           "page",
           "pages"
         ],
-        "title": "SweepsPage",
+        "title": "LinkedSweepsPage",
         "type": "object"
       },
       "scopes": [

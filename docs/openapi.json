@@ -6698,7 +6698,7 @@
           },
           "engine_version": {
             "examples": [
-              "0.3.0"
+              "0.4.0"
             ],
             "title": "Engine Version",
             "type": "string"

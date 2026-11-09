@@ -21,7 +21,9 @@ from candlestack.experiments import (
     BacktestIn,
     BacktestStep,
     Committed,
+    SweepBest,
     SweepIn,
+    SweepListed,
     SweepMetric,
     SweepOut,
     SweepPlan,
@@ -45,6 +47,7 @@ from candlestack.mcp.convention import (
     Step,
     ToolCall,
     ToolSpec,
+    backtest_url,
     changes,
     compare_url,
     reads,
@@ -212,20 +215,50 @@ async def get_sweep(sweep_id: str, ctx: Context, metric: SweepMetric | None = No
     return _result(call, sweep)
 
 
+class LinkedBest(SweepBest):
+    url: str = Field(description="The backtest's page in the app, to show the user")
+
+
+class LinkedSweep(SweepListed):
+    best: LinkedBest | None = Field(
+        description="The finished backtest with the best `metric` so far, with its page; null "
+        "until one has a value. get_sweep ranks them all"
+    )
+
+
+class LinkedSweepsPage(SweepsPage):
+    sweeps: list[LinkedSweep] = Field(description="The page, newest first")
+
+
+def _linked(call: ToolCall, page: SweepsPage) -> LinkedSweepsPage:
+    """The page with the app's page of each sweep's best backtest so far."""
+    sweeps = [
+        LinkedSweep(
+            **sweep.model_dump(exclude={"best"}),
+            best=None
+            if sweep.best is None
+            else LinkedBest(**sweep.best.model_dump(), url=backtest_url(call, sweep.best.id)),
+        )
+        for sweep in page.sweeps
+    ]
+    return LinkedSweepsPage(**page.model_dump(exclude={"sweeps"}), sweeps=sweeps)
+
+
 async def list_sweeps(
     ctx: Context,
     page: Annotated[int, Field(ge=1, le=PAGE_MAX, description="The page, from 1")] = 1,
     per_page: Annotated[
         int, Field(ge=1, le=PER_PAGE_MAX, description="Sweeps per page")
     ] = PAGE_SIZE,
-) -> SweepsPage:
+) -> LinkedSweepsPage:
     """Lists the user's sweeps, newest first, with their progress and best backtest so far.
     get_sweep ranks one; list_backtests with `sweep_id` lists its backtests."""
     call = tool_call(ctx)
     async with call.db() as db:
-        return await build_sweeps(call.state, db, call.settings.app_version).sweeps(
+        listed = await build_sweeps(call.state, db, call.settings.app_version).sweeps(
             call.user.id, page, per_page
         )
+    return _linked(call, listed)
 
 
 async def wait_for_sweep(
@@ -389,7 +422,7 @@ _WAITED = SweepWaitResult(
     url=_SWEEP.url,
 )
 
-_LISTED = SweepsPage.model_validate(
+_LISTED = LinkedSweepsPage.model_validate(
     {
         "sweeps": [
             {
@@ -399,7 +432,13 @@ _LISTED = SweepsPage.model_validate(
                 "count": 2,
                 "done": True,
                 "progress": _SWEEP.progress,
-                "best": {"id": "bt_t9n8v7d6a5", "number": 13, "name": "Bright Vega", "value": 1.42},
+                "best": {
+                    "id": "bt_t9n8v7d6a5",
+                    "number": 13,
+                    "name": "Bright Vega",
+                    "value": 1.42,
+                    "url": "https://app.candlestack.tech/backtests/bt_t9n8v7d6a5",
+                },
             }
         ],
         "total": 1,
@@ -466,8 +505,9 @@ TOOLS = (
         title="List sweeps",
         details="""
             Each one's ID, metric, how many of its backtests are queued, running, finished and
-            failed, whether it is done, and its best finished backtest so far by the metric.
-            Use it to find a sweep again. A page past the last one is empty.""",
+            failed, whether it is done, and its best finished backtest so far by the metric with
+            `url`, its page in the app. Use it to find a sweep again. A page past the last one
+            is empty.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(arguments={}, result=_LISTED),

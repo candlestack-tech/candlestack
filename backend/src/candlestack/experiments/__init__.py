@@ -101,7 +101,9 @@ from candlestack.experiments.schemas import (
 from candlestack.experiments.service import ExperimentsQuery, ListQuery
 from candlestack.experiments.store import BacktestFilters, model_usage
 from candlestack.experiments.sweeps import (
+    SweepBest,
     SweepIn,
+    SweepListed,
     SweepMetric,
     SweepOut,
     SweepPlan,
@@ -166,7 +168,9 @@ __all__ = [
     "SetupTimeframe",
     "SortOrder",
     "Stats",
+    "SweepBest",
     "SweepIn",
+    "SweepListed",
     "SweepMetric",
     "SweepOut",
     "SweepPlan",
