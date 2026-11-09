@@ -2514,7 +2514,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "One of the user's models in full: file, state, its manifest in short, `backtest_count` and their best Sharpe ratio. Its backtests: list_backtests with `model` set to its name.\n\nAfter set_manifest, the trial run: ended when `checked_at` is set, passed when `state` is `verified`, else `check_failed` and `check_error` say why (the model stays `ready`).",
+      "description": "One of the user's models in full: file, state, its manifest in short, how many backtests used it (`backtest_count`) and their best Sharpe ratio. The backtests: list_backtests with `model` set to the model's name.\n\nAfter set_manifest, the trial run: ended when `checked_at` is set, passed when `state` is `verified`, else `check_failed` and `check_error` say why (the model stays `ready`).",
       "details": "In full: its file (format, size, weights, input and output shapes), its state, what its manifest says in short (representation, timeframe, session, input shape, warm-up), how many backtests used it (`backtest_count`) and the best Sharpe ratio of them, how the trial run of its manifest went, and its `url`. get_manifest gives the whole manifest.",
       "endpoints": [
         "GET /api/v1/models"
