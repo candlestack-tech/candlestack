@@ -104,7 +104,21 @@ services:
     environment:
       <<: *backend-environment
       APP_ROLE: runner
-      WEB_WORKERS: "1"
+    # The image's command in one process, once the image says it knows APP_ROLE. A stage rolled
+    # back to an image from before the runner (its deploy runs main's compose file with the older
+    # images) would otherwise run everything here too: a second runner next to the backend's,
+    # which would fail and queue again the other's runs. Such an image exits instead, and
+    # restarts to exit again; its backend runs the backtests as it did, and the smoke test fails
+    # on the runner (.github/scripts/smoke.sh).
+    command:
+      - sh
+      - -c
+      - >-
+        python -c 'import sys; from candlestack.core import Settings;
+        sys.exit(0 if "app_role" in Settings.model_fields
+        else "This image does not know APP_ROLE: the runner does not start")'
+        && exec granian --interface asgi --host 0.0.0.0 --port 8000 --workers 1
+        --no-access-log --log-config granian-logging.json candlestack.main:app
     labels:
       candlestack.version: ${APP_VERSION:?}
     # The app and the runs: two at once (BACKTEST_SLOTS), each up to 50000 candles with their
@@ -185,7 +199,7 @@ services:
 
   # The users' data, sized for a few dozen connections (a pool of at most 10 in each of the
   # backend's two processes and the runner's, the migration, the backup); the container limit
-  # leaves room for them above shared_buffers. Runs as the image's postgres user, which owns the
+  # leaves room for them above shared_buffers (95 MB measured under load with 40 allowed). Runs as the image's postgres user, which owns the
   # data volume, so it needs no capabilities.
   postgres:
     image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
@@ -196,7 +210,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
       POSTGRES_DB: candlestack
     user: postgres
-    mem_limit: 128m
+    mem_limit: 192m
     read_only: true
     volumes:
       - postgres:/var/lib/postgresql
