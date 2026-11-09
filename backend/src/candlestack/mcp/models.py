@@ -219,8 +219,9 @@ async def _model(call: ToolCall, model_id: str) -> ModelOut:
 
 
 async def get_model(model_id: ModelId, ctx: Context) -> ModelDetail:
-    """One of the user's models in full: file, state, its manifest in short, `backtest_count`
-    and their best Sharpe ratio. Its backtests: list_backtests with `model` set to its name.
+    """One of the user's models in full: file, state, its manifest in short, how many backtests
+    used it (`backtest_count`) and their best Sharpe ratio. The backtests: list_backtests with
+    `model` set to the model's name.
 
     After set_manifest, the trial run: ended when `checked_at` is set, passed when `state` is
     `verified`, else `check_failed` and `check_error` say why (the model stays `ready`)."""
