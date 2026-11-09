@@ -4969,7 +4969,7 @@ export interface components {
         ThresholdRule: {
             /**
              * Limit
-             * @description Long at a prediction of `limit` or more, short at `-limit` or less
+             * @description Long at a prediction above 0 and at least `limit`, short at one below 0 and at most `-limit`; a prediction of exactly 0 stays flat, even with `limit` 0
              */
             limit: number;
             /**

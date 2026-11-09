@@ -50,6 +50,7 @@ from candlestack.accounts import Scope as KeyScope
 from candlestack.core import ProblemError, Settings, bearer_token
 from candlestack.mcp.convention import CALLER_STATE, problem_result
 from candlestack.mcp.docs import MCP_DOCS
+from candlestack.mcp.library import docs_client
 from candlestack.mcp.server import TITLE, build_server
 
 MCP_PATH = "/mcp"
@@ -272,8 +273,8 @@ def mount_mcp(app: FastAPI) -> None:
 
 @asynccontextmanager
 async def serving_mcp(app: FastAPI) -> AsyncIterator[None]:
-    """Runs the SDK's session manager while the app runs; on shutdown the calls in progress
-    are cancelled."""
+    """Runs the SDK's session manager and opens get_docs' client while the app runs; on
+    shutdown the calls in progress are cancelled."""
     server = app.state.mcp_server
     # A new session manager for each run of the app (the SDK runs one only once). The Host
     # check of the SDK is off: the edge sets the host, and _sign_in checks the origin.
@@ -284,5 +285,6 @@ async def serving_mcp(app: FastAPI) -> AsyncIterator[None]:
     )
     sessions = server.session_manager
     app.state.mcp_sessions = sessions
-    async with sessions.run():
+    async with docs_client() as docs_http, sessions.run():
+        app.state.docs_http = docs_http
         yield

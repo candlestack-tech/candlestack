@@ -1,7 +1,12 @@
 """What the server tells an agent about CandleStack: its instructions, sent when a client
-connects, and the ``docs`` resource with the links to the public docs."""
+connects, the ``docs`` resource with the links to the public docs, and where the get_docs tool
+reads the docs (``library``)."""
 
-DOCS = "https://candlestack.tech/docs"
+WEBSITE = "https://candlestack.tech"
+DOCS = f"{WEBSITE}/docs"
+# The website's index of every docs page for agents (llmstxt.org); each page is also Markdown
+# at /docs/<page>.md. Both are built with the site, so they match the published pages.
+DOCS_INDEX = f"{WEBSITE}/llms.txt"
 AGENTS_DOCS = f"{DOCS}/agents/"
 MCP_DOCS = f"{DOCS}/mcp/"
 TOOLS_DOCS = f"{MCP_DOCS}tools/"
@@ -36,11 +41,17 @@ sweep of 2 to 4 backtests (a ranked sweep: its best 4) carry `url`, the app's Co
 them side by side. Give the user these links whenever you show results, so they can see the \
 charts and the details themselves.
 
-Docs for agents: {AGENTS_DOCS} and for this server: {MCP_DOCS}. The resource {DOCS_URI} lists \
-every docs page and reference."""
+Read the docs with get_docs (without a page it lists them) before you explain how the engine, \
+a manifest, a metric or an error works, and answer from them: never invent a formula or a \
+behaviour, and say so when CandleStack does not do something. Show metrics in a table. The \
+server's prompts walk through common tasks. On the web: {AGENTS_DOCS} and {MCP_DOCS}; the \
+resource {DOCS_URI} links them."""
 
 DOCS_TEXT = f"""\
 # CandleStack docs for agents
+
+The tool get_docs lists the docs pages of candlestack.tech and answers each one as Markdown, with
+the JSON Schemas below and the problem types (page api/errors).
 
 - Agents: {AGENTS_DOCS} (what the MCP server and the API can do, which to pick)
 - MCP server: {MCP_DOCS} (address, sign-in, scopes, what is web only and why)

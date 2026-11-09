@@ -338,7 +338,8 @@ async def validate_manifest(
     `valid` says whether every check passed. Else each of `problems` (at most 10;
     `more_problems` counts the rest) names its `field` (a path such as input.features[2].id),
     says what is wrong in `detail` and, when the check knows them, lists the values that fit
-    there in `allowed`: fix those fields and check again, then call set_manifest."""
+    there in `allowed`: fix those fields and check again, then call set_manifest. The format,
+    every field and check: get_docs page manifest."""
     call = tool_call(ctx)
     async with call.db() as db:
         try:

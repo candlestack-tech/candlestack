@@ -75,8 +75,11 @@ claude mcp add --transport http candlestack https://app.candlestack.tech/mcp \
     --header "Authorization: Bearer $CANDLESTACK_API_KEY"
 ```
 
-Its tool `get_me` answers who the key signs in as and its scopes. The other clients and every
-tool are on https://candlestack.tech/docs/mcp/.
+Its tool `get_me` answers who the key signs in as and its scopes, and `get_docs` reads these
+docs pages to the agent, so it answers from them. Its prompts (`first_backtest`,
+`analyze_backtest`, `compare_my_backtests`, `find_best_model`, `explain_poor_backtest`,
+`set_up_sweep`) walk the agent through the common tasks. The other clients and every tool are on
+https://candlestack.tech/docs/mcp/.
 
 claude.ai and ChatGPT need no key: add `https://app.candlestack.tech/mcp` as a custom connector,
 and the app sends you through the CandleStack sign-in (OAuth 2.1) to a page where you choose

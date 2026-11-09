@@ -1,4 +1,93 @@
 {
+  "prompts": [
+    {
+      "arguments": [
+        {
+          "description": "The model's name or ID, if it has one",
+          "name": "model",
+          "required": false
+        },
+        {
+          "description": "What to test it on, such as BTC or Apple",
+          "name": "instrument",
+          "required": false
+        }
+      ],
+      "description": "Run a first backtest from scratch: upload a model if needed, give it a manifest, pick an\ninstrument and a period, run it and read the results.",
+      "name": "first_backtest",
+      "title": "Run a first backtest"
+    },
+    {
+      "arguments": [
+        {
+          "description": "The backtest's ID (bt_...), name or number",
+          "name": "backtest",
+          "required": true
+        }
+      ],
+      "description": "Analyze one backtest: its results, its trades and what they say.",
+      "name": "analyze_backtest",
+      "title": "Analyze a backtest"
+    },
+    {
+      "arguments": [
+        {
+          "description": "The backtests' IDs or names, comma separated",
+          "name": "backtests",
+          "required": false
+        }
+      ],
+      "description": "Compare backtests side by side and say which is best and why.",
+      "name": "compare_my_backtests",
+      "title": "Compare my backtests"
+    },
+    {
+      "arguments": [
+        {
+          "description": "Leave it out to choose with the user",
+          "name": "instrument",
+          "required": false
+        },
+        {
+          "description": "What best means, such as Sharpe ratio or drawdown",
+          "name": "metric",
+          "required": false
+        }
+      ],
+      "description": "Find the user's best model, by their backtests or by new ones on the same data.",
+      "name": "find_best_model",
+      "title": "Find my best model"
+    },
+    {
+      "arguments": [
+        {
+          "description": "The backtest's ID (bt_...), name or number",
+          "name": "backtest",
+          "required": true
+        }
+      ],
+      "description": "Explain why a backtest did poorly or failed, from its results and the docs.",
+      "name": "explain_poor_backtest",
+      "title": "Why a backtest did poorly"
+    },
+    {
+      "arguments": [
+        {
+          "description": "Leave it out to choose with the user",
+          "name": "model",
+          "required": false
+        },
+        {
+          "description": "Leave it out to choose with the user",
+          "name": "instrument",
+          "required": false
+        }
+      ],
+      "description": "Set up a sweep: one setup run over several models, instruments, periods or rules.",
+      "name": "set_up_sweep",
+      "title": "Set up a sweep"
+    }
+  ],
   "resources": [
     {
       "_meta": {
@@ -23,7 +112,7 @@
     }
   ],
   "server": {
-    "instructions": "CandleStack is a lab for experiments on financial time series: a user uploads a trading model (Keras or ONNX), describes its input in a manifest and backtests it on market data, crypto from Binance and US stocks from Alpaca, then compares the results and publishes the good ones.\n\nYou act as the user who signed you in, with an API key or by allowing you on CandleStack (OAuth). The scopes of that sign-in decide which tools work: read (everything that only reads), backtests, models and publish. Call get_me first to see who you act for and what you may do. A tool that changes data says so in its annotations.\n\nA tool answers JSON; its text leaves out the fields that are null. A failed tool call answers a problem as JSON: its type (https://candlestack.tech/problems/<slug>) names what went wrong and its detail says what to do; rate-limited also gives retry_after_s, the seconds to wait.\n\nAnswers about a backtest or a model carry its `url`, its page in the app; a comparison and a sweep of 2 to 4 backtests (a ranked sweep: its best 4) carry `url`, the app's Compare page with them side by side. Give the user these links whenever you show results, so they can see the charts and the details themselves.\n\nDocs for agents: https://candlestack.tech/docs/agents/ and for this server: https://candlestack.tech/docs/mcp/. The resource candlestack://docs lists every docs page and reference.",
+    "instructions": "CandleStack is a lab for experiments on financial time series: a user uploads a trading model (Keras or ONNX), describes its input in a manifest and backtests it on market data, crypto from Binance and US stocks from Alpaca, then compares the results and publishes the good ones.\n\nYou act as the user who signed you in, with an API key or by allowing you on CandleStack (OAuth). The scopes of that sign-in decide which tools work: read (everything that only reads), backtests, models and publish. Call get_me first to see who you act for and what you may do. A tool that changes data says so in its annotations.\n\nA tool answers JSON; its text leaves out the fields that are null. A failed tool call answers a problem as JSON: its type (https://candlestack.tech/problems/<slug>) names what went wrong and its detail says what to do; rate-limited also gives retry_after_s, the seconds to wait.\n\nAnswers about a backtest or a model carry its `url`, its page in the app; a comparison and a sweep of 2 to 4 backtests (a ranked sweep: its best 4) carry `url`, the app's Compare page with them side by side. Give the user these links whenever you show results, so they can see the charts and the details themselves.\n\nRead the docs with get_docs (without a page it lists them) before you explain how the engine, a manifest, a metric or an error works, and answer from them: never invent a formula or a behaviour, and say so when CandleStack does not do something. Show metrics in a table. The server's prompts walk through common tasks. On the web: https://candlestack.tech/docs/agents/ and https://candlestack.tech/docs/mcp/; the resource candlestack://docs links them.",
     "name": "candlestack",
     "title": "CandleStack"
   },
@@ -119,6 +208,284 @@
         "read"
       ],
       "title": "Who am I"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "CandleStack's official docs, as published on candlestack.tech/docs: how the backtest engine, the manifest, the metrics, the result document, the problems, the MCP server and the API work. Read the page before you explain any of these, and answer from it instead of from memory.\n\nWithout `page`: the list of pages (page, title, summary) and the references (the JSON Schemas of the manifest and the result document, and the page of every problem type). With `page`: its text as Markdown and its `sections`. A long page comes in `parts`: ask for the next with `part`, or for one section with `section`.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_docs",
+      "endpoints": [],
+      "example": {
+        "arguments": {
+          "page": "manifest"
+        },
+        "result": {
+          "content": "# The model manifest\n\nThe manifest.json you upload with a model says which candles it takes, which columns in which order and how many rows make one sample.\n\n## What a manifest is\n\n...",
+          "page": "manifest",
+          "pages": null,
+          "part": 1,
+          "parts": 1,
+          "references": null,
+          "section": null,
+          "sections": [
+            "What a manifest is",
+            "How you add it",
+            "Fields",
+            "Blocks",
+            "Checks"
+          ],
+          "title": "The model manifest",
+          "url": "https://candlestack.tech/docs/manifest/"
+        }
+      },
+      "inputSchema": {
+        "properties": {
+          "page": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A page from the list, such as manifest; leave it out for the list",
+            "examples": [
+              "manifest"
+            ],
+            "title": "Page"
+          },
+          "part": {
+            "default": 1,
+            "description": "The part to read, from 1, of a long page",
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Part",
+            "type": "integer"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "One section of the page, by its heading from `sections` (such as Metrics, or a tool's name on mcp/tools), its subsections included",
+            "title": "Section"
+          }
+        },
+        "title": "get_docsArguments",
+        "type": "object"
+      },
+      "name": "get_docs",
+      "outputSchema": {
+        "$defs": {
+          "DocsPage": {
+            "description": "A docs page get_docs can read.",
+            "properties": {
+              "page": {
+                "description": "What to pass as `page` to read it",
+                "title": "Page",
+                "type": "string"
+              },
+              "section": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The part of the docs it belongs to",
+                "title": "Section"
+              },
+              "summary": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "What the page is about",
+                "title": "Summary"
+              },
+              "title": {
+                "title": "Title",
+                "type": "string"
+              }
+            },
+            "required": [
+              "page",
+              "title"
+            ],
+            "title": "DocsPage",
+            "type": "object"
+          }
+        },
+        "description": "Without a page, the list of pages; with one, its text or a part of it.",
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The text: Markdown, or JSON",
+            "title": "Content"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The page answered",
+            "title": "Page"
+          },
+          "pages": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/DocsPage"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Every page of the docs, in the website's order",
+            "title": "Pages"
+          },
+          "part": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The part answered, from 1",
+            "title": "Part"
+          },
+          "parts": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How many parts the page (or section) has; ask for each",
+            "title": "Parts"
+          },
+          "references": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/DocsPage"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The JSON Schemas of the manifest and the result document, and the page of every problem type",
+            "title": "References"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The section answered",
+            "title": "Section"
+          },
+          "sections": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The headings of the page's sections and subsections, each a `section` you can ask for",
+            "title": "Sections"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Title"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The page on the web, for the user",
+            "title": "Url"
+          }
+        },
+        "title": "DocsResult",
+        "type": "object"
+      },
+      "scopes": [
+        "read"
+      ],
+      "title": "Read the docs"
     },
     {
       "annotations": {
@@ -1699,7 +2066,7 @@
             "additionalProperties": false,
             "properties": {
               "limit": {
-                "description": "Long at a prediction of `limit` or more, short at `-limit` or less",
+                "description": "Long at a prediction above 0 and at least `limit`, short at one below 0 and at most `-limit`; a prediction of exactly 0 stays flat, even with `limit` 0",
                 "minimum": 0,
                 "title": "Limit",
                 "type": "number"
@@ -3343,7 +3710,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Checks a manifest for one of the user's models without keeping it: a dry run of set_manifest, which changes nothing. It runs every check set_manifest runs: the form, the catalog (every block exists and sits in its step), the blocks' parameters, the names of the columns, the signature against the window and the columns, the shapes of the example, and the signature against the input and output read from the model file.\n\n`valid` says whether every check passed. Else each of `problems` (at most 10; `more_problems` counts the rest) names its `field` (a path such as input.features[2].id), says what is wrong in `detail` and, when the check knows them, lists the values that fit there in `allowed`: fix those fields and check again, then call set_manifest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#validate_manifest",
+      "description": "Checks a manifest for one of the user's models without keeping it: a dry run of set_manifest, which changes nothing. It runs every check set_manifest runs: the form, the catalog (every block exists and sits in its step), the blocks' parameters, the names of the columns, the signature against the window and the columns, the shapes of the example, and the signature against the input and output read from the model file.\n\n`valid` says whether every check passed. Else each of `problems` (at most 10; `more_problems` counts the rest) names its `field` (a path such as input.features[2].id), says what is wrong in `detail` and, when the check knows them, lists the values that fit there in `allowed`: fix those fields and check again, then call set_manifest. The format, every field and check: get_docs page manifest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#validate_manifest",
       "endpoints": [
         "POST /api/v1/models/{model_id}/manifest/check"
       ],
@@ -4797,7 +5164,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Checks a backtest setup without starting anything: the same checks as start_backtest (the model is the user's and has a manifest, the instrument fits the model, the period with the candles the model needs before it fits the market data, the queue has room). Call it before start_backtest when you built the setup yourself.\n\nAnswers what would run (the model, the instrument, the model's timeframe and session, the warm-up) and whether it would wait in the user's queue; a setup that fails a check answers the problem start_backtest would, with what to change in its detail. The arguments are those of start_backtest.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#validate_backtest",
+      "description": "Checks a backtest setup without starting anything: the same checks as start_backtest (the model is the user's and has a manifest, the instrument fits the model, the period with the candles the model needs before it fits the market data, the queue has room). Call it before start_backtest when you built the setup yourself.\n\nAnswers what would run (the model, the instrument, the model's timeframe and session, the warm-up) and whether it would wait in the user's queue; a setup that fails a check answers the problem start_backtest would, with what to change in its detail. The arguments are those of start_backtest.\n\nWhat each setting does to the trades: get_docs page engine (sections Decision steps and Execution settings).\n\nDocs: https://candlestack.tech/docs/mcp/tools/#validate_backtest",
       "endpoints": [
         "POST /api/v1/backtests/check"
       ],
@@ -5268,7 +5635,7 @@
             "additionalProperties": false,
             "properties": {
               "limit": {
-                "description": "Long at a prediction of `limit` or more, short at `-limit` or less",
+                "description": "Long at a prediction above 0 and at least `limit`, short at one below 0 and at most `-limit`; a prediction of exactly 0 stays flat, even with `limit` 0",
                 "minimum": 0,
                 "title": "Limit",
                 "type": "number"
@@ -5620,7 +5987,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Starts a backtest of one of the user's models on one instrument and period. One backtest of a user runs at a time and up to 20 more wait in the queue, and a few run at once over all users, taking turns; so it starts running at once or waits (queued, with its place and `eta_s`).\n\nThe arguments are the body of POST /api/v1/backtests: model.id (one of the user's models with a manifest), data.instrument.id (<market>:<symbol>: a stock for a model of US trading hours, a crypto pair for one of 24/7) and data.period ([start, end) in UTC epoch seconds), and optionally decision (how the predictions become a signal: threshold 0 by default), execution (fills, stop loss, position size, fees and slippage) and benchmarks (buy and hold of the instrument, or of SPY, QQQ or DIA for a stock). The `setup` get_backtest answers has this shape, so a backtest can be run again with changes.\n\nUnits: execution.stop_loss and position_size are fractions (0.07 is 7 %), fee_bps and slippage_bps basis points (10 is 0.1 %), not the percent of the app's Settings. get_backtest_defaults answers the user's defaults in these units too (`period`, `decision`, `execution`, `benchmark_instrument`): pass them through for every setting the user does not name.\n\nPass an `idempotency_key` (a UUID you make) to call it again safely after a timeout: the same call with the same key within 24 hours answers the first backtest instead of starting another.\n\nAnswers its ID and status at once; the run takes from seconds to minutes. Then call wait_for_backtest with the ID until it has ended, and get_backtest for the results.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#start_backtest",
+      "description": "Starts a backtest of one of the user's models on one instrument and period. One backtest of a user runs at a time and up to 20 more wait in the queue, and a few run at once over all users, taking turns; so it starts running at once or waits (queued, with its place and `eta_s`).\n\nThe arguments are the body of POST /api/v1/backtests: model.id (one of the user's models with a manifest), data.instrument.id (<market>:<symbol>: a stock for a model of US trading hours, a crypto pair for one of 24/7) and data.period ([start, end) in UTC epoch seconds), and optionally decision (how the predictions become a signal: threshold 0 by default), execution (fills, stop loss, position size, fees and slippage) and benchmarks (buy and hold of the instrument, or of SPY, QQQ or DIA for a stock). The `setup` get_backtest answers has this shape, so a backtest can be run again with changes.\n\nUnits: execution.stop_loss and position_size are fractions (0.07 is 7 %), fee_bps and slippage_bps basis points (10 is 0.1 %), not the percent of the app's Settings. get_backtest_defaults answers the user's defaults in these units too (`period`, `decision`, `execution`, `benchmark_instrument`): pass them through for every setting the user does not name.\n\nPass an `idempotency_key` (a UUID you make) to call it again safely after a timeout: the same call with the same key within 24 hours answers the first backtest instead of starting another.\n\nAnswers its ID and status at once; the run takes from seconds to minutes. Then call wait_for_backtest with the ID until it has ended, and get_backtest for the results.\n\nHow the settings become trades: get_docs page engine; how the results are computed: get_docs page metrics. Read them before you explain a setting or a result.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#start_backtest",
       "endpoints": [
         "POST /api/v1/backtests"
       ],
@@ -6103,7 +6470,7 @@
             "additionalProperties": false,
             "properties": {
               "limit": {
-                "description": "Long at a prediction of `limit` or more, short at `-limit` or less",
+                "description": "Long at a prediction above 0 and at least `limit`, short at one below 0 and at most `-limit`; a prediction of exactly 0 stays flat, even with `limit` 0",
                 "minimum": 0,
                 "title": "Limit",
                 "type": "number"
@@ -7266,7 +7633,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Reads a backtest, the user's own or one another account published: its status, its setup (which can be sent to start_backtest again, changed or not) and, once it finished, the 12 statistics and the benchmarks' returns, with a link to its page in the app.\n\nThat light answer is the default. For its trades (oldest first) pass `trades_per_page` (e.g. 50) and `trades_page`; a page past the last one is empty. For the equity curve pass `equity_points` (up to 200). Call it after wait_for_backtest answered finished, or for a backtest the user names; it reads what the run stored, so it is quick.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_backtest",
+      "description": "Reads a backtest, the user's own or one another account published: its status, its setup (which can be sent to start_backtest again, changed or not) and, once it finished, the 12 statistics and the benchmarks' returns, with a link to its page in the app.\n\nThat light answer is the default. For its trades (oldest first) pass `trades_per_page` (e.g. 50) and `trades_page`; a page past the last one is empty. For the equity curve pass `equity_points` (up to 200). Call it after wait_for_backtest answered finished, or for a backtest the user names; it reads what the run stored, so it is quick.\n\nWhat each statistic means and how it is computed: get_docs page metrics; the problem of a failed backtest: get_docs page api/errors.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#get_backtest",
       "endpoints": [
         "GET /api/v1/backtests/{backtest_id}"
       ],
@@ -8268,7 +8635,7 @@
             "additionalProperties": false,
             "properties": {
               "limit": {
-                "description": "Long at a prediction of `limit` or more, short at `-limit` or less",
+                "description": "Long at a prediction above 0 and at least `limit`, short at one below 0 and at most `-limit`; a prediction of exactly 0 stays flat, even with `limit` 0",
                 "minimum": 0,
                 "title": "Limit",
                 "type": "number"
@@ -8509,7 +8876,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Compares backtests side by side, as the app's Compare page does: each of the 12 statistics of each with the best and the worst marked (values that read the same count as equal), their setups and which setup fields differ. Use it to pick the best of several runs; it reads only what each stored, so it is quick. A running or failed backtest is listed with its status and no values. Each backtest has its `url`, the page to show the user, and `url` is the app's Compare page with 2 to 4 of them: give it to the user to see the curves and the table.\n\nFor the equity, drawdown and buy and hold of each on one time axis pass `curve_points` (up to 200); without it the curves are null and `times` empty. With many similar backtests pass `setup_mode=\"diff\"` to read the shared setup once.\n\nmax_drawdown is 0 or below and a smaller fall is better: -0.05 is better than -0.20, so its best value is the highest one; its `better` says `lower` as in a lower fall, by its size. The marks already account for it.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#compare_backtests",
+      "description": "Compares backtests side by side, as the app's Compare page does: each of the 12 statistics of each with the best and the worst marked (values that read the same count as equal), their setups and which setup fields differ. Use it to pick the best of several runs; it reads only what each stored, so it is quick. A running or failed backtest is listed with its status and no values. Each backtest has its `url`, the page to show the user, and `url` is the app's Compare page with 2 to 4 of them: give it to the user to see the curves and the table.\n\nFor the equity, drawdown and buy and hold of each on one time axis pass `curve_points` (up to 200); without it the curves are null and `times` empty. With many similar backtests pass `setup_mode=\"diff\"` to read the shared setup once.\n\nmax_drawdown is 0 or below and a smaller fall is better: -0.05 is better than -0.20, so its best value is the highest one; its `better` says `lower` as in a lower fall, by its size. The marks already account for it.\n\nWhat each statistic means and how it is computed: get_docs page metrics; how sweeps and comparisons rank: get_docs page sweeps.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#compare_backtests",
       "endpoints": [
         "GET /api/v1/compare"
       ],
@@ -11977,7 +12344,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Checks a sweep without starting anything: every combination of `base` (the setup of one backtest: model, data, decision, execution, benchmarks) and the values in `vary` (models, instruments, periods, decision rules) passes the checks of a new backtest, and the user's queue has room for all of them. Use it before run_sweep to see how many backtests a grid makes and what each one runs.\n\nAnswers the count, the limit of 20, the queue's room and each setup in the grid's order. A setup that fails a check is the problem of that check with `setup`, its place from 1.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#validate_sweep",
+      "description": "Checks a sweep without starting anything: every combination of `base` (the setup of one backtest: model, data, decision, execution, benchmarks) and the values in `vary` (models, instruments, periods, decision rules) passes the checks of a new backtest, and the user's queue has room for all of them. Use it before run_sweep to see how many backtests a grid makes and what each one runs.\n\nAnswers the count, the limit of 20, the queue's room and each setup in the grid's order. A setup that fails a check is the problem of that check with `setup`, its place from 1. How a sweep varies and ranks: get_docs page sweeps; the shape of `vary`, with an example: get_docs page mcp/tools (section run_sweep).\n\nDocs: https://candlestack.tech/docs/mcp/tools/#validate_sweep",
       "endpoints": [
         "POST /api/v1/sweeps"
       ],
@@ -12597,7 +12964,7 @@
             "additionalProperties": false,
             "properties": {
               "limit": {
-                "description": "Long at a prediction of `limit` or more, short at `-limit` or less",
+                "description": "Long at a prediction above 0 and at least `limit`, short at one below 0 and at most `-limit`; a prediction of exactly 0 stays flat, even with `limit` 0",
                 "minimum": 0,
                 "title": "Limit",
                 "type": "number"
@@ -12804,7 +13171,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Starts a backtest for every combination of `base` (the setup of one backtest) and the values in `vary`: models (each model's manifest sets what it reads and its timeframe, so list models to vary those), instruments, periods and decision rules, 2 to 20 backtests. All go to the end of the user's queue, which runs one at a time, or none does. `metric` is the statistic the ranking orders by. Pass an `idempotency_key` (a UUID you make) to call it again safely after a timeout: the same call with the same key within 24 hours answers the first sweep instead of starting another.\n\nAnswers the sweep: its ID, each backtest's ID, status and setup, the progress, `eta_s` and, for 4 backtests at most, `url`, the app's Compare page of them to show the user. Follow it with wait_for_sweep until `done`. The backtests are ordinary ones, with the sweep's ID.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#run_sweep",
+      "description": "Starts a backtest for every combination of `base` (the setup of one backtest) and the values in `vary`: models (each model's manifest sets what it reads and its timeframe, so list models to vary those), instruments, periods and decision rules, 2 to 20 backtests. All go to the end of the user's queue, which runs one at a time, or none does. `metric` is the statistic the ranking orders by. Pass an `idempotency_key` (a UUID you make) to call it again safely after a timeout: the same call with the same key within 24 hours answers the first sweep instead of starting another.\n\nHow a sweep varies, ranks and compares: get_docs page sweeps; the shape of `vary`: get_docs page mcp/tools (section run_sweep).\n\nAnswers the sweep: its ID, each backtest's ID, status and setup, the progress, `eta_s` and, for 4 backtests at most, `url`, the app's Compare page of them to show the user. Follow it with wait_for_sweep until `done`. The backtests are ordinary ones, with the sweep's ID.\n\nDocs: https://candlestack.tech/docs/mcp/tools/#run_sweep",
       "endpoints": [
         "POST /api/v1/sweeps"
       ],
@@ -13468,7 +13835,7 @@
             "additionalProperties": false,
             "properties": {
               "limit": {
-                "description": "Long at a prediction of `limit` or more, short at `-limit` or less",
+                "description": "Long at a prediction above 0 and at least `limit`, short at one below 0 and at most `-limit`; a prediction of exactly 0 stays flat, even with `limit` 0",
                 "minimum": 0,
                 "title": "Limit",
                 "type": "number"
