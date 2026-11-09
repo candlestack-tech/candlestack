@@ -95,6 +95,18 @@ describe("a finished backtest's chart", () => {
     expect(card.getByRole('button', { name: '1M' }).getAttribute('aria-pressed')).toBe('true');
   });
 
+  // #465: the candles' own red reads 3.7:1 on the light page; the legend's numbers are text.
+  it("writes the candle's numbers in the text colours, and keeps the legend's room over the price", async () => {
+    await openChart();
+    const card = box('Price and trades');
+    for (const label of ['O', 'H', 'L', 'C', 'Vol']) {
+      const value = card.getByText(label, { selector: 'span' }).nextElementSibling;
+      expect(value?.className).toBe('text-up');
+    }
+    // jsdom lays nothing out: the legend takes no height, the price keeps its usual 24 %.
+    expect(charts.scales.right).toEqual({ scaleMargins: { top: 0.24, bottom: 0.2 } });
+  });
+
   it('names the line of an ETF benchmark by its symbol', async () => {
     await openChart(spyDocument());
     const [benchmark] = charts.of('Line').filter((series) => series.pane === 1);

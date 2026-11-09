@@ -19,7 +19,8 @@ type Props = {
 
 type Line = { step: number; title: string; main: ReactNode; detail?: string | undefined };
 
-// A step in a line (.b-rev): its name, what it chose over the details, and Edit.
+// A step in a line (.b-rev): its name, what it chose over the details, and Edit, a target of at
+// least 24 × 24 px (its padding takes no room from the line).
 function SummaryLine({ line, onEdit }: { line: Line; onEdit: (step: number) => void }) {
   return (
     <div className="grid grid-cols-[110px_minmax(0,1fr)_auto] items-baseline gap-3 border-t py-3 first:border-t-0 first:pt-0 max-[640px]:grid-cols-[minmax(0,1fr)_auto]">
@@ -33,7 +34,7 @@ function SummaryLine({ line, onEdit }: { line: Line; onEdit: (step: number) => v
       <button
         type="button"
         aria-label={`Edit ${line.title.toLowerCase()}`}
-        className="cursor-pointer text-[13px] text-primary outline-none hover:underline focus-visible:underline"
+        className="-m-1 cursor-pointer p-1 text-[13px] text-primary outline-none hover:underline focus-visible:underline"
         onClick={() => onEdit(line.step)}
       >
         Edit

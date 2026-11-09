@@ -109,7 +109,13 @@ minute.
   truncate (their title shows them in full); an instrument's id and name wrap, and error messages
   break their long paths (`break-words`). Below `sm` the instrument page shows the symbol fact only to
   screen readers (it ends the id above the name) and narrows the gaps of the facts and the
-  timeframe switch, so each fits one line.
+  timeframe switch, so each fits one line. A table that scrolls in its own box (`overflow-x-auto`)
+  makes the box `relative`: the words only screen readers hear (`sr-only`, absolutely placed) stay
+  inside it instead of widening the page (#465). A name without spaces, such as a model's
+  `BLESK_ATR06_R8_..._M25x23.keras`, breaks anywhere (`[overflow-wrap:anywhere]`). What a finger
+  taps is at least 24 × 24 px (WCAG 2.5.8): a small control takes the rest around it with a
+  padding its negative margin gives back, or with an `after:` area (the switches, the sliders'
+  thumbs), so nothing moves.
 - **Chart height.** The layout is at least as tall as the visible screen (`100dvh`, `100vh`
   without dvh) and the page is a flex column (`Layout.tsx`; in the app the instrument route's
   `staticData: { fill: true }` keeps the workspace's wrappers growing flex columns too,
@@ -202,7 +208,7 @@ dashboard, no nav, New backtest, the theme toggle, the avatar), a 200 px sidebar
 Backtests with the backtest count, Experiments with the count of published backtests
 (`dashboard.experiments.total`), Models with the model count, Instruments, Settings, then the storage the models take, under "Model
 storage" on one line ("4.7 MB of 100 MB"), and the note that market data is delayed 15 min; up to 980 px above the page as a row that scrolls sideways
-without a scrollbar, the foot left out) and the footer.
+without a scrollbar, the foot left out, the open section scrolled into its middle) and the footer.
 The avatar is the user's initials (`initials.ts`), never a provider picture; its menu
 (`src/features/account/AccountMenu.tsx`) is a shadcn/ui DropdownMenu with Settings, Home page,
 API docs and, in red, Sign out. New backtest is a link to the builder ([Backtest builder](#backtest-builder)).
@@ -300,16 +306,18 @@ The two sections with the account's preferences load them in the route's loader
   ask first. The Docs row links the API docs of the same host until the website's API guide is
   live (website#75).
 - The MCP server card (`McpCard.tsx`, #409): the server address of the same host
-  (`window.location.origin` + `/mcp`, so stage shows stage's) with Copy; one line per client
+  (`window.location.origin` + `/mcp`, so stage shows stage's), whole (on two lines where needed),
+  with Copy; one line per client
   (Claude, ChatGPT, Codex, Claude Code, Cursor, VS Code, other clients) with its real mark
   (`src/components/clientLogos.tsx`, the official files the website's docs use; Codex has the
   OpenAI Blossom), how it connects and Guide to `https://candlestack.tech/docs/mcp/install/`
   (Codex's to its section, `#codex`); then Connected apps:
   `GET /api/v1/me/connected-apps` under `['account', 'connected-apps']` (`src/api/oauth.ts`,
-  asked again on coming back to the tab), each app with its tile, name, the host it returns to,
-  its scopes, last use and when it connected, and Disconnect, which asks first
+  asked again on coming back to the tab), each app with its tile, name, the host it returns to
+  (under the name where both do not fit, as a key's prefix under its name), its scopes, last use and when it connected, and Disconnect, which asks first
   (`DELETE /api/v1/me/connected-apps/{id}`; a 404 counts as gone). Without apps a dashed box says
-  how to connect one. The app's tile (`src/components/AppTile.tsx`) draws the mark of a known app
+  how to connect one. On a phone (up to 480 px) the Server URL, Connect and the API keys card's
+  Docs row put their label above the content (`SettingsRow`'s `stack`). The app's tile (`src/components/AppTile.tsx`) draws the mark of a known app
   (claude.ai, chatgpt.com) by the host that vouches for it: for an app named by a client ID
   metadata document that document's host (`document_host`; a document elsewhere that returns to
   claude.ai gets no mark), else the host it returns to (the API answers the host the browser
@@ -417,7 +425,9 @@ delete modals):
   scaled per column; without one every cell has the same tint, as there are no values to draw.
   A column is a button (one tab stop for all, the arrows, Home and End move between them): it
   shows its catalog description, its parameters and its scaling ("as is", "BLESK scaling"). The
-  chosen column is drawn in the accent.
+  chosen column is drawn in the accent. A column is at least 12 px, on a phone 24 px for a
+  finger (the matrix then scrolls in its box). A group's name its columns have no room for (a
+  group of one column, "Bands") steps up over its line, whole, instead of ending after a letter.
 - A model deleted meanwhile (404) closes its Rename or Delete dialog, and its page says it is not
   found.
 
@@ -505,8 +515,9 @@ ahead of it" in the title (the column has no room for more). While a list or the
 a queued or running backtest, it is asked for again every 5 s, so the place and the status keep
 up (#400).
 
-The dashboard's Last backtests (fixed too; When hides in a card under 520 px), Best backtests and
-a model's backtests give their columns the same widths. Every list names its instruments with
+The dashboard's Last backtests (fixed too; When hides in a card under 520 px and the instruments
+under 440 px, a phone, so the name keeps its room; When is at least 104 px, so "28 Oct 18:05"
+stays on one line), Best backtests and a model's backtests give their columns the same widths. Every list names its instruments with
 `BacktestInstruments`: up to as many as it has room for, else one less and "+N" with all of them
 in the title, each symbol cut with an ellipsis where its column is narrower (one and "+N" on the
 Backtests page, two elsewhere).
@@ -628,8 +639,11 @@ so its back link returns there (else "← Backtests").
   why it closed); its row in the table is marked. A row clicked shows its trade on the chart
   the same way, with room around it.
 - The legend at the top left follows the crosshair (the last candle off the chart): symbol,
-  candle size and exchange, open, high, low, close and the change in the candle's colour, the
-  volume, then the key and the trades in view. The pane under it has the strategy's and buy
+  candle size and exchange, open, high, low, close and the change in the candle's colour (the
+  text green and red, `--up` and `--down`, 4.5:1 on the page, not the candles' own), the
+  volume, then the key and the trades in view. The price pane keeps the legend's height free at
+  its top (the price scale's top margin, at least 24 % and at most half the pane), measured while
+  the cursor is off the chart, so no candle or arrow lies under it when it wraps on a phone. The pane under it has the strategy's and buy
   and hold's return (each a button that hides its line) and the drawdown. The bar under the
   chart: 1W, 1M, 3M, 1Y and All on the left; the candle size, Candles or Line and the Trades
   switch, which hides the arrows and the tint, on the right. The price's line is
@@ -709,7 +723,9 @@ so its back link returns there (else "← Backtests").
 - Adding: a scale icon on every list of backtests, off with the reason in its title for a running
   or failed one or at 4, and a button on a backtest's page. The Compare panel in the bottom right
   corner of the signed-in pages lists them; Compare opens the page from 2. It can fold to a small
-  button and is not on the compare page.
+  button and is not on the compare page. Open it covers about a third of a phone's screen, so it
+  is open only on the Backtests list (unless folded there); on the other pages it starts folded
+  and opens on a click or when a backtest is added there, until the next page (#465).
 - The page reads one request, `GET /api/v1/compare` (`compareQueryOptions`, under
   `['account', 'compare', ids]`), never the backtests' documents: about 22 KB for four instead of
   5 to 6 MB. While a new choice loads, the last answer shows the backtests still chosen.
@@ -719,6 +735,8 @@ so its back link returns there (else "← Backtests").
   them, the others plain (all plain when they read the same or when no value is better: Trades,
   Time in market, Buy and hold); `rows.ts` only writes the values. The setup follows, written as
   a backtest's page writes it (`setupGroups`), with a dash where a backtest has no such row.
+  Up to 640 px the labels' column is 96 px and stays at the left while the table scrolls, and a
+  backtest's column 120 px, so two backtests fit a 360 px phone beside the labels.
 
 ## Chat widget of the MCP server
 

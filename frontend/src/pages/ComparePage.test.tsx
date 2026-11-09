@@ -213,6 +213,21 @@ describe('the compare page', () => {
     expect(row('Candles').map((cell) => cell.textContent)).toEqual(['5', '5', 'No backtest']);
   });
 
+  // #465: two backtests fit a 360 px phone beside the labels, which stay while the table scrolls.
+  it('fits two backtests beside the labels on a phone, inside the box that scrolls', async () => {
+    stubApi({ ...LISTS, ...choose(BETTER, WORSE, MIDDLE), ...MARKED });
+    await renderApp('/backtests/compare');
+    const label = await screen.findByRole('rowheader', { name: 'Total return' });
+    const table = label.closest('table') as HTMLElement;
+    // Three backtests and the column to add one: 96 px and 120 px a column up to 640 px.
+    expect(table.style.getPropertyValue('--columns')).toBe('4');
+    expect(table.className).toContain('max-sm:min-w-[calc(96px+var(--columns)*120px)]');
+    expect(table.parentElement?.className.split(' ')).toEqual(expect.arrayContaining(['relative', 'overflow-x-auto']));
+    expect(label.className.split(' ')).toEqual(
+      expect.arrayContaining(['max-sm:sticky', 'max-sm:left-0', 'max-sm:bg-background']),
+    );
+  });
+
   it('shows no panel on its own page', async () => {
     stubApi({ ...LISTS, ...choose(BETTER, WORSE) });
     await renderApp('/backtests/compare');

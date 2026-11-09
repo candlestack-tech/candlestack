@@ -8,6 +8,7 @@ import {
   backtest,
   backtestDocument,
   backtestsAnswer,
+  dashboardAnswer,
   failedBacktest,
   problem,
   sessionWithPreferences,
@@ -173,6 +174,38 @@ describe('choosing backtests to compare', () => {
     expect(comparedFromOf('/backtests/bt_12', 'Bright Vega')).toBe('Bright Vega');
     expect(comparedFromOf('/backtests/bt_12')).toBe('Backtest');
     expect(comparedFromOf('/backtests/new', 'Bright Vega')).toBe('Back');
+  });
+});
+
+// #465: open, the panel covers about a third of a phone's screen.
+describe('the panel beside the other pages', () => {
+  it('starts folded outside the Backtests list, opens on a click, and folds again on another page', async () => {
+    claimCompare(ADA.id);
+    addToCompare({ id: 'bt_12', number: 12, name: 'Bright Vega', description: LINE, symbol: 'AAPL' });
+    stubApi({
+      ...sessionWithPreferences(ADA),
+      ...dashboardAnswer(),
+      ...backtestsAnswer(PAGE),
+      ...experimentsAnswer(),
+    });
+    await renderApp('/dashboard');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /^Compare 1 of 4$/ }));
+    expect(within(panel()).getByRole('link', { name: 'Bright Vega' })).toBeDefined();
+    const nav = within(screen.getByRole('navigation', { name: 'Workspace' }));
+    await user.click(nav.getByRole('link', { name: /^Backtests/ }));
+    await screen.findByRole('link', { name: 'Silent Orion' });
+    expect(panel()).toBeDefined();
+    await user.click(nav.getByRole('link', { name: /^Experiments/ }));
+    expect(await screen.findByRole('button', { name: /^Compare 1 of 4$/ })).toBeDefined();
+    expect(screen.queryByRole('complementary', { name: 'Compare' })).toBeNull();
+  });
+
+  it('opens on the Backtests list as it was left', async () => {
+    claimCompare(ADA.id);
+    addToCompare({ id: 'bt_12', number: 12, name: 'Bright Vega', description: LINE, symbol: 'AAPL' });
+    await openList();
+    expect(within(panel()).getByText('1 of 4')).toBeDefined();
   });
 });
 

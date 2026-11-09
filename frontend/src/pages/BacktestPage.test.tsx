@@ -102,6 +102,16 @@ describe("a finished backtest's page", () => {
     expect(within(setup).getByText('Model').parentElement!.querySelector('[title="Keras"]')).not.toBeNull();
   });
 
+  // #465: a model's name without spaces ran 383 px wide on a 345 px phone.
+  it('breaks a long model name anywhere in the header, as the Setup does', async () => {
+    const doc = backtestDocument();
+    const name = 'BLESK_ATR06_R8_TH05_SL7_FEE10_SLIP2_WIN25_M25x23.keras';
+    await openPage({ status: 200, body: { ...doc, model: { ...doc.model, name } } });
+    const model = (await screen.findByRole('link', { name })).parentElement!;
+    expect(model.className.split(' ')).toEqual(expect.arrayContaining(['min-w-0', '[overflow-wrap:anywhere]']));
+    expect(model.parentElement!.className.split(' ')).toContain('min-w-0');
+  });
+
   it('saves the whole document under its own name and links its format', async () => {
     const createObjectURL = vi.fn(() => 'blob:document');
     vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }));
