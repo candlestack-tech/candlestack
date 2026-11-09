@@ -160,6 +160,40 @@ def test_an_agent_checks_starts_waits_for_and_reads_a_backtest(ada, mcp, sql) ->
     assert total["values"][0] == total["values"][1] == results["stats"]["total_return"]
 
 
+@pytest.mark.usefixtures("worker")
+def test_a_wait_reports_the_run_s_progress(ada, app, client) -> None:
+    model_id = ada.runnable_model()
+    secret = key(ada, "read", "backtests")
+    reported: list[tuple[float, float | None, str | None]] = []
+
+    async def start_and_wait(session: Client) -> Any:
+        async def report(progress: float, total: float | None, message: str | None) -> None:
+            reported.append((progress, total, message))
+
+        started = await session.call_tool("start_backtest", setup(model_id))
+        arguments = {"backtest_id": started.structured_content["id"]}
+        return await session.call_tool("wait_for_backtest", arguments, progress_callback=report)
+
+    async def send() -> Any:
+        headers = {"Authorization": f"Bearer {secret}"}
+        async with (
+            httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), headers=headers) as http,
+            Client(streamable_http_client("http://testserver/mcp", http_client=http)) as session,
+        ):
+            return await start_and_wait(session)
+
+    assert client.portal is not None
+    waited = answer(client.portal.call(send))
+
+    assert waited["status"] == "finished"
+    # From where the run stood when the wait began, each notification higher, to its end.
+    values = [value for value, _, _ in reported]
+    assert values == sorted(set(values))
+    assert values[0] < 100
+    name = f"{waited['name']} (#{waited['number']})"
+    assert reported[-1] == (100.0, 100.0, f"{name}: finished")
+
+
 @pytest.mark.usefixtures("real_worker")
 def test_a_run_through_the_real_worker(ada, mcp) -> None:
     model_id = ada.runnable_model(file=KERAS / "raw_candles.keras")

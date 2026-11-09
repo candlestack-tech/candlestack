@@ -19,6 +19,7 @@ from candlestack.experiments import (
     PAGE_SIZE,
     PER_PAGE_MAX,
     BacktestIn,
+    BacktestStep,
     Committed,
     SweepIn,
     SweepMetric,
@@ -40,11 +41,14 @@ from candlestack.mcp.convention import (
     WAIT_MAX_S,
     Example,
     IdempotencyKey,
+    Progress,
+    Step,
     ToolCall,
     ToolSpec,
     changes,
     compare_url,
     reads,
+    run_progress,
     runner_of,
     tool_call,
 )
@@ -266,15 +270,18 @@ async def wait_for_sweep(
     """Waits until every backtest of a sweep of the user has ended or `timeout_s` seconds
     passed, then answers how many are queued, running, finished and failed, `eta_s`, and once
     `done` the ranking get_sweep gives with `url`, the app's Compare page of the best 4 to show
-    the user. When `done` is false, call it again: a sweep's backtests run one after another."""
+    the user. When `done` is false, call it again: a sweep's backtests run one after another. A
+    client that asks for progress gets how many ended while it waits."""
     call = tool_call(ctx)
     deadline = anyio.current_time() + timeout_s
-    ids, _ = await _progress(call, sweep_id)
+    ids, _, _ = await _progress(call, sweep_id)
+    reported = Progress(ctx)
     with runner_of(call).watch(ids) as changed:
         while True:
             changed.clear()
-            ids, progress = await _progress(call, sweep_id)
+            ids, progress, running = await _progress(call, sweep_id)
             done = not progress.queued and not progress.running
+            await reported.report(*sweep_progress(progress, running))
             left = deadline - anyio.current_time()
             if done or left <= 0:
                 break
@@ -299,7 +306,23 @@ async def wait_for_sweep(
     )
 
 
-async def _progress(call: ToolCall, sweep_id: str) -> tuple[list[str], SweepProgress]:
+def sweep_progress(
+    progress: SweepProgress, running: Sequence[Sequence[Step]]
+) -> tuple[float, int, str]:
+    """The progress of a wait for a sweep, in backtests of all: those that ended and how far
+    each running one is by its steps (`running`); and its message."""
+    ended = progress.finished + progress.failed
+    total = ended + progress.queued + progress.running
+    message = (
+        f"{ended} of {total} ended: {progress.finished} finished, {progress.failed} failed, "
+        f"{progress.running} running, {progress.queued} queued"
+    )
+    return round(ended + sum(run_progress(steps) for steps in running), 2), total, message
+
+
+async def _progress(
+    call: ToolCall, sweep_id: str
+) -> tuple[list[str], SweepProgress, list[list[BacktestStep]]]:
     async with call.db() as db:
         with sweep_problems():
             return await build_sweeps(call.state, db, call.settings.app_version).progress(
@@ -459,5 +482,6 @@ TOOLS = (
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(arguments={"sweep_id": "sw_7f3k2m9qx4", "timeout_s": 50}, result=_WAITED),
+        progress=True,
     ),
 )

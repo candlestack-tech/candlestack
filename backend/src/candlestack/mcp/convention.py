@@ -20,7 +20,7 @@ import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Annotated, Any
+from typing import Annotated, Any, Protocol
 
 from mcp.server.mcpserver import Context
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
@@ -39,8 +39,8 @@ _NAME = re.compile(r"[a-z]+(_[a-z0-9]+){1,3}")
 _NAME_MAX = 32
 # Where the HTTP layer leaves the caller of a request (``request.state``), for the tools.
 CALLER_STATE = "mcp_caller"
-# The longest wait of one call of a wait tool: clients give up on a call after a minute or so,
-# and the transport answers JSON at the end of the call, so the agent calls again.
+# The longest wait of one call of a wait tool: clients give up on a call after a minute or so
+# (progress notifications do not reset every client's timeout), so the agent calls again.
 WAIT_MAX_S = 60
 WAIT_DEFAULT_S = 50
 # The most backtests the app's compare page shows side by side, its slots (`COMPARE_SLOTS` in
@@ -49,6 +49,8 @@ COMPARE_PAGE_MAX = 4
 # How often a wait reads the backtests' rows again when nothing told it of a change: the runner
 # tells it when one starts, ends or is cancelled (``BacktestRunner.watch``).
 POLL_S = 2.5
+# A wait's progress in five equal stages: the user's queue, then the four steps of the run.
+STAGES = 5
 
 # The idempotency key of a tool that starts something (``experiments.idempotent``).
 IdempotencyKey = Annotated[
@@ -106,6 +108,9 @@ class ToolSpec:
     # The tool's ``_meta`` in tools/list: the link to the chat widget of one it shows
     # (``apps.tool_meta``).
     meta: dict[str, Any] | None = None
+    # Whether it sends progress to a client that asks for it, so the HTTP layer answers such a
+    # call as an SSE stream (``http``); every other call is answered as JSON.
+    progress: bool = False
     description: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -166,6 +171,48 @@ class ToolCall:
 def runner_of(call: ToolCall) -> BacktestRunner:
     """The app's backtest runner, which tells a wait when a backtest changed."""
     return call.state.backtest_runner
+
+
+class Step(Protocol):
+    """A step of a run as its progress reads it: the tools' ``StepOut`` or the stored
+    ``experiments.BacktestStep``."""
+
+    @property
+    def id(self) -> str: ...
+    @property
+    def state(self) -> str: ...
+    @property
+    def loaded(self) -> int | None: ...
+    @property
+    def total(self) -> int | None: ...
+
+
+def run_progress(steps: Sequence[Step]) -> float:
+    """How far a running backtest is, 0 to 1, by its steps, as its page shows them: the queue
+    before it ran is the first fifth, then each step a fifth, the candles' load by its
+    chunks."""
+    done = sum(step.state == "done" for step in steps)
+    running = next((step for step in steps if step.state == "running"), None)
+    part = 0.0
+    if running is not None and running.id == "candles" and running.total:
+        part = min((running.loaded or 0) / running.total, 1.0)
+    return (1 + done + part) / STAGES
+
+
+class Progress:
+    """The progress a wait reports to a client that asked for it with a ``progressToken``
+    (``notifications/progress``; without a token nothing is sent). Each notification must be
+    higher than the last, as MCP asks, so a value that is not is left out."""
+
+    def __init__(self, ctx: Context) -> None:
+        self._ctx = ctx
+        self._last: float | None = None
+
+    async def report(self, progress: float, total: float, message: str) -> None:
+        if self._last is not None and progress <= self._last:
+            return
+        self._last = progress
+        await self._ctx.report_progress(progress, total, message)
 
 
 def tool_call(ctx: Context) -> ToolCall:

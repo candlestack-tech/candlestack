@@ -30,6 +30,7 @@ from candlestack.experiments.schemas import (
     BacktestSort,
     BacktestsPage,
     BacktestStatus,
+    BacktestsUpdated,
     BacktestUpdate,
     BestBacktests,
     DashboardOut,
@@ -324,6 +325,37 @@ class BacktestsService:
         backtest.name = name
         await self._store.commit()
         return backtest_out(listed)
+
+    async def update_many(
+        self,
+        user_id: str,
+        backtest_ids: Sequence[str],
+        *,
+        starred: bool | None = None,
+        public: bool | None = None,
+    ) -> BacktestsUpdated:
+        """Stars or unstars the user's backtests with the IDs, and publishes or takes them back,
+        as ``update`` does one, in one transaction. An ID the user has no backtest with is
+        listed in ``not_found``, and with `public` true one that cannot be published (queued,
+        running or failed, or test data) in ``cannot_publish``: nothing changes for them, the
+        rest change. What is already as asked stays, so the same call again changes nothing."""
+        wanted = list(dict.fromkeys(backtest_ids))
+        found = {row.id: row for row in await self._store.to_mark(user_id, wanted)}
+        refused = {
+            row.id
+            for row in found.values()
+            if public and (not row.has_spec or row.status != BacktestStatus.finished.value)
+        }
+        updated = [i for i in wanted if i in found and i not in refused]
+        if updated:
+            await self._store.mark(user_id, updated, starred=starred, public=public)
+        await self._store.commit()
+        return BacktestsUpdated(
+            updated=updated,
+            count=len(updated),
+            not_found=[i for i in wanted if i not in found],
+            cannot_publish=[i for i in wanted if i in refused] if public else None,
+        )
 
     async def _publish(self, backtest: Backtest, *, public: bool | None) -> None:
         """Publishes the backtest, or takes it back, as `public` asks; null leaves it as it is.

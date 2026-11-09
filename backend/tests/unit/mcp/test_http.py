@@ -381,3 +381,44 @@ def test_a_body_at_the_limit_reaches_the_server_whole(
     assert "get_me" in [tool["name"] for tool in response.json()["result"]["tools"]]
     # Too large a body for a light request: it counts in full.
     assert counted.light == [False]
+
+
+@pytest.mark.parametrize(
+    ("tool", "meta", "accept", "streamed"),
+    [
+        ("wait_for_backtest", {"progressToken": "p1"}, ACCEPT["Accept"], True),
+        ("wait_for_sweep", {"progressToken": 7}, ACCEPT["Accept"], True),
+        ("wait_for_backtest", None, ACCEPT["Accept"], False),
+        ("wait_for_backtest", {"progressToken": True}, ACCEPT["Accept"], False),
+        ("wait_for_backtest", {"progressToken": "p1"}, "application/json", False),
+        ("get_backtest_status", {"progressToken": "p1"}, ACCEPT["Accept"], False),
+        ("no_such_tool", {"progressToken": "p1"}, ACCEPT["Accept"], False),
+    ],
+    ids=["token", "integer-token", "no-token", "not-a-token", "no-sse", "no-progress", "unknown"],
+)
+def test_a_tool_call_that_asks_for_progress_is_answered_as_a_stream(
+    mcp_client: TestClient,
+    keys,
+    tool: str,
+    meta: dict[str, object] | None,
+    accept: str,
+    streamed: bool,
+) -> None:
+    # Arguments that do not fit, so the tool answers its problem without reading anything.
+    params: dict[str, object] = {"name": tool, "arguments": {"timeout_s": 0}}
+    if meta is not None:
+        params["_meta"] = meta
+    call = {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": params}
+    headers = {
+        **signed_in(keys),
+        "Accept": accept,
+        # The initialize handshake's protocol, whose SSE answer is a stream from the start.
+        "MCP-Protocol-Version": "2025-06-18",
+    }
+
+    response = mcp_client.post("/mcp", json=call, headers=headers)
+
+    assert response.status_code == 200, response.text
+    kind = response.headers["content-type"].split(";")[0]
+    assert kind == ("text/event-stream" if streamed else "application/json")
+    assert '"isError":true' in response.text.replace(" ", "")

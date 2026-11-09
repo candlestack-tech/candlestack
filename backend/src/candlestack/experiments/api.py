@@ -73,11 +73,14 @@ from candlestack.experiments.schemas import (
     PAGE_SIZE,
     PER_PAGE_MAX,
     QUERY_MAX,
+    UPDATE_MAX,
     BacktestOut,
     BacktestShow,
     BacktestSort,
     BacktestsPage,
     BacktestStatus,
+    BacktestsUpdated,
+    BacktestsUpdateIn,
     BacktestUpdate,
     DashboardOut,
     ExperimentSort,
@@ -820,6 +823,47 @@ async def delete_backtests(
     response.headers.update(NO_STORE)
     with sweep_problems():
         return await deletes.delete(user.id, ids=body.ids or (), sweep_id=body.sweep_id)
+
+
+@router.post(
+    "/api/v1/backtests/update",
+    responses={
+        **_NOT_SIGNED_IN,
+        **problem_doc(
+            403, "The request does not come from the app's own pages (`cross-origin-request`)."
+        ),
+        **problem_doc(
+            422,
+            f"Neither `starred` nor `public`, or more than {UPDATE_MAX} IDs (`validation`).",
+        ),
+    },
+    dependencies=[Depends(require_same_origin)],
+    # As PATCH: an API key needs `publish` to publish or unpublish, `backtests` to star.
+    openapi_extra={
+        "security": [
+            {API_KEY_SCHEME: [Scope.backtests.value]},
+            {API_KEY_SCHEME: [Scope.publish.value]},
+        ]
+    },
+)
+async def update_backtests(
+    body: BacktestsUpdateIn,
+    caller: CallerDep,
+    service: BacktestsServiceDep,
+    response: Response,
+) -> BacktestsUpdated:
+    """Stars, unstars, publishes or unpublishes up to 100 of the user's backtests at once, as
+    `PATCH /api/v1/backtests/{backtest_id}` does one. IDs the user has no backtest with are
+    listed in `not_found`, and when publishing, the backtests that cannot be published (queued,
+    running or failed) in `cannot_publish`; nothing changes for them, the rest change. What is
+    already as asked stays, so sending the same request again is safe. With an API key,
+    publishing and unpublishing need the scope `publish`, starring `backtests`."""
+    needed = {Scope.backtests: body.starred is not None, Scope.publish: body.public is not None}
+    caller.require(*(scope for scope in Scope if needed.get(scope)))
+    response.headers.update(NO_STORE)
+    return await service.update_many(
+        caller.user.id, body.ids, starred=body.starred, public=body.public
+    )
 
 
 @router.get(

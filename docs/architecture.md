@@ -116,6 +116,7 @@ flowchart LR
 | `GET /api/v1/backtests/{backtest_id}/download` | the result document of a finished backtest, the user's or a published one of another account, with every row and trade, as an attachment |
 | `GET /api/v1/backtests` | a page of the user's backtests, 10 or `per_page` up to 100: search `q` (name, number, symbol or model name), `show` (`all`, `starred`, `failed`, `public`), `model` (a model's name), the filters for the API and the agents (`status`, repeated, `sweep_id`, `model_id`, `instrument`, `timeframe`, `representation`, `created_after`, `created_before`, `min_sharpe`, `min_total_return`, `min_max_drawdown`, `starred`, `public`), `sort` and `order`, `page`; with the total, the pages and what the filter panel shows (the counts of all, starred, failed and published backtests, the models used) ([Backtests](#backtests)) |
 | `PATCH /api/v1/backtests/{backtest_id}` | stars, unstars, renames (`409 name-taken`; a name of null goes back to the generated one), publishes or unpublishes the user's backtest |
+| `POST /api/v1/backtests/update` | stars, unstars, publishes or unpublishes up to 100 of the user's backtests at once (`ids` with `starred` and/or `public`); 200 with `updated`, `count`, `not_found` and, when publishing, `cannot_publish` (queued, running, failed or test data), nothing changed for those two ([Experiments](#experiments)) |
 | `GET /api/v1/experiments` | a page of 12 of the backtests every account published ([Experiments](#experiments)): search `q` (the backtest's name, symbol, model name or author's name), `mine` or `author` (a user ID), `market`, `symbol`, `representation`, `timeframe`, `sort` and `order`, `page`; with the total, the pages, the counts (all published, the user's, the accounts that published) and what the filters offer |
 | `GET /api/v1/compare?ids=<id>,<id>` | 1 to 20 backtests side by side, the user's own and others' published ones, as the Compare page shows them; `curve_points` (0 to 200) and `setup_mode` (`full`, `diff`) optional ([Compare](#compare)) |
 | `POST /api/v1/sweeps` | starts a backtest for every combination of a base setup and the lists in `vary` (models, instruments, periods, decision rules), 2 to 20, all in the user's queue or none; 201 with the sweep and `Location`, or with `validate_only` 200 with the count and each setup and nothing started; the `Idempotency-Key` header as for `POST /api/v1/backtests` ([Sweeps](#sweeps)) |
@@ -302,7 +303,7 @@ flowchart LR
   backtest defaults) and
   `ModelsUserDep` (upload, manifest, rename, star, delete a model) need that scope;
   `ReaderDep` lets a key with `read` call a POST that changes nothing (the check of a new
-  backtest); the backtest PATCH takes `CallerDep` and needs `publish` for `public`, `backtests` for the rest;
+  backtest); the backtest PATCH and `POST /api/v1/backtests/update` take `CallerDep` and need `publish` for `public`, `backtests` for the rest;
   `SessionUserDep` refuses every key (the keys themselves, deleting the account, sign-in
   methods, signing out everywhere; signing out refuses keys too). The API reference shows
   the scheme `apiKey` (`accounts.API_KEY_SCHEME`) with the scope of each route, rewritten from
@@ -984,6 +985,15 @@ The backtests users published, which every signed-in account (the beta list's) c
   again after taking it back makes it new. `{"public": false}` takes it back at any time. The
   user's list shows `public` and `published_at` of each backtest, `show=public` lists the
   published ones and the counts have `public`.
+- **Many at once**: `POST /api/v1/backtests/update` stars or publishes up to 100 backtests
+  (`ids` with `starred` and/or `public`, as the PATCH takes them, without `name`) in one
+  transaction, with two queries (`BacktestStore.to_mark`, which locks the rows by number as a
+  delete does, so the two cannot deadlock, and `BacktestStore.mark`, which leaves the rows
+  already as asked unwritten): IDs the user has no backtest with are listed in `not_found`, and with
+  `public` true the backtests that cannot be published in `cannot_publish` instead of a 409;
+  nothing changes for those, the rest change. What is already as asked stays (a published one
+  keeps its time), so the same request can be sent again. It counts as one request, as a
+  delete of many does.
 - **What others see**: the setup, the results, the charts and trades of the result document
   (`GET /api/v1/backtests/{backtest_id}` and its download, which Compare also reads), and of the
   model its name, framework, size, SHA-256 and manifest, never its ID or file. The author shows
@@ -1125,8 +1135,14 @@ call, as the routes' dependencies do), never the API over HTTP.
 
 - **Transport**: Streamable HTTP, stateless, answers as JSON (`json_response`). Every request
   stands alone, so any process answers it and a deploy breaks no session; the SDK answers both
-  the 2026-07-28 protocol and the initialize handshake of the earlier ones. `main` adds the
-  routes (`mount_mcp`) and runs the SDK's session manager in the lifespan (`serving_mcp`), last,
+  the 2026-07-28 protocol and the initialize handshake of the earlier ones. `serving_mcp` runs
+  two stateless session managers of the SDK on the one server: `mcp_sessions` answers JSON,
+  `mcp_streams` answers SSE. A `tools/call` of a tool that sends progress (`ToolSpec.progress`:
+  `wait_for_backtest`, `wait_for_sweep`) with a `progressToken` in its `_meta`, from a client
+  that accepts `text/event-stream`, goes to `mcp_streams` (`http._streamed`): only an SSE
+  answer carries the tool's `notifications/progress` before its result (a JSON answer drops
+  them). Every other request goes to `mcp_sessions` and keeps its JSON answer. `main` adds the
+  routes (`mount_mcp`) and runs the SDK's session managers in the lifespan (`serving_mcp`), last,
   so it stops first. The SDK's Host check is off (the edge sets the host); a request with an
   `Origin` other than `PUBLIC_URL` is `403 cross-origin-request`, against DNS rebinding.
 - **Sign-in**: an API key in `Authorization: Bearer`, checked by `accounts.key_caller` as on a
@@ -1322,7 +1338,10 @@ call, as the routes' dependencies do), never the API over HTTP.
     (`read`) waits as `wait_for_backtest` does, on the runner's word for any of the sweep's
     backtests, reading only their statuses (`Sweeps.progress`), until none is queued or
     running or `timeout_s` passed, and answers `done`, `progress`, `eta_s` and, once done, the
-    ranking `get_sweep` gives with its Compare page's `url`.
+    ranking `get_sweep` gives with its Compare page's `url`; to a client that asks for progress
+    it sends, in backtests of all, those that ended plus how far each running one is by its
+    steps (the same read returns the steps of the running ones), with the counts in the
+    message.
   - `run` (#404): running and reading backtests, on `experiments.backtest_runs` and the problems
     of the routes (`experiments.backtest_problems`): `validate_backtest` (`read`,
     `POST /api/v1/backtests/check`) and `start_backtest` (`backtests`, not idempotent) take the
@@ -1340,11 +1359,19 @@ call, as the routes' dependencies do), never the API over HTTP.
     once ended, for another account's, and before any finished. `wait_for_backtest` (`read`)
     takes `backtest_id`, or `ids` (up to 20) with `until` `any` or `all` (the default), and
     waits until that holds or `timeout_s` passed (50 by default, 60 at most: the transport
-    answers JSON at the end of the call, so a call never outlasts a client's timeout). It reads
+    answers at the end of the call, so a call never outlasts a client's timeout). It reads
     the statuses again when the runner says one of them started, ended or was cancelled
     (`BacktestRunner.watch`, an asyncio event in the one API process), and every 2.5 seconds
     besides; it answers the status of the backtest that decided (`done`, and with `ids` each
-    one in `backtests`), so the agent calls it again while `done` is false.
+    one in `backtests`), so the agent calls it again while `done` is false. To a client that
+    sent a `progressToken` it sends `notifications/progress` from each read (no read more):
+    percent of 100 in five equal stages (the user's queue, nearer its end the nearer its turn,
+    then the steps candles, queue, model and trades, the candles by the chunks loaded), with
+    several backtests their mean (`until` all) or the furthest (any), and a message such as
+    `Silent Orion (#12): loading candles, 3 of 12 chunks`; each value higher than the last
+    (`convention.Progress` leaves out one that is not), as MCP asks. It comes from the steps
+    the run stores, which the backtest's page shows, so the app and the agent read the same
+    thing; the model's and the trades' steps have no progress of their own.
     `get_backtest` (`read`) answers the light result document cut down, from what the run
     stored (`BacktestRuns.light`, no candles, no engine): the summary with the link, the setup
     in the shape of `start_backtest`'s arguments (so it runs again as it is, or changed), the
@@ -1365,6 +1392,10 @@ call, as the routes' dependencies do), never the API over HTTP.
     `backtest_problems`): `list_backtests` (`read`; search, show, model, the filters, sort,
     order, page and `per_page` as `GET /backtests`; the counts and the models used only on
     page 1, or as `include_facets` asks, else null), `rename_backtest` and `star_backtest` (`backtests`; idempotent),
+    `star_backtests` (`backtests`; up to 100 `ids`, `starred`; idempotent) and
+    `publish_backtests` (`publish`; up to 100 `ids`, `published`; destructive, idempotent), on
+    the service of `POST /api/v1/backtests/update`, answering `updated`, `count`, `not_found`
+    and `cannot_publish` as the route does,
     `cancel_backtest` (`backtests`; queued ones only, else `backtest-not-queued`; destructive),
     `list_experiments` (`read`; search, mine, author, market, symbol, representation, timeframe,
     sort, order and page as `GET /experiments`; the counts and the facets, five queries, as

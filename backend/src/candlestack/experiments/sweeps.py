@@ -29,6 +29,7 @@ from candlestack.data import DataError, InstrumentId
 from candlestack.experiments.compare import Mark, metric_rows, ranks
 from candlestack.experiments.document import (
     BacktestIn,
+    BacktestStep,
     BenchmarkIn,
     DataIn,
     InstrumentRef,
@@ -52,6 +53,7 @@ from candlestack.experiments.runs import BacktestRuns, Prepared
 from candlestack.experiments.schemas import PAGE_SIZE, BacktestStatus, Representation
 from candlestack.experiments.service import pages
 from candlestack.experiments.spec import RunSpec
+from candlestack.experiments.steps import shown_steps
 from candlestack.experiments.store import QUEUE_MAX, BacktestStore, Listed
 
 # A sweep runs 2 to 20 backtests: as many as wait in a queue and as the comparison takes.
@@ -454,9 +456,12 @@ class Sweeps:
         await self._runs.fits(user_id, count)
         return room
 
-    async def progress(self, user_id: str, sweep_id: str) -> tuple[list[str], SweepProgress]:
-        """The IDs of the user's sweep's backtests and how many have each status, from their
-        rows alone: what a wait for the sweep reads again and again.
+    async def progress(
+        self, user_id: str, sweep_id: str
+    ) -> tuple[list[str], SweepProgress, list[list[BacktestStep]]]:
+        """The IDs of the user's sweep's backtests, how many have each status and the steps of
+        each running one, from their rows alone: what a wait for the sweep reads again and
+        again.
 
         Raises:
             SweepNotFound.
@@ -464,11 +469,12 @@ class Sweeps:
         rows = await self._store.sweep_statuses(user_id, sweep_id)
         if rows is None:
             raise SweepNotFound
-        counts = Counter(status for _, status in rows)
+        counts = Counter(status for _, status, _ in rows)
         progress = SweepProgress(
             **{status.value: counts[status.value] for status in BacktestStatus}
         )
-        return [backtest_id for backtest_id, _ in rows], progress
+        running = [shown_steps(steps, None) for _, _, steps in rows if steps is not None]
+        return [backtest_id for backtest_id, _, _ in rows], progress, running
 
     async def sweep(
         self, user_id: str, sweep_id: str, metric: SweepMetric | None = None

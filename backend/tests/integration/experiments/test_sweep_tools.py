@@ -179,6 +179,28 @@ def test_an_agent_waits_for_a_sweep_until_it_is_ranked(ada, key, mcp, worker) ->
     assert done["url"] == f"http://testserver/backtests/compare?ids={best}"
 
 
+def test_a_wait_for_a_sweep_reports_how_many_ended(ada, key, mcp, worker) -> None:
+    model_id = ada.runnable_model()
+    secret = key("read", "backtests")
+    sweep = mcp(tool("run_sweep", base=base(model_id), vary={"rules": RULES}), secret)
+    reported: list[tuple[float, float | None, str | None]] = []
+
+    async def wait(session: Client) -> Any:
+        async def report(progress: float, total: float | None, message: str | None) -> None:
+            reported.append((progress, total, message))
+
+        arguments = {"sweep_id": sweep.structured_content["id"]}
+        return await session.call_tool("wait_for_sweep", arguments, progress_callback=report)
+
+    done = mcp(wait, secret)
+
+    assert done.structured_content["done"] is True
+    # Each notification is higher than the last; the last says every backtest ended.
+    values = [value for value, _, _ in reported]
+    assert values == sorted(set(values))
+    assert reported[-1] == (2, 2, "2 of 2 ended: 2 finished, 0 failed, 0 running, 0 queued")
+
+
 @pytest.mark.usefixtures("market")
 def test_a_sweep_started_again_with_its_key_is_the_first_one(ada, key, mcp, sql) -> None:
     model_id = ada.runnable_model()

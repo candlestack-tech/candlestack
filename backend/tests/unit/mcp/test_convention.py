@@ -2,6 +2,7 @@
 answers."""
 
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -11,7 +12,15 @@ from pydantic import BaseModel
 
 from candlestack.accounts import Scope
 from candlestack.core import ProblemError
-from candlestack.mcp.convention import Example, ToolSpec, changes, problem_result, reads
+from candlestack.mcp.convention import (
+    Example,
+    Progress,
+    ToolSpec,
+    changes,
+    problem_result,
+    reads,
+    run_progress,
+)
 from candlestack.mcp.server import TOOLS
 
 
@@ -117,3 +126,52 @@ def test_every_tool_s_example_fits_its_schemas(tool: ToolSpec) -> None:
     output = tool.fn.__annotations__["return"]
     assert isinstance(tool.example.result, output)
     assert output.model_validate(tool.example.result.model_dump(mode="json"))
+
+
+class FakeContext:
+    """Stands in for the tool's ``Context``: records each progress it reports."""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[float, float | None, str | None]] = []
+
+    async def report_progress(
+        self, progress: float, total: float | None = None, message: str | None = None
+    ) -> None:
+        self.sent.append((progress, total, message))
+
+
+@pytest.mark.anyio
+async def test_progress_sends_only_a_value_higher_than_the_last() -> None:
+    ctx = FakeContext()
+    progress = Progress(ctx)  # ty: ignore[invalid-argument-type]
+
+    for value, message in [(0, "a"), (0, "b"), (2, "c"), (1, "d"), (2, "e"), (2.5, "f")]:
+        await progress.report(value, 10, message)
+
+    # The first is sent whatever it is; a value that is not higher is left out, its message too.
+    assert ctx.sent == [(0, 10, "a"), (2, 10, "c"), (2.5, 10, "f")]
+
+
+def step(step_id: str, state: str, loaded: int | None = None, total: int | None = None):
+    return SimpleNamespace(id=step_id, state=state, loaded=loaded, total=total)
+
+
+@pytest.mark.parametrize(
+    ("states", "candles", "expected"),
+    [
+        (("pending", "pending", "pending", "pending"), {}, 0.2),
+        (("running", "pending", "pending", "pending"), {}, 0.2),
+        (("running", "pending", "pending", "pending"), {"loaded": 1, "total": 4}, 0.25),
+        (("running", "pending", "pending", "pending"), {"loaded": 9, "total": 4}, 0.4),
+        (("done", "done", "running", "pending"), {}, 0.6),
+        (("done", "done", "done", "running"), {}, 0.8),
+    ],
+)
+def test_a_running_backtest_s_progress_follows_its_steps(
+    states: tuple[str, ...], candles: dict[str, int], expected: float
+) -> None:
+    ids = ["candles", "queue", "model", "trades"]
+    steps = [step(step_id, state) for step_id, state in zip(ids, states, strict=True)]
+    steps[0] = step("candles", states[0], **candles)
+
+    assert run_progress(steps) == pytest.approx(expected)

@@ -28,6 +28,7 @@ from sqlalchemy import (
     exists,
     func,
     literal,
+    or_,
     select,
     text,
     true,
@@ -201,6 +202,14 @@ class Doomed(NamedTuple):
     id: str
     status: str
     sweep_id: str | None
+
+
+class Marked(NamedTuple):
+    """A backtest about to be starred or published (``BacktestStore.to_mark``)."""
+
+    id: str
+    status: str
+    has_spec: bool
 
 
 class StatusRow(NamedTuple):
@@ -590,6 +599,46 @@ class BacktestStore:
         )
         return bool(found)
 
+    async def to_mark(self, user_id: str, backtest_ids: Sequence[str]) -> list[Marked]:
+        """The user's backtests with one of the IDs, locked until the transaction ends (a run
+        that is finishing stores its status first), without what their runs stored. They are
+        locked by number, as ``to_delete`` locks them, so the two never wait on each other."""
+        rows = await self._db.execute(
+            select(Backtest.id, Backtest.status, Backtest.spec.is_not(None))
+            .where(Backtest.user_id == user_id, Backtest.id.in_(backtest_ids))
+            .order_by(Backtest.number)
+            .with_for_update()
+        )
+        return [Marked(*row) for row in rows]
+
+    async def mark(
+        self,
+        user_id: str,
+        backtest_ids: Sequence[str],
+        *,
+        starred: bool | None,
+        public: bool | None,
+    ) -> None:
+        """Stars or unstars the user's backtests, and publishes or takes them back, as each
+        field that is not None asks; one published already keeps when it was published, and a
+        row already as asked is not written again."""
+        values: dict[str, Any] = {}
+        differs: list[ColumnElement[bool]] = []
+        if starred is not None:
+            values["starred"] = starred
+            differs.append(Backtest.starred.is_distinct_from(starred))
+        if public is not None:
+            values["published_at"] = (
+                func.coalesce(Backtest.published_at, func.now()) if public else None
+            )
+            published = Backtest.published_at.is_not(None)
+            differs.append(~published if public else published)
+        await self._db.execute(
+            update(Backtest)
+            .where(Backtest.user_id == user_id, Backtest.id.in_(backtest_ids), or_(*differs))
+            .values(values)
+        )
+
     # --- The names --------------------------------------------------------------------------------
 
     async def names(self, user_id: str) -> set[str]:
@@ -918,20 +967,23 @@ class BacktestStore:
         )
         return None if median is None else float(median)
 
-    async def sweep_statuses(self, user_id: str, sweep_id: str) -> list[tuple[str, str]] | None:
-        """The ID and status of each backtest of the user's sweep, from their rows alone; None
-        when the user has no such sweep."""
+    async def sweep_statuses(
+        self, user_id: str, sweep_id: str
+    ) -> list[tuple[str, str, Steps | None]] | None:
+        """The ID and status of each backtest of the user's sweep, from their rows alone, and
+        the steps of those running; None when the user has no such sweep."""
         found = await self._db.scalar(
             select(Sweep.id).where(Sweep.id == sweep_id, Sweep.user_id == user_id)
         )
         if found is None:
             return None
+        running = Backtest.status == BacktestStatus.running.value
         rows = await self._db.execute(
-            select(Backtest.id, Backtest.status)
+            select(Backtest.id, Backtest.status, case((running, Backtest.steps)))
             .where(Backtest.user_id == user_id, Backtest.sweep_id == sweep_id)
             .order_by(Backtest.number)
         )
-        return [(backtest_id, status) for backtest_id, status in rows]
+        return [(backtest_id, status, steps) for backtest_id, status, steps in rows]
 
     async def refresh_status(self, backtest: Backtest) -> None:
         """Reads the backtest's status and start again: the runner may have started it in a

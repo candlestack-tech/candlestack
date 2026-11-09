@@ -48,16 +48,19 @@ from candlestack.mcp.apps import attach, shows_widget, tool_meta
 from candlestack.mcp.convention import (
     COMPARE_PAGE_MAX,
     POLL_S,
+    STAGES,
     WAIT_DEFAULT_S,
     WAIT_MAX_S,
     Example,
     IdempotencyKey,
+    Progress,
     ToolCall,
     ToolSpec,
     backtest_url,
     changes,
     compare_url,
     reads,
+    run_progress,
     runner_of,
     tool_call,
 )
@@ -70,6 +73,13 @@ TRADES_PER_PAGE_MAX = 500
 _ENDED = {"finished", "failed"}
 # Values of the curves to six decimals: a millionth of the starting capital.
 _DECIMALS = 6
+
+# What each step but the candles' does while it runs, for the progress' message.
+_DOING = {
+    "queue": "waiting for a worker",
+    "model": "the model predicts",
+    "trades": "trading and the statistics",
+}
 
 StepId = Literal["candles", "queue", "model", "trades"]
 StepState = Literal["pending", "running", "done", "failed"]
@@ -636,6 +646,52 @@ async def start_backtest(  # noqa: PLR0913 (the setup's groups)
     return BacktestStatusResult.model_validate_json(content)
 
 
+def progress_of(status: BacktestStatusResult) -> float:
+    """How far the backtest is, 0 to 1, from where it stands: the user's queue is the first
+    fifth, nearer its end the nearer its turn; then its steps (``run_progress``); 1 once it
+    ended."""
+    if status.ended:
+        return 1.0
+    if status.status == "queued":
+        position = status.queue_position
+        return 1 / (position + 1) / STAGES if position else 0.0
+    return run_progress(status.steps)
+
+
+def stage_of(status: BacktestStatusResult) -> str:
+    """Where the backtest is, in words, for the progress' message."""
+    if status.status == "queued":
+        position = status.queue_position
+        return f"queued, number {position} in the queue" if position else "queued"
+    running = next((step for step in status.steps if step.state == "running"), None)
+    if status.ended or running is None:
+        return status.status
+    if running.id != "candles":
+        return _DOING[running.id]
+    stage = "loading candles"
+    if running.total:
+        stage += f", {running.loaded or 0} of {running.total} chunks"
+    if running.waiting_until is not None:
+        stage += ", waiting for the data source's limit"
+    return stage
+
+
+def wait_progress(
+    statuses: Sequence[BacktestStatusResult],
+    shown: BacktestStatusResult,
+    until: Literal["any", "all"],
+) -> tuple[float, float, str]:
+    """The progress of a wait, in percent of 100, and its message: one backtest's, or with
+    several the mean of theirs (`until` all) or the furthest (any)."""
+    parts = [progress_of(status) for status in statuses]
+    part = max(parts) if until == "any" else sum(parts) / len(parts)
+    message = f"{shown.name} (#{shown.number}): {stage_of(shown)}"
+    if len(statuses) > 1:
+        ended = sum(status.ended for status in statuses)
+        message = f"{ended} of {len(statuses)} ended; {message}"
+    return round(100 * part, 1), 100.0, message
+
+
 async def get_backtest_status(
     backtest_id: BacktestId,
     *,
@@ -681,15 +737,18 @@ async def wait_for_backtest(
     then answers where it stands. Give `ids` instead of `backtest_id` to wait for several at
     once, until any or all of them ended (`until`); `backtests` then has each one. When `done`
     is false, call it again: a backtest can wait in the queue and run for several minutes, and
-    `eta_s` says about how long. Once it finished, read it with get_backtest."""
+    `eta_s` says about how long. Once it finished, read it with get_backtest. A client that
+    asks for progress gets where it stands while it waits."""
     call = tool_call(ctx)
     wanted = _wanted(backtest_id, ids)
     deadline = anyio.current_time() + timeout_s
+    progress = Progress(ctx)
     with runner_of(call).watch(wanted) as changed:
         while True:
             changed.clear()
             statuses = await _statuses(call, wanted)
             shown, done = _decided(statuses, until)
+            await progress.report(*wait_progress(statuses, shown, until))
             left = deadline - anyio.current_time()
             if done or left <= 0:
                 break
@@ -1093,6 +1152,7 @@ TOOLS = (
             arguments={"backtest_id": _ID, "timeout_s": 50},
             result=BacktestWaitResult(**_FINISHED.model_dump(), done=True, backtests=None),
         ),
+        progress=True,
     ),
     ToolSpec(
         get_backtest_status,
