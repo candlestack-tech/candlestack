@@ -14,7 +14,8 @@ export interface paths {
         /**
          * Health of the app
          * @description 200 when the app, its Redis and its Postgres work, 503 with the same body when one of
-         *     them does not.
+         *     them does not. `runner` says whether the backtests' runner is alive; it does not change
+         *     the status, as the API answers without it (a deploy's checks look at it).
          *
          *     The body is compact JSON: deploy checks look for `"version":"<version>"` and the commit.
          */
@@ -3271,6 +3272,12 @@ export interface components {
              * @enum {string}
              */
             redis: "ok" | "error";
+            /**
+             * Runner
+             * @description Whether the backtests' runner is alive: in a process of its own, as its key in Redis says; always `ok` where the API process runs it itself
+             * @enum {string}
+             */
+            runner: "ok" | "error";
             /**
              * Status
              * @enum {string}
