@@ -1183,7 +1183,7 @@ call, as the routes' dependencies do), never the API over HTTP.
   lose only titles and the discriminator, as clients check the structured content against
   them. The arguments are still checked against the tool's signature. A unit test keeps the
   names, descriptions and input schemas of all tools under a budget of characters: they cost
-  about 12,000 tokens, down from 21,400.
+  about 12,200 tokens, down from 21,900.
 - **Answers**: a tool's `structuredContent` is its output model whole, nulls included, so it
   fits the output schema; its text, which a model reads, is the same as compact JSON without
   the null fields of its models (`server.compact_text`, once for every tool, in place of the

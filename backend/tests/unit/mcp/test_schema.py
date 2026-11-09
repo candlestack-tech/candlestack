@@ -13,10 +13,11 @@ from candlestack.mcp.schema import SHORTER, compact_input, compact_output
 from candlestack.mcp.server import build_server
 
 # What tools/list costs a model: the characters of every tool's name, description and input
-# schema as compact JSON (about 4 to a token). Trimmed to 43 % fewer tokens in #459, with
-# 10 % to grow. A new tool or a longer description that does not fit: say less, or move it to
-# the tool's `details`, which only the tool reference shows; raise the budget only on purpose.
-BUDGET_CHARS = 52_000
+# schema as compact JSON (about 4 to a token). #459 cut it from 21,900 tokens to 12,200
+# (48,018 characters for 42 tools); the budget leaves 10 % to grow. A new tool or a longer
+# description that does not fit: say less, or move it to the tool's `details`, which only the
+# tool reference shows; raise the budget only on purpose.
+BUDGET_CHARS = 52_800
 
 
 class Rule(BaseModel):
