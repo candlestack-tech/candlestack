@@ -9,6 +9,7 @@ name of their author, joined from ``users`` (``accounts.User``, through the pack
 It never reads the author's email, and shows the model's name of when the backtest ran.
 """
 
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -42,7 +43,7 @@ from sqlalchemy.orm import InstrumentedAttribute, aliased, load_only, undefer
 from sqlalchemy.sql import visitors
 
 from candlestack.accounts import User
-from candlestack.experiments.models import Backtest, Sweep
+from candlestack.experiments.models import SEARCH_TEXT, Backtest, Sweep
 from candlestack.experiments.names import candidates, generated_name
 from candlestack.experiments.schemas import (
     BacktestShow,
@@ -265,9 +266,28 @@ def _any_instrument(
     return exists(select(literal(1)).select_from(instrument).where(matches(instrument.c.value)))
 
 
-def search(query: str) -> ColumnElement[bool] | None:
+# Three letters or digits in a row: what pg_trgm needs of a query to look it up by its index.
+_TRIGRAM = re.compile(r"[^\W_]{3}")
+
+
+def indexed(query: str) -> bool:
+    """Whether the trigram index of ``SEARCH_TEXT`` can look `query` up. One without three
+    letters or digits in a row has no trigram, and nearly every backtest contains it: the
+    search then reads the user's backtests, as working out ``SEARCH_TEXT`` for each would only
+    cost time."""
+    return _TRIGRAM.search(query) is not None
+
+
+def search(query: str, models: Sequence[str] | None = None) -> ColumnElement[bool] | None:
     """Backtests whose shown name, ``#number``, an instrument's symbol or the model's name
-    contains `query`, in any case; None for a blank query, which every backtest matches."""
+    contains `query`, in any case; None for a blank query, which every backtest matches.
+
+    With `models`, the IDs of the user's models whose name contains `query`
+    (``BacktestStore.models_named``), Postgres looks the backtests that may match up first: by
+    the trigram index of ``SEARCH_TEXT``, or as a backtest of one of those models, whose name
+    shows from the models table, which no index of the backtests holds. The exact condition then
+    decides among them, so what the search finds is the same either way.
+    """
     query = query.strip()
     if not query:
         return None
@@ -275,7 +295,12 @@ def search(query: str) -> ColumnElement[bool] | None:
     symbol = _any_instrument(lambda value: value["symbol"].astext.ilike(pattern, escape="\\"))
     number = (literal("#") + cast(Backtest.number, String)).ilike(pattern, escape="\\")
     name = SHOWN_NAME.ilike(pattern, escape="\\")
-    return number | name | symbol | MODEL_NAME.ilike(pattern, escape="\\")
+    matches = number | name | symbol | MODEL_NAME.ilike(pattern, escape="\\")
+    if models is None:
+        return matches
+    # The IDs as values rather than a subquery: Postgres knows how many backtests they have.
+    found = SEARCH_TEXT.ilike(pattern, escape="\\") | Backtest.model_id.in_(models)
+    return found & matches
 
 
 @dataclass(frozen=True)
@@ -332,13 +357,15 @@ class BacktestFilters:
 def filters(
     *,
     query: str = "",
+    models: Sequence[str] | None = None,
     show: BacktestShow = BacktestShow.all,
     model: str | None = None,
     more: BacktestFilters | None = None,
 ) -> list[ColumnElement[bool]]:
-    """The conditions of the list's search and filters (all of them must hold)."""
+    """The conditions of the list's search (with `models` as ``search`` takes them) and filters
+    (all of them must hold)."""
     conditions: list[ColumnElement[bool]] = []
-    if (matches := search(query)) is not None:
+    if (matches := search(query, models)) is not None:
         conditions.append(matches)
     if show is BacktestShow.starred:
         conditions.append(Backtest.starred.is_(True))
@@ -544,6 +571,15 @@ class BacktestStore:
             .order_by(count.desc(), key)
         )
         return [ModelCount(*row) for row in rows]
+
+    async def models_named(self, user_id: str, query: str) -> list[str]:
+        """The IDs of the user's models whose name contains `query` in any case, as the search
+        compares it (``search``)."""
+        pattern = f"%{escape_like(query.strip())}%"
+        found = await self._db.scalars(
+            select(Model.id).where(Model.user_id == user_id, Model.name.ilike(pattern, escape="\\"))
+        )
+        return list(found)
 
     async def count(self, user_id: str, conditions: Sequence[ColumnElement[bool]]) -> int:
         """The user's backtests that meet the conditions; models joined only when a condition

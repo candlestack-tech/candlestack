@@ -791,7 +791,17 @@ checked at the next start.
   deepest drawdown (`min_max_drawdown`, 0 or below) and starred or published. No filter has an
   index of its own: each query also holds the user's ID, so Postgres reads only that user's
   rows (by `ix_backtests_user_id_created_at` or the unique `(user_id, number)`), a few thousand
-  at most, and filters them in memory. The counts
+  at most, and filters them in memory. The search has one, so its time stays flat as an account
+  grows: `ix_backtests_search`, a trigram index (the extension `pg_trgm`, which the migration
+  creates) of one text per backtest (`models.SEARCH_TEXT`, the SQL function
+  `backtest_search_text`: `#N`, the custom and the generated name, the model's name of when it
+  ran, the symbols; `fastupdate` off, so new rows go straight into it). Postgres looks up the
+  rows whose text contains the query, adds the backtests of the user's models whose current
+  name contains it (their IDs read first, `BacktestStore.models_named`, then by
+  `ix_backtests_model_id`), and the exact condition above decides among them, so the text
+  running the fields together never makes a match. A query without three letters or digits in
+  a row (`#1`, `12`, `store.indexed`) has no trigram to look up and reads the user's rows as
+  before. The counts
   (all, starred, failed) and the models used (by count, then name) ignore the search and the
   filters: they are the filter panel's. The models used are one per name in any case, as the
   model filter compares them (spelled as and with the framework of the newest backtest of the

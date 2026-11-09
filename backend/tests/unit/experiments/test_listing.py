@@ -31,6 +31,7 @@ from candlestack.experiments.store import (
     experiment_scope,
     experiment_search,
     filters,
+    indexed,
     ordering,
     search,
 )
@@ -76,6 +77,42 @@ def test_search_looks_at_the_number_the_symbols_and_the_models_name() -> None:
     assert "coalesce(models.name, backtests.model_name) ILIKE '%%Aapl%%'" in sql
     # The name it shows: the user's own, else the generated one.
     assert "coalesce(backtests.name, backtests.generated_name) ILIKE '%%Aapl%%'" in sql
+    # Without the IDs of the user's models of the name, nothing is looked up by an index.
+    assert "backtest_search_text" not in sql
+
+
+def test_search_with_the_models_looks_the_backtests_up_first() -> None:
+    sql = where_sql(search(" Aapl ", ["mdl_k2m9qx47f3", "mdl_7f3k2m9qx4"]))
+
+    # What the trigram index has or a backtest of those models, then the exact condition.
+    assert (
+        "\nWHERE (backtest_search_text(backtests.number, backtests.name, backtests.generated_name, "
+        "backtests.model_name, backtests.instruments) ILIKE '%%Aapl%%' ESCAPE '\\' "
+        "OR backtests.model_id IN ('mdl_k2m9qx47f3', 'mdl_7f3k2m9qx4')) AND "
+        "(('#' || CAST(backtests.number AS VARCHAR)) ILIKE '%%Aapl%%'"
+    ) in sql
+    assert search(" Aapl ", []) is not None
+    assert filters(query="  ", models=[]) == []
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("aapl", True),
+        ("#512", True),
+        ("lstm.keras", True),
+        ("币安人", True),
+        ("a", False),
+        ("12", False),
+        ("#1", False),
+        ("50%", False),
+        ("b_c", False),
+        ("ab cd", False),
+        ("a.b.c", False),
+    ],
+)
+def test_indexed(query: str, expected: bool) -> None:
+    assert indexed(query) is expected
 
 
 def test_the_filters_add_up() -> None:
