@@ -18,6 +18,7 @@ from candlestack.core.errors import (
     problem_doc,
     problem_responses,
 )
+from candlestack.core.health import keep_runner_alive
 from candlestack.core.health import router as health_router
 from candlestack.core.http import (
     HttpClientDep,
@@ -57,6 +58,7 @@ __all__ = [
     "health_router",
     "install_error_handlers",
     "is_same_origin",
+    "keep_runner_alive",
     "problem_doc",
     "problem_responses",
     "request_with_retry",

@@ -27,10 +27,11 @@ Cloudflare.
 
 | Container | Image | Reached as | Memory limit |
 | --- | --- | --- | --- |
-| `backend` | `ghcr.io/candlestack-tech/candlestack/backend` (built from `backend/`) | `<env>-backend:8000` on the edge network (below) | `384m` |
+| `backend` | `ghcr.io/candlestack-tech/candlestack/backend` (built from `backend/`), the API in two granian processes (`APP_ROLE=api`, `WEB_WORKERS=2`) | `<env>-backend:8000` on the edge network (below) | `640m` |
+| `runner` | the backend's image, one process with `APP_ROLE=runner`: the backtests and the work in the background ([docs/architecture.md](../docs/architecture.md#backtests)) | nothing reaches it; it reaches Redis, Postgres, the job queue and the data sources | `384m` |
 | `frontend` | `ghcr.io/candlestack-tech/candlestack/frontend` (built from `frontend/`: the app) | `<env>-frontend:8080` on the edge network (below) | `32m` |
 | `redis` | `redis:8-alpine`, pinned by digest | `redis:6379` on the environment's own network only | see below |
-| `postgres` | `postgres:18-alpine`, pinned by digest | `postgres:5432` on the environment's own network only | `128m` |
+| `postgres` | `postgres:18-alpine`, pinned by digest | `postgres:5432` on the environment's own network only | `192m` |
 | `migrate` | the backend image, `alembic upgrade head` | runs once per deploy, before the backend starts | `160m` |
 | `backup` | `prodrigestivill/postgres-backup-local:18-alpine`, pinned by digest | nothing reaches it | `32m` |
 | `models-backup` | `offen/docker-volume-backup`, pinned by digest | nothing reaches it, no network | `32m` |
@@ -60,8 +61,9 @@ Postgres keeps what users create (accounts, sessions, settings, the models' rows
 `<env>_models` (`/data/models`, the only path it writes to, served only through the API). The backend image carries the migrations (`backend/migrations`): every deploy
 starts with the `migrate` service, which brings the database to them and exits, and the backend
 starts only once it succeeded, so a failing migration fails the deploy before the new backend
-serves anything. Postgres is sized for a few connections (`max_connections` 20: the backend's
-pool of at most 10, the migration, the backup) with `shared_buffers` 32 MB.
+serves anything. Postgres is sized for a few dozen connections (`max_connections` 40: a pool
+of at most 10 in each of the backend's two processes and in the runner, the migration, the
+backup) with `shared_buffers` 32 MB.
 
 All containers of an environment run with a read-only root filesystem, no Linux capabilities
 and `no-new-privileges`. Postgres runs as the image's `postgres` user, which owns its volume;
@@ -77,34 +79,43 @@ them. After the resize to 4 GB (2026-10-25, the worker not deployed yet), the VM
 
 | Container | Limit per environment | Measured |
 | --- | --- | --- |
-| `backend` | `384m` | about 120 MB idle, 150 MB after uploads; a check of an upload adds a child process of about 45 MB for under a second, one at a time |
+| `backend` | `640m` | two processes: about 295 MB idle, 360 MB at its peak under 100 to 150 users of the signed-in pages (one process before: about 120 MB idle, 240 MB under that load); a check of an upload adds a child process of about 45 MB for under a second, one at a time |
+| `runner` | `384m` | about 180 MB idle, 215 MB while a backtest of 50000 candles runs |
 | `frontend` | `32m` | small: Caddy serving static files |
 | `redis` | `288m` (`maxmemory` 256 MB) | grows with the cache, up to `maxmemory` |
-| `postgres` | `128m` | about 30 MB with the backend's pool connected |
+| `postgres` | `192m` (`128m` before `max_connections` 40) | about 30 MB with the backend's pool connected, about 95 MB under 150 users of the signed-in pages with the backend's two processes |
 | `backup`, `models-backup` | `32m` each | about 2 MB between their weekly runs; the models archive took under 32 MB for 300 MB of files |
 | `migrate` | `160m` | runs only during a deploy |
 | `worker` | `1g`, no swap | about 85 MB idle (the loop); a job adds a process with Keras and JAX (below) |
 | `queue` | `32m` (`maxmemory` 16 MB) | a few MB idle, a few kilobytes per job |
 
-The limits of one environment add up to 896 MB without `migrate`, 1.79 GB for prod and stage,
-on top of the edge Caddy, cloudflared, the server agent (`2 x 64m`) and the system. Besides
-Redis' cache, what runs is about 200 MB per environment; the cache grows up to `maxmemory`,
+The limits of one environment add up to 1.6 GB without `migrate` (the backend's 640 MB, the
+runner's 384 MB and Postgres' 192 MB since the runner has a container of its own, 896 MB
+before), 3.2 GB for prod and stage, on top of the edge Caddy, cloudflared, the server agent (`2 x 64m`) and the
+system. Besides Redis' cache, what runs is about 550 MB per environment (about 200 MB before
+the runner's container and the backend's second process); the cache grows up to `maxmemory`,
 so the two environments stay within the memory with room for the system and a check. The
-backend's 384 MB hold the app (about 150 MB at its peak so far) and the check's child, which
-limits itself to 192 MB of data (`RLIMIT_DATA`; a real model's check takes about 45 MB): about
-40 MB stay free even when both are at their limits.
+backend's 640 MB hold its two processes (about 360 MB at their peak, measured locally under
+150 users) and the check's child, which limits itself to 192 MB of data (`RLIMIT_DATA`; a real
+model's check takes about 45 MB): about 90 MB stay free even when both are at their limits.
+The runner's 384 MB hold the app and two runs at once (`BACKTEST_SLOTS`). Should the VM run
+short, the backend's processes are the first lever: `WEB_WORKERS` 1 saves about 150 MB per
+environment and leaves the runner where it is.
 
-With the worker in both environments (since 2026-10-27), each one's limits add up to 1.95 GB
-(the 896 MB above, the worker's 1 GB and the queue's 32 MB), 3.9 GB for the two: just over the
-3.8 GB, before the edge, cloudflared, the agent and the system. The limits are ceilings: what
+With the worker in both environments (since 2026-10-27), each one's limits add up to 2.66 GB
+(the 1.6 GB above, the worker's 1 GB and the queue's 32 MB), 5.3 GB for the two: over the 3.8
+GB and the 2 GB of swap together only if every container sat at its limit at once. The limits are ceilings: what
 runs is far less, and a real job stays near half of the worker's limit (below):
 
 | | each environment |
 | --- | --- |
-| idle, cache empty | about 290 MB (the worker's loop 85 MB, the queue a few MB) |
-| idle, cache full | about 550 MB |
-| a job running, cache full | about 1.05 GB (a 25 x 28 model over 50000 candles, about 500 MB) |
-| a job at the worker's limit | up to 1.49 GB |
+| idle, cache empty | about 640 MB (the backend 295 MB, the runner 180 MB, the worker's loop 85 MB, the queue a few MB) |
+| idle, cache full | about 900 MB |
+| a job running, cache full | about 1.4 GB (a 25 x 28 model over 50000 candles, about 500 MB) |
+| a job at the worker's limit | up to 1.85 GB |
+
+The rows above add the backend's second process and the runner (about 350 MB per environment,
+measured locally, 2026-11-09) to what was measured on the VM before them.
 
 Measured on the VM after v0.8.0 (prod without the worker yet, stage with it idle): 1.41 GB used,
 2.42 GB available. Both environments running a real job at once take about 2.1 GB, which leaves
@@ -204,12 +215,12 @@ weekly one is 2 or more days old, else both stay until the next Sunday.
 To restore the dump, e.g. prod (stage: `stage-` instead of `prod-`):
 
 ```sh
-sudo docker stop prod-backend-1
+sudo docker stop prod-runner-1 prod-backend-1
 sudo docker exec prod-postgres-1 dropdb --username candlestack candlestack
 sudo docker exec prod-postgres-1 createdb --username candlestack candlestack
 sudo docker exec prod-backup-1 cat /backups/last/candlestack-latest.sql.gz | gunzip |
   sudo docker exec -i prod-postgres-1 psql -v ON_ERROR_STOP=1 --username candlestack --dbname candlestack
-sudo docker start prod-backend-1
+sudo docker start prod-backend-1 prod-runner-1
 ```
 
 `sudo docker exec prod-backup-1 ls /backups/daily` lists the dumps. A dump has the schema of
@@ -227,17 +238,18 @@ point to no file (its file is gone) or a file to no row (an orphan, which does n
 take an archive now: `sudo docker exec prod-models-backup-1 backup`; to list them:
 `sudo docker exec prod-models-backup-1 ls /archive`.
 
-To restore the files (after the database of the same Sunday, the backend still stopped), with the Postgres image the environment already runs (pinned by digest, it has
+To restore the files (after the database of the same Sunday, the backend and the runner still
+stopped), with the Postgres image the environment already runs (pinned by digest, it has
 a shell and tar):
 
 ```sh
-sudo docker stop prod-backend-1
+sudo docker stop prod-runner-1 prod-backend-1
 image=$(sudo docker inspect --format '{{.Config.Image}}' prod-postgres-1)
 sudo docker run --rm --entrypoint sh -v prod_models:/data/models \
   -v prod_model_backups:/archive:ro "$image" -c 'rm -rf /data/models/* \
   && tar -xzf /archive/models-<yyyy-mm-dd>T00-30-00.tar.gz -C /data/models --strip-components 2 \
   && chown -R 65534:65534 /data/models'
-sudo docker start prod-backend-1
+sudo docker start prod-backend-1 prod-runner-1
 ```
 
 Disk: the archive takes up to the size of the models volume (model files hardly compress), and
@@ -437,12 +449,31 @@ of either ([Worker](#worker)).
 
 To roll back stage, re-run the `deploy` job of the stage workflow run of the commit to go back
 to: its `edge` step resets the VM's checkout to main first, so it runs main's deploy script and
-compose file with that run's images, and adds its line to the record. A run from before the
+compose file with that run's images, and adds its line to the record. Main's compose file must
+therefore fit those images: to take stage back past a change of the compose file (such as the
+runner's container, #469, with images from before the runner), revert the change on main
+instead, and stage deploys the revert. A run from before the
 worker passes no worker image, so stage runs without the worker until the next deploy. To roll
 back prod, release a commit that stage ran before (a new tag on it): `up prod` takes its images
 from the record and its compose file from the tag, so prod gets exactly what it ran then.
 Neither goes back past a migration: the older image's `migrate` does not know the database's
 revision and fails the deploy.
+
+The backend's image runs in two containers, `backend` (the API) and `runner` (the backtests).
+A deploy stops the old backend and the old runner first (the runner's runs fail with "The
+server restarted...", the queued backtests stay queued in Postgres), runs the migration, then
+starts the new backend and, as the runner depends on it, the new runner after it, which fills
+the slots. A start in the moment between the two is answered `queued` after a second and runs
+once the runner is up. The first deploy with the runner stops the old backend, which ran the
+backtests itself, before the runner starts, so two runners never run at once; it also restarts
+Postgres once, for its new `max_connections` and memory limit. A prod rollback to a release
+from before the runner is safe: `up prod` runs the tag's compose file, which has no `runner`, so
+the container goes (`--remove-orphans`) and the backend runs the backtests again. Stage cannot
+go back past the runner by re-running an older deploy (above): main's compose file would start
+the runner with an image that does not know `APP_ROLE`, so its command checks that first and
+exits with such an image instead of running a second runner; revert on main. After every deploy
+the smoke test waits until the backend's `/api/health` says `"runner":"ok"`: the runner keeps a
+key in Redis that expires 30 s after it stops writing it.
 
 `up` reads its stdin: the first line is a GHCR token used once for the pull, then `KEY=VALUE`
 lines with the environment's secrets. Only `ALPACA_KEY_ID`, `ALPACA_SECRET_KEY`,

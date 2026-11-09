@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable, Coroutine
-from contextlib import asynccontextmanager, suppress
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext, suppress
 from importlib.resources import files
 from typing import Any, override
 
@@ -31,13 +31,21 @@ from candlestack.core import (
     get_settings,
     health_router,
     install_error_handlers,
+    keep_runner_alive,
     problem_doc,
     sentry_check_router,
     setup_logging,
     setup_sentry,
 )
 from candlestack.data import DataService, build_data_service, data_router, market_data_router
-from candlestack.experiments import BacktestRunner, backtests_router, model_usage
+from candlestack.experiments import (
+    BacktestRunner,
+    RemoteRunner,
+    RunnerChannel,
+    backtests_router,
+    channel_prefix,
+    model_usage,
+)
 from candlestack.jobs import JobClient, JobFiles, JobQueue
 from candlestack.mcp import mount_mcp, serving_mcp
 from candlestack.ml import (
@@ -97,8 +105,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     those a stopped process left running fail now. The ``model_checks`` run the trial runs of the
     models in the worker; at startup they check the models a stopped process left unchecked. On
     shutdown the runs stop (failed), then the data service's lookups in the background and the
-    checks, before the clients close. The MCP server answers while the app runs and stops first."""
+    checks, before the clients close. The MCP server answers while the app runs and stops first.
+
+    ``APP_ROLE`` splits this between processes (``experiments.channel``): an ``api`` process
+    serves the API and MCP, its ``backtest_runner`` a ``RemoteRunner`` that asks the runner's
+    process, and runs none of the work in the background (the stats refresh, the sweep, the
+    check of the models left unchecked); a ``runner`` process runs the backtests and that work
+    and serves no MCP. ``all`` does everything in one process."""
     settings: Settings = app.state.settings
+    # The work that one process of the environment does: in ``runner`` or ``all``.
+    alone = settings.app_role != "api"
     model_storage: ModelStorage = app.state.model_storage
     await model_storage.prepare()
     app.state.redis = create_redis(settings.redis_url)
@@ -113,15 +129,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.http = http
             data_service = build_data_service(settings, app.state.redis, http)
             app.state.data_service = data_service
-            runner = BacktestRunner(app.state.db, data_service, jobs, slots=settings.backtest_slots)
+            runner = await _backtest_runner(app, data_service, jobs)
             app.state.backtest_runner = runner
-            await runner.recover()
             async with (
-                _background(data_service, stats=settings.stats_refresh),
-                _running(keep_incoming_swept(model_storage), "The sweep of incoming model files"),
-                _checking(app.state.model_checks),
+                _background(data_service, stats=settings.stats_refresh and alone),
+                _sweeping(model_storage) if alone else nullcontext(),
+                _checking(app.state.model_checks, recover=alone),
+                _saying_alive(app),
                 # Last, so it stops first: the tools use everything above.
-                serving_mcp(app),
+                nullcontext() if settings.app_role == "runner" else serving_mcp(app),
             ):
                 try:
                     yield
@@ -134,6 +150,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await app.state.db.dispose()
         await jobs_redis.aclose()
         await app.state.redis.aclose()
+
+
+async def _backtest_runner(
+    app: FastAPI, data_service: DataService, jobs: JobClient
+) -> BacktestRunner | RemoteRunner:
+    """The runner of the backtests the role has, started: in an ``api`` process the one that
+    asks the runner's process (``RemoteRunner``), else the runner itself, which in a ``runner``
+    process hears the API processes; those a stopped process left running fail now."""
+    settings: Settings = app.state.settings
+    channel = RunnerChannel(app.state.redis, channel_prefix(settings.app_env))
+    if settings.app_role == "api":
+        remote = RemoteRunner(app.state.db, jobs, channel, slots=settings.backtest_slots)
+        remote.start()
+        return remote
+    runner = BacktestRunner(
+        app.state.db,
+        data_service,
+        jobs,
+        slots=settings.backtest_slots,
+        channel=channel if settings.app_role == "runner" else None,
+    )
+    await runner.recover()
+    return runner
 
 
 def _death_report(what: str) -> Callable[[asyncio.Task[None]], None]:
@@ -165,10 +204,26 @@ async def _running(work: Coroutine[Any, Any, None], what: str) -> AsyncIterator[
             await task
 
 
+def _sweeping(storage: ModelStorage) -> AbstractAsyncContextManager[None]:
+    """Sweeps what crashed uploads left while the app runs."""
+    return _running(keep_incoming_swept(storage), "The sweep of incoming model files")
+
+
+def _saying_alive(app: FastAPI) -> AbstractAsyncContextManager[None]:
+    """In a ``runner`` process, keeps the key that tells the API processes' health the runner
+    is alive while the app runs."""
+    settings: Settings = app.state.settings
+    if settings.app_role != "runner":
+        return nullcontext()
+    return _running(keep_runner_alive(app.state.redis, settings.app_env), "The runner's key")
+
+
 @asynccontextmanager
-async def _checking(checks: ModelChecks) -> AsyncIterator[None]:
-    """Checks the models left unchecked while the app runs; stops the checks on shutdown."""
-    checks.recover()
+async def _checking(checks: ModelChecks, *, recover: bool) -> AsyncIterator[None]:
+    """Checks the models left unchecked while the app runs, with ``recover``; stops the checks
+    on shutdown."""
+    if recover:
+        checks.recover()
     try:
         yield
     finally:

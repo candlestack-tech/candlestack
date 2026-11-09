@@ -1,5 +1,7 @@
-"""The runs of the backtests: each in a task of the API process, outside the request that
-started it, so it outlives the request (docs/architecture.md, "Backtests").
+"""The runs of the backtests: each in a task of the runner's process, outside the request that
+started it, so it outlives the request (docs/architecture.md, "Backtests"). The runner runs in
+the API's process (``APP_ROLE`` ``all``) or in a process of its own (``runner``), which the API
+processes ask through Redis (``channel.py``).
 
 A run loads the candles with the model's warm-up from the data module (further back when the
 warm-up fell short, ``_with_warm_up``), has the worker predict on them through the job queue
@@ -11,9 +13,10 @@ ours is logged as an error (a Sentry issue) and the user is told so.
 A run cannot hold a database connection while the worker runs: it reads the backtest, lets the
 session go, and writes the result in another.
 
-The API runs in one process (granian with one worker), so a backtest that began to run before
-the process started was left by one that stopped: ``recover`` marks those failed (again at each
-check until Postgres answers), and ``close`` on shutdown fails the runs it stops.
+One process runs the runner (the API's single granian worker, or the runner's own), so a
+backtest that began to run before the process started was left by one that stopped: ``recover``
+marks those failed (again at each check until Postgres answers), and ``close`` on shutdown
+fails the runs it stops.
 
 The runner has ``slots`` run slots (``BACKTEST_SLOTS``) over all users, and a user's backtests
 run one at a time: every other backtest waits in its user's queue in Postgres (``queued``),
@@ -21,21 +24,23 @@ which costs nothing while it waits. A free slot goes to the queues in turn (``fi
 users with a queued backtest and none running, the one served longest ago (never, first; ties
 to the one whose oldest backtest waits longest), whose oldest queued backtest starts. The slots
 are filled when a backtest is stored (the request waits for it, so its answer says whether it
-runs), when a run ends however it ends (``wake``), and every ``QUEUE_CHECK_EVERY`` seconds for
-queues that stood still (Postgres out of reach). Queued backtests outlive a stop of the
+runs; from an API process through ``channel.WAKE``), when a run ends however it ends
+(``wake``), and every ``QUEUE_CHECK_EVERY`` seconds for queues that stood still (Postgres out of
+reach, or a word of an API process lost). Queued backtests outlive a stop of the
 process: ``recover`` fills the slots. As each running backtest has one job in the worker's
 queue at most, the worker's queue holds as many jobs as there are slots, so one user's queue
 never holds back another user's backtest, and a job's wait for a worker is short.
 
-A wait (the MCP tools) learns of a backtest that changed here (``watch``): the runner tells it
-when one starts, ends or is cancelled, so it reads the backtest again only then.
+A wait (the MCP tools) learns of a backtest that changed (``watch``): the runner tells it when
+one starts, ends or is cancelled, so it reads the backtest again only then; the waits of the API
+processes hear it through ``channel.CHANGED``.
 """
 
 import asyncio
 import logging
 import time
-from collections.abc import Collection, Iterable, Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Collection, Iterable, Mapping
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from functools import partial
 
@@ -68,6 +73,7 @@ from candlestack.experiments.assembly import (
     stats_out,
     stored_results,
 )
+from candlestack.experiments.channel import CHANGED, FILLED, STOP, WAKE, RunnerChannel, Watchers
 from candlestack.experiments.document import Loaded, PredictionsOut, RunnerOut
 from candlestack.experiments.models import Backtest
 from candlestack.experiments.schemas import EQUITY_POINTS, BacktestStatus
@@ -132,6 +138,7 @@ class BacktestRunner:
         wait: float = DEFAULT_WAIT,
         queue_wait: float = QUEUE_WAIT,
         check_every: float = QUEUE_CHECK_EVERY,
+        channel: RunnerChannel | None = None,
     ) -> None:
         self._db = db
         self._data = data
@@ -158,8 +165,13 @@ class BacktestRunner:
         # of the turns; the turns are counted from the start of the process.
         self._served: dict[str, int] = {}
         self._turns = 0
-        # The waits for a backtest to change, by its ID (``watch``).
-        self._watchers: dict[str, set[asyncio.Event]] = {}
+        # The waits of this process for a backtest to change (``watch``).
+        self._watchers = Watchers()
+        # In a process of its own: what the API processes ask (``_listen``), and the tokens of
+        # their wakes, which the next fill answers.
+        self._channel = channel
+        self._listening: asyncio.Task[None] | None = None
+        self._asked: list[str] = []
 
     async def ping(self) -> None:
         """Raises ``redis.exceptions.RedisError`` when the worker's queue cannot be reached."""
@@ -169,6 +181,10 @@ class BacktestRunner:
     def free(self) -> bool:
         """Whether a run slot is free now."""
         return len(self._tasks) < self._slots
+
+    async def free_slot(self) -> bool:
+        """``free``, as ``channel.Runner`` asks it."""
+        return self.free
 
     def start(self, backtest_id: str) -> None:
         """Runs the backtest, which must be stored as running, in a task of its own. Once
@@ -201,29 +217,35 @@ class BacktestRunner:
 
     # --- The waits --------------------------------------------------------------------------
 
-    @contextmanager
-    def watch(self, backtest_ids: Iterable[str]) -> Iterator[asyncio.Event]:
+    def watch(self, backtest_ids: Iterable[str]) -> AbstractContextManager[asyncio.Event]:
         """An event set whenever one of the backtests starts, ends or is cancelled, while the
-        block runs: a wait clears it, reads the backtests, and waits for it. Only for the runs
-        of this process, which is the only one (a wait still reads again now and then)."""
-        event = asyncio.Event()
-        watched = set(backtest_ids)
-        for backtest_id in watched:
-            self._watchers.setdefault(backtest_id, set()).add(event)
-        try:
-            yield event
-        finally:
-            for backtest_id in watched:
-                waiting = self._watchers.get(backtest_id)
-                if waiting is not None:
-                    waiting.discard(event)
-                    if not waiting:
-                        del self._watchers[backtest_id]
+        block runs (``channel.Watchers``)."""
+        return self._watchers.watch(backtest_ids)
 
     def changed(self, backtest_id: str) -> None:
-        """Tells the waits for the backtest that it changed."""
-        for event in self._watchers.get(backtest_id, ()):
-            event.set()
+        """Tells the waits for the backtest that it changed: those of this process, and in a
+        process of its own those of the API processes."""
+        self._watchers.changed(backtest_id)
+        if self._channel is not None:
+            self._channel.send(CHANGED, [backtest_id])
+
+    # --- What the API processes ask ----------------------------------------------------------
+
+    def _listen(self) -> None:
+        """Hears the wakes and stops of the API processes, in a task of its own, until
+        ``close``; each time it subscribes it fills the slots, as what was asked while nobody
+        listened is lost."""
+        if self._channel is None:
+            return
+        self._listening = asyncio.create_task(
+            self._channel.listen({WAKE: self._woken_by, STOP: self.stop}, subscribed=self.wake),
+            name="runner messages",
+        )
+
+    def _woken_by(self, tokens: list[str]) -> None:
+        """A wake of an API process: the next fill answers its token once it has ended."""
+        self._asked.extend(tokens)
+        self.wake()
 
     # --- The slots and the queues ----------------------------------------------------------
 
@@ -233,6 +255,7 @@ class BacktestRunner:
         and fails those left running until Postgres answered."""
         self._watch = asyncio.create_task(self._keep_moving(), name="backtest queues")
         await self._check()
+        self._listen()
 
     async def _check(self) -> None:
         """Fails the backtests left running, until that once succeeded, then ``resume``.
@@ -254,6 +277,7 @@ class BacktestRunner:
             if left:
                 logger.warning("%d backtests left running by a stopped process failed", left)
         await self._requeue_orphans()
+        await self._stop_deleted()
         await self.resume()
 
     async def _requeue_orphans(self) -> None:
@@ -283,6 +307,25 @@ class BacktestRunner:
                 return
         if orphans:
             logger.error("%d backtests ran without a run and were queued again", len(orphans))
+
+    async def _stop_deleted(self) -> None:
+        """Cancels the runs whose backtests were deleted: the net under a stop that an API
+        process sent while nobody listened. Postgres out of reach is a warning: the next check
+        tries again."""
+        ours = set(self._tasks.values())
+        if not ours:
+            return
+        try:
+            async with self._db.sessions() as session:
+                there = await BacktestStore(session).existing(ours)
+        except DATABASE_ERRORS as error:
+            logger.warning(
+                "The runs of deleted backtests were not checked (%s)", type(error).__name__
+            )
+            return
+        if gone := ours - there:
+            logger.warning("%d runs of deleted backtests were stopped late", len(gone))
+            self.stop(gone)
 
     async def resume(self) -> None:
         """Gives the free slots to the queues in turn (``fill``)."""
@@ -319,20 +362,30 @@ class BacktestRunner:
         out of reach is a warning: the next check fills them."""
         async with self._filling:
             self._woken = False
-            while not self._closed and len(self._tasks) < self._slots:
-                # A turn taken is a run started: a cancel (the request went away) between the
-                # two would leave a backtest running without a run.
-                with anyio.CancelScope(shield=True):
-                    try:
-                        started = await self._take_turn()
-                    except DATABASE_ERRORS as error:
-                        logger.warning(
-                            "The backtest queues were not checked (%s)", type(error).__name__
-                        )
-                        return
-                    if started is None:
-                        return
-                    self.start(started)
+            # The wakes of the API processes asked before this fill began, answered once it
+            # has ended.
+            asked, self._asked = self._asked, []
+            try:
+                await self._fill()
+            finally:
+                if asked and self._channel is not None:
+                    self._channel.send(FILLED, asked)
+
+    async def _fill(self) -> None:
+        while not self._closed and len(self._tasks) < self._slots:
+            # A turn taken is a run started: a cancel (the request went away) between the two
+            # would leave a backtest running without a run.
+            with anyio.CancelScope(shield=True):
+                try:
+                    started = await self._take_turn()
+                except DATABASE_ERRORS as error:
+                    logger.warning(
+                        "The backtest queues were not checked (%s)", type(error).__name__
+                    )
+                    return
+                if started is None:
+                    return
+                self.start(started)
 
     async def _take_turn(self) -> str | None:
         """Marks running the oldest queued backtest of the next user in turn and returns its ID;
@@ -356,7 +409,7 @@ class BacktestRunner:
         """Stops the runs and marks their backtests failed (also a run that had not begun).
         Queued backtests stay queued, for the next start of the process."""
         self._closed = True
-        for background in (self._watch, *self._wakeups):
+        for background in (self._watch, self._listening, *self._wakeups):
             if background is not None:
                 background.cancel()
                 await asyncio.gather(background, return_exceptions=True)
@@ -366,7 +419,12 @@ class BacktestRunner:
         await asyncio.gather(*stopped, return_exceptions=True)
         for backtest_id in stopped.values():
             await self._fail(backtest_id, RESTARTED)
+            # The waits of the API processes, which go on.
+            self.changed(backtest_id)
         await asyncio.gather(*self._requeues, return_exceptions=True)
+        if self._channel is not None:
+            # The last changes, for the waits of the API processes.
+            await self._channel.close()
 
     async def _requeue(self, backtest_id: str) -> None:
         """Puts the backtest that was to run back at the head of its queue, as it never began.

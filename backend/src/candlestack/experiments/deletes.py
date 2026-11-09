@@ -7,10 +7,10 @@ Experiments with it, and its page and other people's comparisons answer 404. A s
 deleted backtests from its list and ranking; a sweep without any left is deleted too.
 
 A queued backtest is taken out of its user's queue. A running one is stopped: its row goes, the
-runner cancels its task (``BacktestRunner.stop``) and its slot goes to the next queue in turn
-(``BacktestRunner.fill``), which may be the user's next queued backtest. A run the runner
-cannot cancel (between its steps on another process) finds its row gone when it ends and stores
-nothing.
+runner cancels its task (``Runner.stop``; in a process of its own, told through Redis, and at
+its next check should that word be lost) and its slot goes to the next queue in turn
+(``Runner.fill``), which may be the user's next queued backtest. A run the runner cannot cancel
+(between its steps on another process) finds its row gone when it ends and stores nothing.
 """
 
 from collections.abc import Sequence
@@ -18,8 +18,8 @@ from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from candlestack.experiments.channel import Runner
 from candlestack.experiments.errors import CountMismatch, SweepNotFound
-from candlestack.experiments.runner import BacktestRunner
 from candlestack.experiments.schemas import BacktestStatus
 from candlestack.experiments.store import BacktestStore
 
@@ -71,7 +71,7 @@ class BacktestsDeleted(BaseModel):
 
 
 class BacktestDeletes:
-    def __init__(self, store: BacktestStore, runner: BacktestRunner) -> None:
+    def __init__(self, store: BacktestStore, runner: Runner) -> None:
         self._store = store
         self._runner = runner
 

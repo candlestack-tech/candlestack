@@ -9,6 +9,7 @@ from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+AppRole = Literal["all", "api", "runner"]
 
 # Our Alpaca request budget per minute. Alpaca allows 200 per key: prod and stage have one
 # each, and about a tenth stays unused for retries and the skew between our minute and Alpaca's.
@@ -69,6 +70,10 @@ class Settings(BaseSettings):
     app_version: str = "dev"
     app_commit: str = "unknown"
     log_level: LogLevel = "INFO"
+    # What this process does: ``all`` the API and the backtests' runner with the other work in
+    # the background (one process, the default); ``api`` only the API, in as many processes as
+    # needed; ``runner`` only the runner and the background work, in one process.
+    app_role: AppRole = "all"
 
     public_url: str = Field(
         default_factory=lambda data: default_public_url(data.get("app_env", "local")),

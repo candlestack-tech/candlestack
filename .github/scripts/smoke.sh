@@ -14,7 +14,7 @@
 # shellcheck disable=SC2329 # the checks are called by name from the loop at the end
 set -euo pipefail
 
-CHECKS=(health openapi docs frontend headers access sources search instruments candles top icon)
+CHECKS=(health runner openapi docs frontend headers access sources search instruments candles top icon)
 
 base=${1:?usage: smoke.sh <base-url>}
 base=${base%/}
@@ -53,6 +53,20 @@ check_health() {
   get /api/health
   expect 200 application/json
   jq -e '.status == "ok"' <<<"$body" >/dev/null || fail "status is not ok: $body"
+}
+
+# The backtests' runner, a container of its own that nothing reaches: the backend's health says
+# whether its key is in Redis (docs/architecture.md, "HTTP surface"). A runner that is still
+# starting gets about 90 s; a backend without the field runs the backtests itself.
+check_runner() {
+  local runner
+  for _ in $(seq 1 30); do
+    get /api/health
+    runner=$(jq -r '.runner // "ok"' <<<"$body")
+    [[ $runner == ok ]] && return 0
+    sleep 3
+  done
+  fail "the backtests' runner is not alive: $body"
 }
 
 check_openapi() {

@@ -16,7 +16,10 @@ Redis is a cache that can be lost at any time. The backtest itself is `signals`,
 `experiments` runs for the API and the `candlestack-bt` command of `cli` from files. A second
 process, the worker (`python -m candlestack.worker`), runs the models users upload in a
 container without network; the backend hands it jobs through a queue in Redis (`jobs`, see
-[Worker](#worker)).
+[Worker](#worker)). In prod and stage the backend's image runs twice: the API in two granian
+processes (`backend`), and the backtests' runner with the work in the background in one
+process of its own (`runner`), which the API's processes ask through Redis
+([Backtests](#backtests), "Where the runner runs").
 
 ## Runtime
 
@@ -31,21 +34,26 @@ flowchart LR
         tunnel --> cloudflared["cloudflared"]
         cloudflared --> caddy["edge Caddy<br/>routes by hostname"]
         subgraph envbox["one environment: prod or stage"]
-            caddy -->|"/api/*, /mcp"| backend["backend<br/>FastAPI on granian :8000"]
+            caddy -->|"/api/*, /mcp"| backend["backend<br/>FastAPI on granian :8000<br/>2 processes, APP_ROLE=api"]
             caddy -->|"everything else"| frontend["frontend<br/>static page, Caddy :8080"]
-            backend --> redis[("redis<br/>cache only")]
+            backend --> redis[("redis<br/>cache, the runner's channel")]
+            runner["runner<br/>the backend's image, APP_ROLE=runner<br/>runs the backtests"] --> redis
+            runner --> postgres
             backend --> postgres[("postgres<br/>users, sessions, settings, models, backtests")]
             backend --> models[("models volume<br/>uploaded model files")]
             modelsbackup["models-backup<br/>weekly archive"] -.->|"read-only"| models
             subgraph jobsnet["jobs network (internal, no way out)"]
                 backend -->|"jobs, results"| queue[("queue<br/>Redis of the jobs")]
+                runner -->|"predict jobs"| queue
                 worker["worker<br/>runs the models, one job at a time"] -->|"takes jobs"| queue
             end
             worker -.->|"read-only"| models
             backend <-->|"candles, predictions"| jobfiles[("jobs volume<br/>the jobs' files")]
             worker <--> jobfiles
+            runner <--> jobfiles
         end
     end
+    runner -->|"HTTPS, candles"| binance
     backend -->|HTTPS| binance["Binance<br/>REST + data.binance.vision"]
     backend -->|HTTPS| alpaca["Alpaca<br/>trading API + market data"]
     backend -->|"HTTPS, sign-in"| oauth["GitHub and Google<br/>OAuth"]
@@ -54,7 +62,8 @@ flowchart LR
 
 | Container | Image | Notes |
 | --- | --- | --- |
-| `backend` | `ghcr.io/candlestack-tech/candlestack/backend` | calls Binance and Alpaca; gets the environment's Alpaca keys at deploy time; keeps the uploaded model files in the volume `models` (`/data/models`, its only writable path) |
+| `backend` | `ghcr.io/candlestack-tech/candlestack/backend` | serves the API and MCP in two granian processes (`APP_ROLE=api`, `WEB_WORKERS=2`); calls Binance and Alpaca; gets the environment's Alpaca keys at deploy time; keeps the uploaded model files in the volume `models` (`/data/models`, its only writable path) |
+| `runner` | the backend's image | runs the backtests and the work in the background in one process (`APP_ROLE=runner`): not on the edge network, reached by nobody; the API's processes ask it through Redis ([Backtests](#backtests)) |
 | `frontend` | `ghcr.io/candlestack-tech/candlestack/frontend` | the web app, static files served by Caddy |
 | `redis` | `redis:8-alpine` | private network of the environment, no persistence, `allkeys-lru` |
 | `postgres` | `postgres:18-alpine` | private network of the environment, data in a volume; migrated by a one-shot `migrate` container (the backend image, `alembic upgrade head`) before the backend starts; prod and stage dump it every Sunday and keep the newest dump (`backup`) |
@@ -66,7 +75,7 @@ flowchart LR
 
 | Path | What |
 | --- | --- |
-| `GET /api/health` | liveness + Redis + Postgres; used by deploys and the ops page; not versioned |
+| `GET /api/health` | liveness + Redis + Postgres, and `runner`: whether the backtests' runner is alive (in an `APP_ROLE` `api` process, while the runner's key `candlestack:<APP_ENV>:runner:alive` is in Redis: the runner writes it every 10 s, it expires after 30 s; it does not change `status`); used by deploys (the smoke test waits for `runner` `ok`) and the ops page; not versioned |
 | `GET /api/health/sources` | reachability of Binance and Alpaca (cached 60 s) |
 | `GET /api/v1/data/instruments`, `/instruments/{instrument_id}`, `/instruments/{instrument_id}/candles` | the instrument list, an instrument and its candles, for signed-in accounts only (401 `not-signed-in` otherwise), see [data.md](data.md) |
 | `GET /api/v1/data/instruments/{instrument_id}/icon` | the instrument's logo, or a fallback image; public ([data.md](data.md#icons)) |
@@ -668,8 +677,8 @@ sequenceDiagram
 ### The check of a model
 
 `PUT /api/v1/models/{model_id}/manifest` answers once the manifest is kept, and then starts
-the model's check (`ml.ModelChecks`, `ml/checks.py`): a task of the API process, like the runs
-of the backtests, so the request never waits for the worker. It reads the model's SHA-256 and
+the model's check (`ml.ModelChecks`, `ml/checks.py`): a task of the API process that answered,
+so the request never waits for the worker. It reads the model's SHA-256 and
 manifest, lets the session go, submits the `check` job through `JobClient` and waits for its
 result (`DEFAULT_WAIT`, 180 s), then keeps what it came to in another transaction, under the
 lock of the user's models and only while the stored manifest has the result's
@@ -686,14 +695,19 @@ lock of the user's models and only while the stored manifest has the result's
 Replacing the manifest clears all four. A user's checks run one after the other, as their
 backtests do: a manifest set while one of the user's checks runs waits for it (a model set
 again before its turn is checked once, with the manifest it has then), so a user who keeps
-replacing manifests holds at most one job in the worker's queue. A worker that cannot be reached or does not answer
+replacing manifests holds at most one job in the worker's queue. The user's queue of checks lives in the API process that answered
+(`ModelChecks._waiting`), so with several API processes (`APP_ROLE` `api`) a user has one check
+at a time per process: at most as many jobs in the worker's queue as there are processes. A worker that cannot be reached or does not answer
 says nothing about the model, so it stays `ready` and unchecked: prod has no queue yet (its
 `queue` host is not there, the job fails at once with a warning), and on stage a stopped
 worker costs one wait of 180 s per check. `checked_at` null with a manifest marks a model whose
-check never came to an end, as when the process stopped while it waited (the API runs in one
-process, which keeps no checks across a restart): at startup the API checks those one after the
-other, oldest first, and stops at the first that finds no worker (unreachable or `expired`),
-so they wait for the next start. On shutdown the checks in progress stop; their models are
+check never came to an end, as when the process stopped while it waited (a process keeps no
+checks across a restart): at its start the runner's process (`APP_ROLE` `runner` or `all`, not
+`api`) checks those one after the other, oldest first, and stops at the first that finds no
+worker (unreachable or `expired`), so they wait for the next start. A check an API process
+still runs then is made twice, which keeps the same result. An API process that stops (a
+crash, a restart of its container alone) loses its checks until the runner's next start, which
+every deploy makes. On shutdown the checks in progress stop; their models are
 checked at the next start.
 
 ## Backtests
@@ -855,15 +869,15 @@ checked at the next start.
   whose oldest queued backtest waits longest) gets it, and under the lock of the user its
   oldest queued one (lowest number) becomes `running` with `started_at`. The users so take
   turns at the slots (round robin), and everyone else waits in Postgres at no cost: no task
-  and no candles in memory until its run. The turns live in the process (one process runs the
-  API); after a restart every user starts even. At most 20 wait (`store.QUEUE_MAX`): a start
+  and no candles in memory until its run. The turns live in the runner's process (one
+  process runs the runner, below); after a restart every user starts even. At most 20 wait (`store.QUEUE_MAX`): a start
   beyond is `409 queue-full` with `limit` and `retry_after_s`, checked before the slower
   checks and again under the lock. When a run ends, finished or failed for any reason (the
   worker stopped or failed the job, the candles, a bug), its slot is freed and filled again in
-  a task of its own (`wake`). Queued backtests outlive a stop of the API process: the stop
-  fails only the runs it stops, and the next start, after failing those left running, fills
-  the slots (`resume`), which it also does every 30 seconds for queues that stood still
-  (Postgres out of reach); a new start fills them too. With Postgres out of reach at the
+  a task of its own (`wake`). Queued backtests outlive a stop of the runner's process: the
+  stop fails only the runs it stops, and the next start, after failing those left running,
+  fills the slots (`resume`), which it also does every 30 seconds for queues that stood still
+  (Postgres out of reach, or a word of an API process lost); a new start fills them too. With Postgres out of reach at the
   start, failing those left running is tried again at each check; it fails only backtests
   that began to run before the process started. A backtest the runner is handed after its
   shutdown began goes back to the head of its queue. A turn taken is a run started: the
@@ -871,7 +885,8 @@ checked at the next start.
   anyio scope, as a start that commits its backtest is from its commit to its answer, so a
   client that goes away leaves no backtest running without a run); as a net, every check puts
   back at the head of its queue a backtest running for a minute without a run of this process
-  (an error in the log). As each running backtest has at most one
+  (an error in the log), and stops the runs whose backtests were deleted (a warning: a stop
+  that was lost). As each running backtest has at most one
   job in the worker's queue, which takes the oldest job first, the worker's queue holds about
   as many jobs as there are slots (a deleted run's job the worker took already still runs to its
   end, up to about 180 s): one user's 20 queued backtests never hold back another user's
@@ -889,8 +904,32 @@ checked at the next start.
   backtests must fit) beyond it are `409 backtest-limit` with `limit` and `count` (a sweep also
   `adding`), whose detail tells the user to delete old ones; checked before the slower checks
   and again under the lock of the user, as the queue is.
-- **The run** (`experiments/runner.py`, `BacktestRunner` on `app.state.backtest_runner`) is a
-  task of the API process, so it outlives the request: the candles with the warm-up from the
+- **Where the runner runs** (`APP_ROLE`, `experiments/channel.py`): one process of the
+  environment runs the runner, as it keeps the slots, the turns and the runs, and its start
+  fails what a stopped one left running. By default (`all`, local development and the tests)
+  that is the API's own process, served by one granian worker, which also runs the other
+  work in the background (the stats refresh, the sweep of the incoming model files, the check
+  of the models left unchecked). With `api` a process only serves the API and MCP, so there
+  can be several (`WEB_WORKERS`), and one process `runner` runs the backtests and that work
+  and serves nothing. An `api` process keeps a `RemoteRunner` on `app.state.backtest_runner`
+  (both are a `channel.Runner`, which the services take) and asks the runner through Redis
+  pub/sub on `candlestack:<APP_ENV>:runner:<kind>`: `wake` with a token after a start, a
+  sweep or a delete committed (the runner fills the slots and answers the token on `filled`
+  once that fill has ended; the start waits for it 1 second at most, then answers what is
+  stored, so its answer still says `running` when its backtest got a slot), `stop` with the
+  IDs of running backtests that were deleted, and `changed` with the IDs of backtests that
+  started, ended or were cancelled, which the runner and the API processes send and every API
+  process hears on one subscription for its waits (`channel.Watchers`). Whether a slot is
+  free (the check of a new backtest) an `api` process counts in Postgres (`running_total`).
+  Pub/sub keeps nothing for a process that does not listen, and nothing needs it to: the
+  runner fills the slots when it (re)subscribes and at every check, the check stops the runs
+  of deleted backtests, a wait reads again every 2.5 seconds, and a start that heard nothing
+  answers `queued`, which is true until the runner's next fill. A stream would keep the
+  messages, but a runner that starts reads the queues from Postgres anyway. A Redis out of
+  reach is a warning, and the subscriptions try again after 0.5 seconds, doubled up to 30.
+- **The run** (`experiments/runner.py`, `BacktestRunner` on `app.state.backtest_runner` of the
+  runner's process) is a task of that process, so it outlives the request: the candles with
+  the warm-up from the
   data module (and the period's candles of the fund a benchmark holds, which only the document
   uses: loaded once, so a fund that cannot be loaded fails the run), loaded further back while
   the model's input has no sample on the period's first candle (an estimated warm-up of Renko
@@ -907,10 +946,10 @@ checked at the next start.
   A failure anywhere fails the backtest with a plain sentence for the user: the data module's
   detail, the job's `error`, a worker out of reach or not answering, the model deleted while
   it ran, no prediction in the period; a bug of ours is logged as an error (a Sentry issue) and the user reads that it was
-  reported. The API runs in one process, so on its start the backtests still `running` were
+  reported. One process runs the runner, so on its start the backtests still `running` were
   left by a process that stopped and fail ("The server restarted..."), and on shutdown the
   runs it stops fail the same way; queued backtests stay queued for the next start
-  ([The queue](#backtests)).
+  ([The queue](#backtests)). The API processes fail nothing at their start.
 - **The steps of a run** (`experiments/steps.py`, `backtest.steps` of the result document,
   which the backtest's page asks for every 2 seconds while it runs) are four, in this order:
   `candles` (`DataService.candles` of the period with the warm-up, then of the fund a
@@ -1388,7 +1427,8 @@ call, as the routes' dependencies do), never the API over HTTP.
     waits until that holds or `timeout_s` passed (50 by default, 60 at most: the transport
     answers at the end of the call, so a call never outlasts a client's timeout). It reads
     the statuses again when the runner says one of them started, ended or was cancelled
-    (`BacktestRunner.watch`, an asyncio event in the one API process), and every 2.5 seconds
+    (`Runner.watch`, an asyncio event of the process, set from the runner's `changed` word
+    when the runner runs in a process of its own), and every 2.5 seconds
     besides; it answers the status of the backtest that decided (`done`, and with `ids` each
     one in `backtests`), so the agent calls it again while `done` is false. To a client that
     sent a `progressToken` it sends `notifications/progress` from each read (no read more):
@@ -1666,9 +1706,11 @@ Environment variables, read by pydantic-settings without a prefix. All are docum
 | `APP_VERSION` | `dev` | deployed version (`main-<sha>`, `v0.2.0`) |
 | `APP_COMMIT` | `unknown` | commit sha, baked into the image at build time |
 | `LOG_LEVEL` | `INFO` | |
+| `APP_ROLE` | `all` | what the process does: `all` the API, the backtests' runner and the work in the background; `api` only the API (as many processes as needed); `runner` only the runner and the background work (one process) ([Backtests](#backtests)) |
+| `WEB_WORKERS` | `1` | read by the image's command, not by the app: how many granian processes serve the app; more than one only with `APP_ROLE` `api` (prod and stage: 2, and the container `runner` with `runner`) |
 | `PUBLIC_URL` | prod `https://app.candlestack.tech`, stage `https://stage.candlestack.tech`, local `http://localhost:5173`, test `http://testserver` | where the app is reached: OAuth callbacks, cookies (`Secure` and `__Host-` over https), the same-origin check |
 | `REDIS_URL` | `redis://127.0.0.1:6379/0` | |
-| `DATABASE_URL` | `postgresql+asyncpg://candlestack:candlestack@127.0.0.1:5432/candlestack` | Postgres (whitespace stripped); the pool holds at most 10 connections |
+| `DATABASE_URL` | `postgresql+asyncpg://candlestack:candlestack@127.0.0.1:5432/candlestack` | Postgres (whitespace stripped); the pool of each process holds at most 10 connections |
 | `MODEL_STORAGE_DIR` | `var/models` | directory of the uploaded model files, relative to the working directory; `/data/models` (a volume) on the VM; created at startup; the worker reads it (read-only) |
 | `JOBS_REDIS_URL` | `redis://127.0.0.1:6379/1` | the job queue between the backend and the worker, with its password where it has one (`compose.yaml`: `redis://:candlestack@queue:6379/0`; the VM: `redis://:<QUEUE_PASSWORD>@queue:6379/0`); never logged |
 | `JOB_FILES_DIR` | `var/jobs` | the directory the backend and the worker share for the jobs' candles and predictions, relative to the working directory; `/data/jobs` (a volume) in the containers |
@@ -1782,7 +1824,7 @@ to check that an error reaches Sentry. The Sentry settings are recorded in
 | A dev sign-in for `APP_ENV` `local` and `test` only, fixed in code, not a setting | signed-in pages can be built and tested without OAuth keys; no setting can turn it on in stage or prod |
 | One source per market, never mixed in one series: Binance spot for crypto, Alpaca SIP for US stocks (15 minutes delayed) | consistent data; both are free |
 | Full history fetched lazily on request, catalog cached 24 h and refreshed in the background | no ingestion pipeline and no scheduler to run |
-| The instruments' 24 h stats refreshed by one asyncio task in the API process (started in the app's lifespan, every 5-10 minutes, a Redis lock per market), only in prod and stage | a list sorted by volume needs every instrument's numbers before anyone asks; a task in the process needs no worker, queue or cron container, and the lock keeps a second process from fetching them again |
+| The instruments' 24 h stats refreshed by one asyncio task in the runner's process (started in the app's lifespan, every 5-10 minutes, a Redis lock per market), only in prod and stage | a list sorted by volume needs every instrument's numbers before anyone asks; a task in the process needs no worker, queue or cron container, and the lock keeps a second process from fetching them again |
 | The list's "Data since" (`available_from`) is read from the first-candle cache in Redis for the page in one `MGET`; up to 5 unknown ones per request are looked up in the background, deduplicated, at most 10 at once per process and a small share of the source's budget per minute, and kept 90 days | the first candle costs one source request per instrument, so a page must never ask the sources for all its rows or wait for them; the first candle never moves, so a value once known serves for months |
 | Stocks use the regular session only (09:30-16:00 New York, calendar from Alpaca) | comparable candles; extended-hours data is thin |
 | Same timeframes for both markets: `1m 5m 15m 30m 1h 4h 1d` | experiments can switch markets without changing the pipeline |
@@ -1792,6 +1834,7 @@ to check that an error reaches Sentry. The Sentry settings are recorded in
 | A fingerprint over every candle set | later experiments can detect that a source changed its data |
 | Prod API and docs public (per-IP rate limit); stage behind Cloudflare Access | anyone can read the released API's reference; unreleased builds stay team-only |
 | Market data (the instrument list, an instrument, its candles) only for signed-in accounts; the icons and the home page's five top instruments public | Alpaca's terms let us use its data for ourselves, and showing it to anyone on the internet would need their notice and consent; an account exists only for someone on the beta list |
+| The backtests' runner in one process of the environment (`APP_ROLE` `runner`, or `all`, the default), the API in as many processes as needed (`api`), which ask the runner through Redis pub/sub | one granian process served about 58 requests a second (#251) and also ran the engine's CPU work; more processes need one owner of the run slots, the turns, the runs and the restart recovery, or each would fail and queue again the runs of the others; Redis is already there, and every word has a net in Postgres, so pub/sub needs no durable queue |
 | granian instead of uvicorn, ty instead of mypy, Polars instead of pandas | faster tools with the same role |
 | Coverage and TDD are team conventions, not CI gates | CI stays fast; test quality is checked in review |
 | Security headers at the edge, the Content-Security-Policy in report-only mode first; Trivy on every image in CI and weekly on what runs | the headers protect every page without app code; the policy's reports show what it would break before it blocks anything; the scans catch known vulnerabilities before a merge and after a release |
