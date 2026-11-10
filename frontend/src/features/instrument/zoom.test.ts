@@ -11,7 +11,7 @@ describe('chart zoom', () => {
     expect(zoomLimits(1000, 5000)).toEqual({ minBarSpacing: 0.5, maxBarSpacing: 50 });
   });
 
-  it('lets a few candles fill the chart, with zooming in and out at the same spacing', () => {
+  it('stops zooming out at the zoom-in limit when there are fewer than 20 candles', () => {
     expect(zoomLimits(1000, 5)).toEqual({ minBarSpacing: 50, maxBarSpacing: 50 });
   });
 

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CandleChart } from './CandleChart';
@@ -158,6 +158,22 @@ describe('the candle chart', () => {
     timeScale.size.position = 25;
     onRange({ from: 0, to: 25 });
     expect(timeScale.scrollToPosition).toHaveBeenCalledWith(10, false);
+  });
+
+  it('offers the latest candle only when the view is back in history', () => {
+    const DAY = 86_400;
+    const days = Array.from({ length: 50 }, (_, i) => ({ ...BAR, time: i * DAY }));
+    render(<CandleChart bars={days} market="crypto" dateStyle={STYLE} daily onNearLeftEdge={() => undefined} />);
+    const onRange = (range: { from: number; to: number }) =>
+      act(() => timeScale.onRange.forEach((handler) => handler(range)));
+    const button = () => screen.queryByRole('button', { name: 'Go to the latest candle' });
+
+    // All 50 candles fit: the library keeps the view 10 bars past the newest one (index 49).
+    onRange({ from: 0, to: 59 });
+    expect(button()).toBeNull();
+
+    onRange({ from: 0, to: 40 });
+    expect(button()).not.toBeNull();
   });
 
   it('keeps the zoom limits as wide as the chart', () => {

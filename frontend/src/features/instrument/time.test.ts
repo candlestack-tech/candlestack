@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { marketTimeZone, viewerTimeZone, type DateStyle } from '@/lib/dates';
 
-import { Tick, crosshairFormatter, dayFormatter, dayZone, tickFormatter, timeZoneNote } from './time';
+import { Tick, crosshairFormatter, dayFormatter, dayNote, dayZone, tickFormatter, timeZoneNote } from './time';
 
 // 2024-06-03 13:30 UTC: the NYSE open in summer time; 2024-01-08 14:30 UTC: the open in winter.
 const SUMMER_OPEN = Date.UTC(2024, 5, 3, 13, 30) / 1000;
@@ -34,6 +34,11 @@ describe('chart time', () => {
   it('says under the chart which clock the axis uses', () => {
     expect(timeZoneNote('America/New_York')).toBe('Times are New York time.');
     expect(timeZoneNote('Europe/Bratislava')).toBe('Times are your time (Europe/Bratislava).');
+  });
+
+  it("says under a daily chart whose days it shows, the market's", () => {
+    expect(dayNote('stock')).toBe('Days are New York trading days.');
+    expect(dayNote('crypto')).toBe('Days are UTC days.');
   });
 
   it('labels years, months and days on the axis', () => {

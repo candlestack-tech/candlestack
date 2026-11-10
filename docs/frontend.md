@@ -283,7 +283,7 @@ The two sections with the account's preferences load them in the route's loader
   `src/features/instrument/time.ts`). Days of the market are its own whatever the zone: the
   first day ("Data since") and a daily chart's dates are a New York session for stocks and a UTC
   day for crypto (`dayZone`), so in New York time a crypto day starting 00:00 UTC does not read
-  as the day before. The list's mini candles write their day in the user's date
+  as the day before; the note under a daily chart says which (`dayNote`). The list's mini candles write their day in the user's date
   format.
   The zone setting is for market times (candles, trades). When something happened here (a
   backtest ran, a model was added) is on the viewer's own clock in the user's formats

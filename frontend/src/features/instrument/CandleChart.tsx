@@ -27,7 +27,7 @@ import { RIGHT_ROOM, openBars, zoomLimits } from './zoom';
 
 // Start loading the older page this many bars before the left edge, so it is there in time.
 const PRELOAD_BARS = 30;
-// Further than this from the newest candle, the "go to the latest candle" button shows.
+// Further than this left of the newest candle, the "go to the latest candle" button shows.
 const AWAY_BARS = 3;
 type Series = { candles: ISeriesApi<'Candlestick'>; volume: ISeriesApi<'Histogram'> };
 
@@ -180,7 +180,9 @@ function followTimeScale(
     if (!range) return;
     if (timeScale.scrollPosition() > RIGHT_ROOM) timeScale.scrollToPosition(RIGHT_ROOM, false);
     if (range.from < PRELOAD_BARS) nearEdge.current();
-    setAwayFromLatest(Math.abs(range.to - lastIndex.current) > AWAY_BARS);
+    // Only a view back in history hides the newest candle: the right edge stops RIGHT_ROOM bars past
+    // it, and when all candles fit the library keeps the view there.
+    setAwayFromLatest(lastIndex.current - range.to > AWAY_BARS);
   });
   timeScale.subscribeSizeChange(() => applyZoomLimits(chart, lastIndex.current + 1));
 }

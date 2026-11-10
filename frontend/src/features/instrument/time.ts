@@ -7,6 +7,11 @@ export function timeZoneNote(timeZone: string): string {
   return timeZone === NEW_YORK ? 'Times are New York time.' : `Times are your time (${timeZone}).`;
 }
 
+// Under a daily chart, which writes each candle's day in the market's zone (dayZone), not times.
+export function dayNote(market: Market): string {
+  return market === 'stock' ? 'Days are New York trading days.' : 'Days are UTC days.';
+}
+
 // The kinds of tick marks lightweight-charts asks a label for (its TickMarkType enum).
 export const Tick = { Year: 0, Month: 1, Day: 2, Time: 3, TimeWithSeconds: 4 } as const;
 
