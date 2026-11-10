@@ -52,13 +52,23 @@ describe('InstrumentHeader', () => {
     expect(classes(html, /<h1 [^>]*>Apple Inc\.</)).toContain('break-words');
   });
 
-  it("writes the first day in the user's date format, as the day it was in the chart's zone", () => {
-    // 2020-07-28 02:00 UTC is still 27 July in New York, already 28 July in Bratislava.
-    const listed = { ...AAPL, available_from: Date.UTC(2020, 6, 28, 2) / 1000 };
-    const since = (dateStyle: typeof STYLE | { timeZone: string; dateFormat: 'iso'; timeFormat: '24' }) =>
-      renderToStaticMarkup(<InstrumentHeader instrument={listed} dateStyle={dateStyle} />);
-    expect(since(STYLE)).toContain('27 Jul 2020');
-    expect(since({ ...STYLE, dateFormat: 'iso' })).toContain('2020-07-27');
-    expect(since({ timeZone: 'Europe/Bratislava', dateFormat: 'iso', timeFormat: '24' })).toContain('2020-07-28');
+  it("writes the first day in the user's date format, as the market's day", () => {
+    const since = (instrument: InstrumentDetail, timeZone: string, dateFormat: 'dmy' | 'iso' = 'dmy') =>
+      renderToStaticMarkup(
+        <InstrumentHeader instrument={instrument} dateStyle={{ timeZone, dateFormat, timeFormat: '24' }} />,
+      );
+    // Data that starts at 00:00 UTC on 17 August 2017 starts on 16 August in New York time.
+    const btc = {
+      ...AAPL,
+      id: 'crypto:BTCUSDT',
+      market: 'crypto',
+      available_from: Date.UTC(2017, 7, 17) / 1000,
+    } as const;
+    expect(since(btc, NEW_YORK)).toContain('17 Aug 2017');
+    expect(since(btc, 'Asia/Tokyo', 'iso')).toContain('2017-08-17');
+    // A stock's first session, 2020-07-27 09:30 New York, is already 28 July in Tokyo.
+    const aapl = { ...AAPL, available_from: Date.UTC(2020, 6, 27, 13, 30) / 1000 };
+    expect(since(aapl, NEW_YORK)).toContain('27 Jul 2020');
+    expect(since(aapl, 'Asia/Tokyo', 'iso')).toContain('2020-07-27');
   });
 });

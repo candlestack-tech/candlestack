@@ -16,22 +16,19 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import type { Market } from '@/api';
 import { Button } from '@/components/ui/button';
 import type { DateStyle } from '@/lib/dates';
-import { priceDecimals } from '@/lib/numbers';
+import { formatPriceWith, priceDecimals } from '@/lib/numbers';
 import { useTheme } from '@/theme';
 
 import type { Bar } from './bars';
 import { ChartLegend } from './ChartLegend';
 import { legendFor } from './legend';
-import { crosshairFormatter, dayFormatter, tickFormatter } from './time';
+import { crosshairFormatter, dayFormatter, dayZone, tickFormatter } from './time';
+import { RIGHT_ROOM, openBars, zoomLimits } from './zoom';
 
 // Start loading the older page this many bars before the left edge, so it is there in time.
 const PRELOAD_BARS = 30;
-// Further than this from the newest candle, the "go to the latest candle" button shows.
+// Further than this left of the newest candle, the "go to the latest candle" button shows.
 const AWAY_BARS = 3;
-// The chart opens on this many of the newest candles, as the mockup does (about four months of
-// daily candles); fewer fill it at the default spacing from the right.
-const OPEN_BARS = 120;
-
 type Series = { candles: ISeriesApi<'Candlestick'>; volume: ISeriesApi<'Histogram'> };
 
 // '#43b049' at 40%: the volume bars are a softer shade of their candle's color.
@@ -70,10 +67,19 @@ function create(container: HTMLElement) {
     autoSize: true,
     // The TradingView attribution is a line in the footer instead (#166).
     layout: { attributionLogo: false },
-    timeScale: { timeVisible: true },
+    // No scrolling before the first candle: older pages load PRELOAD_BARS before that edge, so it
+    // stops the view only once all history is there.
+    timeScale: { timeVisible: true, fixLeftEdge: true },
   });
   const candles = chart.addSeries(CandlestickSeries, { borderVisible: false });
-  const volume = chart.addSeries(HistogramSeries, { priceScaleId: '', priceFormat: { type: 'volume' } });
+  // The volume is an overlay with no scale of its own: its last value and line on the price axis
+  // would read as a price.
+  const volume = chart.addSeries(HistogramSeries, {
+    priceScaleId: '',
+    priceFormat: { type: 'volume' },
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
   volume.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
   return { chart, series: { candles, volume } };
 }
@@ -91,11 +97,13 @@ function setBars(series: Series, bars: readonly Bar[], colors: { up: string; dow
   );
 }
 
-// The axis and the crosshair write dates and times as the user does, in the style's zone; a chart
-// of days shows no time of day under the crosshair.
-function applyTimeFormats(chart: IChartApi, style: DateStyle, daily: boolean) {
-  const ticks = tickFormatter(style);
-  const crosshair = daily ? dayFormatter(style) : crosshairFormatter(style);
+// The axis and the crosshair write dates and times as the user does, in the style's zone. A chart
+// of days shows no time of day under the crosshair, and writes each candle's own day, the market's
+// (dayZone): a crypto day starts at 00:00 UTC, which in New York is still the day before.
+function applyTimeFormats(chart: IChartApi, market: Market, style: DateStyle, daily: boolean) {
+  const zoned = daily ? { ...style, timeZone: dayZone(market) } : style;
+  const ticks = tickFormatter(zoned);
+  const crosshair = daily ? dayFormatter(zoned) : crosshairFormatter(zoned);
   chart.applyOptions({
     localization: { timeFormatter: (time: Time) => crosshair(time as number) },
     timeScale: { tickMarkFormatter: (time: Time, tick: number) => ticks(time as number, tick) },
@@ -109,23 +117,34 @@ function hoveredIndex(event: MouseEventParams): number | null {
   return event.point && event.logical !== undefined ? Math.round(event.logical) : null;
 }
 
-// Puts the bars into the chart, in the theme's colors and with enough decimals for the price.
-// The first bars of a chart show their newest OPEN_BARS; older bars added on the left later shift
-// the view by as many, so it does not jump. Returns the time of the first bar, to compare with on
-// the next call.
+function applyZoomLimits(chart: IChartApi, count: number) {
+  const limits = zoomLimits(chart.timeScale().width(), count);
+  if (limits) chart.applyOptions({ timeScale: limits });
+}
+
+// Puts the bars into the chart, in the theme's colors and with enough decimals for the price,
+// written as the legend writes it (68,897.19). The first bars of a chart show their newest
+// openBars; older bars added on the left later shift the view by as many, so it does not jump.
+// Returns the time of the first bar, to compare with on the next call.
 function showBars(instance: Instance, bars: readonly Bar[], firstTime: number | undefined) {
   const colors = applyTheme(instance.chart, instance.series);
   const decimals = priceDecimals(bars.at(-1)?.close ?? 0);
   instance.series.candles.applyOptions({
-    priceFormat: { type: 'price', precision: decimals, minMove: 10 ** -decimals },
+    priceFormat: {
+      type: 'custom',
+      minMove: 10 ** -decimals,
+      formatter: (price: number) => formatPriceWith(price, decimals),
+    },
   });
   const timeScale = instance.chart.timeScale();
   const range = timeScale.getVisibleLogicalRange();
   const added = firstTime === undefined ? 0 : bars.findIndex((bar) => bar.time === firstTime);
   setBars(instance.series, bars, colors);
-  if (firstTime === undefined && bars.length > OPEN_BARS) {
+  applyZoomLimits(instance.chart, bars.length);
+  const open = openBars(timeScale.width());
+  if (firstTime === undefined && bars.length > open) {
     // Logical indexes are the bars' centres: half a bar more on each side shows them whole.
-    timeScale.setVisibleLogicalRange({ from: bars.length - OPEN_BARS - 0.5, to: bars.length - 0.5 });
+    timeScale.setVisibleLogicalRange({ from: bars.length - open - 0.5, to: bars.length - 0.5 });
   } else if (range && added > 0) {
     timeScale.setVisibleLogicalRange({ from: range.from + added, to: range.to + added });
   }
@@ -143,12 +162,33 @@ function useTimeFormats(
   { dateStyle: { timeZone, dateFormat, timeFormat }, daily }: TimeStyle,
 ) {
   useEffect(() => {
-    if (chart.current) applyTimeFormats(chart.current.chart, { timeZone, dateFormat, timeFormat }, daily);
+    if (chart.current) applyTimeFormats(chart.current.chart, market, { timeZone, dateFormat, timeFormat }, daily);
   }, [chart, market, timeZone, dateFormat, timeFormat, daily]);
 }
 
-// Creates the chart and follows it: loads older pages near the left edge, tracks the candle under
-// the cursor for the legend, and whether the newest candle is out of view.
+// Follows the view: loads older pages near the left edge, stops the view RIGHT_ROOM bars past the
+// newest candle (the library has no such limit, only fixRightEdge, which allows none), keeps the
+// zoom limits as wide as the chart, and says whether the newest candle is out of view.
+function followTimeScale(
+  chart: IChartApi,
+  lastIndex: RefObject<number>,
+  nearEdge: RefObject<() => void>,
+  setAwayFromLatest: (away: boolean) => void,
+) {
+  const timeScale = chart.timeScale();
+  timeScale.subscribeVisibleLogicalRangeChange((range: LogicalRange | null) => {
+    if (!range) return;
+    if (timeScale.scrollPosition() > RIGHT_ROOM) timeScale.scrollToPosition(RIGHT_ROOM, false);
+    if (range.from < PRELOAD_BARS) nearEdge.current();
+    // Only a view back in history hides the newest candle: the right edge stops RIGHT_ROOM bars past
+    // it, and when all candles fit the library keeps the view there.
+    setAwayFromLatest(lastIndex.current - range.to > AWAY_BARS);
+  });
+  timeScale.subscribeSizeChange(() => applyZoomLimits(chart, lastIndex.current + 1));
+}
+
+// Creates the chart and follows it: its view (followTimeScale) and the candle under the cursor for
+// the legend.
 function useCandleChart(market: Market, time: TimeStyle, bars: readonly Bar[], onNearLeftEdge: () => void) {
   const container = useRef<HTMLDivElement>(null);
   const chart = useRef<Instance | null>(null);
@@ -173,11 +213,7 @@ function useCandleChart(market: Market, time: TimeStyle, bars: readonly Bar[], o
     if (!container.current) return;
     const created = create(container.current);
     chart.current = created;
-    created.chart.timeScale().subscribeVisibleLogicalRangeChange((range: LogicalRange | null) => {
-      if (!range) return;
-      if (range.from < PRELOAD_BARS) nearEdge.current();
-      setAwayFromLatest(Math.abs(range.to - lastIndex.current) > AWAY_BARS);
-    });
+    followTimeScale(created.chart, lastIndex, nearEdge, setAwayFromLatest);
     created.chart.subscribeCrosshairMove((event) => setHovered(hoveredIndex(event)));
     return () => {
       created.chart.remove();

@@ -103,6 +103,13 @@ minute.
   without candles (one or two are an outage).
 - **Gaps.** When `meta.gaps_total > 0`, the chart shows a small note: it joins sessions, so
   real gaps in the data would be hidden otherwise.
+- **Scroll and zoom.** The chart stops at its first candle (`fixLeftEdge`; older pages load 30
+  candles before that edge, so it stops for good only once all history is loaded) and at 10
+  empty bars past the newest one. Zooming in stops at 20 candles across the chart, zooming out
+  once all the loaded candles fit. It opens on the newest 120 candles, or on a narrow chart on
+  as many as fit at 6 px each (about 45 on a phone). `src/features/instrument/zoom.ts`.
+- **Axes.** The price axis writes prices as the legend does (68,897.19). The volume, an overlay
+  without a scale of its own, puts no value or line on it.
 - **Phones.** Every page fits a 360 px screen without sideways scrolling, in both themes. Long
   text gives way instead of the layout: the instrument list has fixed column widths (see
   [Instrument list](#instrument-list); the name takes the rest), so names, symbols and exchanges
@@ -280,10 +287,13 @@ The two sections with the account's preferences load them in the route's loader
   the system's alone.
 - Dates and times go through `src/lib/dates.ts` (`formatDate`, `formatTime`, the zone of the
   setting); `useDateStyle()` gives the account's choice, zone and all. A visitor has no setting:
-  the API's formats, in New York time or the zone the page passes. The instrument page writes its
-  first day, the chart's crosshair and axis and the note under it in the user's zone and formats
-  (until the account's setting arrives, the market's zone: New York for stocks, their own for
-  crypto, `src/features/instrument/time.ts`). The list's mini candles write their day in the user's date
+  the API's formats, in New York time or the zone the page passes. The instrument page writes
+  the chart's crosshair and axis and the note under it in the user's zone and formats (until
+  the account's setting arrives, the market's zone: New York for stocks, their own for crypto,
+  `src/features/instrument/time.ts`). Days of the market are its own whatever the zone: the
+  first day ("Data since") and a daily chart's dates are a New York session for stocks and a UTC
+  day for crypto (`dayZone`), so in New York time a crypto day starting 00:00 UTC does not read
+  as the day before; the note under a daily chart says which (`dayNote`). The list's mini candles write their day in the user's date
   format.
   The zone setting is for market times (candles, trades). When something happened here (a
   backtest ran, a model was added) is on the viewer's own clock in the user's formats
