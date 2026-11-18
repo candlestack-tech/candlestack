@@ -1,4 +1,4 @@
-import { TryBacktest } from './Buttons';
+import { ConnectAgent, TryBacktest } from './Buttons';
 import { Pipeline } from './Pipeline';
 
 // The headline, what the product does and the way in, over the pipeline every backtest takes.
@@ -13,10 +13,11 @@ export function Hero() {
         <p className="mt-4 max-w-[54ch] text-[17px] text-muted-foreground">
           Run a trained model on real stock and crypto candles, try different configurations and see which one holds up.
           Change how prices are represented, which model predicts or how its predictions become trades. Every run is
-          measured the same way.
+          measured the same way. Or let your AI agent run it for you.
         </p>
         <div className="mt-6 flex flex-wrap items-center gap-2.5">
           <TryBacktest />
+          <ConnectAgent />
         </div>
       </div>
       <Pipeline />

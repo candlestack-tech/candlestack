@@ -13,7 +13,7 @@ const STEPS: Step[] = [
     eyebrow: 'Layer 1',
     name: 'Representation',
     layer: true,
-    items: ['Renko · Kagi · P&F', 'Heikin-Ashi · Line break', 'Range and volume bars', 'Time windows'],
+    items: ['Renko · Kagi', 'Time windows', 'Normalized indicators'],
   },
   {
     eyebrow: 'Layer 2',
@@ -21,7 +21,12 @@ const STEPS: Step[] = [
     layer: true,
     items: ['Your trained model', 'Keras, ONNX', 'Input shape check'],
   },
-  { eyebrow: 'Layer 3', name: 'Decision', layer: true, items: ['Threshold', 'Stop loss', 'Smoothing'] },
+  {
+    eyebrow: 'Layer 3',
+    name: 'Decision',
+    layer: true,
+    items: ['Threshold · Hysteresis', 'K-means', 'Stop loss, sizing'],
+  },
   { eyebrow: 'Output', name: 'Results', items: ['Return, Sharpe', 'Drawdown', 'Trades on the chart'] },
 ];
 

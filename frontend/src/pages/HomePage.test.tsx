@@ -40,7 +40,8 @@ describe('HomePage', () => {
       'Three layers you can swap',
       'US stocks and crypto pairs, candles from 1m to 1d',
       'See which setup holds up',
-      'A catalog of published experiments',
+      'Let your AI agent run the backtests',
+      'See what others published',
     ]);
   });
 
@@ -73,15 +74,16 @@ describe('HomePage', () => {
     expect(html).toMatch(/<a [^>]*href="\/signin"[^>]*>Try Backtest<\/a>/);
   });
 
-  it('shows the example of compare, and marks experiments as coming soon over a sketch screen readers skip', async () => {
+  it('marks the examples of compare, agents and experiments, and nothing as coming soon', async () => {
     const html = await render();
-    const compare = section(html, 'compare');
-    expect(compare).toContain('>EXAMPLE</span>');
-    expect(compare).not.toContain('Coming soon');
-    const experiments = section(html, 'experiments');
-    expect(experiments.match(/>Coming soon<\/span>/g)).toHaveLength(1);
-    expect(experiments).toContain('aria-hidden="true"');
-    expect(html.match(/Coming soon/g)).toHaveLength(1);
+    for (const id of ['compare', 'agents', 'experiments']) expect(section(html, id)).toContain('>EXAMPLE</span>');
+    expect(html).not.toContain('Coming soon');
+  });
+
+  it('leads Connect an agent from the hero down to the agents', async () => {
+    const html = await render();
+    expect(html).toMatch(/<a [^>]*href="#agents"[^>]*>Connect an agent<\/a>/);
+    expect(html).toMatch(/<section [^>]*id="agents"/);
   });
 
   it('counts the instruments as the API has them', async () => {
@@ -95,7 +97,7 @@ describe('HomePage', () => {
     const badges = [...section(html, 'layers').matchAll(/<li [^>]*>([^<]*)<\/li>/g)].map((match) => match[1]);
     expect(badges).toEqual(expect.arrayContaining(['Keras', 'ONNX']));
     expect(badges).not.toContain('PyTorch');
-    expect(badges).toHaveLength(9);
+    expect(badges).toHaveLength(8);
   });
 
   it('stops the dashes on the pipeline when the user asks for less motion', async () => {

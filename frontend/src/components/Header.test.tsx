@@ -44,10 +44,10 @@ const navItem = (html: string, name: string) => classes(html, new RegExp(`<a [^>
 const isOn = (html: string, name: string) => navItem(html, name).includes('font-medium');
 
 describe('Header', () => {
-  it('links only Product and the API docs for a visitor: the instruments are for signed-in accounts', async () => {
+  it('links only Product, the docs and the API docs for a visitor: the instruments are for signed-in accounts', async () => {
     const html = await render('/');
     const nav = /<nav [^>]*aria-label="Main"[^>]*>.*?<\/nav>/.exec(html)?.[0] ?? '';
-    expect([...nav.matchAll(/<a [^>]*>([^<]*)<\/a>/g)].map((match) => match[1])).toEqual(['Product', 'API']);
+    expect([...nav.matchAll(/<a [^>]*>([^<]*)<\/a>/g)].map((match) => match[1])).toEqual(['Product', 'Docs', 'API']);
     expect(html).not.toContain('href="/instruments"');
   });
 
@@ -64,6 +64,16 @@ describe('Header', () => {
       expect(isOn(html, 'Instruments')).toBe(true);
       expect(isOn(html, 'Product')).toBe(false);
     }
+  });
+
+  it('opens the docs on the website in a new tab, the one link a phone keeps', async () => {
+    const html = await render('/', ADA);
+    const tag = /<a [^>]*>Docs<\/a>/.exec(html)?.[0];
+    expect(tag).toContain('href="https://candlestack.tech/docs"');
+    expect(tag).toContain('target="_blank"');
+    expect(tag).toContain('rel="noopener"');
+    expect(navItem(html, 'Docs')).not.toContain('max-sm:hidden');
+    for (const name of ['Product', 'Instruments', 'API']) expect(navItem(html, name)).toContain('max-sm:hidden');
   });
 
   it('opens the API docs of its own host in a new tab', async () => {
