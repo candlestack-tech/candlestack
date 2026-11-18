@@ -28,7 +28,8 @@ export const COMPARE_CELL = 'px-1 py-0 text-center';
 export const ROW =
   'relative cursor-pointer [&>td]:transition-colors [&>td]:duration-150 hover:[&>td]:bg-muted motion-reduce:[&>td]:transition-none';
 
-// A header that sorts or ranks the list (.dd-sort): ink on hover and while on, with its arrow.
+// A header that sorts or ranks the list (.dd-sort): ink on hover and while on, with its arrow. 24 px
+// high for a finger, its padding taking no room from the header.
 export function SortButton({
   on,
   pressed,
@@ -48,7 +49,7 @@ export function SortButton({
       aria-pressed={pressed}
       onClick={onClick}
       className={cn(
-        'cursor-pointer whitespace-nowrap transition-colors duration-150 outline-none hover:text-foreground focus-visible:text-foreground focus-visible:underline motion-reduce:transition-none',
+        '-my-0.5 cursor-pointer py-0.5 whitespace-nowrap transition-colors duration-150 outline-none hover:text-foreground focus-visible:text-foreground focus-visible:underline motion-reduce:transition-none',
         on && 'text-foreground',
         className,
       )}

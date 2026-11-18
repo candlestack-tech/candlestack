@@ -2,14 +2,14 @@
 import { cleanup, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ARSEN, backtest, dashboardAnswer, modelsAnswer, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, backtest, dashboardAnswer, modelsAnswer, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
 import { experiment } from '@/test/experiments';
 import { charts } from '@/test/lightweightCharts';
 
 vi.mock('lightweight-charts', () => import('@/test/lightweightCharts'));
 
-const VLAD = { id: 'usr_v1a2d3s4h5', name: 'Vladyslav Shudiehov', mine: false };
+const GRACE = { id: 'usr_v1a2d3s4h5', name: 'Grace Hopper', mine: false };
 const NEWEST = [
   experiment(),
   experiment({
@@ -17,7 +17,7 @@ const NEWEST = [
     number: 21,
     name: 'Ancient Antares',
     instruments: [{ symbol: 'BTCUSDT', market: 'crypto' }],
-    author: VLAD,
+    author: GRACE,
     published_at: '2026-10-16T09:02:00Z',
     total_return: -0.084,
     sharpe: -0.31,
@@ -26,7 +26,7 @@ const NEWEST = [
 const PUBLISHED = backtest({ starred: true, public: true, published_at: '2026-10-16T09:12:00Z' });
 
 async function open(dashboard: Parameters<typeof dashboardAnswer>[0]) {
-  stubApi({ ...sessionWithPreferences(ARSEN), ...dashboardAnswer(dashboard), ...modelsAnswer([]) });
+  stubApi({ ...sessionWithPreferences(ADA), ...dashboardAnswer(dashboard), ...modelsAnswer([]) });
   await renderApp('/dashboard');
 }
 
@@ -53,12 +53,12 @@ describe('New in Experiments on the dashboard', () => {
     // it and when is the row's tooltip.
     const rows = ['Velvet Deneb', 'Ancient Antares'].map((name) => widget.getByRole('link', { name }).closest('div')!);
     expect(rows.map((row) => row.textContent)).toEqual([
-      'TTVelvet Deneb+41.2 %NVDA · Renko · 30mSharpe 1.38',
-      'VSAncient Antares−8.4 %BTCUSDT · Renko · 30mSharpe −0.31',
+      'ATVelvet Deneb+41.2 %NVDA · Renko · 30mSharpe 1.38',
+      'GHAncient Antares−8.4 %BTCUSDT · Renko · 30mSharpe −0.31',
     ]);
     expect(rows.map((row) => row.getAttribute('title'))).toEqual([
-      'By Tymur Tkach, published today',
-      'By Vladyslav Shudiehov, published yesterday',
+      'By Alan Turing, published today',
+      'By Grace Hopper, published yesterday',
     ]);
     expect(widget.getByRole('link', { name: 'Velvet Deneb' }).getAttribute('href')).toBe('/backtests/bt_t9n8v7d6a5');
     expect(widget.getByRole('button', { name: 'Add to compare: Ancient Antares' })).toBeDefined();

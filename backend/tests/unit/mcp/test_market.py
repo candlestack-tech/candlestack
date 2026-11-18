@@ -40,7 +40,11 @@ from candlestack.data import (
     SearchResult,
     Timeframe,
 )
-from candlestack.mcp import market
+from candlestack.data.progress import tracker, waiting
+from candlestack.data.sources.base import Period
+from candlestack.experiments import BacktestIn
+from candlestack.mcp import market, run
+from candlestack.mcp.convention import ToolSpec
 
 PROBLEMS = "https://candlestack.tech/problems/"
 BTCUSDT = Instrument(
@@ -108,6 +112,8 @@ class FakeDataService:
     unavailable: list[Market] = field(default_factory=list)
     missing: set[int] = field(default_factory=set)
     calls: list[tuple[Any, ...]] = field(default_factory=list)
+    # The chunks each load of last_candles reports to a watched load, as the service's do.
+    loads: list[int] = field(default_factory=list)
 
     def _called(self, *call: Any) -> None:
         self.calls.append(call)
@@ -152,6 +158,16 @@ class FakeDataService:
     ) -> CandleSet:
         """The last `limit` hours before `end`, missing ones counted, from ``DAY`` on."""
         self._called("last_candles", instrument_id, timeframe, end, limit)
+        if (watched := tracker()) is not None:
+            for chunks in self.loads:
+                watched.plan(
+                    [Period("closed", DAY, DAY + 1, f"c{index}", 0) for index in range(chunks)]
+                )
+                for index in range(chunks):
+                    if index == 1:
+                        waiting(30)
+                        waiting(None)
+                    watched.loaded(index, cached=False)
         return hourly(instrument_id, max(end - limit * HOUR, DAY), end, self.missing)
 
 
@@ -362,6 +378,37 @@ def test_without_start_the_newest_candles_and_where_the_earlier_end(
     assert page["instrument"] == "crypto:BTCUSDT"
     assert page["timeframe"] == "1h"
     assert limiter.keys == ["data:rl:client:127.0.0.1"]
+
+
+def test_candles_report_the_chunks_they_load_to_a_client_that_asks(
+    mcp, service: FakeDataService
+) -> None:
+    """Two loads of 2 and 3 chunks: the second counts on from the first, and a wait for the
+    source's limit says so."""
+    service.loads = [2, 3]
+    reported: list[tuple[float, Any, Any]] = []
+
+    async def run(session: Client) -> CallToolResult:
+        async def report(progress: float, total: float | None, message: str | None) -> None:
+            reported.append((progress, total, message))
+
+        arguments = {"instrument_id": "crypto:BTCUSDT", "timeframe": "1h", "limit": 3}
+        return await session.call_tool("get_candles", arguments, progress_callback=report)
+
+    result = mcp(run)
+
+    assert not result.is_error
+    waits = ", waiting for the data source's limit"
+    assert reported == [
+        (0, 2, "loading candles, 0 of 2 chunks"),
+        (1, 2, "loading candles, 1 of 2 chunks"),
+        (1.5, 2, f"loading candles, 1 of 2 chunks{waits}"),
+        (2, 2, "loading candles, 2 of 2 chunks"),
+        (3, 5, "loading candles, 3 of 5 chunks"),
+        (3.5, 5, f"loading candles, 3 of 5 chunks{waits}"),
+        (4, 5, "loading candles, 4 of 5 chunks"),
+        (5, 5, "loading candles, 5 of 5 chunks"),
+    ]
 
 
 def test_without_start_missing_candles_do_not_end_the_paging(mcp, service: FakeDataService) -> None:
@@ -588,8 +635,94 @@ def test_get_backtest_defaults_answers_the_saved_defaults(mcp, saved: list[str])
         "fees_pct": 0.1,
         "slippage_pct": 0.02,
         "benchmark": "bh",
+        # The same settings in the units start_backtest takes, as the app's builder starts one.
+        "period": {"start": 1_641_168_000, "end": 1_703_894_400},
+        "decision": {
+            "calibrate": None,
+            "ema": None,
+            "rule": {"name": "threshold", "limit": 0.05},
+            "long_only": True,
+            "confirm": None,
+            "min_hold": None,
+        },
+        "execution": {
+            "fill": "next_open",
+            "stop_loss": 0.07,
+            "drawdown_stop": None,
+            "position_size": 1.0,
+            "fee_bps": 10.0,
+            "slippage_bps": 2.0,
+        },
+        "benchmark_instrument": None,
     }
     assert saved == ["usr_adaaaaaaaa"]
+
+
+def test_the_defaults_go_to_start_backtest_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(market, "_time", lambda: TODAY_0930)
+    defaults = BacktestDefaults(
+        direction="both", stop_loss_pct=5, fees_pct=0.07, slippage_pct=0.01, benchmark="SPY"
+    )
+
+    out = market.defaults_out(defaults).model_dump(mode="json")
+
+    # Basis points without the float's tail: 0.07 % is 7, not 7.000000000000001.
+    assert (out["execution"]["fee_bps"], out["execution"]["slippage_bps"]) == (7.0, 1.0)
+    assert out["execution"]["stop_loss"] == 0.05
+    assert out["decision"]["long_only"] is False
+    assert out["benchmark_instrument"] == "stock:SPY"
+    body = BacktestIn.model_validate(
+        {
+            "model": {"id": "mdl_k2m9qx47f3"},
+            "data": {"instrument": {"id": "stock:AAPL"}, "period": out["period"]},
+            "decision": out["decision"],
+            "execution": out["execution"],
+            "benchmarks": [
+                {"id": "spy", "kind": "buy_and_hold", "instrument": out["benchmark_instrument"]}
+            ],
+        }
+    )
+    # From the first day's midnight to the one after the last day, as the builder sends it.
+    days = (date(2025, 1, 1) - date(2021, 1, 4)).days
+    assert body.data.period.end - body.data.period.start == days * 86_400
+    assert body.decision.rule.name == "threshold"
+
+
+# 2026-11-08 09:30 UTC.
+TODAY_0930 = 1_794_096_000 + 9 * HOUR + 1800
+
+
+def test_a_default_period_that_ends_today_ends_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(market, "_time", lambda: TODAY_0930 + 0.5)
+    defaults = BacktestDefaults(period_start=date(2026, 1, 5), period_end=date(2026, 11, 8))
+
+    period = market.defaults_out(defaults).period
+
+    # As the builder sends it: a backtest refuses an end after now (period-out-of-range).
+    assert (period.start, period.end) == (1_767_571_200, TODAY_0930)
+
+
+def test_a_default_period_that_starts_later_keeps_its_end(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(market, "_time", lambda: TODAY_0930)
+    defaults = BacktestDefaults(period_start=date(2026, 12, 1), period_end=date(2026, 12, 31))
+
+    period = market.defaults_out(defaults).period
+
+    # Ending it now would end it before it starts: the defaults still answer.
+    assert (period.start, period.end) == (1_796_083_200, 1_798_761_600)
+
+
+def test_the_descriptions_say_the_units() -> None:
+    def description(specs: tuple[ToolSpec, ...], name: str) -> str:
+        return next(spec.description for spec in specs if spec.name == name)
+
+    defaults = description(market.TOOLS, "get_backtest_defaults")
+    start = description(run.TOOLS, "start_backtest")
+
+    assert "`stop_loss_pct`, `fees_pct` and `slippage_pct` in percent" in defaults
+    assert "fee_bps and slippage_bps in basis points" in defaults
+    assert "fee_bps and slippage_bps basis points (10 is 0.1 %)" in start
+    assert "get_backtest_defaults answers the user's defaults in these units" in start
 
 
 def test_get_preferences_answers_how_the_user_reads_dates(mcp, saved: list[str]) -> None:
@@ -635,6 +768,26 @@ def test_update_backtest_defaults_saves_every_setting(
     assert not result.is_error, result.content
     assert result.structured_content == SAVED
     assert saves == [("usr_adaaaaaaaa", SAVED)]
+
+
+def test_update_backtest_defaults_takes_back_what_get_backtest_defaults_answers(
+    mcp, keys, saved: list[str], saves: list[tuple[str, dict[str, Any]]]
+) -> None:
+    defaults = answer(mcp, "get_backtest_defaults")
+
+    result = call(
+        mcp,
+        "update_backtest_defaults",
+        {"defaults": {**defaults, "stop_loss_pct": 5}},
+        key=keys.backtests_key,
+    )
+
+    # The settings in start_backtest's units are derived: taken, and left out of what is saved.
+    derived = {"period", "decision", "execution", "benchmark_instrument"}
+    settings = {k: v for k, v in defaults.items() if k not in derived} | {"stop_loss_pct": 5}
+    assert not result.is_error, result.content
+    assert result.structured_content == settings
+    assert saves == [("usr_adaaaaaaaa", settings)]
 
 
 @pytest.mark.parametrize(

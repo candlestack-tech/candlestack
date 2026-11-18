@@ -94,7 +94,9 @@ class EmaStep(_Strict):
 class ThresholdRule(_Strict):
     name: Literal["threshold"]
     limit: Number = Field(
-        ge=0, description="Long at a prediction of `limit` or more, short at `-limit` or less"
+        ge=0,
+        description="Long at a prediction above 0 and at least `limit`, short at one below 0 "
+        "and at most `-limit`; a prediction of exactly 0 stays flat, even with `limit` 0",
     )
 
 
@@ -291,7 +293,7 @@ class DocumentAuthor(BaseModel):
     """Who the backtest belongs to: their display name, never their email."""
 
     id: str = Field(description="Public ID of the account", examples=["usr_7f3k2m9qx4"])
-    name: str = Field(description="The account's display name", examples=["Tymur Tkach"])
+    name: str = Field(description="The account's display name", examples=["Grace Hopper"])
     mine: bool = Field(description="The signed-in user's own backtest")
 
 
@@ -319,8 +321,8 @@ class BacktestHeader(BaseModel):
     queue_position: int | None = Field(
         ge=1,
         description=(
-            "Where a queued backtest is in its author's queue: 1 starts next, when the running "
-            "one ends; null for any other status"
+            "Where a queued backtest is in its author's queue: 1 starts next, when their "
+            "running one ended and a run slot is free; null for any other status"
         ),
     )
     sweep_id: str | None = Field(
@@ -355,7 +357,7 @@ class RunnerOut(BaseModel):
 
 
 class Software(BaseModel):
-    engine_version: str = Field(examples=["0.3.0"])
+    engine_version: str = Field(examples=["0.4.0"])
     app_version: str = Field(examples=["2026.10.24-3f2a1c9"])
     runner: RunnerOut | None
 
@@ -393,7 +395,10 @@ class Loaded(BaseModel):
 
 
 class WarmUpReport(BaseModel):
-    candles: int = Field(description="Candles loaded before the period for the warm-up")
+    candles: int = Field(
+        description="Candles the model needs before the period (its warm-up), loaded with it; "
+        "where an `estimate` fell short the run loaded more, from `loaded.start`"
+    )
     kind: Literal["exact", "estimate"]
     dropped: int | None = Field(
         description="The candles the model's input dropped at the start; null until it ran"
@@ -429,7 +434,9 @@ class DataOut(BaseModel):
     period: Period
     loaded: Loaded | None
     changed: bool | None = Field(
-        description="The candles' fingerprint differs from the run's: the source changed them"
+        description="The candles' fingerprint differs from the run's: the source changed them. "
+        "Only the download loads the candles again to compare; the light view is what the run "
+        "stored, so null there"
     )
     warm_up: WarmUpReport
     rows: Rows | None
@@ -567,7 +574,9 @@ class CheckedModel(BaseModel):
 
 class CheckedWarmUp(BaseModel):
     candles: int = Field(
-        description="Candles the model needs before the period, loaded with it", examples=[24]
+        description="Candles the model needs before the period, loaded with it; where an "
+        "`estimate` falls short, the run loads twice as many, up to three times",
+        examples=[24],
     )
     kind: Literal["exact", "estimate"] = Field(
         description="`estimate` for a representation whose need depends on the prices (Renko, Kagi)"

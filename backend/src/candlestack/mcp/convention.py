@@ -3,9 +3,14 @@ tool's body gets about its call (``tool_call``).
 
 A tool is an async function that takes its arguments, typed, and ``ctx: Context``, and returns
 a Pydantic model, which becomes its output schema. Its docstring is the description a model
-reads: what the tool does, when to use it and what it answers. ``ToolSpec`` adds a short
-``verb_noun`` name, a title for people, the scopes an API key needs, the annotations (read-only,
-destructive, idempotent, always all three) and an example call for the tool reference.
+reads with every turn, so it stays short: what the tool does, when to use it instead of its
+siblings, what its arguments mean beyond their schema, its side effects and what agents got
+wrong. What a model needs only now and then goes in ``details``, which the tool reference
+(``docs/mcp-tools.json``, the website's ``mcp/tools`` page, which get_docs reads) shows under the
+description. ``ToolSpec`` adds a short ``verb_noun`` name, a title for people, the scopes an API
+key needs, the annotations (read-only, destructive, idempotent, always all three), an example
+call for the tool reference, and what a call costs of the rate limits (``cost``: 1, or
+``HEAVY`` for one that builds or reruns much, or what works it out from the arguments).
 
 A tool raises ``ProblemError`` for what the agent should see, as a route does; the server turns
 it and every other failure into a tool error whose text is the problem as JSON
@@ -15,27 +20,56 @@ it and every other failure into a tool error whose text is the problem as JSON
 import inspect
 import json
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Annotated, Any, Protocol
 
 from mcp.server.mcpserver import Context
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import State
 from starlette.requests import Request
 
 from candlestack.accounts import Caller, Scope, User
 from candlestack.core import PROBLEM_TYPE_BASE, ProblemError, Settings
-from candlestack.mcp.docs import TOOLS_DOCS
+from candlestack.experiments import IDEMPOTENCY_KEY_MAX, IDEMPOTENCY_KEY_PATTERN, Runner
 
 # A verb and what it acts on, lowercase: get_me, start_backtest, list_models.
 _NAME = re.compile(r"[a-z]+(_[a-z0-9]+){1,3}")
 _NAME_MAX = 32
 # Where the HTTP layer leaves the caller of a request (``request.state``), for the tools.
 CALLER_STATE = "mcp_caller"
+# The longest wait of one call of a wait tool: clients give up on a call after a minute or so
+# (progress notifications do not reset every client's timeout), so the agent calls again.
+WAIT_MAX_S = 60
+WAIT_DEFAULT_S = 50
+# The most backtests the app's compare page shows side by side, its slots (`COMPARE_SLOTS` in
+# frontend/src/routes/compareSearch.ts); the API compares more.
+COMPARE_PAGE_MAX = 4
+# How often a wait reads the backtests' rows again when nothing told it of a change: the runner
+# tells it when one starts, ends or is cancelled (``experiments.Runner.watch``).
+POLL_S = 2.5
+# A wait's progress in five equal stages: the user's queue, then the four steps of the run.
+STAGES = 5
+
+# The idempotency key of a tool that starts something (``experiments.idempotent``).
+IdempotencyKey = Annotated[
+    str | None,
+    Field(
+        max_length=IDEMPOTENCY_KEY_MAX,
+        pattern=IDEMPOTENCY_KEY_PATTERN,
+        description="A key you make, such as a UUID: the same call again with it within 24 "
+        "hours answers the first one instead of starting again",
+    ),
+]
+
+
+def unwrap(text: str) -> str:
+    """`text` with its paragraphs on one line each: the lines are wrapped for the code, a model
+    reads its paragraphs whole."""
+    return "\n\n".join(" ".join(part.split()) for part in text.split("\n\n"))
 
 
 def reads() -> ToolAnnotations:
@@ -76,6 +110,17 @@ class ToolSpec:
     scopes: tuple[Scope, ...]
     annotations: ToolAnnotations
     example: Example
+    # What a call costs of the caller's rate limits (``accounts.charge_rate``), or what works
+    # it out from the call's arguments (a short answer from stored data costs less).
+    cost: int | Callable[[dict[str, Any]], int] = 1
+    # The tool's ``_meta`` in tools/list: the link to the chat widget of one it shows
+    # (``apps.tool_meta``).
+    meta: dict[str, Any] | None = None
+    # Whether it sends progress to a client that asks for it, so the HTTP layer answers such a
+    # call as an SSE stream (``http``); every other call is answered as JSON.
+    progress: bool = False
+    # What the tool reference adds to the description, which a model reads only on demand.
+    details: str | None = None
     description: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -94,10 +139,13 @@ class ToolSpec:
                 f"Tool {self.name}: a tool that only reads needs the scope read alone, one that "
                 "changes data the scope of what it changes"
             )
-        # The docstring's lines are wrapped for the code; a model reads its paragraphs whole.
-        paragraphs = [" ".join(part.split()) for part in doc.split("\n\n")]
-        paragraphs.append(f"Docs: {TOOLS_DOCS}#{self.name}")
-        object.__setattr__(self, "description", "\n\n".join(paragraphs))
+        object.__setattr__(self, "description", unwrap(doc))
+        if self.details is not None:
+            object.__setattr__(self, "details", unwrap(inspect.cleandoc(self.details)))
+
+    def cost_of(self, arguments: dict[str, Any]) -> int:
+        """What the call with `arguments` costs of the caller's rate limits."""
+        return self.cost if isinstance(self.cost, int) else self.cost(arguments)
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,12 +177,77 @@ class ToolCall:
             yield session
 
 
+def runner_of(call: ToolCall) -> Runner:
+    """The app's backtest runner, which tells a wait when a backtest changed."""
+    return call.state.backtest_runner
+
+
+class Step(Protocol):
+    """A step of a run as its progress reads it: the tools' ``StepOut`` or the stored
+    ``experiments.BacktestStep``."""
+
+    @property
+    def id(self) -> str: ...
+    @property
+    def state(self) -> str: ...
+    @property
+    def loaded(self) -> int | None: ...
+    @property
+    def total(self) -> int | None: ...
+
+
+def run_progress(steps: Sequence[Step]) -> float:
+    """How far a running backtest is, 0 to 1, by its steps, as its page shows them: the queue
+    before it ran is the first fifth, then each step a fifth, the candles' load by its
+    chunks."""
+    done = sum(step.state == "done" for step in steps)
+    running = next((step for step in steps if step.state == "running"), None)
+    part = 0.0
+    if running is not None and running.id == "candles" and running.total:
+        part = min((running.loaded or 0) / running.total, 1.0)
+    return (1 + done + part) / STAGES
+
+
+class Progress:
+    """The progress a wait reports to a client that asked for it with a ``progressToken``
+    (``notifications/progress``; without a token nothing is sent). Each notification must be
+    higher than the last, as MCP asks, so a value that is not is left out."""
+
+    def __init__(self, ctx: Context) -> None:
+        self._ctx = ctx
+        self._last: float | None = None
+
+    async def report(self, progress: float, total: float, message: str) -> None:
+        if self._last is not None and progress <= self._last:
+            return
+        self._last = progress
+        await self._ctx.report_progress(progress, total, message)
+
+
 def tool_call(ctx: Context) -> ToolCall:
     """The call `ctx` belongs to; the HTTP layer signed its request in before any tool runs."""
     request = ctx.request_context.request
     if not isinstance(request, Request) or not hasattr(request.state, CALLER_STATE):
         raise RuntimeError("A tool ran outside a request the MCP endpoint signed in")
     return ToolCall(getattr(request.state, CALLER_STATE), request.app.state)
+
+
+def backtest_url(call: ToolCall, backtest_id: str) -> str:
+    """The backtest's page in the app, which the agent gives the user to open."""
+    return f"{call.settings.public_url}/backtests/{backtest_id}"
+
+
+def model_url(call: ToolCall, model_id: str) -> str:
+    """The model's page in the app, which the agent gives the user to open."""
+    return f"{call.settings.public_url}/models/{model_id}"
+
+
+def compare_url(call: ToolCall, backtest_ids: Sequence[str]) -> str | None:
+    """The app's compare page with the backtests side by side, in their order, which the agent
+    gives the user to open; None for fewer than 2 or more than the page shows."""
+    if not 2 <= len(backtest_ids) <= COMPARE_PAGE_MAX:
+        return None
+    return f"{call.settings.public_url}/backtests/compare?ids={','.join(backtest_ids)}"
 
 
 def problem_body(problem: ProblemError) -> dict[str, Any]:
@@ -150,5 +263,5 @@ def problem_body(problem: ProblemError) -> dict[str, Any]:
 
 def problem_result(problem: ProblemError) -> CallToolResult:
     """A tool error whose text is the problem as JSON, so a model reads the type and detail."""
-    text = json.dumps(problem_body(problem), ensure_ascii=False)
+    text = json.dumps(problem_body(problem), ensure_ascii=False, separators=(",", ":"))
     return CallToolResult(content=[TextContent(type="text", text=text)], is_error=True)

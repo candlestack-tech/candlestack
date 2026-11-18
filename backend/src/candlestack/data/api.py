@@ -224,7 +224,7 @@ async def client_rate_limit(
             f"More than {limit} candle and instrument requests in one minute from this "
             f"address. Retry in {retry} seconds.",
             headers={"Retry-After": str(retry)},
-            extensions={"limit": limit},
+            extensions={"limit": limit, "retry_after_s": retry},
         )
 
 

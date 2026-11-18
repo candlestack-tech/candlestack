@@ -4,7 +4,7 @@ import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { meQueryOptions, type Me } from '@/api';
-import { ARSEN } from '@/test/api';
+import { ADA } from '@/test/api';
 import { classes } from '@/test/markup';
 
 import { HomePage } from './HomePage';
@@ -54,7 +54,7 @@ describe('HomePage', () => {
   });
 
   it('leads a signed-in visitor to the instrument list from the markets only', async () => {
-    const html = await render(ARSEN);
+    const html = await render(ADA);
     const links = html.match(/<a [^>]*href="\/instruments"[^>]*>Browse instruments<\/a>/g);
     expect(links).toHaveLength(1);
     expect(section(html, 'markets')).toContain('>Browse instruments</a>');

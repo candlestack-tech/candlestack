@@ -40,7 +40,7 @@ _WRAPPING_IPV4 = (
     ipaddress.ip_network("64:ff9b:1::/48"),
     ipaddress.ip_network("::/96"),
 )
-_GRANT_TYPES = frozenset({"authorization_code", "refresh_token"})
+_GRANT_TYPES_ORDER = ("authorization_code", "refresh_token")
 
 # Resolves a host and port to the IP addresses it names; replaced by the tests.
 Resolver = Callable[[str, int], Awaitable[list[str]]]
@@ -119,15 +119,14 @@ def check_metadata(metadata: ClientMetadataIn) -> None:
         problem = redirect_uri_problem(uri)
         if problem is not None:
             raise OAuthError("invalid_redirect_uri", problem)
-    if "authorization_code" not in metadata.grant_types or not _GRANT_TYPES.issuperset(
-        metadata.grant_types
-    ):
-        raise OAuthError(
-            "invalid_client_metadata",
-            "grant_types must name authorization_code, and refresh_token at most besides",
-        )
-    if metadata.response_types != ["code"]:
-        raise OAuthError("invalid_client_metadata", 'response_types must be ["code"]')
+    # A client may name grant and response types this server does not offer (Claude's metadata
+    # document does): it gets only the ones it offers, as long as the code flow is among them.
+    if "authorization_code" not in metadata.grant_types:
+        raise OAuthError("invalid_client_metadata", "grant_types must name authorization_code")
+    if "code" not in metadata.response_types:
+        raise OAuthError("invalid_client_metadata", "response_types must name code")
+    metadata.grant_types = [kind for kind in _GRANT_TYPES_ORDER if kind in metadata.grant_types]
+    metadata.response_types = ["code"]
     for name in ("client_uri", "logo_uri"):
         value = getattr(metadata, name)
         if value is not None and not _https_url(value):
@@ -212,15 +211,19 @@ def _document(raw: bytes, url: str) -> ClientMetadataIn:
         raise ClientDocumentFailed("the document's client_id is not its URL")
     if "client_secret" in body:
         raise ClientDocumentFailed("a client ID metadata document must not hold a secret")
-    # A document's client has no secret: none is the only method it can use.
-    body.setdefault("token_endpoint_auth_method", TokenEndpointAuthMethod.none.value)
+    # A document's client has no secret: none is the only method it can use. A document may
+    # prefer another method and list the ones its client can use besides (MCP SEP-3149;
+    # ChatGPT's prefers private_key_jwt): its client uses none when none is among them.
+    none = TokenEndpointAuthMethod.none.value
+    methods = body.get("token_endpoint_auth_methods_supported")
+    if isinstance(methods, list) and none in methods:
+        body["token_endpoint_auth_method"] = none
+    if body.setdefault("token_endpoint_auth_method", none) != none:
+        raise ClientDocumentFailed("a document's client must be able to use the method none")
     try:
-        metadata = parse_metadata(body)
+        return parse_metadata(body)
     except OAuthError as error:
         raise ClientDocumentFailed(error.description) from None
-    if metadata.token_endpoint_auth_method is not TokenEndpointAuthMethod.none:
-        raise ClientDocumentFailed("a document's token_endpoint_auth_method must be none")
-    return metadata
 
 
 class ClientDocuments:

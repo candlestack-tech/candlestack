@@ -29,6 +29,8 @@ export {
   backtestsQueryOptions,
   compareQueryOptions,
   dashboardQueryOptions,
+  deleteBacktest,
+  deleteBacktests,
   isUnderway,
   startBacktest,
   updateBacktest,
@@ -48,7 +50,7 @@ export {
   type SortOrder,
 } from './backtests';
 export { candleBridgeQueryOptions, candlePageQueryOptions, candleSpanQueryOptions, type Candles } from './candles';
-export { ApiError, errorMessage } from './client';
+export { ApiError, errorMessage, isGone } from './client';
 export {
   experimentCardsQueryOptions,
   experimentsQueryOptions,

@@ -124,6 +124,43 @@ def test_start_with_a_provider_that_is_not_configured(
     assert "Sign-in with google failed: google sign-in is not configured" in caplog.text
 
 
+@pytest.mark.parametrize(
+    ("next_path", "location"),
+    [
+        ("/oauth/consent?request=abc", "/signin?error=failed&next=/oauth/consent%3Frequest%3Dabc"),
+        ("/dashboard", "/signin?error=failed"),
+        ("//evil.example/", "/signin?error=failed"),
+        ("https://evil.example/", "/signin?error=failed"),
+        ("/api/v1/me", "/signin?error=failed"),
+    ],
+)
+def test_a_failed_start_keeps_a_next_of_the_app(
+    client: TestClient, limiter: FakeLimiter, next_path: str, location: str
+) -> None:
+    limiter.wait = 12.3
+
+    for provider in ("google", "github"):  # not configured, and over the rate limit
+        response = client.get(
+            f"/api/v1/auth/{provider}/start", params={"next": next_path}, follow_redirects=False
+        )
+        assert response.headers["location"] == location
+
+
+def test_a_failed_connect_start_does_not_carry_next(
+    client: TestClient, limiter: FakeLimiter
+) -> None:
+    limiter.wait = 12.3
+
+    response = client.get(
+        "/api/v1/auth/github/start",
+        params={"intent": "connect", "next": "/settings/sign-in?from=banner"},
+        headers=LINK,
+        follow_redirects=False,
+    )
+
+    assert response.headers["location"] == "/settings/sign-in?error=failed"
+
+
 def test_start_with_an_unknown_provider(client: TestClient) -> None:
     response = client.get("/api/v1/auth/facebook/start", follow_redirects=False)
 

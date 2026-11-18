@@ -2,4 +2,4 @@
 // card for the request and the session.
 export { AllowAccess } from './AllowAccess';
 export { ExpiredRequest, LoadFailed } from './parts';
-export { SignInToConnect } from './SignInToConnect';
+export { NotOnBetaList, SignInToConnect } from './SignInToConnect';

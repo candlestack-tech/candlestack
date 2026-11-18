@@ -4,7 +4,8 @@ the queue and while it runs, read its results in a compact form and compare back
 They call the services of the backtests routes (``experiments.backtest_runs``) with the same
 access rules: the user's own backtests and other accounts' published ones, read only. The
 answers are smaller than the API's: the result document is cut to what an agent reads (the
-statistics, the setup, a page of trades, at most ``EQUITY_POINTS`` points of the equity).
+statistics and the setup, and only when asked a page of trades and at most ``EQUITY_POINTS``
+points of the equity), read from what the run stored.
 """
 
 import json
@@ -14,42 +15,71 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 import anyio
+import numpy as np
 from mcp.server.mcpserver import Context
 from pydantic import BaseModel, Field
 
 from candlestack import experiments
-from candlestack.accounts import Scope
+from candlestack.accounts import HEAVY, Scope
+from candlestack.core import DATABASE_ERRORS, ProblemError
 from candlestack.experiments import (
     COMPARE_MAX,
+    CURVE_POINTS,
     BacktestCheck,
     BacktestHeader,
     BacktestIn,
     BacktestRuns,
     BenchmarkIn,
+    Committed,
+    ComparedBacktest,
     CompareOut,
     DataIn,
     Decision,
     Execution,
     ModelRef,
+    SetupMode,
     Stats,
     backtest_problems,
     backtest_runs,
     check_ids,
+    idempotent,
 )
-from candlestack.mcp.convention import Example, ToolCall, ToolSpec, changes, reads, tool_call
+from candlestack.mcp.apps import attach, shows_widget, tool_meta
+from candlestack.mcp.convention import (
+    COMPARE_PAGE_MAX,
+    POLL_S,
+    STAGES,
+    WAIT_DEFAULT_S,
+    WAIT_MAX_S,
+    Example,
+    IdempotencyKey,
+    Progress,
+    ToolCall,
+    ToolSpec,
+    backtest_url,
+    changes,
+    compare_url,
+    reads,
+    run_progress,
+    runner_of,
+    tool_call,
+)
 
-# The longest wait of one call of wait_for_backtest: clients give up on a call after a minute
-# or so, and the transport answers JSON at the end of the call, so the agent calls again.
-WAIT_MAX_S = 60
-WAIT_DEFAULT_S = 50
-# How often a wait reads the backtest's row again.
-POLL_S = 1.0
+# The most backtests one wait follows.
+WAIT_IDS_MAX = 20
 # The most points of the equity get_backtest answers: enough to see its shape.
 EQUITY_POINTS = 200
 TRADES_PER_PAGE_MAX = 500
 _ENDED = {"finished", "failed"}
 # Values of the curves to six decimals: a millionth of the starting capital.
 _DECIMALS = 6
+
+# What each step but the candles' does while it runs, for the progress' message.
+_DOING = {
+    "queue": "waiting for a worker",
+    "model": "the model predicts",
+    "trades": "trading and the statistics",
+}
 
 StepId = Literal["candles", "queue", "model", "trades"]
 StepState = Literal["pending", "running", "done", "failed"]
@@ -83,12 +113,14 @@ class BacktestStatusResult(BaseModel):
     number: int = Field(description="The author's own number, shown as #N")
     name: str
     status: Status = Field(
-        description="queued (waits for the user's running backtest), running, finished (has "
+        description="queued (waits for the user's running backtest or a free run slot), "
+        "running, finished (has "
         "results) or failed (has an error, also when cancelled before it ran)"
     )
     ended: bool = Field(description="finished or failed: it will not change any more")
     queue_position: int | None = Field(
-        description="While queued: 1 starts next, when the running one ends"
+        description="While queued: 1 starts next of the user's backtests, when their running "
+        "one ended and a run slot is free"
     )
     error: str | None = Field(description="What went wrong and what to do, for a failed one")
     created_at: datetime
@@ -96,7 +128,27 @@ class BacktestStatusResult(BaseModel):
     finished_at: datetime | None
     duration_s: float | None = Field(description="Seconds it ran, the wait in the queue left out")
     steps: list[StepOut]
+    eta_s: float | None = Field(
+        description="About how many seconds until it ends: its place in the queue and its run, "
+        "each run as long as the median of the user's recent runs, the wait for a free run "
+        "slot left out; null once ended, for another account's backtest, and before any of "
+        "the user's backtests finished"
+    )
     url: str = Field(description="The backtest's page in the app, to show the user")
+
+
+class BacktestWaitResult(BacktestStatusResult):
+    """Where the backtest waited for stands; with `ids`, the one that decided the answer (the
+    first that ended for `until` any, the first still going for `until` all, else the first),
+    and each one in `backtests`."""
+
+    done: bool = Field(
+        description="The wait is over: the backtest ended, or with `ids` any or all of them "
+        "(`until`); false when `timeout_s` passed first"
+    )
+    backtests: list[BacktestStatusResult] | None = Field(
+        description="With `ids`: where each stands, in the order given; null with `backtest_id`"
+    )
 
 
 class Author(BaseModel):
@@ -114,10 +166,28 @@ class BacktestSummary(BaseModel):
     public: bool = Field(description="Published in Experiments")
     queue_position: int | None
     error: str | None
+    sweep_id: str | None = Field(
+        description="The sweep it was started in (get_sweep); null for one started alone and "
+        "for another account's"
+    )
     created_at: datetime
     finished_at: datetime | None
     duration_s: float | None
     url: str = Field(description="The backtest's page in the app, to show the user")
+
+
+class ComparedBacktestOut(ComparedBacktest):
+    url: str = Field(description="The backtest's page in the app, to show the user")
+
+
+class CompareResult(CompareOut):
+    """Backtests side by side, in the order asked for, each with its page in the app."""
+
+    backtests: list[ComparedBacktestOut]
+    url: str | None = Field(
+        description=f"The app's Compare page with these backtests side by side, to show the "
+        f"user; null for one, or for more than {COMPARE_PAGE_MAX}, which the page does not show"
+    )
 
 
 class ModelOut(BaseModel):
@@ -206,8 +276,12 @@ class BacktestResult(BaseModel):
     benchmark_returns: dict[str, float | None] = Field(
         description="Each benchmark's total return, by its ID"
     )
-    trades: TradesPage | None
-    equity: EquityOut | None
+    trades: TradesPage | None = Field(
+        description="A page of its trades, once finished and asked for (`trades_per_page`)"
+    )
+    equity: EquityOut | None = Field(
+        description="Its equity curve, once finished and asked for (`equity_points`)"
+    )
 
 
 # --- Helpers ----------------------------------------------------------------------------------
@@ -221,11 +295,9 @@ async def _runs(call: ToolCall) -> AsyncIterator[BacktestRuns]:
             yield backtest_runs(call.state, db)
 
 
-def _url(call: ToolCall, backtest_id: str) -> str:
-    return f"{call.settings.public_url}/backtests/{backtest_id}"
-
-
-def _status(call: ToolCall, header: BacktestHeader) -> BacktestStatusResult:
+def _status(
+    call: ToolCall, header: BacktestHeader, eta_s: float | None = None
+) -> BacktestStatusResult:
     return BacktestStatusResult(
         id=header.id,
         number=header.number,
@@ -249,7 +321,8 @@ def _status(call: ToolCall, header: BacktestHeader) -> BacktestStatusResult:
             )
             for step in header.steps
         ],
-        url=_url(call, header.id),
+        eta_s=eta_s,
+        url=backtest_url(call, header.id),
     )
 
 
@@ -258,29 +331,64 @@ async def _header(call: ToolCall, backtest_id: str) -> BacktestHeader:
         return await runs.header(call.user.id, backtest_id)
 
 
+async def _statuses(call: ToolCall, ids: Sequence[str]) -> list[BacktestStatusResult]:
+    """Where each of the backtests stands, from their rows alone, in a session of its own."""
+    async with _runs(call) as runs:
+        standings = await runs.statuses(call.user.id, ids)
+    return [_status(call, standing.header, standing.eta_s) for standing in standings]
+
+
+def _wanted(backtest_id: str | None, ids: list[str] | None) -> list[str]:
+    """The backtests to wait for: ``backtest_id`` or ``ids`` (once each), not both."""
+    if (backtest_id is None) == (ids is None):
+        raise ProblemError(
+            422,
+            "validation",
+            "Invalid request",
+            "Give either backtest_id or ids, the backtests to wait for.",
+        )
+    return [backtest_id] if backtest_id is not None else list(dict.fromkeys(ids or []))
+
+
+def _decided(
+    statuses: Sequence[BacktestStatusResult], until: Literal["any", "all"]
+) -> tuple[BacktestStatusResult, bool]:
+    """The backtest the answer is about, and whether the wait is over."""
+    if until == "any":
+        ended = [status for status in statuses if status.ended]
+        return (ended[0], True) if ended else (statuses[0], False)
+    going = [status for status in statuses if not status.ended]
+    return (going[0], False) if going else (statuses[0], True)
+
+
 def equity_rows(drawdown: Sequence[float], points: int = EQUITY_POINTS) -> list[int]:
     """The rows of a series of ``len(drawdown)`` rows to show at most ``points`` of: evenly
-    spaced, the first and the last, and the deepest point of the drawdown."""
+    spaced, the first and the last, and the deepest point of the drawdown (only the last of
+    one point, the first and the last of two)."""
     count = len(drawdown)
     if count <= points:
         return list(range(count))
+    if points <= 2:
+        return [0, count - 1][-points:]
     spaced = {round(i * (count - 1) / (points - 2)) for i in range(points - 1)}
     deepest = min(range(count), key=drawdown.__getitem__)
     return sorted(spaced | {deepest})
 
 
 def _rounded(values: Sequence[float | None], rows: Sequence[int]) -> list[float]:
-    return [round(float(values[row] or 0.0), _DECIMALS) for row in rows]
+    # A value that is not a number (null in the document) reads as 0.
+    picked = np.asarray([values[row] for row in rows], dtype=np.float64)
+    return [round(value, _DECIMALS) for value in np.nan_to_num(picked, nan=0.0).tolist()]
 
 
-def _equity(series: dict[str, Any]) -> EquityOut:
+def _equity(series: dict[str, Any], points: int) -> EquityOut:
     columns = series["columns"]
-    rows = equity_rows(columns["drawdown"])
+    rows = equity_rows(columns["drawdown"], points)
     return EquityOut(
         points=len(rows),
         rows=series["count"],
         resolution=series["resolution"],
-        ts=[columns["ts"][row] for row in rows],
+        ts=[int(columns["ts"][row]) for row in rows],
         equity=_rounded(columns["equity"], rows),
         drawdown=_rounded(columns["drawdown"], rows),
         benchmarks={key: _rounded(line, rows) for key, line in series["benchmarks"].items()},
@@ -288,9 +396,15 @@ def _equity(series: dict[str, Any]) -> EquityOut:
 
 
 def _trades(trades: dict[str, Any], page: int, per_page: int) -> TradesPage:
-    columns = trades["columns"]
     count = trades["count"]
     first = (page - 1) * per_page
+    # The page's rows of each column as Python values (the stored columns are NumPy arrays).
+    columns = {
+        name: list(values[first : first + per_page])
+        if isinstance(values, list)
+        else values[first : first + per_page].tolist()
+        for name, values in trades["columns"].items()
+    }
     items = [
         TradeOut(
             open_ts=columns["open_ts"][row],
@@ -303,7 +417,7 @@ def _trades(trades: dict[str, Any], page: int, per_page: int) -> TradesPage:
             exit_reason=columns["exit_reason"][row],
             candles_held=columns["candles_held"][row],
         )
-        for row in range(first, min(first + per_page, count))
+        for row in range(min(per_page, max(count - first, 0)))
     ]
     return TradesPage(
         page=page,
@@ -335,10 +449,60 @@ def _setup(document: dict[str, Any]) -> SetupOut:
     )
 
 
+# What the widget draws of a backtest of a comparison, and of the one backtest of get_backtest.
+_COMPARED_CURVE = frozenset({"id", "equity"})
+_BACKTEST_CURVES = frozenset({"id", "equity", "drawdown", "buy_and_hold"})
+
+
+def _curves(
+    compared: CompareOut, fields: frozenset[str] = _COMPARED_CURVE, shown: int = COMPARE_PAGE_MAX
+) -> dict[str, Any]:
+    """The curves of the first `shown` backtests of a comparison on its times, as the widget
+    draws them."""
+    return {
+        "times": compared.times,
+        "backtests": [
+            backtest.model_dump(include=set(fields)) for backtest in compared.backtests[:shown]
+        ],
+    }
+
+
+async def _backtest_curves(call: ToolCall, backtest_id: str) -> dict[str, Any] | None:
+    """The widget's chart of a finished backtest: its equity, drawdown and buy and hold at
+    ``CURVE_POINTS`` times, from the small curves its run stored for comparisons (as the
+    Compare page draws them), not from its whole series; None for one that has none (test
+    data without a document)."""
+    try:
+        async with _runs(call) as runs:
+            compared = await experiments.compare_backtests(
+                runs, call.user.id, [backtest_id], curve_points=CURVE_POINTS, setup_mode="full"
+            )
+    except ProblemError:
+        return None
+    return _curves(compared, _BACKTEST_CURVES, shown=1)
+
+
+def _without_curves(compared: CompareOut) -> CompareOut:
+    """The comparison as ``curve_points`` 0 answers it: no times and no curves."""
+    empty = {"equity": None, "drawdown": None, "buy_and_hold": None}
+    return compared.model_copy(
+        update={
+            "times": [],
+            "backtests": [backtest.model_copy(update=empty) for backtest in compared.backtests],
+        }
+    )
+
+
 def backtest_result(
-    document: dict[str, Any], url: str, *, trades_page: int, trades_per_page: int
+    document: dict[str, Any],
+    url: str,
+    *,
+    trades_page: int = 1,
+    trades_per_page: int = 0,
+    equity_points: int = 0,
 ) -> BacktestResult:
-    """The compact answer of get_backtest from the light result document."""
+    """The compact answer of get_backtest from the light result document: a page of trades
+    only with ``trades_per_page`` and the equity only with ``equity_points``."""
     header, data, results = document["backtest"], document["data"], document["results"]
     return BacktestResult(
         backtest=BacktestSummary(
@@ -350,6 +514,7 @@ def backtest_result(
             public=header["public"],
             queue_position=header["queue_position"],
             error=header["error"],
+            sweep_id=header.get("sweep_id"),
             created_at=header["created_at"],
             finished_at=header["finished_at"],
             duration_s=header["duration_s"],
@@ -363,9 +528,11 @@ def backtest_result(
         if results is None
         else {key: value["total_return"] for key, value in results["benchmarks"].items()},
         trades=None
-        if results is None
+        if results is None or trades_per_page == 0
         else _trades(results["trades"], trades_page, trades_per_page),
-        equity=None if results is None else _equity(results["series"]),
+        equity=None
+        if results is None or equity_points == 0
+        else _equity(results["series"], equity_points),
     )
 
 
@@ -388,15 +555,10 @@ async def validate_backtest(
     execution: Executions,
     benchmarks: Benchmarks,
 ) -> BacktestCheck:
-    """Checks a backtest setup without starting anything: the same checks as start_backtest
-    (the model is the user's and has a manifest, the instrument fits the model, the period with
-    the candles the model needs before it fits the market data, the queue has room). Call it
-    before start_backtest when you built the setup yourself.
-
-    Answers what would run (the model, the instrument, the model's timeframe and session, the
-    warm-up) and whether it would wait in the user's queue; a setup that fails a check answers
-    the problem start_backtest would, with what to change in its detail. The arguments are
-    those of start_backtest."""
+    """Runs the checks of start_backtest, with its arguments, without starting anything: the
+    model has a manifest, the instrument fits it, the period has the candles it needs, the
+    queue has room. Call it first when you built the setup yourself. A failing check answers
+    the problem start_backtest would."""
     call = tool_call(ctx)
     body = BacktestIn(
         model=model, data=data, decision=decision, execution=execution, benchmarks=benchmarks
@@ -405,7 +567,7 @@ async def validate_backtest(
         return await runs.check(call.user.id, body)
 
 
-async def start_backtest(
+async def start_backtest(  # noqa: PLR0913 (the setup's groups)
     model: ModelRef,
     data: DataIn,
     *,
@@ -413,29 +575,113 @@ async def start_backtest(
     decision: Decisions,
     execution: Executions,
     benchmarks: Benchmarks,
+    idempotency_key: IdempotencyKey = None,
 ) -> BacktestStatusResult:
-    """Starts a backtest of one of the user's models on one instrument and period. One
-    backtest of a user runs at a time and up to 20 more wait in the queue, so it starts
-    running at once or waits (queued, with its place).
+    """Starts a backtest of one of the user's models (with a manifest) on one instrument and
+    period: it runs at once or waits in the user's queue (one runs at a time, 20 wait). It
+    answers at once: follow it with wait_for_backtest, then get_backtest.
 
-    The arguments are the body of POST /api/v1/backtests: model.id (one of the user's models
-    with a manifest), data.instrument.id (<market>:<symbol>: a stock for a model of US trading
-    hours, a crypto pair for one of 24/7) and data.period ([start, end) in UTC epoch seconds),
-    and optionally decision (how the predictions become a signal: threshold 0 by default),
-    execution (fills, stop loss, position size, fees and slippage in basis points) and
-    benchmarks (buy and hold of the instrument, or of SPY, QQQ or DIA for a stock). The `setup`
-    get_backtest answers has this shape, so a backtest can be run again with changes.
+    The instrument: a stock for a model of US trading hours, a crypto pair for one of 24/7.
+    decision is a threshold of 0 by default. get_backtest's `setup` has this shape, to run it
+    again with changes.
 
-    Answers its ID and status at once; the run takes from seconds to minutes. Then call
-    wait_for_backtest with the ID until it has ended, and get_backtest for the results."""
+    Units: execution.stop_loss and position_size are fractions (0.07 is 7 %), fee_bps and
+    slippage_bps basis points (10 is 0.1 %), not Settings' percent. get_backtest_defaults
+    answers the user's defaults in these units too: pass them through for every setting the
+    user does not name. Settings: get_docs page engine; results: get_docs page metrics."""
     call = tool_call(ctx)
     body = BacktestIn(
         model=model, data=data, decision=decision, execution=execution, benchmarks=benchmarks
     )
-    async with _runs(call) as runs:
-        _, content = await runs.start(call.user.id, body)
-    header = BacktestHeader.model_validate(json.loads(content)["backtest"])
-    return _status(call, header)
+
+    async def started(committed: Committed) -> bytes:
+        async with _runs(call) as runs:
+            _, content = await runs.start(call.user.id, body, committed)
+        header = BacktestHeader.model_validate(json.loads(content)["backtest"])
+        try:
+            return await again(header.id)
+        except DATABASE_ERRORS:
+            # Stored and scheduled already: answered as the start saw it, without the estimate.
+            return _status(call, header).model_dump_json().encode()
+
+    async def again(backtest_id: str) -> bytes:
+        async with _runs(call) as runs:
+            (standing,) = await runs.statuses(call.user.id, [backtest_id])
+        return _status(call, standing.header, standing.eta_s).model_dump_json().encode()
+
+    with backtest_problems():
+        content, _ = await idempotent(
+            call.state.redis,
+            user_id=call.user.id,
+            kind="start_backtest",
+            key=idempotency_key,
+            body=body.model_dump_json().encode(),
+            answer=started,
+            rebuild=again,
+        )
+    return BacktestStatusResult.model_validate_json(content)
+
+
+# How far into its fifth a step that reports nothing of its own may get by the clock: the
+# rest waits for the step to end.
+_STEP_BY_TIME_MAX = 0.9
+
+
+def progress_of(status: BacktestStatusResult, now: datetime | None = None) -> float:
+    """How far the backtest is, 0 to 1, from where it stands: the user's queue is the first
+    fifth, nearer its end the nearer its turn; then its steps (``run_progress``); 1 once it
+    ended. The model and the trades report nothing while they run, so within their fifth it
+    moves by the clock: the share of its run that went by, as `eta_s` estimates the run."""
+    if status.ended:
+        return 1.0
+    if status.status == "queued":
+        position = status.queue_position
+        return 1 / (position + 1) / STAGES if position else 0.0
+    steps = run_progress(status.steps)
+    running = next((step for step in status.steps if step.state == "running"), None)
+    if running is None or running.id not in {"model", "trades"}:
+        return steps
+    if status.eta_s is None or status.started_at is None:
+        return steps
+    elapsed = ((now or datetime.now(UTC)) - status.started_at).total_seconds()
+    if elapsed <= 0:
+        return steps
+    by_time = (1 + (STAGES - 1) * elapsed / (elapsed + status.eta_s)) / STAGES
+    return min(max(steps, by_time), steps + _STEP_BY_TIME_MAX / STAGES)
+
+
+def stage_of(status: BacktestStatusResult) -> str:
+    """Where the backtest is, in words, for the progress' message."""
+    if status.status == "queued":
+        position = status.queue_position
+        return f"queued, number {position} in the queue" if position else "queued"
+    running = next((step for step in status.steps if step.state == "running"), None)
+    if status.ended or running is None:
+        return status.status
+    if running.id != "candles":
+        return _DOING[running.id]
+    stage = "loading candles"
+    if running.total:
+        stage += f", {running.loaded or 0} of {running.total} chunks"
+    if running.waiting_until is not None:
+        stage += ", waiting for the data source's limit"
+    return stage
+
+
+def wait_progress(
+    statuses: Sequence[BacktestStatusResult],
+    shown: BacktestStatusResult,
+    until: Literal["any", "all"],
+) -> tuple[float, float, str]:
+    """The progress of a wait, in percent of 100, and its message: one backtest's, or with
+    several the mean of theirs (`until` all) or the furthest (any)."""
+    parts = [progress_of(status) for status in statuses]
+    part = max(parts) if until == "any" else sum(parts) / len(parts)
+    message = f"{shown.name} (#{shown.number}): {stage_of(shown)}"
+    if len(statuses) > 1:
+        ended = sum(status.ended for status in statuses)
+        message = f"{ended} of {len(statuses)} ended; {message}"
+    return round(100 * part, 1), 100.0, message
 
 
 async def get_backtest_status(
@@ -443,63 +689,101 @@ async def get_backtest_status(
     *,
     ctx: Context,
 ) -> BacktestStatusResult:
-    """Where a backtest stands right now: queued with its place in the queue, running with
-    its steps (loading candles, waiting for the worker, the model, the trades), finished or
-    failed with the error. It does not wait; to wait for the end, call wait_for_backtest."""
+    """Where a backtest stands now (its place in the queue, its steps or its error), without
+    waiting; to wait: wait_for_backtest."""
     call = tool_call(ctx)
     return _status(call, await _header(call, backtest_id))
 
 
 async def wait_for_backtest(
-    backtest_id: BacktestId,
+    backtest_id: Annotated[
+        str | None,
+        Field(description="Or give `ids`", examples=["bt_7f3k2m9qx4"]),
+    ] = None,
     timeout_s: Annotated[
         int,
-        Field(
-            ge=1,
-            le=WAIT_MAX_S,
-            description=f"How long to wait at most, in seconds (up to {WAIT_MAX_S})",
-        ),
+        Field(ge=1, le=WAIT_MAX_S, description="Seconds to wait at most"),
     ] = WAIT_DEFAULT_S,
+    ids: Annotated[
+        list[str] | None,
+        Field(
+            min_length=1,
+            max_length=WAIT_IDS_MAX,
+            description="Instead of `backtest_id`",
+        ),
+    ] = None,
+    until: Annotated[
+        Literal["any", "all"],
+        Field(description="With `ids`"),
+    ] = "all",
     *,
     ctx: Context,
-) -> BacktestStatusResult:
-    """Waits until a backtest has ended (finished or failed) or `timeout_s` seconds passed,
-    then answers where it stands. When `ended` is false, call it again: a backtest can wait in
-    the queue and run for several minutes. Once it finished, read it with get_backtest."""
+) -> BacktestWaitResult:
+    """Waits until a backtest ended or `timeout_s` passed, then answers where it stands; with
+    `ids`, several at once, until any or all ended. Not `done`: call it again (a backtest can
+    wait and run for minutes; `eta_s` says about how long). Then get_backtest."""
     call = tool_call(ctx)
+    wanted = _wanted(backtest_id, ids)
     deadline = anyio.current_time() + timeout_s
-    while True:
-        header = await _header(call, backtest_id)
-        left = deadline - anyio.current_time()
-        if header.status.value in _ENDED or left <= 0:
-            return _status(call, header)
-        await anyio.sleep(min(POLL_S, left))
+    progress = Progress(ctx)
+    with runner_of(call).watch(wanted) as changed:
+        while True:
+            changed.clear()
+            statuses = await _statuses(call, wanted)
+            shown, done = _decided(statuses, until)
+            await progress.report(*wait_progress(statuses, shown, until))
+            left = deadline - anyio.current_time()
+            if done or left <= 0:
+                break
+            with anyio.move_on_after(min(POLL_S, left)):
+                await changed.wait()
+    return BacktestWaitResult(
+        **shown.model_dump(), done=done, backtests=None if ids is None else statuses
+    )
 
 
 async def get_backtest(
     backtest_id: BacktestId,
     trades_page: Annotated[int, Field(ge=1, description="The page of trades, from 1")] = 1,
     trades_per_page: Annotated[
-        int, Field(ge=1, le=TRADES_PER_PAGE_MAX, description="Trades per page")
-    ] = 50,
+        int,
+        Field(
+            ge=0,
+            le=TRADES_PER_PAGE_MAX,
+            description="0 for no trades",
+        ),
+    ] = 0,
+    equity_points: Annotated[
+        int,
+        Field(
+            ge=0,
+            le=EQUITY_POINTS,
+            description="0 for no curve",
+        ),
+    ] = 0,
     *,
     ctx: Context,
 ) -> BacktestResult:
-    """Reads a backtest, the user's own or one another account published: its status, its
-    setup (which can be sent to start_backtest again, changed or not) and, once it finished,
-    the 12 statistics, the benchmarks' returns, one page of its trades (oldest first) and the
-    equity curve in at most 200 points, with a link to its page in the app.
-
-    Call it after wait_for_backtest answered finished, or for a backtest the user names. A
-    page of trades past the last one is empty."""
+    """Reads a backtest, the user's own or a published one: status, setup (start_backtest
+    takes it back) and, once finished, the 12 statistics and the benchmarks' returns. Trades:
+    `trades_per_page` (such as 50) and `trades_page`; the equity curve: `equity_points`.
+    Statistics: get_docs page metrics; a failed one's problem: get_docs page api/errors."""
     call = tool_call(ctx)
     async with _runs(call) as runs:
-        _, content = await runs.document(call.user.id, backtest_id, light=True)
+        _, document = await runs.light(
+            call.user.id, backtest_id, series=equity_points > 0, trades=trades_per_page > 0
+        )
+    # A client that shows the widget gets the curves for its chart, not for the model.
+    if document["results"] is not None and shows_widget(ctx):
+        chart = await _backtest_curves(call, backtest_id)
+        if chart is not None:
+            attach(ctx, chart)
     return backtest_result(
-        json.loads(content),
-        _url(call, backtest_id),
+        document,
+        backtest_url(call, backtest_id),
         trades_page=trades_page,
         trades_per_page=trades_per_page,
+        equity_points=equity_points,
     )
 
 
@@ -509,22 +793,58 @@ async def compare_backtests(
         Field(
             min_length=1,
             max_length=COMPARE_MAX,
-            description=f"1 to {COMPARE_MAX} backtest IDs: the user's own and published ones",
+            description="The user's own and published ones",
             examples=[["bt_7f3k2m9qx4", "bt_t9n8v7d6a5"]],
         ),
     ],
+    curve_points: Annotated[
+        int,
+        Field(
+            ge=0,
+            le=CURVE_POINTS,
+            description="0 for no curves",
+        ),
+    ] = 0,
+    setup_mode: Annotated[
+        SetupMode,
+        Field(
+            description="diff: what all share once in `shared_setup`, each `setup` only its "
+            "fields of `differs`"
+        ),
+    ] = "full",
     *,
     ctx: Context,
-) -> CompareOut:
-    """Compares backtests side by side, as the app's Compare page does: each of the 12
-    statistics of each with the best and the worst marked (values that read the same count as
-    equal), their setups and which setup fields differ, and the equity, drawdown and buy and
-    hold of each on one time axis of at most 200 times. Use it to pick the best of several
-    runs; it reads only what each stored, so it is quick. A running or failed backtest is
-    listed with its status and no values."""
+) -> CompareResult:
+    """Compares backtests side by side, as the app's Compare page does: the 12 statistics
+    with the best and the worst marked, and the setups with the fields that differ (a running
+    or failed one has no values). `curve_points` adds the curves; with many similar backtests,
+    `setup_mode="diff"` gives their shared setup once.
+
+    max_drawdown is 0 or below and a smaller fall is better: -0.05 is better than -0.20; the
+    marks account for it. Statistics: get_docs page metrics; ranks: get_docs page sweeps."""
     call = tool_call(ctx)
+    # A client that shows the widget gets the curves of those it draws, not for the model; the
+    # widget draws the ones the model asked for (`curve_points`) as they are.
+    chart = curve_points == 0 and shows_widget(ctx)
     async with _runs(call) as runs:
-        return await experiments.compare_backtests(runs, call.user.id, check_ids(ids))
+        compared = await experiments.compare_backtests(
+            runs,
+            call.user.id,
+            check_ids(ids),
+            curve_points=CURVE_POINTS if chart else curve_points,
+            setup_mode=setup_mode,
+        )
+    if chart:
+        attach(ctx, _curves(compared))
+        compared = _without_curves(compared)
+    return CompareResult(
+        **compared.model_dump(exclude={"backtests"}),
+        backtests=[
+            ComparedBacktestOut(**backtest.model_dump(), url=backtest_url(call, backtest.id))
+            for backtest in compared.backtests
+        ],
+        url=compare_url(call, [backtest.id for backtest in compared.backtests]),
+    )
 
 
 # --- Examples for the tool reference ----------------------------------------------------------
@@ -563,6 +883,7 @@ _QUEUED = BacktestStatusResult(
     finished_at=None,
     duration_s=None,
     steps=_steps("pending", "pending", "pending", "pending"),
+    eta_s=324.0,
     url=_URL,
 )
 _FINISHED = _QUEUED.model_copy(
@@ -573,6 +894,7 @@ _FINISHED = _QUEUED.model_copy(
         "started_at": datetime(2026, 11, 2, 9, 31, tzinfo=UTC),
         "finished_at": datetime(2026, 11, 2, 9, 33, 42, tzinfo=UTC),
         "duration_s": 162.0,
+        "eta_s": None,
         "steps": [
             step.model_copy(update={"duration_s": seconds})
             for step, seconds in zip(
@@ -586,6 +908,7 @@ _RUNNING = _QUEUED.model_copy(
         "status": "running",
         "queue_position": None,
         "started_at": datetime(2026, 11, 2, 9, 31, tzinfo=UTC),
+        "eta_s": 150.0,
         "steps": [
             StepOut(
                 id="candles",
@@ -645,6 +968,7 @@ _RESULT = BacktestResult(
         public=False,
         queue_position=None,
         error=None,
+        sweep_id=None,
         created_at=_CREATED,
         finished_at=datetime(2026, 11, 2, 9, 33, 42, tzinfo=UTC),
         duration_s=162.0,
@@ -708,7 +1032,7 @@ _RESULT = BacktestResult(
         benchmarks={"bh": [1.0, 1.1213, 1.0544]},
     ),
 )
-_COMPARE = CompareOut.model_validate(
+_COMPARE = CompareResult.model_validate(
     {
         "backtests": [
             {
@@ -724,6 +1048,7 @@ _COMPARE = CompareOut.model_validate(
                 "equity": [0.0, 0.0812],
                 "drawdown": [0.0, 0.0],
                 "buy_and_hold": [0.0, 0.0544],
+                "url": _URL,
             },
             {
                 "id": "bt_t9n8v7d6a5",
@@ -738,6 +1063,7 @@ _COMPARE = CompareOut.model_validate(
                 "equity": [0.0, -0.031],
                 "drawdown": [0.0, -0.05],
                 "buy_and_hold": [0.0, 0.0544],
+                "url": "https://app.candlestack.tech/backtests/bt_t9n8v7d6a5",
             },
         ],
         "metrics": [
@@ -751,14 +1077,31 @@ _COMPARE = CompareOut.model_validate(
         ],
         "differs": ["decision.rule.limit"],
         "times": [_START, _END - 1_800],
+        "url": f"https://app.candlestack.tech/backtests/compare?ids={_ID},bt_t9n8v7d6a5",
     }
 )
+
+
+def _get_backtest_cost(arguments: dict[str, Any]) -> int:
+    """``get_backtest``'s cost: its default answer (setup, metrics, benchmark returns) is read
+    from stored data and costs 1; asking for trades or equity points costs ``HEAVY``."""
+    asks_more = arguments.get("trades_per_page") or arguments.get("equity_points")
+    return HEAVY if asks_more else 1
+
 
 TOOLS = (
     ToolSpec(
         validate_backtest,
         name="validate_backtest",
         title="Check a backtest setup",
+        details="""
+            The checks: the model is the user's and has a manifest, the instrument fits the
+            model, the period with the candles the model needs before it fits the market data,
+            the queue has room. Answers what would run (the model, the instrument, the model's
+            timeframe and session, the warm-up) and whether it would wait in the user's queue;
+            the problem of a failing check says what to change in its detail. What each setting
+            does to the trades: get_docs page engine (sections Decision steps and Execution
+            settings).""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(arguments=_SETUP_ARGUMENTS, result=_CHECK),
@@ -767,22 +1110,51 @@ TOOLS = (
         start_backtest,
         name="start_backtest",
         title="Start a backtest",
+        details="""
+            One backtest of a user runs at a time and up to 20 more wait in the queue, and a
+            few run at once over all users, taking turns; a queued one answers its place and
+            `eta_s`. The run takes from seconds to minutes.
+
+            The arguments are the body of POST /api/v1/backtests: model.id (one of the user's
+            models with a manifest), data.instrument.id (<market>:<symbol>) and data.period
+            ([start, end) in UTC epoch seconds), and optionally decision (how the predictions
+            become a signal), execution (fills, stop loss, position size, fees and slippage) and
+            benchmarks (buy and hold of the instrument, or of SPY, QQQ or DIA for a stock).
+            get_backtest_defaults gives the user's defaults as `period`, `decision`, `execution`
+            and `benchmark_instrument`.
+
+            Pass an `idempotency_key` (a UUID you make) to call it again safely after a timeout:
+            the same call with the same key within 24 hours answers the first backtest instead
+            of starting another. Read the engine and metrics pages before you explain a
+            setting or a result.""",
         scopes=(Scope.backtests,),
         annotations=changes(destructive=False, idempotent=False),
         example=Example(arguments=_SETUP_ARGUMENTS, result=_QUEUED),
+        cost=HEAVY,
     ),
     ToolSpec(
         wait_for_backtest,
         name="wait_for_backtest",
         title="Wait for a backtest",
+        details="""
+            A backtest has ended when it finished or failed. `timeout_s` is at most 60 seconds;
+            `ids` takes up to 20 backtests, and `backtests` then has each one. A client that
+            asks for progress gets where it stands while it waits.""",
         scopes=(Scope.read,),
         annotations=reads(),
-        example=Example(arguments={"backtest_id": _ID, "timeout_s": 50}, result=_FINISHED),
+        example=Example(
+            arguments={"backtest_id": _ID, "timeout_s": 50},
+            result=BacktestWaitResult(**_FINISHED.model_dump(), done=True, backtests=None),
+        ),
+        progress=True,
     ),
     ToolSpec(
         get_backtest_status,
         name="get_backtest_status",
         title="Backtest status",
+        details="""
+            Queued with its place in the queue, running with its steps (loading candles, waiting
+            for the worker, the model, the trades), finished, or failed with the error.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(arguments={"backtest_id": _ID}, result=_RUNNING),
@@ -791,16 +1163,43 @@ TOOLS = (
         get_backtest,
         name="get_backtest",
         title="Read a backtest",
+        details="""
+            The light answer, without trades and curve, is the default. Trades come oldest
+            first, up to 500 a page; a page past the last one is empty. The equity curve has up
+            to 200 points. Call it after wait_for_backtest answered finished, or for a backtest
+            the user names; it reads what the run stored, so it is quick. It links the
+            backtest's page in the app.""",
         scopes=(Scope.read,),
         annotations=reads(),
-        example=Example(arguments={"backtest_id": _ID}, result=_RESULT),
+        example=Example(
+            arguments={"backtest_id": _ID, "trades_per_page": 50, "equity_points": 3},
+            result=_RESULT,
+        ),
+        cost=_get_backtest_cost,
+        meta=tool_meta("Reading the backtest", "Read the backtest"),
     ),
     ToolSpec(
         compare_backtests,
         name="compare_backtests",
         title="Compare backtests",
+        details="""
+            1 to 20 backtests. Use it to pick the best of several runs; it reads only what each
+            stored, so it is quick. Values that read the same count as equal. Each backtest has
+            its `url`, and `url` is the app's Compare page with 2 to 4 of them: give it to the
+            user to see the curves and the table.
+
+            `curve_points` (up to 200) gives the equity, drawdown and buy and hold of each on one
+            time axis; without it the curves are null and `times` empty. setup_mode full gives
+            each backtest's whole setup.
+
+            max_drawdown's best value is the highest one; its `better` says `lower` as in a
+            lower fall, by its size. How sweeps and comparisons rank: get_docs page sweeps.""",
         scopes=(Scope.read,),
         annotations=reads(),
-        example=Example(arguments={"ids": [_ID, "bt_t9n8v7d6a5"]}, result=_COMPARE),
+        example=Example(
+            arguments={"ids": [_ID, "bt_t9n8v7d6a5"], "curve_points": 2}, result=_COMPARE
+        ),
+        cost=HEAVY,
+        meta=tool_meta("Comparing the backtests", "Compared the backtests"),
     ),
 )

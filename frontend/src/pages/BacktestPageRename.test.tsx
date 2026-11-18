@@ -3,7 +3,7 @@ import { cleanup, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ARSEN, backtest, backtestDocument, problem, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, backtest, backtestDocument, problem, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
 import { candles } from '@/test/candles';
 import { charts } from '@/test/lightweightCharts';
@@ -37,7 +37,7 @@ type Answers = Parameters<typeof stubApi>[0];
 
 async function openPage(answer: Answers[string], answers: Answers = {}) {
   const fetch = stubApi({
-    ...sessionWithPreferences(ARSEN),
+    ...sessionWithPreferences(ADA),
     [DOCUMENT]: answer,
     [CANDLES]: { status: 200, body: candles(TIMES) },
     ...answers,

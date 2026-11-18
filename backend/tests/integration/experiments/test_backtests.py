@@ -2,11 +2,15 @@
 search, filters, sorts, pages and counts, starring, the Dashboard, the models' usage, and what
 happens to backtests when their model or their account goes."""
 
+import asyncio
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import event
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 
 pytestmark = pytest.mark.integration
 
@@ -168,6 +172,69 @@ def test_search_finds_the_models_current_name(ada) -> None:
     assert numbers(ada.backtests(q="original")) == []
 
 
+def test_search_matches_within_one_field_not_across_them(ada) -> None:
+    ada.backtest(1, symbols=("MSFT", "AAPL"), model_name="lstm.keras")
+    ada.backtest(2, name="Mine", generated_name="Ember Lynx")
+
+    # The text the trigram index holds runs the fields together (#1, the names, the model's
+    # name, the symbols as JSON); the search does not.
+    for query in ("A lstm", 'keras ["MSFT', 'MSFT", "AAPL', "Mine Ember", "Ember"):
+        assert numbers(ada.backtests(q=query)) == [], query
+    assert numbers(ada.backtests(q="Backtest A")) == [1]
+    assert numbers(ada.backtests(q="mine")) == [2]
+
+
+async def _explain(database_url: str, statement: str, parameters: Any) -> str:
+    engine = create_async_engine(database_url, poolclass=NullPool)
+    try:
+        async with engine.connect() as connection:
+            result = await connection.exec_driver_sql(f"EXPLAIN {statement}", parameters)
+            return "\n".join(row[0] for row in result)
+    finally:
+        await engine.dispose()
+
+
+def test_the_search_looks_the_backtests_up_by_the_trigram_index(
+    ada, sql, app, database_url: str
+) -> None:
+    model_id = ada.model("renamed.keras")
+    ada.backtest(1, symbols=("MSFT",))
+    # 1999 more like #1, every hundredth of the renamed model.
+    sql(
+        "INSERT INTO backtests (id, user_id, number, status, instruments, representation, "
+        "model_id, model_name, model_framework, setup, generated_name, created_at) "
+        "SELECT 'bt_' || lpad(n::text, 10, '0'), user_id, n, status, instruments, "
+        "representation, CASE WHEN n % 100 = 0 THEN :model_id END, model_name, "
+        "model_framework, setup, 'Backtest ' || n, created_at "
+        "FROM backtests, generate_series(2, 2000) n WHERE number = 1",
+        model_id=model_id,
+    )
+    sql(
+        "UPDATE backtests SET instruments = CAST(:aapl AS jsonb) WHERE number = 7",
+        aapl='[{"market": "stock", "symbol": "AAPL"}]',
+    )
+    sql("ANALYZE backtests")
+    sent: list[tuple[str, Any]] = []
+
+    def record(_connection, _cursor, statement, parameters, *_args) -> None:
+        if "ILIKE" in statement and "FROM backtests" in statement:
+            sent.append((statement, parameters))
+
+    engine = app.state.db.engine.sync_engine
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        found = {query: numbers(ada.backtests(q=query)) for query in ("aapl", "renamed")}
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    assert found == {"aapl": [7], "renamed": list(range(2000, 0, -100))[:10]}
+    # Each query as the app sent it (its count and its page, parameters and all) finds its rows
+    # by the index.
+    assert len(sent) == 4
+    for statement, parameters in sent:
+        assert "ix_backtests_search" in asyncio.run(_explain(database_url, statement, parameters))
+
+
 def test_show(ada) -> None:
     ada.backtest(1, starred=True)
     ada.backtest(2, status="failed", starred=True)
@@ -311,6 +378,112 @@ def test_pages_of_the_filtered_backtests(ada) -> None:
     page = ada.backtests(show="starred").json()
 
     assert (page["total"], page["pages"]) == (6, 1)
+
+
+def test_per_page(ada) -> None:
+    for number in range(1, 24):
+        ada.backtest(number)
+
+    page = ada.backtests(per_page=20, page=2).json()
+
+    assert [backtest["number"] for backtest in page["backtests"]] == [3, 2, 1]
+    assert (page["total"], page["pages"]) == (23, 2)
+    for wrong in (0, 101):
+        assert ada.backtests(per_page=wrong).status_code == 422
+
+
+@pytest.fixture
+def varied(ada, sql) -> dict[str, str]:
+    """Backtests that differ in what the filters of the API look at; the model's ID by name."""
+    first, second = ada.model("first.keras"), ada.model("second.keras")
+    sql(
+        "INSERT INTO sweeps (id, user_id, metric, grid, created_at) "
+        "VALUES ('sw_aaaaaaaaaa', :user_id, 'sharpe', '[]', now())",
+        user_id=ada.id,
+    )
+    ada.backtest(1, model_id=first, sharpe=0.5, total_return=0.3, max_drawdown=-0.3)
+    ada.backtest(2, model_id=second, symbols=("MSFT",), timeframe="1h", sharpe=1.5)
+    ada.backtest(3, status="failed", market="crypto", symbols=("BTCUSDT",), representation="kagi")
+    ada.backtest(4, model_id=first, starred=True, max_drawdown=-0.05, published=10, spec={})
+    ada.backtest(5, symbols=("MSFT", "AAPL"), total_return=-0.2, win_rate=0.9)
+    sql("UPDATE backtests SET sweep_id = 'sw_aaaaaaaaaa' WHERE number IN (2, 5)")
+    sql("UPDATE backtests SET status = 'queued' WHERE number = 5")
+    return {"first": first, "second": second}
+
+
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+        ({"status": ["queued", "failed"]}, [5, 3]),
+        ({"status": "finished"}, [4, 2, 1]),
+        ({"sweep_id": "sw_aaaaaaaaaa"}, [5, 2]),
+        ({"instrument": "stock:AAPL"}, [5, 4, 1]),
+        ({"instrument": "Stock:msft"}, [5, 2]),
+        ({"instrument": "crypto:BTCUSDT"}, [3]),
+        ({"timeframe": "1h"}, [2]),
+        ({"representation": "kagi"}, [3]),
+        # #N started N hours after the tests' epoch, 2026-10-01 12:00 UTC.
+        ({"created_after": "2026-10-01T14:00:00Z"}, [5, 4, 3, 2]),
+        ({"created_before": "2026-10-01T14:00:00"}, [1]),
+        ({"created_after": "2026-10-01T14:00:00+01:00"}, [5, 4, 3, 2, 1]),
+        ({"min_sharpe": 1.2}, [2]),
+        ({"min_total_return": 0}, [4, 2, 1]),
+        ({"min_max_drawdown": -0.1}, [5, 4, 2]),
+        ({"starred": "true"}, [4]),
+        ({"starred": "false"}, [5, 3, 2, 1]),
+        ({"public": "true"}, [4]),
+        ({"public": "false"}, [5, 3, 2, 1]),
+        ({"min_sharpe": 0.5, "instrument": "stock:AAPL", "show": "starred"}, [4]),
+    ],
+)
+def test_the_filters_of_the_api(ada, varied, params, expected) -> None:
+    page = ada.backtests(**params)
+
+    assert page.status_code == 200, page.text
+    assert numbers(page) == expected
+    # The panel's counts and models stay those of all the backtests.
+    assert page.json()["counts"]["all"] == 5
+
+
+def test_the_model_id_filter(ada, varied) -> None:
+    assert numbers(ada.backtests(model_id=varied["first"])) == [4, 1]
+    assert numbers(ada.backtests(model_id="mdl_unknown000")) == []
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"instrument": "AAPL"},
+        {"min_max_drawdown": 0.1},
+        {"status": "lost"},
+        {"min_sharpe": "nan"},
+        {"min_total_return": "inf"},
+        {"min_max_drawdown": "-inf"},
+    ],
+)
+def test_a_filter_the_api_cannot_read_is_invalid(ada, params) -> None:
+    response = ada.backtests(**params)
+
+    assert response.status_code == 422
+    assert response.json()["type"] == PROBLEMS + "validation"
+
+
+@pytest.mark.usefixtures("results")
+@pytest.mark.parametrize(
+    ("sort", "order", "expected"),
+    [("win_rate", "desc", [4, 3, 1, 5, 2]), ("sortino", "desc", [1, 4, 5, 3, 2])],
+)
+def test_sort_by_win_rate_and_sortino(ada, sql, sort, order, expected) -> None:
+    sql("UPDATE backtests SET win_rate = number / 10.0 WHERE status = 'finished' AND number <> 4")
+    sql("UPDATE backtests SET win_rate = 0.35 WHERE number = 4")
+    sql(
+        "UPDATE backtests SET stats = jsonb_build_object('sortino', 5 - number) "
+        "WHERE status = 'finished' AND number <> 3"
+    )
+    # A finished backtest whose Sortino ratio is undefined comes last with the failed ones.
+    sql("""UPDATE backtests SET stats = '{"sortino": null}' WHERE number = 3""")
+
+    assert numbers(ada.backtests(sort=sort, order=order)) == expected
 
 
 # --- Starring --------------------------------------------------------------------------------

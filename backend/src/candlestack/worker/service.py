@@ -94,7 +94,8 @@ class Paths:
 
 class JobProcess:
     """Runs one job in a fresh process (``RUNNER``), stopped after ``time_limit`` seconds or
-    at the job's deadline, whichever comes first: past it nobody reads the result."""
+    when the backend stops waiting for it, whichever comes first: past that nobody reads the
+    result. The backend waits the job's ``wait`` from its claim (else until its deadline)."""
 
     def __init__(self, paths: Paths, time_limit: float, command: Sequence[str] = RUNNER) -> None:
         self._paths = paths
@@ -105,7 +106,8 @@ class JobProcess:
         """The job's result; never raises but for cancellation, which stops the process."""
         request = Request(job=job, models_dir=self._paths.models, files_dir=self._paths.files)
         spawned = time.time()
-        limit = min(self._time_limit, max(job.deadline - spawned, 0))
+        waited = max(job.deadline - spawned, 0) if job.wait is None else job.wait
+        limit = min(self._time_limit, waited)
         # A session of its own, so whatever the process started goes with it (_stop_group).
         async with await anyio.open_process(
             self._command,

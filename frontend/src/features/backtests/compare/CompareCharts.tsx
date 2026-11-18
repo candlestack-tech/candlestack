@@ -100,7 +100,6 @@ function draw(pane: Pane, lines: readonly Line[]) {
     }
     return series;
   });
-  pane.chart.timeScale().fitContent();
 }
 
 // What happens on a chart is copied to the other, and the copy is not copied back.
@@ -183,9 +182,16 @@ function useDrawn(panes: RefObject<Pane[]>, lines: readonly Line[]) {
   useEffect(() => {
     latest.current = lines;
   });
+  // Both charts get their lines before either is fitted to them. The fit waits for the chart's next
+  // frame, while the new lines move the view at once and that view is copied to the other chart as
+  // a range, also applied then: fitted first, the other chart's copy came after its fit, and the
+  // copy back undid this one's, so both showed only their last points, 6 px apart (#466).
   useEffect(() => {
     panes.current.forEach((pane) => {
       draw(pane, latest.current);
+    });
+    panes.current.forEach(({ chart }) => {
+      chart.timeScale().fitContent();
     });
   }, [panes, signature]);
   useEffect(() => {

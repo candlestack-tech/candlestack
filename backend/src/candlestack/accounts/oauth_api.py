@@ -294,9 +294,11 @@ async def authorize(
 )
 async def token(request: Request, server: AuthorizationServerDep) -> Response:
     """The token endpoint: trades a code and its PKCE verifier, or a refresh token, for an
-    access token (`csa_...`, an hour) and a new refresh token (`csr_...`, 30 days, works once;
-    bringing a used one again revokes every token of that sign-in). A public client sends its
-    `client_id`; a client with a secret authenticates as it registered."""
+    access token (`csa_...`, an hour) and a new refresh token (`csr_...`, 30 days, works once).
+    A used refresh token brought again within 60 seconds of its use is only refused
+    (`invalid_grant`), as a retry or another session of the client; later, it revokes every token
+    of that sign-in. A public client sends its `client_id`; a client with a secret authenticates
+    as it registered."""
     try:
         tokens = await server.token(await _form(request), request.headers.get("authorization"))
     except OAuthError as error:

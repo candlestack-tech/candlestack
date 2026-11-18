@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Instrument } from '@/api';
-import { ARSEN, problem, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, problem, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 
 vi.mock('lightweight-charts', () => import('@/test/lightweightCharts'));
@@ -48,7 +48,7 @@ const symbols = () =>
 
 describe('InstrumentsPage', () => {
   it('lists what the search finds, with the query in the box and the title', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), [SEARCH]: page([BTC, BTC_EUR], 2) });
+    stubApi({ ...sessionWithPreferences(ADA), [SEARCH]: page([BTC, BTC_EUR], 2) });
     await renderApp('/instruments?q=btc');
     expect(heading()).toBe('Instruments');
     await vi.waitFor(() =>
@@ -59,13 +59,13 @@ describe('InstrumentsPage', () => {
   });
 
   it('says Loading until the list arrives', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), [SEARCH]: () => new Promise(() => {}) });
+    stubApi({ ...sessionWithPreferences(ADA), [SEARCH]: () => new Promise(() => {}) });
     await renderApp('/instruments?q=btc');
     expect(await screen.findByText('Loading instruments…')).toBeDefined();
   });
 
   it('says when nothing matches the search', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), [SEARCH]: page([], 0) });
+    stubApi({ ...sessionWithPreferences(ADA), [SEARCH]: page([], 0) });
     await renderApp('/instruments?q=btc');
     expect(
       await screen.findByText('No instruments match “btc”. Try a symbol like btc or a name like apple.'),
@@ -74,7 +74,7 @@ describe('InstrumentsPage', () => {
 
   it('says why the list cannot load and offers to try again', async () => {
     const fetch = stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       [SEARCH]: problem(500, 'internal', 'Something broke.'),
     });
     await renderApp('/instruments?q=btc');
@@ -88,7 +88,7 @@ describe('InstrumentsPage', () => {
   it('opens a later page of the search from the pager', async () => {
     const many = Array.from({ length: 25 }, (_, i) => ({ ...BTC, id: `crypto:BTC${i}`, symbol: `BTC${i}` }));
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       [SEARCH]: page(many, 26),
       'GET /api/v1/data/instruments?limit=25&offset=25&q=btc': page([BTC_EUR], 26, 25),
     });

@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ConnectedApp } from '@/api';
-import { ARSEN, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, warmUpSettings } from '@/test/app';
 
 beforeAll(warmUpSettings);
@@ -69,7 +69,7 @@ const card = () => within(screen.getByRole('region', { name: 'MCP server' }));
 const row = (name: string) => within(card().getByText(name).closest('div.grid') as HTMLElement);
 
 async function open(answers: Parameters<typeof stubApi>[0]) {
-  const fetch = stubApi({ ...sessionWithPreferences(ARSEN), ...NO_KEYS, ...answers });
+  const fetch = stubApi({ ...sessionWithPreferences(ADA), ...NO_KEYS, ...answers });
   const app = await renderApp('/settings/api-and-mcp');
   return { fetch, ...app, user: userEvent.setup() };
 }
@@ -83,6 +83,20 @@ describe('MCP server card', () => {
     await user.click(card().getByRole('button', { name: 'Copy' }));
     expect(await navigator.clipboard.readText()).toBe(url);
     expect(card().getByRole('button', { name: 'Copied' })).toBeDefined();
+  });
+
+  // #465: at 360 px the address showed as "https:…" and the clients' words wrapped one by one.
+  it('puts the labels above the address and the clients on a phone, and shows the whole address', async () => {
+    await open(appsAnswer(APPS));
+    for (const label of ['Server URL', 'Connect']) {
+      const row = card().getByText(label).closest('[data-slot="settings-row"]')!;
+      expect(row.className).toContain('max-[480px]:grid-cols-[minmax(0,1fr)]');
+    }
+    const address = card().getByText(`${window.location.origin}/mcp`).parentElement!;
+    expect(address.className.split(' ')).toEqual(['min-w-0', '[overflow-wrap:anywhere]']);
+    // An app's host goes under its name rather than cut it ("ChatG…").
+    const name = await card().findByText('ChatGPT', { selector: 'b' });
+    expect(name.parentElement!.className.split(' ')).toContain('flex-wrap');
   });
 
   it('lists each client with its mark, how it connects and its guide', async () => {

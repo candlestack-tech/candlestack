@@ -3,7 +3,7 @@
 import { fireEvent, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 
-import { ARSEN, catalogAnswer, MB, model, modelsAnswer, rawCandlesSummary, session, stubApi } from './api';
+import { ADA, catalogAnswer, MB, model, modelsAnswer, rawCandlesSummary, session, stubApi } from './api';
 import { renderApp } from './app';
 
 export const UPLOAD = 'POST /api/v1/models?name=lstm-signals.keras';
@@ -28,7 +28,7 @@ export const jsonFile = (name: string, body: unknown) => new File([JSON.stringif
 export type Answers = Parameters<typeof stubApi>[0];
 
 export async function openUpload(answers: Answers = {}) {
-  const fetch = stubApi({ ...session(ARSEN), ...modelsAnswer([]), ...catalogAnswer, ...answers });
+  const fetch = stubApi({ ...session(ADA), ...modelsAnswer([]), ...catalogAnswer, ...answers });
   const app = await renderApp('/models');
   const user = userEvent.setup();
   await user.click(await screen.findByRole('button', { name: /^Upload model/ }));

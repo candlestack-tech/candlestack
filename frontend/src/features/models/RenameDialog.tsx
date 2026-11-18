@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 
-import { ApiError, errorMessage, type Model } from '@/api';
+import { ApiError, errorMessage, isGone, type Model } from '@/api';
 import { CancelButton, PrimaryButton } from '@/components/DialogButtons';
 import { Hint } from '@/components/Hint';
 import {
@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils';
 
 import { splitExtension } from './format';
 import { nameOf, nameProblem } from './names';
-import { isGone, useRenameModel } from './useModels';
+import { useRenameModel } from './useModels';
 
 function errorText(error: Error): string {
   if (error instanceof ApiError && error.problem === 'model-name-taken')

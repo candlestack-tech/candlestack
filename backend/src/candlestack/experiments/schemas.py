@@ -1,16 +1,19 @@
 """Request and response bodies of the backtests and dashboard API, and the documents a backtest
 stores (its instruments and setup)."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
-from typing import Self
+from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from candlestack.data import InstrumentId
+
 BACKTEST_NAME_MAX = 80
 
-# Backtests per page of the list.
+# Backtests per page of the list, unless a request asks for up to PER_PAGE_MAX.
 PAGE_SIZE = 10
+PER_PAGE_MAX = 100
 # Published backtests per page of Experiments: four rows of three cards.
 EXPERIMENTS_PAGE_SIZE = 12
 # The newest published backtests the Dashboard shows.
@@ -21,6 +24,8 @@ QUERY_MAX = 100
 MODEL_NAME_MAX = 255
 # The most points of a backtest's equity series: enough for a small chart.
 EQUITY_POINTS = 60
+# The most backtests one request stars or publishes: as many as one deletes.
+UPDATE_MAX = 100
 
 
 class BacktestStatus(StrEnum):
@@ -190,8 +195,8 @@ class BacktestOut(BaseModel):
     queue_position: int | None = Field(
         ge=1,
         description=(
-            "Where a queued backtest is in the user's queue: 1 starts next, when the running "
-            "one ends; null for any other status"
+            "Where a queued backtest is in the user's queue: 1 starts next, when their running "
+            "one ended and a run slot is free; null for any other status"
         ),
         examples=[None],
     )
@@ -247,6 +252,21 @@ class BacktestOut(BaseModel):
     )
 
 
+def as_utc(value: datetime | None) -> datetime | None:
+    """A time of a filter in UTC when it names no zone."""
+    return value.replace(tzinfo=UTC) if value is not None and value.tzinfo is None else value
+
+
+def instrument_filter(value: str | None) -> str | None:
+    """The instrument filter of the list as ``InstrumentId`` writes it (``stock:AAPL``), so
+    ``Stock:aapl`` matches too.
+
+    Raises:
+        ValueError: Not a ``<market>:<symbol>`` ID (``data.InvalidRequest``).
+    """
+    return None if value is None else str(InstrumentId.parse(value))
+
+
 class BacktestShow(StrEnum):
     """Which backtests the list shows: all, the starred, the failed or the published ones."""
 
@@ -258,8 +278,9 @@ class BacktestShow(StrEnum):
 
 class BacktestSort(StrEnum):
     """What the list is sorted by. `default` is newest first (`order` does not apply); `when`
-    sorts like `number`; `name` by the name, in any case. Backtests without the value (failed
-    ones) come last either way, and ties go by number, newest first."""
+    sorts like `number`; `name` by the name, in any case; `sortino` by the Sortino ratio of
+    `results.stats`. Backtests without the value (failed ones) come last either way, and ties
+    go by number, newest first."""
 
     default = "default"
     number = "number"
@@ -270,6 +291,8 @@ class BacktestSort(StrEnum):
     max_drawdown = "max_drawdown"
     trades = "trades"
     when = "when"
+    win_rate = "win_rate"
+    sortino = "sortino"
 
 
 class SortOrder(StrEnum):
@@ -295,7 +318,9 @@ class ModelCount(BaseModel):
 
 
 class BacktestsPage(BaseModel):
-    backtests: list[BacktestOut] = Field(description=f"The page, at most {PAGE_SIZE} backtests")
+    backtests: list[BacktestOut] = Field(
+        description=f"The page, at most `per_page` backtests ({PAGE_SIZE} unless asked)"
+    )
     total: int = Field(description="Backtests that match the filters", examples=[15])
     page: int = Field(description="The page, from 1", examples=[1])
     pages: int = Field(description="Pages of the backtests that match, at least 1", examples=[2])
@@ -339,6 +364,55 @@ class BacktestUpdate(BaseModel):
         return self
 
 
+class BacktestsUpdateIn(BaseModel):
+    """Star, unstar, publish or unpublish many backtests at once: the fields of
+    ``BacktestUpdate`` but the name, for each of `ids`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ids: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(
+        min_length=1,
+        max_length=UPDATE_MAX,
+        description=f"1 to {UPDATE_MAX} IDs of the user's backtests",
+        examples=[["bt_7f3k2m9qx4", "bt_t9n8v7d6a5"]],
+    )
+    starred: bool | None = Field(default=None, description="Star them (true) or unstar them")
+    public: bool | None = Field(
+        default=None,
+        description="Publish them in Experiments (true) or take them back (false). Only a "
+        "finished backtest made in the app can be published",
+    )
+
+    @model_validator(mode="after")
+    def _says_something(self) -> Self:
+        if self.starred is None and self.public is None:
+            raise ValueError("send what to change: starred, public or both")
+        return self
+
+
+class BacktestsUpdated(BaseModel):
+    """What changed."""
+
+    updated: list[str] = Field(
+        description="The IDs of the backtests that are now as asked, in the order given, those "
+        "that were already included",
+        examples=[["bt_7f3k2m9qx4", "bt_t9n8v7d6a5"]],
+    )
+    count: int = Field(description="How many are now as asked", examples=[2])
+    not_found: list[str] = Field(
+        description="IDs the user has no backtest with (deleted, or another account's): "
+        "nothing changed for them",
+        examples=[[]],
+    )
+    cannot_publish: list[str] | None = Field(
+        default=None,
+        description="With `public` true: IDs of the user's backtests that cannot be published "
+        "(queued, running or failed, or test data without a result document); nothing changed "
+        "for them. Null otherwise",
+        examples=[[]],
+    )
+
+
 class BestBacktests(BaseModel):
     """The 5 best finished backtests by each result, the best first (for `max_drawdown` the
     smallest fall)."""
@@ -360,7 +434,7 @@ class Author(BaseModel):
     """Who published a backtest: their display name, never their email."""
 
     id: str = Field(description="Public ID of the account", examples=["usr_7f3k2m9qx4"])
-    name: str = Field(description="The account's display name", examples=["Tymur Tkach"])
+    name: str = Field(description="The account's display name", examples=["Grace Hopper"])
     mine: bool = Field(description="The signed-in user published it")
 
 

@@ -15,7 +15,7 @@ import { MoreRow, STARRED_ROW, TOP, Widget } from './widgets';
 
 // The framework's tile, the name over what it reads and its framework ("in 25×23 → 1 · Keras"),
 // and at the right its best Sharpe ratio over how many backtests used it. The row opens the
-// Models page.
+// model's page.
 function Row({ model, onStar }: { model: Model; onStar: (model: Model) => void }) {
   const framework = frameworkOf(model.framework);
   const name = framework ?? model.framework;
@@ -25,7 +25,11 @@ function Row({ model, onStar }: { model: Model; onStar: (model: Model) => void }
       <RowStar starred label={`Unstar model ${model.name}`} onToggle={() => onStar(model)} />
       {framework && <FrameworkTile framework={framework} />}
       <span className={cn('flex min-w-0 flex-col', !framework && 'col-span-2')}>
-        <Link to="/models" className={cn(ROW_OPENER, 'truncate text-[13px] font-medium')}>
+        <Link
+          to="/models/$modelId"
+          params={{ modelId: model.id }}
+          className={cn(ROW_OPENER, 'truncate text-[13px] font-medium')}
+        >
           {model.name}
         </Link>
         <span className="truncate font-mono text-[11.5px]/[normal] text-muted-foreground">

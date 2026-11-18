@@ -116,7 +116,13 @@ minute.
   truncate (their title shows them in full); an instrument's id and name wrap, and error messages
   break their long paths (`break-words`). Below `sm` the instrument page shows the symbol fact only to
   screen readers (it ends the id above the name) and narrows the gaps of the facts and the
-  timeframe switch, so each fits one line.
+  timeframe switch, so each fits one line. A table that scrolls in its own box (`overflow-x-auto`)
+  makes the box `relative`: the words only screen readers hear (`sr-only`, absolutely placed) stay
+  inside it instead of widening the page (#465). A name without spaces, such as a model's
+  `BLESK_ATR06_R8_..._M25x23.keras`, breaks anywhere (`[overflow-wrap:anywhere]`). What a finger
+  taps is at least 24 × 24 px (WCAG 2.5.8): a small control takes the rest around it with a
+  padding its negative margin gives back, or with an `after:` area (the switches, the sliders'
+  thumbs), so nothing moves.
 - **Chart height.** The layout is at least as tall as the visible screen (`100dvh`, `100vh`
   without dvh) and the page is a flex column (`Layout.tsx`; in the app the instrument route's
   `staticData: { fill: true }` keeps the workspace's wrappers growing flex columns too,
@@ -170,7 +176,8 @@ Sign-in is GitHub or Google only (#208), designed in the design repository: the 
   sets it to `null`).
 - Signing in is a full page navigation to `/api/v1/auth/{github|google}/start?next=<path>`. The
   API sends the browser to the provider, and from there back to `next` (default `/dashboard`),
-  to `/signin?error=denied` or to `/signin?error=failed`.
+  to `/signin?error=denied` or to `/signin?error=failed`, both with `next` when the sign-in had
+  one other than the default.
 - `GET /api/v1/auth/denied` names the account the beta list just turned away.
 - `POST /api/v1/auth/sign-out` ends the session. The avatar menu's Sign out then sets the user
   to `null` and goes to the home page; a 401 (the session had already ended) counts the same.
@@ -183,7 +190,10 @@ names the layout: `useSearch({ from: '/_app/instruments' })`.
 
 - `/signin?next=&error=` shows the start (GitHub, Google, the beta note) or, after
   `error=denied`, who was turned away with Use another account (back to the start, `next`
-  kept) and Contact the team. A clicked button stays busy ("Opening GitHub", a spinner) while
+  kept) and Contact the team. When `next` is an app's consent page, the loader also reads that
+  request (`GET /api/v1/oauth/requests/{id}`) and the page shows the consent page's
+  not-on-the-beta-list card naming the app, whose Use another account goes back to the consent
+  page; a request that is gone (404) gets the plain card. A clicked button stays busy ("Opening GitHub", a spinner) while
   the browser leaves; Back from the provider offers the buttons again. An open session skips
   the page and goes to `next` or `/dashboard`.
 - `/dashboard`, `/backtests`, `/experiments`, `/models`, `/upload/$token`, `/instruments`,
@@ -205,7 +215,7 @@ dashboard, no nav, New backtest, the theme toggle, the avatar), a 200 px sidebar
 Backtests with the backtest count, Experiments with the count of published backtests
 (`dashboard.experiments.total`), Models with the model count, Instruments, Settings, then the storage the models take, under "Model
 storage" on one line ("4.7 MB of 100 MB"), and the note that market data is delayed 15 min; up to 980 px above the page as a row that scrolls sideways
-without a scrollbar, the foot left out) and the footer.
+without a scrollbar, the foot left out, the open section scrolled into its middle) and the footer.
 The avatar is the user's initials (`initials.ts`), never a provider picture; its menu
 (`src/features/account/AccountMenu.tsx`) is a shadcn/ui DropdownMenu with Settings, Home page,
 API docs and, in red, Sign out. New backtest is a link to the builder ([Backtest builder](#backtest-builder)).
@@ -306,19 +316,26 @@ The two sections with the account's preferences load them in the route's loader
   ask first. The Docs row links the API docs of the same host until the website's API guide is
   live (website#75).
 - The MCP server card (`McpCard.tsx`, #409): the server address of the same host
-  (`window.location.origin` + `/mcp`, so stage shows stage's) with Copy; one line per client
+  (`window.location.origin` + `/mcp`, so stage shows stage's), whole (on two lines where needed),
+  with Copy; one line per client
   (Claude, ChatGPT, Codex, Claude Code, Cursor, VS Code, other clients) with its real mark
   (`src/components/clientLogos.tsx`, the official files the website's docs use; Codex has the
   OpenAI Blossom), how it connects and Guide to `https://candlestack.tech/docs/mcp/install/`
   (Codex's to its section, `#codex`); then Connected apps:
   `GET /api/v1/me/connected-apps` under `['account', 'connected-apps']` (`src/api/oauth.ts`,
-  asked again on coming back to the tab), each app with its tile, name, the host it returns to,
-  its scopes, last use and when it connected, and Disconnect, which asks first
+  asked again on coming back to the tab), each app with its tile, name, the host it returns to
+  (under the name where both do not fit, as a key's prefix under its name), its scopes, last use and when it connected, and Disconnect, which asks first
   (`DELETE /api/v1/me/connected-apps/{id}`; a 404 counts as gone). Without apps a dashed box says
-  how to connect one. The app's tile (`src/components/AppTile.tsx`) draws the mark of a known app
-  by the host it returns to (claude.ai, chatgpt.com: the API checks that host against the
-  registered redirect URIs, so a name cannot borrow it), else the `logo_uri` the app gave (sent
-  without a referrer), else its initial; a logo that does not load falls back to the initial.
+  how to connect one. On a phone (up to 480 px) the Server URL, Connect and the API keys card's
+  Docs row put their label above the content (`SettingsRow`'s `stack`). The app's tile (`src/components/AppTile.tsx`) draws the mark of a known app
+  (claude.ai, chatgpt.com) by the host that vouches for it: for an app named by a client ID
+  metadata document that document's host (`document_host`; a document elsewhere that returns to
+  claude.ai gets no mark), else the host it returns to (the API answers the host the browser
+  really returned to at the consent, one of the redirect URIs the app registered, so neither a
+  name nor a second registered URI can borrow it); else, for an app named by a metadata
+  document, the `logo_uri` it gave (sent without a referrer); else its initial. An app that
+  registered itself never shows its `logo_uri`, which could be a picture of anyone's mark; a logo
+  that does not load falls back to the initial.
 - Account: Sign out everywhere (`POST /api/v1/auth/sign-out-everywhere`) and Delete account
   (`DELETE /api/v1/me`, after the app's dialog). Both then forget the user and their data and go
   to the home page, as Sign out does (`useLeaveAccount.ts`).
@@ -337,12 +354,16 @@ is not asked again on mount.
 
 - Signed in: the app's tile linked to the CandleStack mark, "Claude wants access to your
   CandleStack account", "From claude.ai" (the host it returns to, as anyone can register an app
-  called Claude), Signed in as with Not you? (signs out and stays on the page), the scopes in the
-  API's plain words with boxes (read always and faded, the others only when the app asked for
-  them; Run backtests and Manage models start on, Publish off), what an app can never do, Cancel
-  and Allow. Either posts `POST /api/v1/oauth/requests/{id}` (`deny`, or `allow` with the ticked
-  scopes) and sends the browser to the answer's `redirect_to`; the buttons stay off until it has
-  left.
+  called Claude), who names it: "Named by claude.ai" for an app named by a client ID metadata
+  document (its `document_host`, which a document cannot fake), "Named by the app itself, not
+  checked" for one that registered itself; Signed in as with Not you? (signs out and stays on the
+  page), the scopes in the API's plain words with boxes (read always and faded, the others only
+  when the app asked for them; Run backtests and Manage models start on, Publish off), what an
+  app can never do, Cancel and Allow. Either posts `POST /api/v1/oauth/requests/{id}` (`deny`, or
+  `allow` with the ticked scopes) and sends the browser to the answer's `redirect_to`; the
+  buttons, the boxes and Not you? stay off until it has left. Back from the app, a page the
+  browser restores from its back-forward cache (`pageshow` with `persisted`) offers the buttons
+  again; the request is used by then, so either says it has expired.
 - Signed out: the same card offers GitHub and Google and names the app; signing in comes back to
   the page.
 - Off the beta list (`403 not-on-beta-list` on Allow): the sign-in page's words, with Use another
@@ -414,7 +435,9 @@ delete modals):
   scaled per column; without one every cell has the same tint, as there are no values to draw.
   A column is a button (one tab stop for all, the arrows, Home and End move between them): it
   shows its catalog description, its parameters and its scaling ("as is", "BLESK scaling"). The
-  chosen column is drawn in the accent.
+  chosen column is drawn in the accent. A column is at least 12 px, on a phone 24 px for a
+  finger (the matrix then scrolls in its box). A group's name its columns have no room for (a
+  group of one column, "Bands") steps up over its line, whole, instead of ending after a letter.
 - A model deleted meanwhile (404) closes its Rename or Delete dialog, and its page says it is not
   found.
 
@@ -480,14 +503,31 @@ the longest of every date and time format. Trades is left out: with it the model
 at 1200 px, When at 800 (and from 980 to 1080 px), Model at 720, Sharpe at 560, Instruments at
 480.
 
+A checkbox before each row (the app's 18 px box, `src/components/Tick.tsx`, 26 px wide with the
+star's cell after it) and one in the header for the page choose backtests to delete. The header's
+box shows a dash while only some rows are chosen and chooses none once all are. Only the rows of
+the page shown count, so another page or search never deletes what is out of sight. While any
+are chosen, Delete with their count ("Delete 3", the page's Delete button) sits at the right of
+the search and Filters. It opens the backtest page's dialog for all of them: "Delete 3
+backtests?", that they go with their results and trades, that running ones are stopped, queued
+ones leave the queue and published ones also leave Experiments and the Compare of anyone who
+added them when any chosen one is such, and "This cannot be undone." Delete sends
+`POST /api/v1/backtests/delete` with their `ids` (one chosen row goes as
+`DELETE /api/v1/backtests/{id}`), and IDs in `not_found` count as deleted. Then the choice is
+cleared, the deleted ones leave Compare, the same queries as after a single delete are asked for
+again and a toast says "3 backtests were deleted" ("Bright Vega was deleted" for one). An error
+stays in the dialog with the choice kept. With the checkboxes the backtest's name keeps 120 px at
+the page's full width, not 150.
+
 A backtest without results has its badge in the Return column: Running, Failed, or Queued with
 its place in the user's queue (`queue_position`, 1 starts next), "Queued · 2", with "2 backtests
 ahead of it" in the title (the column has no room for more). While a list or the dashboard shows
 a queued or running backtest, it is asked for again every 5 s, so the place and the status keep
 up (#400).
 
-The dashboard's Last backtests (fixed too; When hides in a card under 520 px), Best backtests and
-a model's backtests give their columns the same widths. Every list names its instruments with
+The dashboard's Last backtests (fixed too; When hides in a card under 520 px and the instruments
+under 440 px, a phone, so the name keeps its room; When is at least 104 px, so "28 Oct 18:05"
+stays on one line), Best backtests and a model's backtests give their columns the same widths. Every list names its instruments with
 `BacktestInstruments`: up to as many as it has room for, else one less and "+N" with all of them
 in the title, each symbol cut with an ellipsis where its column is narrower (one and "+N" on the
 Backtests page, two elsewhere).
@@ -557,7 +597,7 @@ so its back link returns there (else "← Backtests").
   link while it exists),
   the period's first and last UTC day, when it ran and how long. A finished one has
   `[Download JSON | ?]` (the download is `GET /api/v1/backtests/{id}/download`, which the browser
-  saves as `candlestack-backtest-<N>.json`; `?` opens https://candlestack.tech/docs/backtest-json)
+  saves as `candlestack-backtest-<N>.json`; `?` opens https://candlestack.tech/docs/backtest-json/)
   and Add to compare. Rename (any status) names it with `PATCH /api/v1/backtests/{id}`: the name
   replaces the title, with the number beside it, and shows under the number in the lists.
 - Queued (#400): the badge says how many are ahead ("Queued · 2 ahead", the running one and
@@ -570,6 +610,16 @@ so its back link returns there (else "← Backtests").
   dialog shows the API's sentence (`409 backtest-not-queued`) and the page is asked for again.
   The dialog cannot be closed while the request runs. Where the 2 s poll finds it running while
   the dialog is open, the dialog says it has left the queue and Cancel backtest turns off.
+- Delete (the user's own, any status, last in the header, `DeleteBacktest.tsx`): an outline button
+  with a bin, red on hover, that asks first in the dialog the list's bulk delete shares
+  (`src/features/backtests/DeleteDialog.tsx`): Delete Bright Vega?, a sentence by status (a
+  queued one leaves the queue, a running one is stopped), that a published one also leaves
+  Experiments and the Compare of anyone who added it, and "This cannot be undone.", then Cancel or
+  Delete. It sends `DELETE /api/v1/backtests/{id}`. Then the backtest leaves Compare, the lists,
+  the dashboard, Experiments and the models are asked for again, the page goes to Backtests and
+  the backtest's document leaves the cache, so going back says it is not found. A 404 (deleted in
+  another tab) counts as deleted. Any other error shows its detail in the dialog, which cannot be
+  closed while the request runs.
 - Finished: the six first results in a strip (`src/components/FactsStrip.tsx`, the model page's
   too), then the charts and the trades beside every metric of the engine and the setup (one column
   up to 980 px). Running: a moving bar and the setup. Failed: the error and the setup. A 404 says
@@ -599,8 +649,11 @@ so its back link returns there (else "← Backtests").
   why it closed); its row in the table is marked. A row clicked shows its trade on the chart
   the same way, with room around it.
 - The legend at the top left follows the crosshair (the last candle off the chart): symbol,
-  candle size and exchange, open, high, low, close and the change in the candle's colour, the
-  volume, then the key and the trades in view. The pane under it has the strategy's and buy
+  candle size and exchange, open, high, low, close and the change in the candle's colour (the
+  text green and red, `--up` and `--down`, 4.5:1 on the page, not the candles' own), the
+  volume, then the key and the trades in view. The price pane keeps the legend's height free at
+  its top (the price scale's top margin, at least 24 % and at most half the pane), measured while
+  the cursor is off the chart, so no candle or arrow lies under it when it wraps on a phone. The pane under it has the strategy's and buy
   and hold's return (each a button that hides its line) and the drawdown. The bar under the
   chart: 1W, 1M, 3M, 1Y and All on the left; the candle size, Candles or Line and the Trades
   switch, which hides the arrows and the tint, on the right. The price's line is
@@ -638,7 +691,7 @@ so its back link returns there (else "← Backtests").
   setup, no model file; the line under the title starts with the author (initials and name) and
   ends with "Published today"; the model is its name in ink, never a link, and the setup says the
   model file stays with the author. On top of the right column the author card: the 40 px
-  initials, the name, "Published 2 Nov 2026 at 10:14" and "More by Tymur →" to
+  initials, the name, "Published 2 Nov 2026 at 10:14" and "More by Grace →" to
   `/experiments?author=<id>`. The back link goes to Experiments (back through the history when it
   was opened there, so its search stays). Once its author unpublished it, the page answers 404
   and says it is not found.
@@ -652,11 +705,23 @@ so its back link returns there (else "← Backtests").
   stays after a reload in this browser. A slot gives a backtest its colour, and removing another
   moves nothing. One that no longer exists leaves the choice when the comparison answers 404 with
   its `id`; the comparison of the rest names the next, if any.
+- The URL names the backtests compared, in the order of their slots:
+  `/backtests/compare?ids=bt_7f3k2m9qx4,bt_t9n8v7d6a5` (`src/routes/compareSearch.ts`; what is no
+  backtest ID, a repeat or one past the fourth is dropped). A link from elsewhere, such as the
+  `url` an agent gets from the MCP server or a copied address, chooses its backtests in place of
+  the choice before the page shows (the route's loader, `openInCompare`, after it gives the choice
+  to the signed-in account; a link naming the backtests compared already keeps their slots); the
+  comparison then
+  names them and gives another account's its author, and one that answers 404 leaves as above.
+  From then on every change of the choice rewrites the URL in place (`replace`, the history
+  state of the back link kept), so the address always reopens the same comparison. The page marks
+  the address it shows, a link's included (`comparedInUrl` in the history state): Back on it, the
+  choice stands.
 - Other accounts' backtests from Experiments can be compared too; their slot keeps the author's
   name. The panel asks for their documents (not on the compare page, whose comparison tells the
   same), and one that now answers 404 was unpublished: it leaves the comparison but keeps its slot, dashed in the
   warning colour, "#57 was unpublished" with the author's initials, until the user dismisses it
-  (the compare page says "Vladyslav Shudiehov unpublished #57, so it left your Compare."). The
+  (the compare page says "Alan Turing unpublished #57, so it left your Compare."). The
   user's own that answers 404 was deleted and leaves at once (`leaveCompare`).
 - Whose: another account's backtest has its author's initials (16 px) in the panel and the charts'
   legends, the initials and the name (20 px) in the table's head, and the Setup gets an Author
@@ -668,7 +733,9 @@ so its back link returns there (else "← Backtests").
 - Adding: a scale icon on every list of backtests, off with the reason in its title for a running
   or failed one or at 4, and a button on a backtest's page. The Compare panel in the bottom right
   corner of the signed-in pages lists them; Compare opens the page from 2. It can fold to a small
-  button and is not on the compare page.
+  button and is not on the compare page. Open it covers about a third of a phone's screen, so it
+  is open only on the Backtests list (unless folded there); on the other pages it starts folded
+  and opens on a click or when a backtest is added there, until the next page (#465).
 - The page reads one request, `GET /api/v1/compare` (`compareQueryOptions`, under
   `['account', 'compare', ids]`), never the backtests' documents: about 22 KB for four instead of
   5 to 6 MB. While a new choice loads, the last answer shows the backtests still chosen.
@@ -678,6 +745,25 @@ so its back link returns there (else "← Backtests").
   them, the others plain (all plain when they read the same or when no value is better: Trades,
   Time in market, Buy and hold); `rows.ts` only writes the values. The setup follows, written as
   a backtest's page writes it (`setupGroups`), with a dash where a backtest has no such row.
+  Up to 640 px the labels' column is 96 px and stays at the left while the table scrolls, and a
+  backtest's column 120 px, so two backtests fit a 360 px phone beside the labels.
+
+## Chat widget of the MCP server
+
+`src/widget/` is not part of the app: it is the page chat clients (Claude, ChatGPT) show a
+tool's answer with ([#457](https://github.com/candlestack-tech/candlestack/issues/457);
+`docs/architecture.md`, MCP, Chat widget). `npm run build:widget` (`vite.widget.config.ts`)
+builds it into one HTML file with its script and styles inline and writes it into the backend
+package (`backend/src/candlestack/mcp/widget.html`), which serves it; `src/widget/build.test.ts`
+fails when the committed file is not what the sources build, or grows past 150 KB, or loads a
+file. A chat client loads it each time it shows a result, so it is plain TypeScript building
+its elements and SVG charts itself, without React or Lightweight Charts (about 25 KB, 10 KB
+gzipped), in the system's fonts. It takes the app's palette (both themes, as the host says) and
+its number formats (`src/lib/results.ts`) and model names (`src/features/models/manifest.ts`).
+Three cards, after the mockups of the issue: a backtest (equity against its benchmark, drawdown,
+eight statistics), a comparison (up to four backtests on one time axis, six statistics with the
+best marked) and a model (its pipeline, four numbers, the returns of its best backtests). Its
+buttons ask the host to open the app's pages.
 
 ## Experiments
 
@@ -699,7 +785,7 @@ author is their display name with the initials the app draws (`AuthorAvatar.tsx`
 - Beside the title All · Mine with their counts (`counts`) and Cards · Table, both the app's
   segmented control at 34 px. Cards is the default; the view is the browser's (`localStorage`,
   `view.ts`, like the compare selection), not the URL's, and stays as it was left.
-- The toolbar: the search (instrument, model or author), the author chip of "More by Tymur" (the
+- The toolbar: the search (instrument, model or author), the author chip of "More by Grace" (the
   initials, the name and a cross that shows everyone), then Market (All markets, Stocks, Crypto,
   then under "Instrument" each published one), Representation (Any, Renko, Kagi, Candles) and
   Timeframe (Any and those published), each a 34 px chip with a 236 px list of one choice
@@ -728,7 +814,7 @@ author is their display name with the initials the app draws (`AuthorAvatar.tsx`
   backtest's page ([Backtest page](#backtest-page)), whose back link returns here as it was.
 - The dashboard has New in Experiments on top of the right column once anything is published:
   the four newest (`dashboard.experiments`) in the rows of Starred backtests with the author's
-  initials, "Tymur Tkach · today", and "Open Experiments … 25 published →".
+  initials, "Grace Hopper · today", and "Open Experiments … 25 published →".
 
 ## Instrument icons
 

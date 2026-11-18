@@ -3,7 +3,8 @@
 Sign-in starts at ``GET /api/v1/auth/{provider}/start?next=<path>``, which redirects to GitHub
 or Google; the provider returns to ``/api/v1/auth/{provider}/callback``, which sets the session
 cookie and redirects to ``next`` (default ``/dashboard``), or to ``/signin?error=denied`` (not on
-the beta list: ``GET /api/v1/auth/denied`` names the account) or ``/signin?error=failed``. A
+the beta list: ``GET /api/v1/auth/denied`` names the account) or ``/signin?error=failed``, both
+with ``next`` too when it is not the default, so the sign-in page goes on to it. A
 provider's account that never signed in joins the user with its email, so the email links a
 user's GitHub and Google.
 With ``intent=connect`` the same round trip, started from a link of Settings, adds a sign-in
@@ -60,6 +61,7 @@ from candlestack.accounts.schemas import (
 )
 from candlestack.accounts.service import (
     CONNECT_NEXT,
+    DEFAULT_NEXT,
     SESSION_MAX_AGE,
     AccountsService,
     SignInStart,
@@ -82,8 +84,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["accounts"])
 
 SIGN_IN_PAGE = "/signin"
-FAILED_URL = f"{SIGN_IN_PAGE}?error=failed"
-DENIED_URL = f"{SIGN_IN_PAGE}?error=denied"
 _PROVIDER_NAMES = {Provider.github: "GitHub", Provider.google: "Google"}
 
 IntentParam = Annotated[
@@ -112,10 +112,21 @@ def _redirect(url: str) -> RedirectResponse:
     return RedirectResponse(url, status_code=302)
 
 
+def _error_page(page: str, code: str, next_path: str | None = None) -> str:
+    """`page` (the sign-in page or Settings) with the error's `code`. The sign-in page also
+    gets `next_path`, the page the sign-in was going to (an app's consent page, say), when it
+    is a page of the app other than the default, so signing in again goes on to it."""
+    query = {"error": code}
+    if page == SIGN_IN_PAGE and (path := safe_next(next_path)) != DEFAULT_NEXT:
+        query["next"] = path
+    return f"{page}?{urlencode(query, safe='/')}"
+
+
 def _failed(provider: Provider, error: SignInFailed, page: str) -> RedirectResponse:
-    """Back to `page` (the sign-in page or Settings) with the error's code."""
+    """Back to `page` (the sign-in page or Settings) with the error's code, and on the sign-in
+    page the page the sign-in was going to."""
     logger.warning("Sign-in with %s failed: %s", provider, error.reason)
-    return _redirect(f"{page}?error={error.code}")
+    return _redirect(_error_page(page, error.code, error.next_path))
 
 
 def _database_failed(provider: Provider, error: Exception, page: str) -> RedirectResponse:
@@ -124,7 +135,7 @@ def _database_failed(provider: Provider, error: Exception, page: str) -> Redirec
     from the provider, so it gets a page, not a problem. The error reaches Sentry by its type
     only: its message and the variables of its frames may hold the account's email."""
     logger.error("Sign-in with %s failed: Postgres failed (%s)", provider, type(error).__name__)
-    return _redirect(f"{page}?error={SignInFailed.code}")
+    return _redirect(_error_page(page, SignInFailed.code))
 
 
 def _to_provider(start: SignInStart, cookies: Cookies) -> RedirectResponse:
@@ -149,8 +160,9 @@ async def start_sign_in(  # noqa: PLR0913 (the query parameters and the dependen
     next: NextPath = None,  # noqa: A002 (the parameter's name in the URL)
     intent: IntentParam = SignInIntent.sign_in,
 ) -> RedirectResponse:
-    """Redirects to the provider's sign-in page, or to `/signin?error=failed` when sign-in
-    with it is not available or this address made too many sign-in requests in a minute. A
+    """Redirects to the provider's sign-in page, or to `/signin?error=failed` (with `next`
+    when it is not the default) when sign-in with it is not available or this address made
+    too many sign-in requests in a minute. A
     provider's account that never signed in joins the CandleStack user with its email, so the
     email links a user's GitHub and Google; it signs in to a new user when no user has it.
 
@@ -169,6 +181,7 @@ async def start_sign_in(  # noqa: PLR0913 (the query parameters and the dependen
             )
         start = await service.start_sign_in(provider, next)
     except SignInFailed as error:
+        error.next_path = next
         return _failed(provider, error, page)
     except DATABASE_ERRORS as error:  # a connect looks up the session
         return _database_failed(provider, error, page)
@@ -231,7 +244,7 @@ async def finish_sign_in(  # noqa: PLR0913 (the provider's query parameters)
             error=error,
         )
     except SignInDenied as denied:
-        response = _redirect(DENIED_URL)
+        response = _redirect(_error_page(SIGN_IN_PAGE, "denied", denied.next_path))
         cookies.set(response, DENIED, denied.denial_id, TTL)
     except SignInFailed as failed:
         response = _failed(provider, failed, page)

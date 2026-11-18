@@ -266,9 +266,14 @@ warm-up as a short expression of its parameters (`"0"`, `"length - 1"`) and its 
   TA-Lib does, wait only for TA-Lib's first value, which does depend on it
   ([below](#two-starts-of-the-recursive-indicators)). With `candles@1` the number is
   `exact`, and the build drops just that many rows. With rows that span several candles (Renko, Kagi) it is an `estimate` from
-  the candles a row takes, so the run loads more and the report says how many the warm-up
-  used. Renko bricks also depend on the candle they start on, which no warm-up removes
-  ([below](#renko-triples)).
+  the candles a row takes. Where the rows formed more slowly before the period, the first
+  sample would fall on a later candle than the period's first, and the backtest would start
+  there, its buy and hold from a later close. So the run builds the input up to the period's
+  first candle before it asks the worker, and while that candle has no sample it loads twice
+  as many candles before the period, three times at most and as far as the data and
+  `CANDLES_MAX` allow; the report says how many it loaded (`loaded`) and how many the warm-up
+  used (`dropped`). Renko bricks also depend on the candle they start on, which no warm-up
+  removes ([below](#renko-triples)).
 - A row with a missing, NaN or infinite feature at the start is warm-up: it is dropped and
   counted. One after a complete row is an error, so the model never gets a sample with a hole
   in it.
@@ -424,7 +429,8 @@ those of `@2` on the candle `max(first_brick, atr_window)`, 49 by default. The f
 waits for two more bricks, and a sample for 24 finished rows. A brick takes about
 `1 + 2 * atr_multiple` candles: on the 30-minute candles of the BLESK data a brick of 0.6 ATR
 takes 1.7 on average and under 1.8 on 95 % of the stocks, and the rule is above the 95 % of
-every multiple from 0.2 to 3, so the estimate is rather too long than too short. With the
+every multiple from 0.2 to 3, so the estimate is rather too long than too short; where it
+still falls short, the run loads further back ([the warm-up](#the-blocks)). With the
 BLESK features of `@1` the warm-up is 350 candles (the EMA of 50) and then 53 for the 24 rows:
 403 candles, about 31 trading days. With the `@2` blocks it is 54 candles (the first brick on
 the candle 49, then two bricks) and then 53: 107 candles, about 8 trading days.

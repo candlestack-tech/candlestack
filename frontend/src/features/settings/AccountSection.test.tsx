@@ -4,15 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { meQueryOptions, preferencesQueryOptions } from '@/api';
-import {
-  ARSEN,
-  NOT_SIGNED_IN,
-  dashboardAnswer,
-  model,
-  modelsAnswer,
-  sessionWithPreferences,
-  stubApi,
-} from '@/test/api';
+import { ADA, NOT_SIGNED_IN, dashboardAnswer, model, modelsAnswer, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, warmUpSettings } from '@/test/app';
 
 beforeAll(warmUpSettings);
@@ -32,7 +24,7 @@ async function signedOutAtHome(router: Awaited<ReturnType<typeof renderApp>>['ro
 describe('Account', () => {
   it('signs out everywhere: ends every session, forgets the user and goes home', async () => {
     const fetch = stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       'POST /api/v1/auth/sign-out-everywhere': { status: 204 },
     });
     const { router, queryClient } = await renderApp('/settings/account');
@@ -47,7 +39,7 @@ describe('Account', () => {
   });
 
   it('counts a session that had already ended as signed out', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), 'POST /api/v1/auth/sign-out-everywhere': NOT_SIGNED_IN });
+    stubApi({ ...sessionWithPreferences(ADA), 'POST /api/v1/auth/sign-out-everywhere': NOT_SIGNED_IN });
     const { router } = await renderApp('/settings/account');
     await userEvent.setup().click(card().getByRole('button', { name: 'Sign out everywhere' }));
     await signedOutAtHome(router);
@@ -55,7 +47,7 @@ describe('Account', () => {
 
   it('stays signed in and says why when it cannot sign out everywhere', async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       'POST /api/v1/auth/sign-out-everywhere': { status: 503, body: { detail: 'Down for a minute.' } },
     });
     const { router } = await renderApp('/settings/account');
@@ -65,7 +57,7 @@ describe('Account', () => {
   });
 
   it('asks before deleting the account; Cancel keeps it', async () => {
-    const fetch = stubApi(sessionWithPreferences(ARSEN));
+    const fetch = stubApi(sessionWithPreferences(ADA));
     await renderApp('/settings/account');
     const user = userEvent.setup();
     await user.click(card().getByRole('button', { name: 'Delete account' }));
@@ -81,7 +73,7 @@ describe('Account', () => {
 
   it('says how many backtests and uploaded models go with the account', async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...dashboardAnswer({ counts: { all: 15, starred: 5, failed: 2, public: 0 } }),
       ...modelsAnswer([model(), model({ id: 'mdl_a2b3c4d5e6' })]),
     });
@@ -94,7 +86,7 @@ describe('Account', () => {
   });
 
   it('deletes the account from the dialog and goes home signed out', async () => {
-    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), 'DELETE /api/v1/me': { status: 204 } });
+    const fetch = stubApi({ ...sessionWithPreferences(ADA), 'DELETE /api/v1/me': { status: 204 } });
     const { router, queryClient } = await renderApp('/settings/account');
     const user = userEvent.setup();
     await user.click(card().getByRole('button', { name: 'Delete account' }));
@@ -108,7 +100,7 @@ describe('Account', () => {
   });
 
   it('says in the dialog why the account could not be deleted, and forgets it once closed', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), 'DELETE /api/v1/me': { status: 503, body: { detail: 'Down.' } } });
+    stubApi({ ...sessionWithPreferences(ADA), 'DELETE /api/v1/me': { status: 503, body: { detail: 'Down.' } } });
     await renderApp('/settings/account');
     const user = userEvent.setup();
     await user.click(card().getByRole('button', { name: 'Delete account' }));

@@ -135,10 +135,21 @@ class Backtest(Base):
         LargeBinary, deferred=True, deferred_raiseload=True
     )
     # The curves of the light result document (``ts``, ``close``, ``equity`` and ``drawdown`` of
-    # its series, a point per day past 10,000 candles) as zstd Parquet: what the comparison
-    # draws without loading the candles again. Null for a backtest that finished before they
-    # were stored, and until one finishes.
+    # its series, a point per day past 10,000 candles, cut to 1,000 points) as zstd Parquet:
+    # what the comparison draws without loading the candles again. Null for a backtest that
+    # finished before they were stored, and until one finishes; every row of the light series
+    # for one that finished before they were cut.
     curves: Mapped[bytes | None] = mapped_column(
+        LargeBinary, deferred=True, deferred_raiseload=True
+    )
+    # The series and the trades of the light result document as zstd Parquet
+    # (``assembly.stored_results``), with each benchmark's return in ``report``: what the light
+    # view and get_backtest answer without the candles or the engine. Null until it finished,
+    # and for one that finished before they were stored until its document is first read.
+    series: Mapped[bytes | None] = mapped_column(
+        LargeBinary, deferred=True, deferred_raiseload=True
+    )
+    trades: Mapped[bytes | None] = mapped_column(
         LargeBinary, deferred=True, deferred_raiseload=True
     )
     # The sweep that started it; null for a backtest started alone.
@@ -188,6 +199,14 @@ Index(
     func.lower(Backtest.generated_name),
     unique=True,
 )
+# A new backtest's name must differ from the custom names too, which few backtests have: what
+# ``BacktestStore.free_name`` looks a few names up in, beside the unique index.
+Index(
+    "ix_backtests_user_id_name",
+    Backtest.user_id,
+    func.lower(Backtest.name),
+    postgresql_where=Backtest.name.is_not(None),
+)
 # The queue of a user is their queued backtests, oldest (lowest number) first: a few among all
 # the rows.
 Index(
@@ -195,6 +214,12 @@ Index(
     Backtest.user_id,
     Backtest.number,
     postgresql_where=Backtest.status == "queued",
+)
+# Whether a user has a backtest running, which the scheduler asks of every queue: a few rows.
+Index(
+    "ix_backtests_running",
+    Backtest.user_id,
+    postgresql_where=Backtest.status == "running",
 )
 # A sweep reads its backtests: a few among all the rows.
 Index(
@@ -208,4 +233,27 @@ Index(
     "ix_backtests_published_at",
     Backtest.published_at,
     postgresql_where=Backtest.published_at.is_not(None),
+)
+# What the search of the list (``store.search``) can find in a backtest's own row, in one text
+# (the SQL function ``backtest_search_text`` of the migration that added it): the number as #N,
+# both names, the model's name of when it ran and the instruments' symbols as a JSON array (a
+# symbol is letters, digits and dots, ``data.InstrumentId``, so it shows as it is). A backtest
+# whose field contains the query contains it here too, so its trigram index (pg_trgm) lets
+# Postgres look those rows up instead of reading all of the user's.
+SEARCH_TEXT = func.backtest_search_text(
+    Backtest.number,
+    Backtest.name,
+    Backtest.generated_name,
+    Backtest.model_name,
+    Backtest.instruments,
+    type_=Text,
+)
+Index(
+    "ix_backtests_search",
+    SEARCH_TEXT.label("search"),
+    postgresql_using="gin",
+    postgresql_ops={"search": "gin_trgm_ops"},
+    # New rows go straight into the index rather than a pending list until the next vacuum,
+    # which Postgres would scan in every search: backtests are written seldom, searched often.
+    postgresql_with={"fastupdate": "off"},
 )

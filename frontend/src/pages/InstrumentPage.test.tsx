@@ -3,7 +3,7 @@ import { cleanup, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ARSEN, problem, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, problem, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 import { candles, times } from '@/test/candles';
 import { BTC } from '@/test/instruments';
@@ -30,7 +30,7 @@ const heading = () => screen.getByRole('heading', { level: 1 }).textContent;
 describe('InstrumentPage', () => {
   it('shows the instrument and draws its candles of the timeframe asked for', async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       [DETAIL]: { status: 200, body: BTC },
       [DAILY]: { status: 200, body: candles(OCTOBER) },
     });
@@ -45,7 +45,7 @@ describe('InstrumentPage', () => {
 
   it('opens on the first timeframe the instrument has when the one asked for is not among them', async () => {
     const fetch = stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       [DETAIL]: { status: 200, body: BTC },
       [HOURLY]: { status: 200, body: candles(times(1_790_812_800 - 3600, 1, 3600)) },
     });
@@ -59,7 +59,7 @@ describe('InstrumentPage', () => {
   it('shows Loading while the instrument loads, then the page', async () => {
     let answer: (value: { status: number; body: unknown }) => void = () => {};
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       [DETAIL]: () => new Promise((resolve) => (answer = resolve)),
       [DAILY]: { status: 200, body: candles(OCTOBER) },
     });
@@ -75,7 +75,7 @@ describe('InstrumentPage', () => {
 
   it('says why the instrument cannot load, and loads it on Try again', async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       [DETAIL]: problem(503, 'source-unavailable', 'Binance is not answering.'),
     });
     await renderApp('/instrument/crypto:BTCUSDT?tf=1d');
@@ -85,7 +85,7 @@ describe('InstrumentPage', () => {
     expect(screen.getByRole('link', { name: 'Back to instruments' }).getAttribute('href')).toBe('/instruments');
 
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       [DETAIL]: { status: 200, body: BTC },
       [DAILY]: { status: 200, body: candles(OCTOBER) },
     });
@@ -95,7 +95,7 @@ describe('InstrumentPage', () => {
 
   it('says why the candles cannot load, under the instrument it did load', async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       [DETAIL]: { status: 200, body: BTC },
       [DAILY]: problem(503, 'source-unavailable', 'Binance is not answering.'),
     });

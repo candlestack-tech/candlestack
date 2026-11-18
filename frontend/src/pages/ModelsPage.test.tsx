@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { modelsQueryOptions } from '@/api';
 import {
-  ARSEN,
+  ADA,
   DEFAULT_PREFERENCES,
   MB,
   model,
@@ -66,7 +66,7 @@ const subtitle = () => screen.getByRole('heading', { level: 1 }).parentElement?.
 
 describe('the Models page', () => {
   it('says how many models there are and the storage they take, Upload model beside it', async () => {
-    stubApi({ ...session(ARSEN), ...modelsAnswer([TSMIXER, LSTM]) });
+    stubApi({ ...session(ADA), ...modelsAnswer([TSMIXER, LSTM]) });
     await renderApp('/models');
     expect(await screen.findByText('2 models · 17.2 MB of 100 MB used')).toBeDefined();
     const upload = screen.getByRole('button', { name: 'Upload model' });
@@ -79,13 +79,13 @@ describe('the Models page', () => {
     const answer = modelsAnswer([TSMIXER]);
     const list = answer['GET /api/v1/models'] as { status: number; body: { usage: object } };
     list.body.usage = { ...list.body.usage, file_max_bytes: 20 * 1024 * 1024 };
-    stubApi({ ...session(ARSEN), ...answer });
+    stubApi({ ...session(ADA), ...answer });
     await renderApp('/models');
     expect(await screen.findByText('Keras or ONNX, up to 20 MB')).toBeDefined();
   });
 
   it('opens the upload from an outline button, not the quick action card of the dashboard', async () => {
-    stubApi({ ...session(ARSEN), ...modelsAnswer([TSMIXER]) });
+    stubApi({ ...session(ADA), ...modelsAnswer([TSMIXER]) });
     await renderApp('/models');
     const upload = await screen.findByRole('button', { name: 'Upload model' });
     // Outline: the app header's New backtest is the one primary button.
@@ -98,44 +98,44 @@ describe('the Models page', () => {
   });
 
   it('says how many models still need a manifest', async () => {
-    stubApi({ ...session(ARSEN), ...modelsAnswer([TSMIXER, DRAFT]) });
+    stubApi({ ...session(ADA), ...modelsAnswer([TSMIXER, DRAFT]) });
     await renderApp('/models');
     await vi.waitFor(() => expect(subtitle()).toBe('2 models · 28.4 MB of 100 MB used · 1 needs a manifest'));
     expect(screen.getByText('1 needs a manifest').className).toContain('text-warn');
     cleanup();
 
-    stubApi({ ...session(ARSEN), ...modelsAnswer([DRAFT, model({ id: 'mdl_x', name: 'x.keras' })]) });
+    stubApi({ ...session(ADA), ...modelsAnswer([DRAFT, model({ id: 'mdl_x', name: 'x.keras' })]) });
     await renderApp('/models');
     await vi.waitFor(() => expect(subtitle()).toBe('2 models · 28.4 MB of 100 MB used · 2 need a manifest'));
   });
 
   it('says model for one, and shows no tiles without models', async () => {
-    stubApi({ ...session(ARSEN), ...modelsAnswer([LSTM]) });
+    stubApi({ ...session(ADA), ...modelsAnswer([LSTM]) });
     await renderApp('/models');
     expect(await screen.findByText('1 model · 3 MB of 100 MB used')).toBeDefined();
     cleanup();
 
-    stubApi({ ...session(ARSEN), ...modelsAnswer([]) });
+    stubApi({ ...session(ADA), ...modelsAnswer([]) });
     await renderApp('/models');
     expect(await screen.findByText('0 models · 0 MB of 100 MB used')).toBeDefined();
     expect(screen.queryAllByRole('article')).toEqual([]);
   });
 
   it('keeps the line under the title while the models load', async () => {
-    stubApi({ ...session(ARSEN), 'GET /api/v1/models': () => new Promise(() => {}) });
+    stubApi({ ...session(ADA), 'GET /api/v1/models': () => new Promise(() => {}) });
     await renderApp('/models');
     expect(subtitle()).toBe(' ');
   });
 
   it('says why the models could not load', async () => {
-    stubApi({ ...session(ARSEN), 'GET /api/v1/models': { status: 503, body: { detail: 'Down for a minute.' } } });
+    stubApi({ ...session(ADA), 'GET /api/v1/models': { status: 503, body: { detail: 'Down for a minute.' } } });
     await renderApp('/models');
     expect(await screen.findByText('Down for a minute.')).toBeDefined();
     expect(subtitle()).toBe('Down for a minute.');
   });
 
   it('shows a tile per model in the order of the API', async () => {
-    stubApi({ ...session(ARSEN), ...modelsAnswer([TSMIXER, LSTM, DRAFT]) });
+    stubApi({ ...session(ADA), ...modelsAnswer([TSMIXER, LSTM, DRAFT]) });
     await renderApp('/models');
     await screen.findByText(/^3 models · 31\.4 MB of 100 MB used/);
     expect(tiles().map((item) => item.querySelector('a')?.textContent)).toEqual([
@@ -146,7 +146,7 @@ describe('the Models page', () => {
   });
 
   it('writes what a model is, its state, what it reads and its results', async () => {
-    stubApi({ ...session(ARSEN), ...modelsAnswer([TSMIXER, LSTM, DRAFT]) });
+    stubApi({ ...session(ADA), ...modelsAnswer([TSMIXER, LSTM, DRAFT]) });
     await renderApp('/models');
     await screen.findByText(/^3 models · 31\.4 MB of 100 MB used/);
 
@@ -174,13 +174,13 @@ describe('the Models page', () => {
   });
 
   it('writes the shape of the file on a tile without a manifest', async () => {
-    stubApi({ ...session(ARSEN), ...modelsAnswer([model()]) });
+    stubApi({ ...session(ADA), ...modelsAnswer([model()]) });
     await renderApp('/models');
     expect(await screen.findByText('in 25 × 23 · no manifest')).toBeDefined();
   });
 
   it("opens the model's page from its tile", async () => {
-    stubApi({ ...session(ARSEN), ...modelsAnswer([TSMIXER]) });
+    stubApi({ ...session(ADA), ...modelsAnswer([TSMIXER]) });
     const { router } = await renderApp('/models');
     const link = await screen.findByRole('link', { name: 'my-tsmixer.keras' });
     expect(link.getAttribute('href')).toBe('/models/mdl_7f3k2m9qx4');
@@ -190,7 +190,7 @@ describe('the Models page', () => {
 
   it('wraps a long name to at most two lines, with the whole name in its title', async () => {
     const name = 'BLESK_ATR06_R8_OHLCV_window25_threshold005_retrained_final.keras';
-    stubApi({ ...session(ARSEN), ...modelsAnswer([model({ name })]) });
+    stubApi({ ...session(ADA), ...modelsAnswer([model({ name })]) });
     await renderApp('/models');
     const link = await screen.findByRole('link', { name });
     expect(link.getAttribute('title')).toBe(name);
@@ -202,7 +202,7 @@ describe('the Models page', () => {
   it('writes the day a model was added in the date format and zone of the account', async () => {
     const appearance = { ...DEFAULT_PREFERENCES.appearance, date_format: 'iso', time_zone: 'local' } as const;
     stubApi({
-      ...sessionWithPreferences(ARSEN, { ...DEFAULT_PREFERENCES, appearance }),
+      ...sessionWithPreferences(ADA, { ...DEFAULT_PREFERENCES, appearance }),
       ...modelsAnswer([TSMIXER, LSTM]),
     });
     await renderApp('/models');
@@ -211,7 +211,7 @@ describe('the Models page', () => {
   });
 
   it('stars a model at once, then keeps what the API answered', async () => {
-    stubApi({ ...session(ARSEN), ...modelsAnswer([TSMIXER]) });
+    stubApi({ ...session(ADA), ...modelsAnswer([TSMIXER]) });
     const { queryClient } = await renderApp('/models');
     await screen.findByText('1 model · 14.2 MB of 100 MB used');
     const star = tile('my-tsmixer.keras').getByRole('button', { name: 'Star model my-tsmixer.keras' });
@@ -232,7 +232,7 @@ describe('the Models page', () => {
   });
 
   it('shows the star before the API answers', async () => {
-    stubApi({ ...session(ARSEN), ...modelsAnswer([TSMIXER]) });
+    stubApi({ ...session(ADA), ...modelsAnswer([TSMIXER]) });
     await renderApp('/models');
     await screen.findByText('1 model · 14.2 MB of 100 MB used');
     stubApi({ ...modelsAnswer([TSMIXER]), 'PATCH /api/v1/models/mdl_7f3k2m9qx4': () => new Promise(() => {}) });
@@ -242,7 +242,7 @@ describe('the Models page', () => {
   });
 
   it('puts the star back when the API refuses it', async () => {
-    stubApi({ ...session(ARSEN), ...modelsAnswer([LSTM]) });
+    stubApi({ ...session(ADA), ...modelsAnswer([LSTM]) });
     await renderApp('/models');
     await screen.findByText('1 model · 3 MB of 100 MB used');
     const star = tile('lstm-signals.keras').getByRole('button', { name: 'Star model lstm-signals.keras' });

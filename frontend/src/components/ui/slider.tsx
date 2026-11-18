@@ -5,7 +5,8 @@ import { cn } from '@/lib/utils';
 
 // shadcn/ui's Slider with one thumb, in the app design's look (mockups/app, .st-sl): a 6 px track,
 // the accent up to the value and the darker surface after it, a 16 px ring of the accent as the
-// thumb, which grows a little on hover. The thumb carries the name and the value.
+// thumb, which grows a little on hover and takes a tap 4 px around it (a 24 × 24 target). The
+// thumb carries the name and the value.
 function Slider({
   className,
   'aria-label': label,
@@ -24,7 +25,7 @@ function Slider({
       <SliderPrimitive.Thumb
         aria-label={label}
         aria-valuetext={valueText}
-        className="block size-4 rounded-full border-2 border-primary bg-background shadow-[0_1px_4px_var(--shadow)] transition-transform duration-150 outline-none hover:scale-115 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        className="relative block size-4 rounded-full border-2 border-primary bg-background shadow-[0_1px_4px_var(--shadow)] transition-transform duration-150 outline-none after:absolute after:-inset-1.5 hover:scale-115 focus-visible:ring-[3px] focus-visible:ring-ring/50"
       />
     </SliderPrimitive.Root>
   );

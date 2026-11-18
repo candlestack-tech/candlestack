@@ -4,6 +4,7 @@ and the worker see of a job, and what becomes of a job whose worker stopped."""
 import time
 from collections.abc import AsyncIterator
 
+import anyio
 import pytest
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
@@ -99,6 +100,40 @@ async def test_a_job_still_queued_is_not_claimed(queue: JobQueue) -> None:
 
 async def test_an_empty_queue_has_nothing_to_claim(queue: JobQueue) -> None:
     assert await queue.claim("worker-1", 30) is None
+
+
+async def test_with_a_claim_by_the_wait_starts_once_a_worker_took_the_job(
+    queue: JobQueue,
+) -> None:
+    submitted = job(wait=2)
+    await queue.submit(submitted)
+
+    async def take_late() -> None:
+        await anyio.sleep(1.2)
+        await queue.claim("w1", 30)
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(take_late)
+        started = time.monotonic()
+        # Taken after 1.2 s, it waits 1.5 s more: past the 2 s of a wait from the submit.
+        result = await queue.result(submitted.id, 1.5, claim_by=submitted.deadline)
+        waited = time.monotonic() - started
+
+    assert result is None
+    assert waited > 2.5
+
+
+async def test_with_a_claim_by_a_job_nobody_takes_is_given_up_at_its_deadline(
+    queue: JobQueue,
+) -> None:
+    submitted = job(wait=0.5)
+    await queue.submit(submitted)
+
+    started = time.monotonic()
+    result = await queue.result(submitted.id, 60, claim_by=submitted.deadline)
+
+    assert result is None
+    assert time.monotonic() - started < 2
 
 
 async def test_no_result_in_time_is_none(queue: JobQueue) -> None:

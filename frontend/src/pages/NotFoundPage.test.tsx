@@ -3,7 +3,7 @@ import { cleanup, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ARSEN, session, stubApi } from '@/test/api';
+import { ADA, session, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 
 afterEach(() => {
@@ -21,7 +21,7 @@ describe('NotFoundPage', () => {
   });
 
   it('leads home, not to the instrument list, signed in or not', async () => {
-    for (const user of [null, ARSEN]) {
+    for (const user of [null, ADA]) {
       stubApi(session(user));
       const { router } = await renderApp('/instruments/nope');
       await userEvent.setup().click(screen.getByRole('link', { name: 'Back to home' }));

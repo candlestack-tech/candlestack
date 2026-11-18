@@ -17,7 +17,8 @@ const credits = [
 
 // Solid, so the background grid stops above it. The credits go right from sm up; on a phone they
 // wrap under the links. 24 px at the sides; in the app 16 px on a phone, as the page above it
-// (mockups/app; mockups/home keeps 24 px).
+// (mockups/app; mockups/home keeps 24 px). A link is 24 px high for a finger, its padding taking
+// no room from the line (an inline link's padding never does).
 export function Footer({ app = false }: { app?: boolean }) {
   return (
     <footer className="border-t bg-background">
@@ -29,7 +30,7 @@ export function Footer({ app = false }: { app?: boolean }) {
       >
         <span>CandleStack</span>
         {links.map(({ name, href }) => (
-          <a key={href} href={href} target="_blank" rel="noopener" className="hover:text-foreground">
+          <a key={href} href={href} target="_blank" rel="noopener" className="-my-[3px] py-[3px] hover:text-foreground">
             {name}
           </a>
         ))}
@@ -41,7 +42,7 @@ export function Footer({ app = false }: { app?: boolean }) {
                 href={href}
                 target="_blank"
                 rel="noreferrer"
-                className="underline underline-offset-2 hover:text-foreground"
+                className="py-[3px] underline underline-offset-2 hover:text-foreground"
               >
                 {name}
               </a>

@@ -5,7 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { preferencesQueryOptions, type Appearance } from '@/api';
 import { cityOf, viewerTimeZone } from '@/lib/dates';
-import { ARSEN, DEFAULT_PREFERENCES, sentBody, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, DEFAULT_PREFERENCES, sentBody, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, warmUpSettings } from '@/test/app';
 
 beforeAll(warmUpSettings);
@@ -34,7 +34,7 @@ const choices = (name: string) =>
 
 describe('Appearance', () => {
   it('shows the account’s settings, each format on the same moment', async () => {
-    stubApi(sessionWithPreferences(ARSEN));
+    stubApi(sessionWithPreferences(ADA));
     await renderApp('/settings/appearance');
     expect(choices('Theme')).toEqual(['Light', 'Dark *']);
     expect(choices('Time zone')).toEqual(['New York *', cityOf(viewerTimeZone())]);
@@ -46,7 +46,7 @@ describe('Appearance', () => {
   });
 
   it('switches the theme of the page at once and saves it, like the header’s toggle', async () => {
-    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [UPDATE]: answered({ theme: 'light' }) });
+    const fetch = stubApi({ ...sessionWithPreferences(ADA), [UPDATE]: answered({ theme: 'light' }) });
     await renderApp('/settings/appearance');
     await userEvent.setup().click(card().getByRole('radio', { name: 'Light' }));
 
@@ -57,7 +57,7 @@ describe('Appearance', () => {
   });
 
   it('follows the header’s toggle, which saves to the account too', async () => {
-    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [UPDATE]: answered({ theme: 'light' }) });
+    const fetch = stubApi({ ...sessionWithPreferences(ADA), [UPDATE]: answered({ theme: 'light' }) });
     await renderApp('/settings/appearance');
     await userEvent.setup().click(screen.getByRole('button', { name: 'Switch to light theme' }));
     expect(choices('Theme')).toEqual(['Light *', 'Dark']);
@@ -65,7 +65,7 @@ describe('Appearance', () => {
   });
 
   it('saves the time zone and the formats as each changes', async () => {
-    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [UPDATE]: answered({ time_zone: 'local' }) });
+    const fetch = stubApi({ ...sessionWithPreferences(ADA), [UPDATE]: answered({ time_zone: 'local' }) });
     const { queryClient } = await renderApp('/settings/appearance');
     const user = userEvent.setup();
 
@@ -82,7 +82,7 @@ describe('Appearance', () => {
   });
 
   it('turns the animations off for the whole page with Reduce motion', async () => {
-    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [UPDATE]: answered({ reduce_motion: true }) });
+    const fetch = stubApi({ ...sessionWithPreferences(ADA), [UPDATE]: answered({ reduce_motion: true }) });
     await renderApp('/settings/appearance');
     const motion = card().getByRole('switch', { name: 'Reduce motion' });
     await userEvent.setup().click(motion);
@@ -95,7 +95,7 @@ describe('Appearance', () => {
 
   it('goes back and says why when a change cannot be saved, and Retry makes it again', async () => {
     const answers = [{ status: 503, body: { detail: 'Down for a minute.' } }, answered({ theme: 'light' })];
-    const fetch = stubApi({ ...sessionWithPreferences(ARSEN), [UPDATE]: async () => answers.shift()! });
+    const fetch = stubApi({ ...sessionWithPreferences(ADA), [UPDATE]: async () => answers.shift()! });
     const { queryClient } = await renderApp('/settings/appearance');
     const user = userEvent.setup();
     await user.click(card().getByRole('radio', { name: 'Light' }));
@@ -115,7 +115,7 @@ describe('Appearance', () => {
   });
 
   it('does not bring back an old failure on coming back to the section', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), [UPDATE]: { status: 503, body: { detail: 'Down for a minute.' } } });
+    stubApi({ ...sessionWithPreferences(ADA), [UPDATE]: { status: 503, body: { detail: 'Down for a minute.' } } });
     const { router } = await renderApp('/settings/appearance');
     await userEvent.setup().click(card().getByRole('radio', { name: 'Light' }));
     await card().findByRole('alert');

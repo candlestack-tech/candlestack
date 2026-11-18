@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import State
 
 from candlestack.core import DbSessionDep, SettingsDep
+from candlestack.experiments.deletes import BacktestDeletes
 from candlestack.experiments.runs import BacktestRuns
 from candlestack.experiments.service import BacktestsService
 from candlestack.experiments.store import BacktestStore
@@ -26,7 +27,11 @@ def backtest_runs(state: State, db: AsyncSession) -> BacktestRuns:
     """The runs on `db` with the clients the app keeps on `state`: what a route depends on, and
     what an MCP tool builds for its call."""
     return BacktestRuns(
-        BacktestStore(db), state.data_service, state.backtest_runner, state.settings.app_version
+        BacktestStore(db),
+        state.data_service,
+        state.backtest_runner,
+        state.settings.app_version,
+        limit=state.settings.backtest_limit,
     )
 
 
@@ -41,7 +46,13 @@ def build_sweeps(state: State, db: AsyncSession, app_version: str) -> Sweeps:
     """The sweeps of the app with ``state`` on the Postgres session ``db``: for the routes and
     the MCP tools alike."""
     store = BacktestStore(db)
-    runs = BacktestRuns(store, state.data_service, state.backtest_runner, app_version)
+    runs = BacktestRuns(
+        store,
+        state.data_service,
+        state.backtest_runner,
+        app_version,
+        limit=state.settings.backtest_limit,
+    )
     return Sweeps(store, runs)
 
 
@@ -50,3 +61,16 @@ def get_sweeps(request: Request, db: DbSessionDep, settings: SettingsDep) -> Swe
 
 
 SweepsDep = Annotated[Sweeps, Depends(get_sweeps)]
+
+
+def build_deletes(state: State, db: AsyncSession) -> BacktestDeletes:
+    """Deleting backtests on ``db`` with the runner the app keeps: for the routes and the MCP
+    tools alike."""
+    return BacktestDeletes(BacktestStore(db), state.backtest_runner)
+
+
+def get_deletes(request: Request, db: DbSessionDep) -> BacktestDeletes:
+    return build_deletes(request.app.state, db)
+
+
+DeletesDep = Annotated[BacktestDeletes, Depends(get_deletes)]

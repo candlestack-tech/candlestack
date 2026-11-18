@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRight } from 'lucide-react';
-import { useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 
 import { catalogQueryOptions, type Manifest } from '@/api';
 import { HINT } from '@/components/Hint';
@@ -119,18 +119,58 @@ function ColumnFacts({ column, index }: { column: Column; index: number }) {
   );
 }
 
-// The groups over the columns (.p6-groups), each as wide as its columns.
+// Which groups' names their columns have no room for, by their place, as the page lays them out
+// (`[data-group]`), again whenever the grid changes width.
+function useCutNames(groups: string) {
+  const grid = useRef<HTMLDivElement>(null);
+  const [cut, setCut] = useState<readonly number[]>([]);
+  useLayoutEffect(() => {
+    const box = grid.current;
+    if (!box) return;
+    const measure = () => {
+      const names = [...box.querySelectorAll<HTMLElement>('[data-group]')];
+      const next = names.flatMap((name, index) => (name.scrollWidth > name.clientWidth ? [index] : []));
+      setCut((last) => (last.join() === next.join() ? last : next));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    return () => {
+      observer.disconnect();
+    };
+  }, [groups]);
+  return { grid, cut };
+}
+
+// The groups over the columns (.p6-groups), each as wide as its columns. A name its columns have
+// no room for (a group of one column, "Bands") steps up over its line, whole, rather than end in
+// an ellipsis after its first letter.
 function Groups({ columns }: { columns: Column[] }) {
+  const groups = groupsOf(columns);
+  const { grid, cut } = useCutNames(groups.map(({ group, span }) => `${group}:${String(span)}`).join(','));
   return (
-    <div className="col-start-2 grid gap-0.5" style={repeat(columns.length)} aria-hidden="true">
-      {groupsOf(columns).map(({ group, span }, index) => (
+    <div
+      ref={grid}
+      className={cn('col-start-2 grid gap-0.5', cut.length > 0 && 'pt-4')}
+      style={repeat(columns.length)}
+      aria-hidden="true"
+    >
+      {groups.map(({ group, span }, index) => (
         <span
           key={`${group}-${index}`}
           title={group}
-          className="truncate border-t-2 pt-[3px] font-mono text-[10.5px] text-muted-foreground"
+          className="relative border-t-2 pt-[3px] font-mono text-[10.5px] text-muted-foreground"
           style={{ gridColumn: `span ${span}` }}
         >
-          {group}
+          <span data-group className={cn('block truncate', cut.includes(index) && 'invisible')}>
+            {group}
+          </span>
+          {cut.includes(index) && (
+            <span data-raised className="absolute bottom-full left-0 mb-0.5 whitespace-nowrap">
+              {group}
+            </span>
+          )}
         </span>
       ))}
     </div>
@@ -182,9 +222,9 @@ export function InputMatrix({ manifest, hint }: Props) {
   return (
     <>
       <div className="overflow-x-auto p-0.5">
-        {/* At least 12 px a column, 8 px on a phone, so the prediction still fits beside them. */}
+        {/* At least 12 px a column; on a phone 24 px and its gap for a finger (it scrolls then). */}
         <div
-          className="grid grid-cols-[minmax(46px,auto)_minmax(calc(var(--columns)*12px),1fr)_auto] gap-x-2.5 gap-y-1.5 max-sm:grid-cols-[minmax(46px,auto)_minmax(calc(var(--columns)*8px),1fr)_auto]"
+          className="grid grid-cols-[minmax(46px,auto)_minmax(calc(var(--columns)*12px),1fr)_auto] gap-x-2.5 gap-y-1.5 max-sm:grid-cols-[minmax(46px,auto)_minmax(calc(var(--columns)*26px),1fr)_auto]"
           style={{ '--columns': columns.length } as CSSProperties}
         >
           <Groups columns={columns} />

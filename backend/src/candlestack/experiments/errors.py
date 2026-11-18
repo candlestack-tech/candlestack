@@ -37,7 +37,12 @@ class InvalidBacktest(Exception):
 
 
 class QueueFull(Exception):
-    """The user has as many backtests waiting in their queue as it holds."""
+    """The user has as many backtests waiting in their queue as it holds; one fits in about
+    ``retry_after_s`` seconds."""
+
+    def __init__(self, retry_after_s: int) -> None:
+        super().__init__(retry_after_s)
+        self.retry_after_s = retry_after_s
 
 
 class BacktestNotQueued(Exception):
@@ -98,12 +103,22 @@ class SweepTooLarge(Exception):
 
 
 class SweepQueueFull(Exception):
-    """The user's queue has room for fewer backtests than the sweep's ``count``: ``room``."""
+    """The user's queue has room for fewer backtests than the sweep's ``count``: ``room``; all
+    fit in about ``retry_after_s`` seconds."""
 
-    def __init__(self, count: int, room: int) -> None:
-        super().__init__(count, room)
+    def __init__(self, count: int, room: int, retry_after_s: int) -> None:
+        super().__init__(count, room, retry_after_s)
         self.count = count
         self.room = room
+        self.retry_after_s = retry_after_s
+
+
+class IdempotencyKeyReused(Exception):
+    """A request repeats an idempotency key of the user's last 24 hours with another body."""
+
+
+class IdempotencyKeyInUse(Exception):
+    """The first request with the idempotency key is still being answered."""
 
 
 class SetupFailed(Exception):
@@ -114,3 +129,23 @@ class SetupFailed(Exception):
         super().__init__(index, error)
         self.index = index
         self.error = error
+
+
+class BacktestLimitReached(Exception):
+    """The user has ``count`` backtests, and ``adding`` more would pass the most an account
+    keeps (``limit``)."""
+
+    def __init__(self, limit: int, count: int, adding: int = 1) -> None:
+        super().__init__(limit, count, adding)
+        self.limit = limit
+        self.count = count
+        self.adding = adding
+
+
+class CountMismatch(Exception):
+    """The confirmation of a delete names another number of backtests than ``count``, how
+    many match."""
+
+    def __init__(self, count: int) -> None:
+        super().__init__(count)
+        self.count = count

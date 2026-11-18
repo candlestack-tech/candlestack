@@ -1,8 +1,8 @@
-import { Check } from 'lucide-react';
 import { useEffect, useRef, type ReactNode } from 'react';
 
 import type { Scope } from '@/api';
 import { HINT } from '@/components/Hint';
+import { Tick } from '@/components/Tick';
 import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
@@ -66,38 +66,26 @@ type ScopeProps = {
   onToggle: () => void;
   // The consent page: what the scope lets the app do, alone, in place of its name and API name.
   plain?: boolean;
+  // Off for a moment, as while the consent page sends the decision.
+  disabled?: boolean;
 };
-
-// .box: the 18 px box, filled with the accent and its check when on.
-function Tick({ on, faded }: { on: boolean; faded: boolean }) {
-  return (
-    <span
-      className={cn(
-        'mt-px grid size-[18px] place-items-center rounded-[5px] border-[1.5px] text-primary-foreground peer-focus-visible:ring-[3px] peer-focus-visible:ring-ring/50',
-        on ? 'border-primary bg-primary' : 'border-[color-mix(in_srgb,var(--muted)_60%,var(--rule))]',
-        faded && 'opacity-55',
-      )}
-    >
-      {on && <Check aria-hidden="true" strokeWidth={3} className="size-3" />}
-    </span>
-  );
-}
 
 // .sc: a box, the scope in plain words with its API name, what it lets the key do. Read is always
 // on (every other scope needs it), its box faded and "Always" at the right.
-export function ScopeBox({ scope, label, description, on, onToggle, plain = false }: ScopeProps) {
+export function ScopeBox({ scope, label, description, on, onToggle, plain = false, disabled = false }: ScopeProps) {
   const fixed = scope === 'read';
+  const off = fixed || disabled;
   return (
     <label
       className={cn(
         'grid grid-cols-[18px_minmax(0,1fr)_auto] items-start gap-2.5 bg-background px-3 py-2.5 text-left transition-colors [&+&]:border-t',
-        fixed ? 'cursor-default' : 'cursor-pointer hover:bg-muted',
+        off ? 'cursor-default' : 'cursor-pointer hover:bg-muted',
       )}
     >
       <input
         type="checkbox"
         checked={on}
-        disabled={fixed}
+        disabled={off}
         aria-label={plain ? description : label}
         aria-describedby={plain ? undefined : `scope-${scope}`}
         onChange={onToggle}

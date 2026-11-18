@@ -3,8 +3,10 @@
 // Return fits "+9,999.9 %", When "12 Oct 22:34" on one line (an older run's "28 May 2025
 // 11:58 AM" takes two), the instruments one symbol of seven letters with its icon (a "+N" after it
 // cuts the symbol). The Backtest column takes the rest, so its name has room (#376): in the
-// Backtests table the model has a width too, on up to two lines.
+// Backtests table the model has a width too, on up to two lines, and its checkboxes the 18 px box
+// with the cell's 8 px before it (the star's cell gives the 8 px after it).
 export const WIDTH = {
+  select: 'w-[26px]',
   instruments: 'w-[104px]',
   model: 'w-[120px]',
   return: 'w-[96px]',

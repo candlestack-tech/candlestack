@@ -42,6 +42,7 @@ from candlestack.ml.problems import (
 )
 from candlestack.ml.schemas import (
     MANIFEST_MAX_BYTES,
+    MODELS_MAX,
     NAME_MAX,
     UPLOAD_LINK_MINUTES,
     Framework,
@@ -55,7 +56,7 @@ from candlestack.ml.schemas import (
     ModelUploadIn,
     UploadStatus,
 )
-from candlestack.ml.service import ModelsAccountDeletion, ModelsService
+from candlestack.ml.service import ModelsAccountDeletion, ModelsService, upload_curl
 from candlestack.ml.storage import (
     LocalModelStorage,
     ModelStorage,
@@ -67,6 +68,7 @@ from candlestack.ml.usage import ModelUsage, ModelUsageStats, no_usage
 __all__ = [
     "LINK_REFUSALS",
     "MANIFEST_MAX_BYTES",
+    "MODELS_MAX",
     "NAME_MAX",
     "UPLOAD_LINK_MINUTES",
     "Framework",
@@ -105,6 +107,7 @@ __all__ = [
     "no_usage",
     "preprocessing_router",
     "rename_taken",
+    "upload_curl",
     "upload_not_found",
     "upload_problem",
 ]

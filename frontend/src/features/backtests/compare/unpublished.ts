@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { ApiError, backtestQueryOptions, type BacktestDocument, type ComparedBacktest } from '@/api';
 
 import { comparedDescription, documentDescription } from '../names';
-import { leaveCompare, nameInCompare, useCompareSelection, type ComparePick } from './selection';
+import { creditInCompare, leaveCompare, nameInCompare, useCompareSelection, type ComparePick } from './selection';
 
 export const isMissing = (error: unknown) => error instanceof ApiError && error.status === 404;
 
@@ -52,9 +52,18 @@ export function useNamesOf(picks: readonly ComparePick[], results: readonly { da
   );
 }
 
-// The same from the comparison, on the compare page.
+// The same from the comparison, on the compare page; with the number and the author's name, which
+// a backtest chosen by a link (openInCompare) does not have yet.
 export const useComparedNames = (backtests: readonly ComparedBacktest[]) => {
   useNames(backtests.map((backtest) => [backtest.id, backtest.name, comparedDescription(backtest)] as const));
+  const creditsKey = JSON.stringify(
+    backtests.map(({ id, number, author }) => [id, number, author.mine ? null : author.name] as const),
+  );
+  useEffect(() => {
+    for (const [id, number, author] of JSON.parse(creditsKey) as [string, number, string | null][]) {
+      creditInCompare(id, number, author ?? undefined);
+    }
+  }, [creditsKey]);
 };
 
 // The panel asks for the documents of the other accounts' backtests it holds, so one unpublished

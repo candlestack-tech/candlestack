@@ -1,4 +1,4 @@
-import type { Model } from '@/api';
+import { isGone, type Model } from '@/api';
 import { CancelButton, DangerButton } from '@/components/DialogButtons';
 import {
   Dialog,
@@ -12,7 +12,7 @@ import {
 import { plural } from '@/lib/plural';
 
 import { formatSize } from './format';
-import { isGone, useDeleteModel } from './useModels';
+import { useDeleteModel } from './useModels';
 
 // What happens to the backtests that used the model: they stay.
 function backtestsNote(count: number): string {

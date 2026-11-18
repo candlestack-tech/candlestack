@@ -259,6 +259,22 @@ def _out(
     )
 
 
+# A path from the user's home, kept outside the quotes so the shell expands it.
+_HOME_PREFIXES = {"~/": "~/", "$HOME/": '"$HOME"/'}
+
+
+def upload_curl(path: str) -> str:
+    """The upload command up to the link's URL, which follows it after a space: curl sending
+    the file at `path`, for a POSIX shell (not PowerShell or cmd.exe). The path is quoted, but a
+    leading `~/` or `$HOME/` is left for the shell to expand. `--fail-with-body` prints the
+    problem when the upload is refused. The URL is not an argument: no local variable holds it
+    (Sentry filters only the token's by its name)."""
+    for prefix, kept in _HOME_PREFIXES.items():
+        if path.startswith(prefix) and len(path) > len(prefix):
+            return f"curl --fail-with-body -T {kept}{shlex.quote(path.removeprefix(prefix))}"
+    return f"curl --fail-with-body -T {shlex.quote(path)}"
+
+
 def upload_token_hash(token: str) -> bytes:
     return hashlib.sha256(token.encode()).digest()
 
@@ -424,6 +440,15 @@ def _texts_with_nul(value: object, where: str) -> list[tuple[str, str]]:
     return []
 
 
+@dataclass(frozen=True, slots=True)
+class ModelsPage:
+    """A page of the user's models, how many there are and the storage they take."""
+
+    models: list[ModelOut]
+    total: int
+    usage: StorageUsage
+
+
 class ModelsService:
     def __init__(self, store: ModelStore, storage: ModelStorage, uploads: UploadLocks) -> None:
         self._store = store
@@ -432,16 +457,39 @@ class ModelsService:
 
     async def models(self, user_id: str) -> ModelsOut:
         """The user's models, oldest first, and the storage they take."""
+        listed = await self.models_page(user_id)
+        return ModelsOut(models=listed.models, usage=listed.usage)
+
+    async def models_page(
+        self, user_id: str, *, offset: int = 0, limit: int | None = None
+    ) -> ModelsPage:
+        """The user's models, oldest first, from `offset` and at most `limit` of them (all by
+        default); how many there are and the storage all of them take. Only the models of the
+        page are counted in the backtests."""
         models = await self._store.models(user_id)
-        usage = await self._store.backtest_usage(user_id, [model.id for model in models])
-        return ModelsOut(
-            models=[_out(model, usage.get(model.id, UNUSED), _spec(model)) for model in models],
+        shown = models[offset:] if limit is None else models[offset : offset + limit]
+        usage = await self._store.backtest_usage(user_id, [model.id for model in shown])
+        return ModelsPage(
+            models=[_out(model, usage.get(model.id, UNUSED), _spec(model)) for model in shown],
+            total=len(models),
             usage=StorageUsage(
                 used_bytes=sum(model.size_bytes for model in models),
                 quota_bytes=QUOTA_BYTES,
                 file_max_bytes=FILE_MAX_BYTES,
             ),
         )
+
+    async def model(self, user_id: str, model_id: str) -> ModelOut:
+        """The user's model with the ID, as the list shows it.
+
+        Raises:
+            ModelNotFound: The user has no model with the ID.
+        """
+        model = await self._store.model(user_id, model_id)
+        if model is None:
+            raise ModelNotFound
+        usage = await self._store.backtest_usage(user_id, [model.id])
+        return _out(model, usage.get(model.id, UNUSED), _spec(model))
 
     async def upload(
         self,
@@ -611,8 +659,7 @@ class ModelsService:
             **_upload_out(upload, now).model_dump(),
             url=public_url + UPLOAD_PATH + token,
             page_url=public_url + UPLOAD_PAGE_PATH + token,
-            command=f"curl --fail-with-body -T {shlex.quote(new.name)} "
-            f"{public_url}{UPLOAD_PATH}{token}",
+            command=f"{upload_curl(new.name)} {public_url}{UPLOAD_PATH}{token}",
         )
 
     async def upload_status(self, user_id: str, upload_id: str) -> ModelUploadOut:

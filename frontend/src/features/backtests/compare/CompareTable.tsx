@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import { X } from 'lucide-react';
+import type { CSSProperties } from 'react';
 
 import type { CompareMetric, ComparedBacktest } from '@/api';
 import { Button } from '@/components/ui/button';
@@ -16,8 +17,15 @@ import { removeFromCompare } from './selection';
 // A backtest of the comparison, its place in the answer (`index`) and its slot's colour.
 export type CompareColumn = { backtest: ComparedBacktest; index: number; color: string };
 
-const LABEL = 'px-3.5 py-2 text-left align-middle text-[13px] font-normal text-muted-foreground';
-const CELL = 'min-w-0 truncate px-3.5 py-2 align-middle text-[13.5px]';
+// Up to 640 px the labels' column is 96 px and stays at the left while the table scrolls, the
+// paddings narrower, so two backtests fit a phone beside it and the next one's edge shows there
+// are more.
+const SIDES = 'px-3.5 max-sm:px-2.5';
+const LABEL = cn(
+  SIDES,
+  'py-2 text-left align-middle text-[13px] font-normal text-muted-foreground max-sm:sticky max-sm:left-0 max-sm:z-[1] max-sm:bg-background',
+);
+const CELL = cn(SIDES, 'min-w-0 truncate py-2 align-middle text-[13.5px]');
 const LINE = 'border-b [tr:last-child>&]:border-b-0';
 const MARKS: Record<NonNullable<Mark>, string> = {
   best: 'bg-[color-mix(in_srgb,var(--up)_14%,transparent)] font-semibold text-up',
@@ -39,7 +47,7 @@ function Author({ name, text = name, className }: { name: string; text?: string;
 function Heading({ backtest, color }: Omit<CompareColumn, 'index'>) {
   const { id, name, author } = backtest;
   return (
-    <th scope="col" className={cn(LINE, 'px-3.5 py-2 text-left align-top font-normal')}>
+    <th scope="col" className={cn(LINE, SIDES, 'py-2 text-left align-top font-normal')}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
@@ -135,19 +143,24 @@ export function CompareTable({ columns, metrics, canAdd, onAdd }: Props) {
     columns.map(({ index }) => index),
   );
   const span = 1 + columns.length + (canAdd ? 1 : 0);
+  // `relative`: the screen reader's words of an empty cell are placed inside the box that scrolls,
+  // not past the page's edge.
   return (
-    <section className="mt-4 overflow-x-auto rounded-lg border bg-background">
-      <table className="w-full min-w-[760px] table-fixed border-separate border-spacing-0">
+    <section className="relative mt-4 overflow-x-auto rounded-lg border bg-background">
+      <table
+        className="w-full min-w-[760px] table-fixed border-separate border-spacing-0 max-sm:min-w-[calc(96px+var(--columns)*120px)]"
+        style={{ '--columns': span - 1 } as CSSProperties}
+      >
         <thead>
           <tr>
-            <th scope="col" className={cn(LINE, LABEL, 'w-[180px]')}>
+            <th scope="col" className={cn(LINE, LABEL, 'w-[180px] max-sm:w-24')}>
               Backtest
             </th>
             {columns.map((column) => (
               <Heading key={column.backtest.id} backtest={column.backtest} color={column.color} />
             ))}
             {canAdd && (
-              <th scope="col" className={cn(LINE, 'px-3.5 py-2 text-left align-middle font-normal')}>
+              <th scope="col" className={cn(LINE, SIDES, 'py-2 text-left align-middle font-normal')}>
                 <Button type="button" variant="outline" className={BUTTON_SIZES.sm} onClick={onAdd}>
                   + Add backtest
                 </Button>

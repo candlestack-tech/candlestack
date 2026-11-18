@@ -1,6 +1,6 @@
 import { Link, useRouterState } from '@tanstack/react-router';
 import { ChevronDown, Scale, X } from 'lucide-react';
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -117,13 +117,14 @@ function Unpublished({ pick }: { pick: ComparePick }) {
 }
 
 // The panel folded: what reopens it.
-function FoldedPanel({ count }: { count: string }) {
+function FoldedPanel({ count, onOpen }: { count: string; onOpen: () => void }) {
   return (
     <Button
       type="button"
       variant="outline"
       onClick={() => {
         hideComparePanel(false);
+        onOpen();
       }}
       className="fixed right-6 bottom-6 z-40 h-10 bg-background shadow-[0_6px_24px_var(--shadow)] max-[480px]:right-4 max-[480px]:bottom-4"
     >
@@ -164,18 +165,34 @@ function PanelHead({ count }: { count: string }) {
   );
 }
 
+// Whether the panel is folded: as the user left it on the Backtests list, where backtests are
+// chosen; on the other pages it starts folded, so it covers no chart or table (a third of a
+// phone's screen), until it is opened there or a backtest is added there. And whether this is the
+// compare page, which has no panel.
+function useFolded(hidden: boolean, count: number) {
+  const pathname = useRouterState({ select: ({ location }) => location.pathname });
+  const [openedOn, setOpenedOn] = useState<string | null>(null);
+  const [known, setKnown] = useState(count);
+  if (known !== count) {
+    setKnown(count);
+    if (count > known) setOpenedOn(pathname);
+  }
+  const folded = hidden || (pathname !== '/backtests' && openedOn !== pathname);
+  return { folded, open: () => setOpenedOn(pathname), comparing: pathname === '/backtests/compare' };
+}
+
 // The backtests chosen to compare, in the bottom right corner of the signed-in pages while there
 // are any: their slots one under the other, Clear, a fold to a small button, and Compare from 2.
 export function ComparePanel({ userId }: { userId: string }) {
   const { slots, picks, gone, hidden } = useCompareSelection();
-  const comparing = useRouterState({ select: ({ location }) => location.pathname === '/backtests/compare' });
+  const { folded, open, comparing } = useFolded(hidden, picks.length);
   useEffect(() => {
     claimCompare(userId);
   }, [userId]);
   usePanelPicks(!comparing);
   if ((picks.length === 0 && gone.length === 0) || comparing) return null;
   const count = `${picks.length} of ${SLOTS}`;
-  if (hidden) return <FoldedPanel count={count} />;
+  if (folded) return <FoldedPanel count={count} onOpen={open} />;
   return (
     <aside
       aria-label="Compare"

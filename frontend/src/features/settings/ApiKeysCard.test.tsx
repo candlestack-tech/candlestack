@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiKeysQueryOptions, type ApiKey, type ApiKeys } from '@/api';
-import { ARSEN, problem, sentBody, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, problem, sentBody, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, warmUpSettings } from '@/test/app';
 
 beforeAll(warmUpSettings);
@@ -74,7 +74,7 @@ const card = () => within(screen.getByRole('region', { name: 'API keys' }));
 const row = (name: string) => within(card().getByText(name).closest('div.grid') as HTMLElement);
 
 async function open(answers: Record<string, unknown>) {
-  const fetch = stubApi({ ...sessionWithPreferences(ARSEN), ...(answers as Parameters<typeof stubApi>[0]) });
+  const fetch = stubApi({ ...sessionWithPreferences(ADA), ...(answers as Parameters<typeof stubApi>[0]) });
   const app = await renderApp('/settings/api-and-mcp');
   return { fetch, ...app, user: userEvent.setup() };
 }

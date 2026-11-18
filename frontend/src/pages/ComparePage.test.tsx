@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { addToCompare, clearCompare } from '@/features/backtests/compare/selection';
 import { valueAt } from '@/features/backtests/compare/chartLines';
-import { ARSEN, backtestDocument, backtestsAnswer, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, backtestDocument, backtestsAnswer, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 import { compareAnswers, compareMissing } from '@/test/compare';
 import { othersDocument } from '@/test/experiments';
@@ -56,7 +56,7 @@ const MARKED = compareAnswers([BETTER, WORSE, MIDDLE], {
 
 const answer = (body: unknown) => ({ status: 200, body });
 const LISTS = {
-  ...sessionWithPreferences(ARSEN),
+  ...sessionWithPreferences(ADA),
   ...backtestsAnswer({ backtests: [], counts: { all: 0, starred: 0, failed: 0, public: 0 }, models: [] }),
 };
 
@@ -213,6 +213,21 @@ describe('the compare page', () => {
     expect(row('Candles').map((cell) => cell.textContent)).toEqual(['5', '5', 'No backtest']);
   });
 
+  // #465: two backtests fit a 360 px phone beside the labels, which stay while the table scrolls.
+  it('fits two backtests beside the labels on a phone, inside the box that scrolls', async () => {
+    stubApi({ ...LISTS, ...choose(BETTER, WORSE, MIDDLE), ...MARKED });
+    await renderApp('/backtests/compare');
+    const label = await screen.findByRole('rowheader', { name: 'Total return' });
+    const table = label.closest('table') as HTMLElement;
+    // Three backtests and the column to add one: 96 px and 120 px a column up to 640 px.
+    expect(table.style.getPropertyValue('--columns')).toBe('4');
+    expect(table.className).toContain('max-sm:min-w-[calc(96px+var(--columns)*120px)]');
+    expect(table.parentElement?.className.split(' ')).toEqual(expect.arrayContaining(['relative', 'overflow-x-auto']));
+    expect(label.className.split(' ')).toEqual(
+      expect.arrayContaining(['max-sm:sticky', 'max-sm:left-0', 'max-sm:bg-background']),
+    );
+  });
+
   it('shows no panel on its own page', async () => {
     stubApi({ ...LISTS, ...choose(BETTER, WORSE) });
     await renderApp('/backtests/compare');
@@ -229,7 +244,7 @@ describe('comparing with another account’s backtests', () => {
       number: doc.backtest.number,
       name: doc.backtest.name,
       symbol: 'AAPL',
-      author: 'Tymur Tkach',
+      author: 'Alan Turing',
     });
     return { [`GET /api/v1/backtests/${doc.backtest.id}`]: answer(doc), ...compareAnswers([BETTER, doc]) };
   };
@@ -239,15 +254,15 @@ describe('comparing with another account’s backtests', () => {
     await renderApp('/backtests/compare');
     expect(await screen.findByText('2 of 4 backtests · 1 yours, 1 from Experiments')).toBeDefined();
     await screen.findByRole('rowheader', { name: 'Author' });
-    expect(row('Author').map((cell) => cell.textContent)).toEqual(['ALYou', 'TTTymur Tkach', 'No backtest']);
+    expect(row('Author').map((cell) => cell.textContent)).toEqual(['ALYou', 'ATAlan Turing', 'No backtest']);
     // Each head and legend names its backtest on two lines, without its number (#376).
     const head = screen.getByRole('link', { name: 'Velvet Deneb' }).closest('th')!;
-    expect(within(head).getByText('Tymur Tkach').previousElementSibling?.textContent).toBe('TT');
+    expect(within(head).getByText('Alan Turing').previousElementSibling?.textContent).toBe('AT');
     expect(within(head).getByText('AAPL · Candles · 30m')).toBeDefined();
     expect(within(head).queryByText('#9')).toBeNull();
     const legend = within(screen.getByRole('region', { name: 'Equity' }));
     expect(legend.getByText('Bright Vega').parentElement?.textContent).toBe('Bright VegaAAPL · Candles · 30m');
-    expect(legend.getByTitle('Tymur Tkach').parentElement?.textContent).toBe('TTVelvet Deneb');
+    expect(legend.getByTitle('Alan Turing').parentElement?.textContent).toBe('ATVelvet Deneb');
     expect(legend.queryByText(/#/)).toBeNull();
   });
 
@@ -261,7 +276,7 @@ describe('comparing with another account’s backtests', () => {
 
   it('says which one its author unpublished until it is dismissed', async () => {
     const doc = othersDocument();
-    addToCompare({ id: doc.backtest.id, number: 9, name: 'Velvet Deneb', symbol: 'AAPL', author: 'Tymur Tkach' });
+    addToCompare({ id: doc.backtest.id, number: 9, name: 'Velvet Deneb', symbol: 'AAPL', author: 'Alan Turing' });
     stubApi({
       ...LISTS,
       ...choose(BETTER, WORSE),
@@ -269,7 +284,7 @@ describe('comparing with another account’s backtests', () => {
     });
     await renderApp('/backtests/compare');
     const note = (await screen.findByText(/, so it left your Compare\.$/)).parentElement!;
-    expect(note.textContent).toBe('TTTymur Tkach unpublished Velvet Deneb, so it left your Compare.');
+    expect(note.textContent).toBe('ATAlan Turing unpublished Velvet Deneb, so it left your Compare.');
     expect(screen.getByText('2 of 4 backtests')).toBeDefined();
     await userEvent.click(within(note).getByRole('button', { name: 'Dismiss' }));
     expect(screen.queryByText(/so it left your Compare/)).toBeNull();
@@ -306,6 +321,41 @@ describe('the charts of the compare page', () => {
       charts.hover(null);
     });
     expect(screen.queryByText('−6.0 %')).toBeNull();
+  });
+});
+
+describe('the charts of backtests whose periods do not overlap (#466)', () => {
+  const YEAR = 365 * 86_400;
+  // The backtest of this number, its series moved by `shift` seconds.
+  const moved = (number: number, shift: number) => {
+    const base = doc(number);
+    if (!base.results) throw new Error('A finished backtest has results');
+    const { series } = base.results;
+    const ts = series.columns.ts.map((time) => time + shift);
+    return { ...base, results: { ...base.results, series: { ...series, columns: { ...series.columns, ts } } } };
+  };
+
+  it('draw each over its whole period from 0 %, and fit both charts once both have their lines', async () => {
+    const earlier = moved(12, -2 * YEAR);
+    const later = moved(11, 0);
+    stubApi({ ...LISTS, ...choose(earlier, later) });
+    await renderApp('/backtests/compare');
+    await vi.waitFor(() => {
+      expect(charts.of('Line')).toHaveLength(4);
+    });
+    const [early, late, earlyFall, lateFall] = charts.of('Line');
+    const span = (points: { time: number }[] | undefined) => [points?.[0]?.time, points?.at(-1)?.time];
+    const ts = (each: typeof earlier) => each.results?.series.columns.ts ?? [];
+    expect(span(early?.data)).toEqual([ts(earlier)[0], ts(earlier).at(-1)]);
+    expect(span(late?.data)).toEqual([ts(later)[0], ts(later).at(-1)]);
+    expect(span(earlyFall?.data)).toEqual(span(early?.data));
+    expect(span(lateFall?.data)).toEqual(span(late?.data));
+    for (const line of [early, late, earlyFall, lateFall]) expect(line?.data[0]).toMatchObject({ value: 0 });
+    // A chart's fit waits for its next frame: fitted before the other had its lines, the view the
+    // other copied back undid it.
+    const last = charts.steps.slice(-6);
+    expect(last.map((step) => step.split(' ')[0])).toEqual(['data', 'data', 'data', 'data', 'fit', 'fit']);
+    expect(new Set(last.slice(-2)).size).toBe(2);
   });
 });
 

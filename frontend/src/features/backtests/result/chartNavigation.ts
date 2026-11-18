@@ -121,14 +121,32 @@ function useDropOnUserMove(view: TradesChartView | null, pending: { current: Tar
   }, [view, pending]);
 }
 
+// The view the chart left when it went to a target by itself. The chart tells of its new view
+// only a frame later: that view settling in between is no move of the user's.
+function useLeftView(visible: View | null) {
+  const inView = useRef(visible);
+  const left = useRef<View | null>(null);
+  useEffect(() => {
+    inView.current = visible;
+  }, [visible]);
+  const leave = useCallback(() => {
+    left.current = inView.current;
+  }, []);
+  const stale = useCallback((settled: View) => settled === left.current, []);
+  return { leave, stale };
+}
+
+type OnChart = { view: TradesChartView | null; frame: PriceFrame | undefined; visible: View | null };
+
 // Going to a part of time: at once while the candles shown cover it, else once the right ones
 // are in (the frame effect shows it then).
-function useGoTo(view: TradesChartView | null, frame: PriceFrame | undefined, run: Run, setWant: (want: Want) => void) {
+function useGoTo({ view, frame, visible }: OnChart, run: Run, setWant: (want: Want) => void) {
   const pending = useRef<Target | null>(null);
   const shown = useRef(frame);
   useEffect(() => {
     shown.current = frame;
   }, [frame]);
+  const { leave, stale } = useLeftView(visible);
   useDropOnUserMove(view, pending);
   const goTo = useCallback(
     (target: View) => {
@@ -145,15 +163,19 @@ function useGoTo(view: TradesChartView | null, frame: PriceFrame | undefined, ru
     [view, run, setWant],
   );
   // The target waiting for candles of this size, taken once they are in.
-  const take = useCallback((level: Level) => {
-    const target = pending.current;
-    if (target?.level !== level) return null;
-    pending.current = null;
-    return target;
-  }, []);
+  const take = useCallback(
+    (level: Level) => {
+      const target = pending.current;
+      if (target?.level !== level) return null;
+      pending.current = null;
+      leave();
+      return target;
+    },
+    [leave],
+  );
   const waiting = useCallback(() => pending.current !== null, []);
   const current = useCallback(() => shown.current, []);
-  return { goTo, take, waiting, current };
+  return { goTo, take, waiting, current, stale };
 }
 
 // New candles on the chart, keeping what is in view or going where it was asked to. After the
@@ -182,21 +204,21 @@ function useFrameOnChart(
 
 // Once the chart stopped moving: other candles when the span in view wants another size or the
 // view reached past the blocks around it. Not while a target waits for its candles: the chart
-// only moved there by itself (the first candles came in), and the user's own move drops it.
+// only moved there by itself (the first candles came in), and the user's own move drops it. Nor
+// for the view the chart left for a target.
 function useLoadOnMove(
   visible: View | null,
-  current: () => PriceFrame | undefined,
-  waiting: () => boolean,
+  { current, waiting, stale }: Pick<ReturnType<typeof useGoTo>, 'current' | 'waiting' | 'stale'>,
   run: Run,
   setWant: (want: Want) => void,
 ) {
   const settled = useDebouncedValue(visible, SETTLE_MS);
   useEffect(() => {
     const frame = current();
-    if (!settled || !frame || waiting()) return;
+    if (!settled || !frame || waiting() || stale(settled)) return;
     const next = nextWant({ start: settled.from, end: settled.to }, frame, run.levels, run.source);
     if (next) setWant(next);
-  }, [settled, current, waiting, run, setWant]);
+  }, [settled, current, waiting, stale, run, setWant]);
 }
 
 // The range the chart was put on: a pick goes there, a move of the user's own leaves it. A range
@@ -204,19 +226,25 @@ function useLoadOnMove(
 function useRange(goTo: (target: View) => void, run: Run, visible: View | null, waiting: () => boolean) {
   const [range, setRange] = useState<RangeName | null>(null);
   const current = useRef(range);
+  // The view in place when the range was picked. React may run the effect of a move from before
+  // the pick only after it, when the pick has already let go of the target waiting for candles but
+  // `current` still holds the range before: that move must not drop the range just picked.
+  const pickedAt = useRef<View | null>(null);
   useEffect(() => {
     current.current = range;
   }, [range]);
   useEffect(() => {
     const name = current.current;
-    if (name && visible && !waiting() && !near(visible, rangeView(name, run))) setRange(null);
+    if (!name || !visible || visible === pickedAt.current || waiting()) return;
+    if (!near(visible, rangeView(name, run))) setRange(null);
   }, [visible, run, waiting]);
   const pick = useCallback(
     (name: RangeName) => {
+      pickedAt.current = visible;
       setRange(name);
       goTo(rangeView(name, run));
     },
-    [goTo, run],
+    [goTo, run, visible],
   );
   return { range, setRange, pick };
 }
@@ -235,10 +263,11 @@ export function useChartNavigation(doc: BacktestDocument, series: Series, trades
   const { container, view } = useChartView(style, LEVEL_SECONDS[level] >= DAY);
   const { candles, returns, drawn } = useDrawn(frame, prices.failed, run, series, trades);
   const events = useChartEvents(view, { candles, seconds: drawn?.seconds ?? LEVEL_SECONDS[level] });
-  const { goTo, take, waiting, current } = useGoTo(view, frame, run, setWant);
+  const going = useGoTo({ view, frame, visible: events.visible }, run, setWant);
+  const { goTo, take, waiting } = going;
   const { range, setRange, pick } = useRange(goTo, run, events.visible, waiting);
   useFrameOnChart(view, drawn, frame, take, () => pick('1M'));
-  useLoadOnMove(events.visible, current, waiting, run, setWant);
+  useLoadOnMove(events.visible, going, run, setWant);
   return {
     run,
     prices,

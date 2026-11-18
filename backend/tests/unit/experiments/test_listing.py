@@ -1,6 +1,8 @@
 """How the search, filters, sorts and pages of the list and of Experiments turn into SQL,
 without a database; the results are integration tests (tests/integration/experiments)."""
 
+from datetime import UTC, datetime
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
@@ -11,6 +13,7 @@ from candlestack.experiments.schemas import (
     EXPERIMENTS_PAGE_SIZE,
     BacktestShow,
     BacktestSort,
+    BacktestStatus,
     ExperimentSort,
     InstrumentMarket,
     Representation,
@@ -19,6 +22,7 @@ from candlestack.experiments.schemas import (
 )
 from candlestack.experiments.service import facets_out, pages
 from candlestack.experiments.store import (
+    BacktestFilters,
     Facets,
     _reads_models,
     escape_like,
@@ -27,6 +31,7 @@ from candlestack.experiments.store import (
     experiment_scope,
     experiment_search,
     filters,
+    indexed,
     ordering,
     search,
 )
@@ -72,6 +77,42 @@ def test_search_looks_at_the_number_the_symbols_and_the_models_name() -> None:
     assert "coalesce(models.name, backtests.model_name) ILIKE '%%Aapl%%'" in sql
     # The name it shows: the user's own, else the generated one.
     assert "coalesce(backtests.name, backtests.generated_name) ILIKE '%%Aapl%%'" in sql
+    # Without the IDs of the user's models of the name, nothing is looked up by an index.
+    assert "backtest_search_text" not in sql
+
+
+def test_search_with_the_models_looks_the_backtests_up_first() -> None:
+    sql = where_sql(search(" Aapl ", ["mdl_k2m9qx47f3", "mdl_7f3k2m9qx4"]))
+
+    # What the trigram index has or a backtest of those models, then the exact condition.
+    assert (
+        "\nWHERE (backtest_search_text(backtests.number, backtests.name, backtests.generated_name, "
+        "backtests.model_name, backtests.instruments) ILIKE '%%Aapl%%' ESCAPE '\\' "
+        "OR backtests.model_id IN ('mdl_k2m9qx47f3', 'mdl_7f3k2m9qx4')) AND "
+        "(('#' || CAST(backtests.number AS VARCHAR)) ILIKE '%%Aapl%%'"
+    ) in sql
+    assert search(" Aapl ", []) is not None
+    assert filters(query="  ", models=[]) == []
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("aapl", True),
+        ("#512", True),
+        ("lstm.keras", True),
+        ("币安人", True),
+        ("a", False),
+        ("12", False),
+        ("#1", False),
+        ("50%", False),
+        ("b_c", False),
+        ("ab cd", False),
+        ("a.b.c", False),
+    ],
+)
+def test_indexed(query: str, expected: bool) -> None:
+    assert indexed(query) is expected
 
 
 def test_the_filters_add_up() -> None:
@@ -82,6 +123,67 @@ def test_the_filters_add_up() -> None:
     assert len(conditions) == 3
     assert "backtests.starred IS true" in sql
     assert "lower(coalesce(models.name, backtests.model_name)) = lower('Lstm.keras')" in sql
+
+
+def test_no_filter_of_the_api_filters_nothing() -> None:
+    assert BacktestFilters().conditions() == []
+    assert filters(more=BacktestFilters()) == []
+
+
+def test_the_filters_of_the_api_add_up_after_the_pages_own() -> None:
+    more = BacktestFilters(
+        statuses=(BacktestStatus.finished, BacktestStatus.failed),
+        sweep_id="sw_7f3k2m9qx4",
+        model_id="mdl_k2m9qx47f3",
+        timeframe=SetupTimeframe.h1,
+        representation=Representation.kagi,
+        created_after=datetime(2026, 10, 1, tzinfo=UTC),
+        created_before=datetime(2026, 11, 1, tzinfo=UTC),
+        min_sharpe=0.0,
+        min_total_return=0.1,
+        min_max_drawdown=-0.2,
+        starred=False,
+        public=True,
+    )
+
+    conditions = filters(show=BacktestShow.starred, more=more)
+    sql = where_sql(*conditions)
+
+    assert len(conditions) == 13
+    assert sql.startswith("WHERE backtests.starred IS true AND backtests.status IN ")
+    for part in (
+        "backtests.status IN ('finished', 'failed')",
+        "backtests.sweep_id = 'sw_7f3k2m9qx4'",
+        "backtests.model_id = 'mdl_k2m9qx47f3'",
+        "(backtests.setup ->> 'timeframe') = '1h'",
+        "backtests.representation = 'kagi'",
+        "backtests.created_at >= '2026-10-01 00:00:00+00:00'",
+        "backtests.created_at < '2026-11-01 00:00:00+00:00'",
+        # A least value of 0 still filters.
+        "backtests.sharpe >= 0.0",
+        "backtests.total_return >= 0.1",
+        "backtests.max_drawdown >= -0.2",
+        # Not starred is a filter too.
+        "backtests.starred IS false",
+        "backtests.published_at IS NOT NULL AND backtests.status = 'finished'",
+    ):
+        assert part in sql
+    assert _reads_models(conditions) is False
+
+
+def test_the_instrument_filter_looks_for_the_instrument_in_the_list() -> None:
+    [condition] = BacktestFilters(instrument="crypto:BTCUSDT").conditions()
+
+    compiled = select(Backtest.id).where(condition).compile(dialect=postgresql.dialect())
+
+    assert "backtests.instruments @> %(instruments_1)s" in str(compiled)
+    assert compiled.params == {"instruments_1": [{"market": "crypto", "symbol": "BTCUSDT"}]}
+
+
+def test_not_public_is_never_published() -> None:
+    assert where_sql(*BacktestFilters(public=False).conditions()) == (
+        "WHERE backtests.published_at IS NULL"
+    )
 
 
 def test_show_failed() -> None:
@@ -107,6 +209,12 @@ def test_the_default_sort_is_newest_first_in_any_order(order: SortOrder) -> None
         (BacktestSort.total_return, SortOrder.asc, "backtests.total_return ASC NULLS LAST"),
         (BacktestSort.max_drawdown, SortOrder.desc, "backtests.max_drawdown DESC NULLS LAST"),
         (BacktestSort.trades, SortOrder.desc, "backtests.num_trades DESC NULLS LAST"),
+        (BacktestSort.win_rate, SortOrder.desc, "backtests.win_rate DESC NULLS LAST"),
+        (
+            BacktestSort.sortino,
+            SortOrder.asc,
+            "CAST(backtests.stats ->> 'sortino' AS FLOAT) ASC NULLS LAST",
+        ),
         (BacktestSort.number, SortOrder.asc, "backtests.number ASC NULLS LAST"),
         (BacktestSort.when, SortOrder.asc, "backtests.number ASC NULLS LAST"),
         (
@@ -143,6 +251,11 @@ def test_only_the_search_and_the_model_filter_read_the_models() -> None:
 @pytest.mark.parametrize(("total", "expected"), [(0, 1), (1, 1), (10, 1), (11, 2), (23, 3)])
 def test_pages(total: int, expected: int) -> None:
     assert pages(total) == expected
+
+
+@pytest.mark.parametrize(("total", "expected"), [(0, 1), (100, 1), (101, 2)])
+def test_pages_of_100(total: int, expected: int) -> None:
+    assert pages(total, 100) == expected
 
 
 @pytest.mark.parametrize(("total", "expected"), [(0, 1), (12, 1), (13, 2)])

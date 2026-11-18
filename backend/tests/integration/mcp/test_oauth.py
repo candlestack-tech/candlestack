@@ -3,6 +3,7 @@ from the 401 of ``/mcp``, registers itself, sends the browser through the consen
 the code and calls a tool with the token, on a real Postgres and Redis (conftest.py). The browser
 is Ada's signed-in session, which allows read and backtests."""
 
+import json
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -19,6 +20,7 @@ from mcp.shared.auth import (
     OAuthClientMetadata,
     OAuthToken,
 )
+from mcp.types import TextContent
 from pydantic import AnyUrl
 
 pytestmark = pytest.mark.integration
@@ -93,7 +95,7 @@ def test_the_sdk_s_client_signs_in_with_oauth_and_calls_a_tool(
     storage = Storage()
     browser = ConsentingBrowser(app, ada.cookie)
 
-    async def run() -> dict[str, Any]:
+    async def run() -> tuple[dict[str, Any], dict[str, Any]]:
         provider = OAuthClientProvider(
             server_url=URL,
             client_metadata=OAuthClientMetadata(
@@ -114,10 +116,15 @@ def test_the_sdk_s_client_signs_in_with_oauth_and_calls_a_tool(
             result = await session.call_tool("get_me", {})
             assert not result.is_error, result.content
             assert result.structured_content is not None
-            return result.structured_content
+            # Ada did not allow models: the app is told how to get it, not to create a key.
+            refused = await session.call_tool("create_model_upload", {"name": "m.keras"})
+            assert refused.is_error
+            [text] = refused.content
+            assert isinstance(text, TextContent)
+            return result.structured_content, json.loads(text.text)
 
     assert client.portal is not None
-    me = client.portal.call(run)
+    me, missing = client.portal.call(run)
 
     assert me["id"] == ada.id
     assert me["scopes"] == ["read", "backtests"]
@@ -131,3 +138,7 @@ def test_the_sdk_s_client_signs_in_with_oauth_and_calls_a_tool(
     [(scopes, last_used)] = sql("SELECT scopes, last_used_at FROM connected_apps")
     assert scopes == ["read", "backtests"]
     assert last_used is not None
+    assert missing["type"] == "https://candlestack.tech/problems/missing-scope"
+    assert missing["scope"] == "models"
+    assert missing["detail"].startswith("This connected app was not allowed the scope models")
+    assert "connect it again" in missing["detail"]

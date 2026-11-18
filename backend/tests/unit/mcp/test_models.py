@@ -5,15 +5,17 @@ are integration tests (tests/integration/mcp/test_models.py)."""
 import json
 from collections.abc import AsyncIterable
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from mcp import Client
-from mcp.types import CallToolResult
+from mcp.types import CallToolResult, RequestParamsMeta
 
 from candlestack.accounts import Caller, Scope, User
 from candlestack.core import ProblemError
 from candlestack.mcp import http, models
+from candlestack.mcp.apps import CHART_KEY
 from candlestack.ml import (
     Framework,
     ManifestCheckFailed,
@@ -22,7 +24,6 @@ from candlestack.ml import (
     ModelNameTaken,
     ModelNotFound,
     ModelOut,
-    ModelsOut,
     ModelState,
     ModelUpdate,
     ModelUploadIn,
@@ -32,6 +33,7 @@ from candlestack.ml import (
 )
 from candlestack.ml.errors import StorageFull
 from candlestack.ml.schemas import ModelUploadCreated, ModelUploadOut, StorageUsage
+from candlestack.ml.service import ModelsPage
 from candlestack.preprocessing import InvalidManifest, parse_manifest
 
 PROBLEMS = "https://candlestack.tech/problems/"
@@ -86,17 +88,27 @@ class FakeService:
         self.calls: list[tuple[Any, ...]] = []
         self.error: Exception | None = None
         self.stored_manifest: dict[str, Any] | None = MANIFEST
+        # The upload made its model, instead of failing its check.
+        self.upload_done = False
 
     def _raise(self) -> None:
         if self.error is not None:
             raise self.error
 
-    async def models(self, user_id: str) -> ModelsOut:
-        self.calls.append(("models", user_id))
-        return ModelsOut(
-            models=self.models_,
+    async def models_page(
+        self, user_id: str, *, offset: int = 0, limit: int | None = None
+    ) -> ModelsPage:
+        self.calls.append(("models_page", user_id, offset, limit))
+        end = None if limit is None else offset + limit
+        return ModelsPage(
+            models=self.models_[offset:end],
+            total=len(self.models_),
             usage=StorageUsage(used_bytes=2000, quota_bytes=100, file_max_bytes=50),
         )
+
+    async def model(self, user_id: str, model_id: str) -> ModelOut:
+        self.calls.append(("model", user_id, model_id))
+        return self._model(model_id)
 
     def _model(self, model_id: str) -> ModelOut:
         for item in self.models_:
@@ -174,7 +186,7 @@ class FakeService:
         self.calls.append(("upload_status", user_id, upload_id))
         if upload_id != "upl_7f3k2m9qx4":
             raise UploadNotFound
-        return ModelUploadOut(
+        failed = ModelUploadOut(
             id=upload_id,
             name="lstm.keras",
             size_bytes=1000,
@@ -186,6 +198,16 @@ class FakeService:
             problem="model-check-failed",
             check=None,
             error="The file holds no trained weights.",
+        )
+        if not self.upload_done:
+            return failed
+        return failed.model_copy(
+            update={
+                "status": UploadStatus.done,
+                "model_id": "mdl_7f3k2m9qx4",
+                "problem": None,
+                "error": None,
+            }
         )
 
 
@@ -318,9 +340,28 @@ def test_list_models_answers_them_in_short(mcp, service: FakeService) -> None:
         "backtest_count": 2,
         "best_sharpe": 1.5,
         "created_at": "2026-11-02T09:30:00Z",
+        # Its page, to show the user.
+        "url": "http://testserver/models/mdl_7f3k2m9qx4",
     }
     assert listed["models"][1]["timeframe"] is None
-    assert service.calls == [("models", ADA.id)]
+    assert listed["total"] == 2
+    assert service.calls == [("models_page", ADA.id, 0, None)]
+
+
+def test_list_models_answers_a_page_when_asked(mcp, service: FakeService) -> None:
+    listed = answer(call(mcp, "list_models", {"page": 2, "per_page": 1}))
+
+    assert [item["name"] for item in listed["models"]] == ["mixer.onnx"]
+    assert (listed["total"], listed["used_bytes"]) == (2, 2000)
+    assert service.calls == [("models_page", ADA.id, 1, 1)]
+
+
+@pytest.mark.parametrize("arguments", [{"per_page": 0}, {"per_page": 101}, {"page": 0}])
+def test_list_models_refuses_a_page_out_of_range(
+    mcp, service: FakeService, arguments: dict[str, int]
+) -> None:
+    assert problem(call(mcp, "list_models", arguments))["type"] == PROBLEMS + "validation"
+    assert service.calls == []
 
 
 def test_get_model_answers_one_model_in_full(mcp, service: FakeService) -> None:
@@ -328,6 +369,76 @@ def test_get_model_answers_one_model_in_full(mcp, service: FakeService) -> None:
 
     assert got["name"] == "mixer.onnx"
     assert got["input_shape"] == [25, 1]
+    assert got["url"] == "http://testserver/models/mdl_secondxxxx"
+    # It reads that one model, not the whole list.
+    assert service.calls == [("model", ADA.id, "mdl_secondxxxx")]
+
+
+class FakeBacktests:
+    """Stands in for the backtests service the widget's part of get_model lists from."""
+
+    def __init__(self) -> None:
+        self.queries: list[tuple[str, Any]] = []
+
+    async def find(self, user_id: str, query: Any) -> Any:
+        self.queries.append((user_id, query))
+        setup = SimpleNamespace(threshold=0.05, direction=SimpleNamespace(value="both"))
+        best = SimpleNamespace(
+            id="bt_7f3k2m9qx4",
+            name="Silent Orion",
+            instruments=[SimpleNamespace(symbol="SPY")],
+            total_return=-0.0563,
+            sharpe=-0.44,
+            setup=setup,
+        )
+        return SimpleNamespace(backtests=[best])
+
+
+@pytest.mark.parametrize("chatgpt", [False, True])
+def test_get_model_gives_the_widget_its_best_backtests_and_the_model_the_same_answer(
+    mcp, service: FakeService, monkeypatch: pytest.MonkeyPatch, chatgpt: bool
+) -> None:
+    backtests = FakeBacktests()
+    monkeypatch.setattr(models, "get_backtests_service", lambda _db: backtests)
+
+    async def run(session: Client) -> CallToolResult:
+        meta: RequestParamsMeta | None = {"openai/subject": "v1/abc"} if chatgpt else None
+        return await session.call_tool("get_model", {"model_id": "mdl_secondxxxx"}, meta=meta)
+
+    plain = call(mcp, "get_model", {"model_id": "mdl_secondxxxx"})
+    widget = mcp(run, key=READ_KEY, apps=not chatgpt)
+
+    assert widget.content == plain.content
+    assert widget.structured_content == plain.structured_content
+    assert CHART_KEY not in (plain.meta or {})
+    assert (widget.meta or {})[CHART_KEY] == {
+        "backtests": [
+            {
+                "id": "bt_7f3k2m9qx4",
+                "name": "Silent Orion",
+                "symbols": ["SPY"],
+                "total_return": -0.0563,
+                "sharpe": -0.44,
+                "url": "http://testserver/backtests/bt_7f3k2m9qx4",
+            }
+        ],
+        "decision": {"threshold": 0.05, "direction": "both"},
+    }
+    # Only the widget's call lists them: its finished ones, the best by the Sharpe ratio.
+    [(user_id, query)] = backtests.queries
+    assert user_id == ADA.id
+    assert (query.sort, query.order, query.per_page) == ("sharpe", "desc", models.WIDGET_BACKTESTS)
+    assert query.more.model_id == "mdl_secondxxxx"
+    assert query.more.statuses == ("finished",)
+
+
+def test_get_model_says_it_counts_the_backtests() -> None:
+    """It answers how many backtests used the model, not the list: that is list_backtests."""
+    text = description("get_model")
+
+    assert "how many backtests used it (`backtest_count`)" in text
+    assert "list_backtests with `model` set to the model's name" in text
+    assert "backtest_count" in models.ModelOut.model_fields
 
 
 def test_another_s_or_an_unknown_model_is_not_found(mcp, service: FakeService) -> None:
@@ -419,6 +530,7 @@ def test_set_manifest_keeps_it_and_starts_the_trial_run(
     )
 
     assert answer(result)["state"] == "ready"
+    assert answer(result)["url"] == "http://testserver/models/mdl_7f3k2m9qx4"
     assert service.calls == [("set_manifest", ADA.id, "mdl_7f3k2m9qx4", MANIFEST)]
     assert checks.started == [(ADA.id, "mdl_7f3k2m9qx4")]
 
@@ -460,6 +572,7 @@ def test_rename_model_keeps_the_extension(mcp, service: FakeService) -> None:
     )
 
     assert answer(result)["name"] == "lstm-v2.keras"
+    assert answer(result)["url"] == "http://testserver/models/mdl_7f3k2m9qx4"
     assert service.calls == [
         ("update", ADA.id, "mdl_7f3k2m9qx4", ModelUpdate(name="lstm-v2", starred=None))
     ]
@@ -533,12 +646,47 @@ def test_create_model_upload_answers_the_link_the_command_and_the_page(
     token = "t" * 40
     assert link["url"] == f"http://testserver/api/v1/uploads/{token}"
     assert link["page_url"] == f"http://testserver/upload/{token}"
-    assert link["command"] == f"curl --fail-with-body -T lstm.keras {link['url']}"
+    # A bare name is rarely where the file is: the command says where its path goes.
+    assert link["command"] == f"curl --fail-with-body -T ./path/to/lstm.keras {link['url']}"
     assert link["expires_at"] == "2026-11-02T09:45:00Z"
     assert "upl_7f3k2m9qx4" in link["next_steps"]
     assert "09:45 UTC" in link["next_steps"]
     [(_, user_id, new, _)] = service.calls
     assert (user_id, new) == (ADA.id, ModelUploadIn(name="lstm.keras", size_bytes=1000))
+
+
+@pytest.mark.parametrize(
+    ("file_name", "path"),
+    [
+        ("models/lstm.keras", "models/lstm.keras"),
+        ("/home/ada/my models/lstm.keras", "'/home/ada/my models/lstm.keras'"),
+        (r"C:\Users\Ada\lstm.onnx", r"'C:\Users\Ada\lstm.onnx'"),
+        # The home is left for the shell to expand: quoted, ~ stays a plain character.
+        ("~/models/lstm.keras", "~/models/lstm.keras"),
+        ("~/my models/lstm.keras", "~/'my models/lstm.keras'"),
+        ("$HOME/models/lstm.keras", '"$HOME"/models/lstm.keras'),
+    ],
+)
+def test_the_command_sends_the_file_at_the_path_given(
+    mcp, service: FakeService, file_name: str, path: str
+) -> None:
+    result = call(
+        mcp, "create_model_upload", {"file_name": file_name, "size_bytes": 1000}, MODELS_KEY
+    )
+
+    link = answer(result)
+    assert link["command"] == f"curl --fail-with-body -T {path} {link['url']}"
+
+
+def description(name: str) -> str:
+    return next(spec.description for spec in models.TOOLS if spec.name == name)
+
+
+def test_the_description_says_where_the_path_goes() -> None:
+    command = models.UploadLink.model_json_schema()["properties"]["command"]
+
+    assert "`./path/to/<name>` for a bare name" in command["description"]
+    assert "replace ./path/to/ with the folder the file is in" in description("create_model_upload")
 
 
 def test_a_link_that_does_not_fit_is_the_upload_s_problem(mcp, service: FakeService) -> None:
@@ -568,9 +716,19 @@ def test_get_model_upload_answers_how_it_stands(mcp, service: FakeService) -> No
         "status": "failed",
         "expires_at": "2026-11-02T09:45:00Z",
         "model_id": None,
+        "model_url": None,
         "problem": "model-check-failed",
         "error": "The file holds no trained weights.",
     }
+
+
+def test_a_done_upload_answers_the_new_model_s_page(mcp, service: FakeService) -> None:
+    service.upload_done = True
+
+    got = answer(call(mcp, "get_model_upload", {"upload_id": "upl_7f3k2m9qx4"}))
+
+    assert (got["status"], got["model_id"]) == ("done", "mdl_7f3k2m9qx4")
+    assert got["model_url"] == "http://testserver/models/mdl_7f3k2m9qx4"
 
 
 def test_an_unknown_upload_is_not_found(mcp, service: FakeService) -> None:

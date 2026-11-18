@@ -122,7 +122,7 @@ export function BestBacktests({ best }: Props) {
   const word = METRICS.find((each) => each.metric === by)?.by;
   return (
     <Widget icon={TrophyIcon} title="Best backtests" aside={<Hint>by {word}</Hint>}>
-      <div className="overflow-x-auto">
+      <div className="relative overflow-x-auto">
         <table className={TABLE}>
           <Headings by={by} onPick={setBy} />
           <tbody>

@@ -130,7 +130,7 @@
               "type": "null"
             }
           ],
-          "description": "Where a queued backtest is in its author's queue: 1 starts next, when the running one ends; null for any other status",
+          "description": "Where a queued backtest is in its author's queue: 1 starts next, when their running one ended and a run slot is free; null for any other status",
           "title": "Queue Position"
         },
         "started_at": {
@@ -615,7 +615,7 @@
               "type": "null"
             }
           ],
-          "description": "The candles' fingerprint differs from the run's: the source changed them",
+          "description": "The candles' fingerprint differs from the run's: the source changed them. Only the download loads the candles again to compare; the light view is what the run stored, so null there",
           "title": "Changed"
         },
         "instrument": {
@@ -800,7 +800,7 @@
         "name": {
           "description": "The account's display name",
           "examples": [
-            "Tymur Tkach"
+            "Grace Hopper"
           ],
           "title": "Name",
           "type": "string"
@@ -1380,7 +1380,7 @@
         },
         "engine_version": {
           "examples": [
-            "0.3.0"
+            "0.4.0"
           ],
           "title": "Engine Version",
           "type": "string"
@@ -1547,7 +1547,7 @@
       "additionalProperties": false,
       "properties": {
         "limit": {
-          "description": "Long at a prediction of `limit` or more, short at `-limit` or less",
+          "description": "Long at a prediction above 0 and at least `limit`, short at one below 0 and at most `-limit`; a prediction of exactly 0 stays flat, even with `limit` 0",
           "minimum": 0,
           "title": "Limit",
           "type": "number"
@@ -1711,7 +1711,7 @@
     "WarmUpReport": {
       "properties": {
         "candles": {
-          "description": "Candles loaded before the period for the warm-up",
+          "description": "Candles the model needs before the period (its warm-up), loaded with it; where an `estimate` fell short the run loaded more, from `loaded.start`",
           "title": "Candles",
           "type": "integer"
         },

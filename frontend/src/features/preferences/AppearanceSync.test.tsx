@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { meQueryOptions } from '@/api';
 import { viewerTimeZone } from '@/lib/dates';
-import { ARSEN, DEFAULT_PREFERENCES, session, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, DEFAULT_PREFERENCES, session, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
 
 import { useDateStyle, useViewerDateStyle } from './useAppearance';
@@ -28,7 +28,7 @@ const LIGHT_CALM = {
 
 describe('the account’s appearance on the page', () => {
   it('wins over this browser’s theme on any page once signed in, and becomes its cache', async () => {
-    stubApi(sessionWithPreferences(ARSEN, LIGHT_CALM));
+    stubApi(sessionWithPreferences(ADA, LIGHT_CALM));
     await renderApp('/');
     await vi.waitFor(() => expect(document.documentElement.dataset.theme).toBe('light'));
     expect(document.documentElement.dataset.motion).toBe('reduce');
@@ -56,7 +56,7 @@ describe('the account’s appearance on the page', () => {
   });
 
   it('still gets the account’s settings when the header’s toggle is used before they arrive', async () => {
-    const fetch = stubApi(session(ARSEN));
+    const fetch = stubApi(session(ADA));
     const answer = fetch.getMockImplementation();
     let theme = 'dark';
     let arrive = () => undefined as void;
@@ -83,7 +83,7 @@ describe('the account’s appearance on the page', () => {
   });
 
   it('drops Reduce motion when the user signs out', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN, LIGHT_CALM), 'POST /api/v1/auth/sign-out': { status: 204 } });
+    stubApi({ ...sessionWithPreferences(ADA, LIGHT_CALM), 'POST /api/v1/auth/sign-out': { status: 204 } });
     const { router } = await renderApp('/dashboard');
     await vi.waitFor(() => expect(document.documentElement.dataset.motion).toBe('reduce'));
     const user = userEvent.setup();
@@ -104,13 +104,13 @@ describe('useDateStyle', () => {
 
   it('is the account’s choice when signed in', async () => {
     stubApi(
-      sessionWithPreferences(ARSEN, {
+      sessionWithPreferences(ADA, {
         ...DEFAULT_PREFERENCES,
         appearance: { ...DEFAULT_PREFERENCES.appearance, date_format: 'iso', time_format: '12' },
       }),
     );
     const queryClient = new QueryClient();
-    queryClient.setQueryData(meQueryOptions().queryKey, ARSEN);
+    queryClient.setQueryData(meQueryOptions().queryKey, ADA);
     const { result } = renderHook(useDateStyle, { wrapper: wrapper(queryClient) });
     await vi.waitFor(() =>
       expect(result.current).toEqual({ timeZone: 'America/New_York', dateFormat: 'iso', timeFormat: '12' }),
@@ -119,13 +119,13 @@ describe('useDateStyle', () => {
 
   it('takes the account’s time zone over the one a page offers a visitor', async () => {
     stubApi(
-      sessionWithPreferences(ARSEN, {
+      sessionWithPreferences(ADA, {
         ...DEFAULT_PREFERENCES,
         appearance: { ...DEFAULT_PREFERENCES.appearance, time_zone: 'local' },
       }),
     );
     const queryClient = new QueryClient();
-    queryClient.setQueryData(meQueryOptions().queryKey, ARSEN);
+    queryClient.setQueryData(meQueryOptions().queryKey, ADA);
     const { result } = renderHook(() => useDateStyle('America/New_York'), { wrapper: wrapper(queryClient) });
     await vi.waitFor(() => expect(result.current.timeZone).toBe(viewerTimeZone()));
   });
@@ -158,13 +158,13 @@ describe('useViewerDateStyle', () => {
   it('is the viewer’s own zone in the account’s formats, though the setting is New York', async () => {
     viewerIn('Europe/Bratislava');
     stubApi(
-      sessionWithPreferences(ARSEN, {
+      sessionWithPreferences(ADA, {
         ...DEFAULT_PREFERENCES,
         appearance: { ...DEFAULT_PREFERENCES.appearance, time_zone: 'ny', date_format: 'iso', time_format: '12' },
       }),
     );
     const queryClient = new QueryClient();
-    queryClient.setQueryData(meQueryOptions().queryKey, ARSEN);
+    queryClient.setQueryData(meQueryOptions().queryKey, ADA);
     const { result } = renderHook(useViewerDateStyle, { wrapper: wrapper(queryClient) });
     await vi.waitFor(() =>
       expect(result.current).toEqual({ timeZone: 'Europe/Bratislava', dateFormat: 'iso', timeFormat: '12' }),

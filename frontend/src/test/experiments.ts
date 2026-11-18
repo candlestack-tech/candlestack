@@ -8,9 +8,9 @@ import { backtest, backtestDocument, type stubApi } from './api';
 type Answers = Parameters<typeof stubApi>[0];
 
 // Another account of the beta, as an author of Experiments.
-export const TYMUR = { id: 'usr_t9m8r7k6j5', name: 'Tymur Tkach', mine: false };
+export const ALAN = { id: 'usr_t9m8r7k6j5', name: 'Alan Turing', mine: false };
 
-// A published backtest as Experiments shows it: Tymur's #9, Velvet Deneb, on NVDA with a Renko model, against
+// A published backtest as Experiments shows it: Alan's #9, Velvet Deneb, on NVDA with a Renko model, against
 // SPY, published at 10:14 on 17 Oct 2026.
 export const experiment = (fields: Partial<Experiment> = {}): Experiment => ({
   id: 'bt_t9n8v7d6a5',
@@ -28,7 +28,7 @@ export const experiment = (fields: Partial<Experiment> = {}): Experiment => ({
   win_rate: 0.548,
   num_trades: 188,
   equity: { strategy: [0, 0.1, 0.25, 0.412], benchmark: [0, 0.05, 0.1, 0.143] },
-  author: TYMUR,
+  author: ALAN,
   published_at: '2026-10-17T10:14:00Z',
   ...fields,
 });
@@ -53,7 +53,7 @@ export const experimentsAnswer = (page: Partial<ExperimentsPage> = {}, query = '
   };
 };
 
-// The backtest of api.ts's backtestDocument as another account published it: Tymur's #9, Velvet Deneb, read
+// The backtest of api.ts's backtestDocument as another account published it: Alan's #9, Velvet Deneb, read
 // only, its model without an ID (the file stays with him).
 export const othersDocument = (): BacktestDocument => {
   const doc = backtestDocument();
@@ -65,7 +65,7 @@ export const othersDocument = (): BacktestDocument => {
       name: 'Velvet Deneb',
       generated_name: 'Velvet Deneb',
       number: 9,
-      author: TYMUR,
+      author: ALAN,
       public: true,
       published_at: '2026-10-17T10:14:00Z',
     },

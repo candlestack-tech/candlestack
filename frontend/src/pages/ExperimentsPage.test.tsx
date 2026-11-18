@@ -4,9 +4,9 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { setExperimentsView } from '@/features/backtests/experiments/view';
-import { ARSEN, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
-import { TYMUR, experiment, experimentsAnswer, othersDocument } from '@/test/experiments';
+import { ALAN, experiment, experimentsAnswer, othersDocument } from '@/test/experiments';
 import { charts } from '@/test/lightweightCharts';
 
 vi.mock('lightweight-charts', () => import('@/test/lightweightCharts'));
@@ -18,7 +18,7 @@ const MINE = experiment({
   name: 'Bright Vega',
   instruments: [{ symbol: 'AAPL', market: 'stock' }],
   representation: 'kagi',
-  author: { id: ARSEN.id, name: ARSEN.display_name, mine: true },
+  author: { id: ADA.id, name: ADA.display_name, mine: true },
   published_at: '2026-10-16T09:12:00Z',
   total_return: -0.084,
 });
@@ -42,7 +42,7 @@ const PAGE = {
 type Answers = Parameters<typeof stubApi>[0];
 
 async function open(url: string, answers: Answers) {
-  const fetch = stubApi({ ...sessionWithPreferences(ARSEN), ...answers });
+  const fetch = stubApi({ ...sessionWithPreferences(ADA), ...answers });
   const app = await renderApp(url);
   return { ...app, fetch, user: userEvent.setup() };
 }
@@ -95,7 +95,7 @@ describe('Experiments as cards', () => {
     const card = within(nine!);
     // Its name over what it ran on, what its model reads and the timeframe, without its number
     // (#376); the second line takes the place of the Renko and 30m badges.
-    const link = card.getByRole('link', { name: 'Velvet Deneb, NVDA · Renko · 30m, by Tymur Tkach' });
+    const link = card.getByRole('link', { name: 'Velvet Deneb, NVDA · Renko · 30m, by Alan Turing' });
     expect(link.getAttribute('href')).toBe('/backtests/bt_t9n8v7d6a5');
     expect(card.getByRole('heading', { level: 2 }).textContent).toBe('Velvet Deneb');
     expect(card.getByText('NVDA · Renko · 30m')).toBeDefined();
@@ -106,7 +106,7 @@ describe('Experiments as cards', () => {
     expect(
       card.getAllByRole('term').map((term) => `${term.textContent} ${term.nextElementSibling?.textContent}`),
     ).toEqual(['Return +41.2 %', 'Sharpe 1.38', 'Max drawdown −12.4 %', 'Trades 188']);
-    expect(card.getByText('Tymur Tkach').previousElementSibling?.textContent).toBe('TT');
+    expect(card.getByText('Alan Turing').previousElementSibling?.textContent).toBe('AT');
     expect(card.getByText('Today')).toBeDefined();
     // The user's own says so, and its day is yesterday.
     expect(within(mine!).getByText('you')).toBeDefined();
@@ -144,7 +144,7 @@ describe('Experiments as cards', () => {
     await user.click(await screen.findByRole('button', { name: 'Add to compare: Velvet Deneb' }));
     const panel = screen.getByRole('complementary', { name: 'Compare' });
     expect(within(panel).getByRole('link', { name: 'Velvet Deneb' })).toBeDefined();
-    expect(within(panel).getByTitle('Tymur Tkach').textContent).toBe('TT');
+    expect(within(panel).getByTitle('Alan Turing').textContent).toBe('AT');
     expect(JSON.parse(localStorage.getItem('compare-backtests') ?? '{}')).toMatchObject({
       slots: [
         {
@@ -152,7 +152,7 @@ describe('Experiments as cards', () => {
           number: 9,
           name: 'Velvet Deneb',
           symbol: 'NVDA',
-          author: 'Tymur Tkach',
+          author: 'Alan Turing',
         },
         null,
         null,
@@ -194,7 +194,7 @@ describe('Experiments as a table', () => {
         .map((cell) => cell.textContent),
     ).toEqual([
       'Velvet Deneb#9',
-      'TTTymur Tkach',
+      'ATAlan Turing',
       'NVDA',
       'blesk-novol-8.kerasRenko · 30m · 25 × 23',
       '+41.2 %',
@@ -305,7 +305,7 @@ describe('the search and the chips of Experiments', () => {
       'Name, instrument, model or author',
     );
     expect(
-      screen.getByText('Search by name, instrument, model or author, like Orion, NVDA, kagi or Tymur.'),
+      screen.getByText('Search by name, instrument, model or author, like Orion, NVDA, kagi or Ada.'),
     ).toBeDefined();
     await user.click(screen.getByRole('button', { name: 'Clear search and filters' }));
     expect(router.state.location.search).toEqual({});
@@ -313,12 +313,12 @@ describe('the search and the chips of Experiments', () => {
   });
 
   it('shows the author of More by in a chip, whose cross shows everyone again', async () => {
-    const { user, router } = await open(`/experiments?author=${TYMUR.id}`, {
-      ...experimentsAnswer({ ...PAGE, experiments: [NINE], total: 3 }, `?author=${TYMUR.id}&page=1`),
+    const { user, router } = await open(`/experiments?author=${ALAN.id}`, {
+      ...experimentsAnswer({ ...PAGE, experiments: [NINE], total: 3 }, `?author=${ALAN.id}&page=1`),
       ...experimentsAnswer(PAGE, '?page=1'),
     });
     const chip = await screen.findByRole('button', { name: 'Remove the author filter' });
-    await vi.waitFor(() => expect(chip.textContent).toBe('TTTymur Tkach'));
+    await vi.waitFor(() => expect(chip.textContent).toBe('ATAlan Turing'));
     expect(chip.getAttribute('title')).toBe('Show everyone');
     expect(screen.getByText('3 of 25')).toBeDefined();
     await user.click(chip);

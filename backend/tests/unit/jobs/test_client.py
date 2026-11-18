@@ -2,13 +2,22 @@
 files go once the result is in, whatever it is."""
 
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import polars as pl
 import pytest
 
-from candlestack.jobs import NO_ANSWER, Job, JobClient, JobFiles, JobResult, manifest_sha256
+from candlestack.jobs import (
+    DEFAULT_WAIT,
+    NO_ANSWER,
+    Job,
+    JobClient,
+    JobFiles,
+    JobResult,
+    manifest_sha256,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -27,6 +36,7 @@ class FakeQueue:
         self.answer = answer
         self.submitted: list[Job] = []
         self.waits: list[float] = []
+        self.claims_by: list[float | None] = []
         self.pinged = 0
 
     async def ping(self) -> None:
@@ -40,9 +50,11 @@ class FakeQueue:
         job_id: str,
         wait: float,
         *,
+        claim_by: float | None = None,
         claimed: Callable[[], Awaitable[None]] | None = None,
     ) -> JobResult | None:
         self.waits.append(wait)
+        self.claims_by.append(claim_by)
         if claimed is not None:
             await claimed()
         job = self.submitted[-1]
@@ -86,7 +98,36 @@ async def test_predict_returns_the_predictions_and_removes_the_files(tmp_path: P
         MANIFEST,
     )
     assert queue.waits == [30]
+    # The wait starts once a worker took the job; until then the job's deadline holds.
+    assert (job.wait, queue.claims_by) == (30, [job.deadline])
     assert leftovers(tmp_path) == []
+
+
+async def test_a_job_waits_for_a_worker_up_to_its_queue_wait(tmp_path: Path) -> None:
+    jobs, queue, _ = client(tmp_path, "done")
+
+    before = time.time()
+    await jobs.check(model="u/m.keras", sha256=SHA256, manifest=MANIFEST, queue_wait=45)
+
+    (job,) = queue.submitted
+    assert before + 45 <= job.deadline <= time.time() + 45
+    assert job.wait == DEFAULT_WAIT
+
+
+async def test_predict_leaves_the_example_and_the_notes_out_of_the_job(tmp_path: Path) -> None:
+    jobs, queue, _ = client(tmp_path, "done")
+    manifest = {**MANIFEST, "example": {"input": [[[1.0]]], "output": [[0.5]]}, "about": {"a": "b"}}
+
+    result, _ = await jobs.predict(
+        model="u/m.keras", sha256=SHA256, manifest=manifest, candles=CANDLES
+    )
+    await jobs.check(model="u/m.keras", sha256=SHA256, manifest=manifest)
+
+    predict, check = queue.submitted
+    assert predict.manifest == MANIFEST
+    assert result.manifest_sha256 == manifest_sha256(MANIFEST)
+    # The check compares the model with the example.
+    assert check.manifest == manifest
 
 
 async def test_predict_tells_when_a_worker_took_the_job(tmp_path: Path) -> None:

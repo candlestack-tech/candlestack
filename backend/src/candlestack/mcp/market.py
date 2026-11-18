@@ -9,10 +9,13 @@ of at most ``CANDLES_MAX`` rows, so one call never floods the model's context. S
 backtest defaults needs the scope ``backtests``, as its route does.
 """
 
+import math
 import time
-from datetime import UTC, datetime
-from typing import Annotated, Literal
+from collections.abc import Awaitable
+from datetime import UTC, date, datetime, timedelta
+from typing import Annotated, Any, Literal
 
+import anyio
 from mcp.server.mcpserver import Context
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,14 +39,25 @@ from candlestack.data import (
     InstrumentId,
     InstrumentSort,
     InstrumentStats,
+    LoadProgress,
     Market,
     SearchResult,
     Timeframe,
     TimeParam,
     client_rate_limit,
     data_problems,
+    watch_load,
 )
-from candlestack.mcp.convention import Example, ToolCall, ToolSpec, changes, reads, tool_call
+from candlestack.experiments import Decision, Execution, Period
+from candlestack.mcp.convention import (
+    Example,
+    Progress,
+    ToolCall,
+    ToolSpec,
+    changes,
+    reads,
+    tool_call,
+)
 from candlestack.preprocessing import BlockOut, Step, describe_catalog
 
 # Rows of one get_candles call. Clients show a result a second time as indented text, so a full
@@ -63,8 +77,7 @@ InstrumentIdArg = Annotated[
     Field(
         min_length=3,
         max_length=40,
-        description="Instrument ID, <market>:<symbol>, as search_instruments answers it: "
-        "crypto:BTCUSDT, stock:AAPL",
+        description="<market>:<symbol>, such as crypto:BTCUSDT or stock:AAPL",
     ),
 ]
 
@@ -141,8 +154,7 @@ async def search_instruments(
         Field(
             min_length=1,
             max_length=50,
-            description="Symbol or name, any case; separators are ignored (btc/usdt finds "
-            "BTCUSDT, brkb finds BRK.B)",
+            description="Symbol or name, any case; separators are ignored (btc/usdt finds BTCUSDT)",
         ),
     ],
     ctx: Context,
@@ -153,17 +165,12 @@ async def search_instruments(
         Field(description="Only instruments that trade there: BINANCE for crypto pairs"),
     ] = None,
     limit: Annotated[int, Field(ge=1, le=50, description="Most items to answer")] = 10,
-    offset: Annotated[int, Field(ge=0, description="Matches to skip, for the next page")] = 0,
+    offset: Annotated[int, Field(ge=0, description="Matches to skip")] = 0,
 ) -> InstrumentsFound:
-    """Finds instruments by symbol or name: every Binance spot pair that trades (market crypto)
-    and every tradable US stock and ETF at Alpaca (market stock). Use it to turn what the user
-    names (bitcoin, Apple, SPY) into the instrument ID the other tools take.
-
-    The best match comes first: the most traded pair of a crypto asset equal to the query (btc
-    finds crypto:BTCUSDT), then the exact symbol, symbol prefixes, words of the name. Each item
-    has its last price, 24 h change and volume, and since when it has candles. Page with offset
-    while next_offset is not null. For the most traded instruments or the top gainers without
-    a query, use top_instruments."""
+    """Finds instruments by symbol or name and gives the instrument ID the other tools take
+    (btc finds crypto:BTCUSDT, apple stock:AAPL): Binance spot pairs (market crypto), US stocks
+    and ETFs at Alpaca (market stock). Best match first; page with offset while next_offset is
+    not null. To browse without a query (most traded, top gainers): top_instruments."""
     call = tool_call(ctx)
     with data_problems():
         found = await _data(call).search(query, market, limit, offset, exchange=exchange)
@@ -192,20 +199,18 @@ _TOP_SORTS = {
 
 async def top_instruments(
     ctx: Context,
-    market: Annotated[Market | None, Field(description="Only this market; both without")] = None,
+    market: Annotated[Market | None, Field(description="Both when left out")] = None,
     sort: Annotated[
         Literal["volume", "change", "-change"],
         Field(
-            description="volume: the most traded (24 h volume in USD) first; change: the top "
-            "gainers (24 h change) first; -change: the top losers first"
+            description="volume: the most traded (24 h, in USD); change: the top gainers; "
+            "-change: the top losers"
         ),
     ] = "volume",
     limit: Annotated[int, Field(ge=1, le=25, description="How many")] = 10,
 ) -> TopInstruments:
-    """The most traded instruments, or the top gainers or losers of the last 24 hours, of one
-    market or both, with their last price, 24 h change and volume. Use it when the user asks
-    what moves or what is liquid enough to test, or wants ideas for instruments without naming
-    one; to find a named instrument, use search_instruments."""
+    """The most traded instruments, or the top gainers or losers of the last 24 hours, for
+    ideas when the user names none; to find a named one: search_instruments."""
     call = tool_call(ctx)
     with data_problems():
         found = await _data(call).search(None, market, limit, sort=_TOP_SORTS[sort])
@@ -238,9 +243,8 @@ class InstrumentDetail(BaseModel):
 
 
 async def get_instrument(instrument_id: InstrumentIdArg, ctx: Context) -> InstrumentDetail:
-    """One instrument and the period its candles cover: from the first candle to the newest
-    closed one, in which timeframes. Use it before get_candles or a backtest to pick a period
-    that has data; a period outside it fails with period-out-of-range."""
+    """One instrument, the timeframes of its candles and the period they cover. Check it
+    before get_candles or a backtest: a period outside it fails with period-out-of-range."""
     call = tool_call(ctx)
     await _limit_source_requests(ctx, call)
     with data_problems():
@@ -336,52 +340,98 @@ async def _from_start(
     return _page(found, next_start=found.end if found.end < end else None, next_end=None)
 
 
+class _ChunksLoaded:
+    """The chunks a page's loads fetched, over every load of the page: a load that starts again
+    from its first chunk counts on from the ones before it, so the progress only grows. A wait
+    for the source's limit is half a chunk."""
+
+    def __init__(self) -> None:
+        self.before = 0
+        self.last = LoadProgress()
+
+    def add(self, progress: LoadProgress) -> tuple[float, float, str]:
+        if progress.loaded < self.last.loaded:
+            self.before += self.last.loaded
+        self.last = progress
+        loaded, total = self.before + progress.loaded, self.before + progress.total
+        message = f"loading candles, {loaded} of {total} chunks"
+        if progress.waiting_until is None:
+            return loaded, total, message
+        # Half a chunk on, as MCP's progress must grow for the client to hear of the wait.
+        return loaded + 0.5, total, f"{message}, waiting for the data source's limit"
+
+
+async def _reporting_loads[T](ctx: Context, load: Awaitable[T]) -> T:
+    """Awaits `load` and reports how many chunks of candles it fetched to a client that asked
+    for progress: a page the cache does not hold may take a while, a stock waiting for the
+    source's limit longer."""
+    progress = Progress(ctx)
+    chunks = _ChunksLoaded()
+    send, receive = anyio.create_memory_object_stream[LoadProgress](math.inf)
+
+    async def forward() -> None:
+        async with receive:
+            async for loaded in receive:
+                if loaded.total:
+                    await progress.report(*chunks.add(loaded))
+
+    # The load's own error goes out as it is, not in the task group's exception group, so
+    # data_problems() still makes it the problem it is.
+    failed: Exception | None = None
+    async with anyio.create_task_group() as group:
+        group.start_soon(forward)
+        with send, watch_load(send.send_nowait):
+            try:
+                page = await load
+            except Exception as error:  # noqa: BLE001 (re-raised below, as it is)
+                failed = error
+    if failed is not None:
+        raise failed
+    return page
+
+
 async def get_candles(
     instrument_id: InstrumentIdArg,
-    timeframe: Annotated[Timeframe, Field(description="Length of one candle")],
+    timeframe: Timeframe,
     ctx: Context,
     *,
     start: Annotated[
         TimeParam | None,
         Field(
-            description="Start of the period, inclusive: an ISO 8601 date or date-time (UTC "
-            "unless it says another offset), 2024-06-03 or 2024-06-03T13:30:00Z, or epoch "
-            "seconds. Without it, the newest candles before end"
+            description="Inclusive: an ISO 8601 date or date-time (UTC unless it gives an "
+            "offset) or epoch seconds. Without it, the newest candles before end"
         ),
     ] = None,
     end: Annotated[
         TimeParam | None,
-        Field(description="End of the period, exclusive, in the same forms; default now"),
+        Field(description="Exclusive, in the same forms; default now"),
     ] = None,
     limit: Annotated[
         int, Field(ge=1, le=CANDLES_MAX, description="Most candles in this page")
     ] = CANDLES_DEFAULT,
 ) -> CandlesPage:
-    """Closed OHLCV candles of one instrument in one timeframe, in pages of at most 500. Use
-    it to look at the price around a trade, check a period before a backtest or compute
-    something the backtest result does not say; a backtest loads its own candles, so do not
-    fetch them for it.
+    """Closed OHLCV candles of one instrument and timeframe, up to 500 a page. A backtest
+    loads its own candles: do not fetch them for it.
 
-    With start: the candles from start on, oldest first; while next_start is not null, call
-    again with start=next_start for the next page. Without start: the newest limit candles
-    before end; call again with end=next_end for the earlier ones. Stocks have candles of the
-    regular session only (09:30-16:00 New York); missing candles are never filled in (gaps).
-    Counts against a per-minute limit of candle requests; ask for a longer timeframe rather
-    than many pages.
+    With start: from start on, oldest first; the next page with start=next_start. Without
+    start: the newest before end; earlier ones with end=next_end. Stocks have the regular
+    session only (09:30-16:00 New York); missing candles stay gaps. A per-minute limit applies:
+    ask for a longer timeframe rather than many pages.
 
-    Data terms: crypto comes from Binance spot, stocks from Alpaca (SIP, every US exchange,
-    15 minutes delayed). Alpaca allows its data for the user's personal, noncommercial use
-    only: use it for the user's analysis here, never publish or pass on the stock candles."""
+    Data terms: stocks come from Alpaca (15 minutes delayed) for the user's personal,
+    noncommercial use only: never publish or pass on the stock candles."""
     call = tool_call(ctx)
     await _limit_source_requests(ctx, call)
     until = int(_time()) if end is None else end
     with data_problems():
         instrument = InstrumentId.parse(instrument_id)
         if start is None:
-            return await _newest(_data(call), instrument, timeframe, until, limit)
-        return await _from_start(
-            _data(call), instrument, timeframe, start=start, end=until, limit=limit
-        )
+            load = _newest(_data(call), instrument, timeframe, until, limit)
+        else:
+            load = _from_start(
+                _data(call), instrument, timeframe, start=start, end=until, limit=limit
+            )
+        return await _reporting_loads(ctx, load)
 
 
 # --- Preprocessing catalog ---------------------------------------------------------------------
@@ -450,17 +500,12 @@ async def preprocessing_catalog(
     ctx: Context,
     step: Annotated[
         Step | None,
-        Field(
-            description="Only the blocks of this step: representation (which rows: candles, "
-            "Renko bricks, a Kagi line), feature (the columns), normalization, window"
-        ),
+        Field(description="Only the blocks of this step"),
     ] = None,
 ) -> Catalog:
-    """Every block a model's manifest can name, by step: the representation (which rows the
-    model sees), the features (its columns, in order), their normalization and the window
-    (rows to samples), each with its versioned ID, what it does, its warm-up and its parameters
-    with types, ranges and defaults. Use it to write or check a manifest, or to explain what
-    a model's input is made of; the manifest format is on https://candlestack.tech/docs/manifest."""
+    """Every block a manifest can name, by step (representation, feature, normalization,
+    window), with its versioned ID, warm-up and parameters. Use it to write or check a
+    manifest. The manifest format: get_docs page manifest."""
     tool_call(ctx)
     return Catalog(
         blocks=[CatalogBlock.of(block) for block in _CATALOG.blocks if step in (None, block.step)]
@@ -478,32 +523,122 @@ def _accounts(call: ToolCall, db: AsyncSession) -> AccountsService:
     )
 
 
-async def get_backtest_defaults(ctx: Context) -> BacktestDefaults:
-    """How the user's new backtests start, as saved in Settings, Backtest defaults (or the
-    app's defaults): timeframe, period, direction (long only or both), the signal threshold,
-    stop loss, fees, slippage and the benchmark. Use these for every setting of a backtest
-    the user does not name, so it runs as the app would start it."""
+class BacktestDefaultsOut(BacktestDefaults):
+    """The backtest defaults twice: as Settings shows them, in percent (`stop_loss_pct`,
+    `fees_pct`, `slippage_pct`) and days, and in the units start_backtest takes (`period`,
+    `decision`, `execution`, `benchmark_instrument`)."""
+
+    period: Period = Field(
+        description="`period_start` to `period_end` as start_backtest's `data.period`: UTC epoch "
+        "seconds from the first day's midnight to the midnight after the last day (excluded), "
+        "or to now while that day has not ended, as the app's builder sends it"
+    )
+    decision: Decision = Field(
+        description="`threshold` and `direction` as start_backtest's `decision`: the threshold "
+        "rule with `limit` the threshold, `long_only` for the direction long"
+    )
+    execution: Execution = Field(
+        description="`stop_loss_pct`, `fees_pct` and `slippage_pct` as start_backtest's "
+        "`execution`: `stop_loss` a fraction (7 % is 0.07), `fee_bps` and `slippage_bps` in basis "
+        "points (0.1 % is 10)"
+    )
+    benchmark_instrument: str | None = Field(
+        description="`benchmark` as the `instrument` of start_backtest's `benchmarks` item "
+        "(`kind` buy_and_hold): null for the backtest's own instrument, else stock:SPY, "
+        "stock:QQQ or stock:DIA, for a stock backtest only",
+        examples=[None],
+    )
+
+
+def _midnight(day: date) -> int:
+    return int(datetime(day.year, day.month, day.day, tzinfo=UTC).timestamp())
+
+
+def _bps(pct: float) -> float:
+    """Percent as basis points, without the float's tail (0.07 % is 7, not 7.000000000000001)."""
+    return round(pct * 100, 4)
+
+
+def _period(defaults: BacktestDefaults) -> Period:
+    """The defaults' days as epoch seconds, ending now at the latest as the builder's period
+    does: there are no candles after, and a backtest refuses an end in the future. A period
+    that starts in the future keeps its end, so it stays a period (the backtest refuses it)."""
+    start = _midnight(defaults.period_start)
+    end = _midnight(defaults.period_end + timedelta(days=1))
+    now = int(_time())
+    return Period(start=start, end=min(end, now) if now > start else end)
+
+
+def defaults_out(defaults: BacktestDefaults) -> BacktestDefaultsOut:
+    """The defaults with the same settings in start_backtest's units, as the app's builder
+    starts a backtest from them (the next candle's open, the whole capital, no drawdown stop)."""
+    return BacktestDefaultsOut(
+        **defaults.model_dump(),
+        period=_period(defaults),
+        decision=Decision.model_validate(
+            {
+                "rule": {"name": "threshold", "limit": defaults.threshold},
+                "long_only": defaults.direction == "long",
+            }
+        ),
+        execution=Execution(
+            stop_loss=defaults.stop_loss_pct / 100,
+            fee_bps=_bps(defaults.fees_pct),
+            slippage_bps=_bps(defaults.slippage_pct),
+        ),
+        benchmark_instrument=None
+        if defaults.benchmark == "bh"
+        else f"stock:{defaults.benchmark.value}",
+    )
+
+
+async def get_backtest_defaults(ctx: Context) -> BacktestDefaultsOut:
+    """The user's defaults for new backtests (Settings, Backtest defaults): use them for every
+    setting of a backtest the user does not name.
+
+    They come twice: as Settings shows them, `stop_loss_pct`, `fees_pct` and `slippage_pct` in
+    percent, the period in days; and in start_backtest's units, to pass through unchanged:
+    `period` (as data.period), `decision`, `execution` (stop_loss a fraction, fee_bps and
+    slippage_bps in basis points) and `benchmark_instrument` (null: the backtest's own). The
+    timeframe is not an argument of start_backtest: a backtest runs at its model's."""
     call = tool_call(ctx)
     async with call.db() as db:
         preferences = await _accounts(call, db).preferences(call.user)
-    return preferences.backtest_defaults
+    return defaults_out(preferences.backtest_defaults)
+
+
+_DERIVED = "Ignored"
+
+
+class BacktestDefaultsArg(BacktestDefaultsIn):
+    # The backtest defaults to save, in Settings' units. The settings in start_backtest's units
+    # that get_backtest_defaults adds are taken and ignored, so its answer can come back with
+    # one setting changed. No docstring: the argument's description says it to a model.
+
+    period: Any = Field(default=None, exclude=True, description=_DERIVED)
+    decision: Any = Field(default=None, exclude=True, description=_DERIVED)
+    execution: Any = Field(default=None, exclude=True, description=_DERIVED)
+    benchmark_instrument: Any = Field(default=None, exclude=True, description=_DERIVED)
 
 
 async def update_backtest_defaults(
     defaults: Annotated[
-        BacktestDefaultsIn,
-        Field(description="Every setting, as get_backtest_defaults answers them"),
+        BacktestDefaultsArg,
+        Field(
+            description="Every setting in Settings' units (percent, days); "
+            "get_backtest_defaults' answer can be sent back as it is"
+        ),
     ],
     ctx: Context,
 ) -> BacktestDefaults:
-    """Saves how the user's new backtests start, as Save defaults in Settings, Backtest
-    defaults does: every setting as a whole, replacing the saved ones. Use it only when the
-    user asks to change their defaults; to run one backtest with other settings, pass them when
-    you start it instead. Call get_backtest_defaults first and change only what the user
-    named. Answers the saved defaults."""
+    """Saves the user's defaults for new backtests, all of them, replacing the saved ones.
+    Only when the user asks to change their defaults (for one backtest, pass the settings to
+    start_backtest): read get_backtest_defaults, change only what the user named."""
     call = tool_call(ctx)
     async with call.db() as db:
-        return await _accounts(call, db).save_backtest_defaults(call.user, defaults)
+        return await _accounts(call, db).save_backtest_defaults(
+            call.user, BacktestDefaultsIn.model_validate(defaults.model_dump())
+        )
 
 
 class Preferences(BaseModel):
@@ -518,10 +653,8 @@ class Preferences(BaseModel):
 
 
 async def get_preferences(ctx: Context) -> Preferences:
-    """How the user reads dates and times in the app: the time zone (exchange time or their
-    own), the date format and 12 or 24 hour time. Use it to write dates and times in your
-    answers the way the app shows them to the user. The backtest defaults are
-    get_backtest_defaults."""
+    """How the user reads dates and times in the app (time zone, date format, 12 or 24
+    hour): write them that way in your answers."""
     call = tool_call(ctx)
     async with call.db() as db:
         preferences = await _accounts(call, db).preferences(call.user)
@@ -560,6 +693,12 @@ TOOLS = (
         search_instruments,
         name="search_instruments",
         title="Search instruments",
+        details="""
+            The order: the most traded pair of a crypto asset equal to the query, then the
+            exact symbol, symbol prefixes, words of the name; separators are ignored (brkb finds
+            BRK.B). Crypto is every Binance spot pair that trades, stocks every tradable US
+            stock and ETF at Alpaca. Each item has its last price, 24 h change and volume, and
+            since when it has candles.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(
@@ -571,6 +710,10 @@ TOOLS = (
         top_instruments,
         name="top_instruments",
         title="Top instruments",
+        details="""
+            Use it when the user asks what moves or what is liquid enough to test, or wants
+            ideas for instruments without naming one. Of one market, or both without `market`;
+            each with its last price, 24 h change and volume.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(
@@ -600,8 +743,23 @@ TOOLS = (
         get_candles,
         name="get_candles",
         title="Candles",
+        details="""
+            Use it to look at the price around a trade, check a period before a backtest or
+            compute something the backtest result does not say.
+
+            `start` and `end` take an ISO 8601 date or date-time, such as 2024-06-03 or
+            2024-06-03T13:30:00Z, or epoch seconds. While `next_start` is not null, call again
+            with start set to it for the next page. Every call counts against a per-minute
+            limit of candle requests. A client that asks for progress gets how many chunks of
+            candles a page the cache does not hold has loaded.
+
+            Data terms: crypto comes from Binance spot, stocks from Alpaca (SIP, every US
+            exchange, 15 minutes delayed). Alpaca allows its data for the user's personal,
+            noncommercial use only: use it for the user's analysis here, never publish or pass
+            on the stock candles.""",
         scopes=(Scope.read,),
         annotations=reads(),
+        progress=True,
         example=Example(
             arguments={
                 "instrument_id": "crypto:BTCUSDT",
@@ -629,6 +787,12 @@ TOOLS = (
         preprocessing_catalog,
         name="preprocessing_catalog",
         title="Preprocessing catalog",
+        details="""
+            The steps: the representation (which rows the model sees: candles, Renko bricks, a
+            Kagi line), the features (its columns, in order), their normalization and the
+            window (rows to samples). Each block has its versioned ID, what it does, its warm-up
+            and its parameters with types, ranges and defaults. Use it also to explain what a
+            model's input is made of.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(
@@ -644,14 +808,26 @@ TOOLS = (
         get_backtest_defaults,
         name="get_backtest_defaults",
         title="Backtest defaults",
+        details="""
+            The settings: timeframe, period, direction (long only or both), the signal
+            threshold, stop loss, fees, slippage and the benchmark, as saved in Settings,
+            Backtest defaults, or the app's defaults. With them a backtest runs as the app
+            would start it. `period` is in UTC epoch seconds; `benchmark_instrument` is the
+            instrument of the buy and hold benchmark.""",
         scopes=(Scope.read,),
         annotations=reads(),
-        example=Example(arguments={}, result=BacktestDefaults()),
+        example=Example(arguments={}, result=defaults_out(BacktestDefaults())),
     ),
     ToolSpec(
         update_backtest_defaults,
         name="update_backtest_defaults",
         title="Save backtest defaults",
+        details="""
+            It saves as Save defaults in Settings, Backtest defaults does: every setting as a
+            whole (timeframe, period_start, period_end, direction, threshold, stop_loss_pct,
+            fees_pct, slippage_pct and benchmark). The settings in start_backtest's units that
+            get_backtest_defaults adds (`period`, `decision`, `execution`,
+            `benchmark_instrument`) are taken and ignored. Answers the saved defaults.""",
         scopes=(Scope.backtests,),
         annotations=changes(destructive=True, idempotent=True),
         example=Example(
@@ -663,6 +839,9 @@ TOOLS = (
         get_preferences,
         name="get_preferences",
         title="Date and time preferences",
+        details="""
+            The time zone is exchange time or the user's own. The backtest defaults are
+            get_backtest_defaults.""",
         scopes=(Scope.read,),
         annotations=reads(),
         example=Example(

@@ -43,6 +43,7 @@ from candlestack.data import (
 from candlestack.data.progress import tracker, waiting
 from candlestack.data.sources.base import Period
 from candlestack.jobs import Job, JobFiles, JobQueue, JobResult, Reason, Runner, Timings
+from candlestack.preprocessing import build_input, parse_manifest
 from candlestack.worker.service import JobProcess, Paths, Worker
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "keras"
@@ -98,7 +99,8 @@ class FakeMarket:
     the same for the symbols they have. ``slow`` seconds pass in each check of a new backtest,
     and ``held`` has how many connections of the app's pool (``pool``) were in use at each
     check and load. ``loads`` has the period of each load, ``background`` whether it was a
-    background load and ``instruments`` what it loaded.
+    background load and ``instruments`` what it loaded. Between the two ``ts`` of ``calm`` the
+    candles stand still, open and close at the walk's price at the first of them.
 
     With ``chunks``, a load reports its progress as the data module does (``data.watch_load``):
     that many chunks, the first half from the cache, then a wait of a minute for the source
@@ -114,6 +116,7 @@ class FakeMarket:
         self.background: list[bool] = []
         self.instruments: list[str] = []
         self.slow = 0.0
+        self.calm: tuple[int, int] | None = None
         self.pool: Any = None
         self.held: list[int] = []
         self.chunks = 0
@@ -184,6 +187,11 @@ class FakeMarket:
         # An index fund moves otherwise than the instruments.
         shift = 0 if instrument_id.symbol in {"AAPL", "BTCUSDT"} else 100_000
         close, opens = _walk(ts + shift, self.scale), _walk(ts + shift - step, self.scale)
+        if self.calm is not None:
+            first, after = self.calm
+            still = (ts >= first) & (ts < after)
+            level = _walk(np.array([first + shift]), self.scale)[0]
+            close, opens = np.where(still, level, close), np.where(still, level, opens)
         frame = pl.DataFrame(
             {
                 "ts": ts,
@@ -241,15 +249,17 @@ def market(app: FastAPI, client: Any) -> FakeMarket:
 class FakeWorker:
     """Answers the jobs of the queue as the worker would, without a model: one prediction per
     candle after the window's first rows (the warm-up), the candle's return over the one before
-    it in percent; or, with ``failure``, that failure (its reason and the user's sentences).
-    A job claimed waits to be answered while ``gate`` is clear. Its result has the timings as
-    the worker gives them: the wait in the queue and the time to the result, and of a done job
-    the model's parts (``TIMINGS``)."""
+    it in percent; with ``built``, one per sample of the model's input as the worker builds it
+    (``preprocessing.build_input``), the same return; or, with ``failure``, that failure (its
+    reason and the user's sentences). A job claimed waits to be answered while ``gate`` is
+    clear. Its result has the timings as the worker gives them: the wait in the queue and the
+    time to the result, and of a done job the model's parts (``TIMINGS``)."""
 
     def __init__(self, redis_url: str, files: Path) -> None:
         self._redis_url = redis_url
         self._files = JobFiles(files)
         self.failure: tuple[Reason, str] | None = None
+        self.built = False
         self.jobs: list[Job] = []
         # The columns of each job's candles, as the worker got them.
         self.columns: list[list[str]] = []
@@ -299,7 +309,13 @@ class FakeWorker:
         close = candles["close"]
         predictions = pl.DataFrame(
             {"ts": candles["ts"], "prediction": (close / close.shift(1) - 1) * 100}
-        ).slice(dropped)
+        )
+        if self.built:
+            made = build_input(candles, parse_manifest(job.manifest))
+            predictions = made.ts.to_frame("ts").join(predictions, on="ts", how="left")
+            dropped = made.dropped
+        else:
+            predictions = predictions.slice(dropped)
         self._files.write_predictions(job.id, predictions)
         return JobResult(
             id=job.id,

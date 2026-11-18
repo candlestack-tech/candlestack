@@ -1,33 +1,47 @@
-"""The runs of the backtests: each in a task of the API process, outside the request that
-started it, so it outlives the request (docs/architecture.md, "Backtests").
+"""The runs of the backtests: each in a task of the runner's process, outside the request that
+started it, so it outlives the request (docs/architecture.md, "Backtests"). The runner runs in
+the API's process (``APP_ROLE`` ``all``) or in a process of its own (``runner``), which the API
+processes ask through Redis (``channel.py``).
 
-A run loads the candles with the model's warm-up from the data module, has the worker predict
-on them through the job queue (``jobs.JobClient``), aligns the predictions with the candles,
-applies the decision's steps, runs the engine and the statistics (``assembly.run``) and stores
-the result. It records its steps as it goes (``steps.py``), so the backtest's page shows where
-it is. Whatever fails marks the backtest failed with a plain error for the user, and the step
-it was at failed; a bug of ours is logged as an error (a Sentry issue) and the user is told so.
+A run loads the candles with the model's warm-up from the data module (further back when the
+warm-up fell short, ``_with_warm_up``), has the worker predict on them through the job queue
+(``jobs.JobClient``), aligns the predictions with the candles, applies the decision's steps,
+runs the engine and the statistics (``assembly.run``) and stores the result. It records its
+steps as it goes (``steps.py``), so the backtest's page shows where it is. Whatever fails marks
+the backtest failed with a plain error for the user, and the step it was at failed; a bug of
+ours is logged as an error (a Sentry issue) and the user is told so.
 A run cannot hold a database connection while the worker runs: it reads the backtest, lets the
 session go, and writes the result in another.
 
-The API runs in one process (granian with one worker), so a backtest that began to run before
-the process started was left by one that stopped: ``recover`` marks those failed (again at each
-check until Postgres answers), and ``close`` on shutdown fails the runs it stops.
+One process runs the runner (the API's single granian worker, or the runner's own), so a
+backtest that began to run before the process started was left by one that stopped: ``recover``
+marks those failed (again at each check until Postgres answers), and ``close`` on shutdown
+fails the runs it stops.
 
-A user's backtests run one at a time; the others wait in the user's queue (``queued``). When a
-run ends, however it ends, the runner starts the oldest queued backtest of its user. Queued
-backtests outlive a stop of the process: ``recover`` starts the first of each queue, and every
-``QUEUE_CHECK_EVERY`` seconds ``resume`` starts those of a queue that stood still (its next
-could not be started, Postgres out of reach). As each user has at most one run, and so one job
-in the worker's queue, which takes the oldest job first, one user's queue never holds back
-another user's backtest.
+The runner has ``slots`` run slots (``BACKTEST_SLOTS``) over all users, and a user's backtests
+run one at a time: every other backtest waits in its user's queue in Postgres (``queued``),
+which costs nothing while it waits. A free slot goes to the queues in turn (``fill``): of the
+users with a queued backtest and none running, the one served longest ago (never, first; ties
+to the one whose oldest backtest waits longest), whose oldest queued backtest starts. The slots
+are filled when a backtest is stored (the request waits for it, so its answer says whether it
+runs; from an API process through ``channel.WAKE``), when a run ends however it ends
+(``wake``), and every ``QUEUE_CHECK_EVERY`` seconds for queues that stood still (Postgres out of
+reach, or a word of an API process lost). Queued backtests outlive a stop of the
+process: ``recover`` fills the slots. As each running backtest has one job in the worker's
+queue at most, the worker's queue holds as many jobs as there are slots, so one user's queue
+never holds back another user's backtest, and a job's wait for a worker is short.
+
+A wait (the MCP tools) learns of a backtest that changed (``watch``): the runner tells it when
+one starts, ends or is cancelled, so it reads the backtest again only then; the waits of the API
+processes hear it through ``channel.CHANGED``.
 """
 
 import asyncio
 import logging
 import time
-from collections.abc import Mapping
-from datetime import UTC, datetime
+from collections.abc import Collection, Iterable, Mapping
+from contextlib import AbstractContextManager
+from datetime import UTC, datetime, timedelta
 from functools import partial
 
 import anyio
@@ -42,27 +56,33 @@ from candlestack.data import (
     InstrumentId,
     SourceUnavailable,
     Timeframe,
+    TooManyCandles,
+    WarmUpOutOfRange,
 )
 from candlestack.experiments.assembly import (
     NothingToTest,
     Run,
+    Stored,
     align_of,
-    curves_parquet,
     equity_points,
     main_benchmark,
     predictions_parquet,
+    results,
     rows_of,
     run,
     stats_out,
+    stored_results,
 )
+from candlestack.experiments.channel import CHANGED, FILLED, STOP, WAKE, RunnerChannel, Watchers
 from candlestack.experiments.document import Loaded, PredictionsOut, RunnerOut
 from candlestack.experiments.models import Backtest
 from candlestack.experiments.schemas import EQUITY_POINTS, BacktestStatus
-from candlestack.experiments.spec import RunReport, RunSpec
+from candlestack.experiments.spec import RunReport, RunSpec, run_manifest
 from candlestack.experiments.steps import StepRecorder, Steps
 from candlestack.experiments.store import BacktestStore
-from candlestack.jobs import DEFAULT_WAIT, JobClient, JobResult
+from candlestack.jobs import DEFAULT_WAIT, QUEUE_WAIT, JobClient, JobResult
 from candlestack.ml import model_file
+from candlestack.preprocessing import InvalidManifest, Manifest, build_input, parse_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +97,14 @@ JOB_FAILED = "The model could not run on the candles. Try again later."
 MODEL_GONE = "The model was deleted before the backtest could run it."
 # How often the queues that stood still are moved on, in seconds.
 QUEUE_CHECK_EVERY = 30.0
+# How many backtests run at once by default, over all users (``BACKTEST_SLOTS``).
+SLOTS = 2
+# How long a backtest may be running without a run of the process before a check queues it
+# again, in seconds: far longer than a turn takes from its commit to its run.
+ORPHAN_GRACE = 60.0
+# How many times a run loads further back when its warm-up fell short, each time twice as many
+# candles before the period: 403 estimated candles become up to 3224.
+LONGER_WARM_UPS = 3
 
 
 class RunFailed(Exception):
@@ -97,23 +125,30 @@ def _ms(since: float) -> float:
 
 
 class BacktestRunner:
-    """Starts the runs of the backtests and keeps their tasks until they end."""
+    """Gives the run slots to the queues in turn, starts the runs of the backtests and keeps
+    their tasks until they end."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 (what the runner is set up with)
         self,
         db: Database,
         data: DataService,
         jobs: JobClient,
         *,
+        slots: int = SLOTS,
         wait: float = DEFAULT_WAIT,
+        queue_wait: float = QUEUE_WAIT,
         check_every: float = QUEUE_CHECK_EVERY,
+        channel: RunnerChannel | None = None,
     ) -> None:
         self._db = db
         self._data = data
         self._jobs = jobs
+        self._slots = slots
         self._wait = wait
+        self._queue_wait = queue_wait
         self._check_every = check_every
-        # The runs going on, by their backtest.
+        self._orphan_grace = ORPHAN_GRACE
+        # The runs going on, by their backtest: each holds a slot.
         self._tasks: dict[asyncio.Task[None], str] = {}
         self._watch: asyncio.Task[None] | None = None
         self._closed = False
@@ -122,10 +157,34 @@ class BacktestRunner:
         self._recovered = False
         # The backtests put back in their queue after ``close``.
         self._requeues: set[asyncio.Task[None]] = set()
+        # One fill at a time; ``_woken`` while a fill is asked for and has not begun.
+        self._filling = asyncio.Lock()
+        self._woken = False
+        self._wakeups: set[asyncio.Task[None]] = set()
+        # The turn each user was last served in (a slot given to their queue), for the order
+        # of the turns; the turns are counted from the start of the process.
+        self._served: dict[str, int] = {}
+        self._turns = 0
+        # The waits of this process for a backtest to change (``watch``).
+        self._watchers = Watchers()
+        # In a process of its own: what the API processes ask (``_listen``), and the tokens of
+        # their wakes, which the next fill answers.
+        self._channel = channel
+        self._listening: asyncio.Task[None] | None = None
+        self._asked: list[str] = []
 
     async def ping(self) -> None:
         """Raises ``redis.exceptions.RedisError`` when the worker's queue cannot be reached."""
         await self._jobs.ping()
+
+    @property
+    def free(self) -> bool:
+        """Whether a run slot is free now."""
+        return len(self._tasks) < self._slots
+
+    async def free_slot(self) -> bool:
+        """``free``, as ``channel.Runner`` asks it."""
+        return self.free
 
     def start(self, backtest_id: str) -> None:
         """Runs the backtest, which must be stored as running, in a task of its own. Once
@@ -139,22 +198,69 @@ class BacktestRunner:
         task = asyncio.create_task(self._run(backtest_id), name=f"backtest {backtest_id}")
         self._tasks[task] = backtest_id
         task.add_done_callback(self._ended)
+        self.changed(backtest_id)
+
+    def stop(self, backtest_ids: Collection[str]) -> None:
+        """Cancels the runs of the backtests, deleted while they ran: no failure is stored, and
+        each slot goes to the next queue once its task has ended (``_ended``). The worker may
+        still finish a job it took; nothing reads its answer. The waits for them read again."""
+        for task, backtest_id in list(self._tasks.items()):
+            if backtest_id in backtest_ids:
+                task.cancel()
+        for backtest_id in backtest_ids:
+            self.changed(backtest_id)
 
     def _ended(self, task: asyncio.Task[None]) -> None:
+        """Frees the slot of the run that ended, and gives it to the next queue."""
         self._tasks.pop(task, None)
+        self.wake()
+
+    # --- The waits --------------------------------------------------------------------------
+
+    def watch(self, backtest_ids: Iterable[str]) -> AbstractContextManager[asyncio.Event]:
+        """An event set whenever one of the backtests starts, ends or is cancelled, while the
+        block runs (``channel.Watchers``)."""
+        return self._watchers.watch(backtest_ids)
+
+    def changed(self, backtest_id: str) -> None:
+        """Tells the waits for the backtest that it changed: those of this process, and in a
+        process of its own those of the API processes."""
+        self._watchers.changed(backtest_id)
+        if self._channel is not None:
+            self._channel.send(CHANGED, [backtest_id])
+
+    # --- What the API processes ask ----------------------------------------------------------
+
+    def _listen(self) -> None:
+        """Hears the wakes and stops of the API processes, in a task of its own, until
+        ``close``; each time it subscribes it fills the slots, as what was asked while nobody
+        listened is lost."""
+        if self._channel is None:
+            return
+        self._listening = asyncio.create_task(
+            self._channel.listen({WAKE: self._woken_by, STOP: self.stop}, subscribed=self.wake),
+            name="runner messages",
+        )
+
+    def _woken_by(self, tokens: list[str]) -> None:
+        """A wake of an API process: the next fill answers its token once it has ended."""
+        self._asked.extend(tokens)
+        self.wake()
+
+    # --- The slots and the queues ----------------------------------------------------------
 
     async def recover(self) -> None:
-        """Marks failed the backtests a stopped process left running, starts the first queued
-        backtest of each user, and from now on does both every ``check_every`` seconds: moves
-        on the queues that stand still, and fails those left running until Postgres answered.
-        """
+        """Marks failed the backtests a stopped process left running, fills the slots, and from
+        now on does both every ``check_every`` seconds: moves on the queues that stand still,
+        and fails those left running until Postgres answered."""
         self._watch = asyncio.create_task(self._keep_moving(), name="backtest queues")
         await self._check()
+        self._listen()
 
     async def _check(self) -> None:
         """Fails the backtests left running, until that once succeeded, then ``resume``.
         Postgres out of reach is a warning: the next check tries again, and meanwhile the
-        queues of their users stand still."""
+        queues stand still."""
         if not self._recovered:
             try:
                 async with self._db.sessions() as session:
@@ -170,19 +276,60 @@ class BacktestRunner:
             self._recovered = True
             if left:
                 logger.warning("%d backtests left running by a stopped process failed", left)
+        await self._requeue_orphans()
+        await self._stop_deleted()
         await self.resume()
 
-    async def resume(self) -> None:
-        """Starts the oldest queued backtest of each user who has one and none running.
-        Postgres out of reach is a warning: the next call tries again."""
+    async def _requeue_orphans(self) -> None:
+        """Puts back at the head of their queues the backtests running for ``orphan_grace``
+        seconds without a run of this process, the only one: they never began (nothing should
+        leave one, this is the net). Under the lock of the fills, so none is taken meanwhile.
+        Postgres out of reach is a warning: the next check tries again."""
+        async with self._filling:
+            ours = set(self._tasks.values())
+            before = _now() - timedelta(seconds=self._orphan_grace)
+            try:
+                async with self._db.sessions() as session:
+                    store = BacktestStore(session)
+                    orphans = [
+                        backtest_id
+                        for backtest_id in await store.running_since(before)
+                        if backtest_id not in ours
+                    ]
+                    for backtest_id in orphans:
+                        await store.requeue(backtest_id)
+                    await store.commit()
+            except DATABASE_ERRORS as error:
+                logger.warning(
+                    "The backtests running without a run were not checked (%s)",
+                    type(error).__name__,
+                )
+                return
+        if orphans:
+            logger.error("%d backtests ran without a run and were queued again", len(orphans))
+
+    async def _stop_deleted(self) -> None:
+        """Cancels the runs whose backtests were deleted: the net under a stop that an API
+        process sent while nobody listened. Postgres out of reach is a warning: the next check
+        tries again."""
+        ours = set(self._tasks.values())
+        if not ours:
+            return
         try:
             async with self._db.sessions() as session:
-                users = await BacktestStore(session).waiting()
+                there = await BacktestStore(session).existing(ours)
         except DATABASE_ERRORS as error:
-            logger.warning("The backtest queues were not checked (%s)", type(error).__name__)
+            logger.warning(
+                "The runs of deleted backtests were not checked (%s)", type(error).__name__
+            )
             return
-        for user_id in users:
-            await self._next(user_id)
+        if gone := ours - there:
+            logger.warning("%d runs of deleted backtests were stopped late", len(gone))
+            self.stop(gone)
+
+    async def resume(self) -> None:
+        """Gives the free slots to the queues in turn (``fill``)."""
+        await self.fill()
 
     async def _keep_moving(self) -> None:
         while True:
@@ -193,52 +340,91 @@ class BacktestRunner:
                 # A bug of ours (a Sentry issue); the next check still comes.
                 logger.exception("The backtest queues could not be checked")
 
-    async def _next(self, user_id: str) -> None:
-        """Starts the user's oldest queued backtest, unless one of theirs runs. Postgres out of
-        reach is a warning: ``resume`` starts it later."""
-        if self._closed:
+    def wake(self) -> None:
+        """Fills the slots in a task of its own, soon; once for every call made before that
+        fill began."""
+        if self._closed or self._woken:
             return
+        self._woken = True
+        task = asyncio.create_task(self._fill_woken(), name="backtest slots")
+        self._wakeups.add(task)
+        task.add_done_callback(self._wakeups.discard)
+
+    async def _fill_woken(self) -> None:
         try:
-            async with self._db.sessions() as session:
-                store = BacktestStore(session)
+            await self.fill()
+        except Exception:
+            # A bug of ours (a Sentry issue); the next check fills them.
+            logger.exception("The backtest slots could not be filled")
+
+    async def fill(self) -> None:
+        """Starts queued backtests while a slot is free, one queue's turn at a time. Postgres
+        out of reach is a warning: the next check fills them."""
+        async with self._filling:
+            self._woken = False
+            # The wakes of the API processes asked before this fill began, answered once it
+            # has ended.
+            asked, self._asked = self._asked, []
+            try:
+                await self._fill()
+            finally:
+                if asked and self._channel is not None:
+                    self._channel.send(FILLED, asked)
+
+    async def _fill(self) -> None:
+        while not self._closed and len(self._tasks) < self._slots:
+            # A turn taken is a run started: a cancel (the request went away) between the two
+            # would leave a backtest running without a run.
+            with anyio.CancelScope(shield=True):
+                try:
+                    started = await self._take_turn()
+                except DATABASE_ERRORS as error:
+                    logger.warning(
+                        "The backtest queues were not checked (%s)", type(error).__name__
+                    )
+                    return
+                if started is None:
+                    return
+                self.start(started)
+
+    async def _take_turn(self) -> str | None:
+        """Marks running the oldest queued backtest of the next user in turn and returns its ID;
+        None when no queue can take a slot. Under the lock of each user it tries, so a start or
+        a cancel of theirs cannot cross it."""
+        async with self._db.sessions() as session:
+            store = BacktestStore(session)
+            users = await store.waiting()
+            # Least recently served first; the order of ``waiting`` among equals.
+            for user_id in sorted(users, key=lambda user: self._served.get(user, 0)):
                 await store.lock_user(user_id)
                 started = await store.take_next(user_id, _now())
                 await store.commit()
-        except DATABASE_ERRORS as error:
-            logger.warning(
-                "The next backtest of a queue was not started (%s)", type(error).__name__
-            )
-            return
-        if started is not None:
-            self.start(started.id)
-
-    async def _advance(self, backtest_id: str) -> None:
-        """Starts the next backtest of the user of the one whose run ended."""
-        try:
-            async with self._db.sessions() as session:
-                user_id = await BacktestStore(session).user_of(backtest_id)
-        except DATABASE_ERRORS as error:
-            logger.warning(
-                "The queue of backtest %s was not moved on (%s)", backtest_id, type(error).__name__
-            )
-            return
-        if user_id is not None:
-            await self._next(user_id)
+                if started is not None:
+                    self._turns += 1
+                    self._served[user_id] = self._turns
+                    return started.id
+        return None
 
     async def close(self) -> None:
         """Stops the runs and marks their backtests failed (also a run that had not begun).
         Queued backtests stay queued, for the next start of the process."""
         self._closed = True
-        if self._watch is not None:
-            self._watch.cancel()
-            await asyncio.gather(self._watch, return_exceptions=True)
+        for background in (self._watch, self._listening, *self._wakeups):
+            if background is not None:
+                background.cancel()
+                await asyncio.gather(background, return_exceptions=True)
         stopped = dict(self._tasks)
         for task in stopped:
             task.cancel()
         await asyncio.gather(*stopped, return_exceptions=True)
         for backtest_id in stopped.values():
             await self._fail(backtest_id, RESTARTED)
+            # The waits of the API processes, which go on.
+            self.changed(backtest_id)
         await asyncio.gather(*self._requeues, return_exceptions=True)
+        if self._channel is not None:
+            # The last changes, for the waits of the API processes.
+            await self._channel.close()
 
     async def _requeue(self, backtest_id: str) -> None:
         """Puts the backtest that was to run back at the head of its queue, as it never began.
@@ -262,8 +448,8 @@ class BacktestRunner:
         except Exception:
             logger.exception("Backtest %s failed with an error of CandleStack", backtest_id)
             await self._fail(backtest_id, INTERNAL)
-        # Not after a run that ``close`` cancelled: the process stops.
-        await self._advance(backtest_id)
+        # Its slot goes to the next queue once the task is done (``_ended``).
+        self.changed(backtest_id)
 
     async def _execute(self, backtest_id: str) -> None:
         async with self._db.sessions() as session:
@@ -290,6 +476,10 @@ class BacktestRunner:
         stored = predictions.filter(pl.col("ts").is_between(period.start, period.end - 1))
         done = await _backtest(spec, candles.frame, stored)
         timings["backtest"] = _ms(clock)
+        # The light results, so reading them never runs the engine again (CPU work, in a thread).
+        kept = await anyio.to_thread.run_sync(
+            lambda: stored_results(results(done, spec.benchmarks, light=True, held=held))
+        )
         blob, digest = predictions_parquet(stored)
         report = RunReport(
             loaded=Loaded(
@@ -305,8 +495,9 @@ class BacktestRunner:
             align=align_of(done),
             runner=_runner(spec, result),
             timings=timings,
+            benchmarks=kept.benchmarks,
         )
-        await self._finish(backtest_id, done, report, blob, steps, held=held)
+        await self._finish(backtest_id, done, report, kept, steps, blob=blob, held=held)
 
     async def _save_steps(self, backtest_id: str, steps: Steps) -> None:
         """Stores the run's steps; Postgres out of reach is a warning, as the run goes on."""
@@ -327,16 +518,14 @@ class BacktestRunner:
         stock candles waits for the source's request budget, minutes if need be; and those of
         the index fund each benchmark holds (``_benchmark_candles``)."""
         data = spec.data
+        instrument, timeframe = InstrumentId.parse(data.instrument.id), Timeframe(data.timeframe)
         await steps.start("candles")
         try:
             async with steps.loading():
                 candles = await self._data.candles(
-                    InstrumentId.parse(data.instrument.id),
-                    Timeframe(data.timeframe),
-                    data.load_start,
-                    data.period.end,
-                    background=True,
+                    instrument, timeframe, data.load_start, data.period.end, background=True
                 )
+                candles = await self._with_warm_up(spec, candles)
         except SourceUnavailable as error:
             raise RunFailed("candles", _source_unavailable(error)) from error
         except DataError as error:
@@ -344,6 +533,41 @@ class BacktestRunner:
         held = await self._benchmark_candles(spec)
         await steps.loaded(candles.frame.height)
         return candles, held
+
+    async def _with_warm_up(self, spec: RunSpec, candles: CandleSet) -> CandleSet:
+        """The candles, loaded further back until the model's input has a sample on the
+        period's first candle, so the engine's rows start there whatever the representation.
+
+        The warm-up of rows that span several candles (Renko, Kagi) is an estimate: where the
+        bricks or lines formed slowly before the period, the first sample falls on a later
+        candle, and the run would start there, its buy and hold from a later close. Each time
+        the run loads twice as many candles before the period (``LONGER_WARM_UPS`` times at
+        most), and stops where the data has no more or the load would pass the maximum: the
+        rows then start at the first prediction, as before.
+        """
+        data = spec.data
+        instrument, timeframe = InstrumentId.parse(data.instrument.id), Timeframe(data.timeframe)
+        try:
+            manifest = parse_manifest(spec.model.manifest)
+        except InvalidManifest:
+            return candles  # the worker refuses it and says why
+        for _ in range(LONGER_WARM_UPS):
+            covered = partial(_covers, candles.marked_frame(), manifest, data.period.start)
+            if await anyio.to_thread.run_sync(covered):
+                break
+            before = candles.frame.filter(pl.col("ts") < data.period.start).height
+            try:
+                start = await self._data.warm_up_start(
+                    instrument, timeframe, data.period.start, data.period.end, 2 * max(before, 1)
+                )
+            except (WarmUpOutOfRange, TooManyCandles):
+                break
+            if start >= candles.start:
+                break
+            candles = await self._data.candles(
+                instrument, timeframe, start, data.period.end, background=True
+            )
+        return candles
 
     async def _benchmark_candles(self, spec: RunSpec) -> dict[str, pl.DataFrame]:
         """The candles of the index fund each benchmark holds, of the period, by the benchmark's
@@ -385,9 +609,11 @@ class BacktestRunner:
             result, predictions = await self._jobs.predict(
                 model=model,
                 sha256=spec.model.sha256,
-                manifest=spec.model.manifest,
+                # A backtest stored before the copy was cut still has the example in it.
+                manifest=run_manifest(spec.model.manifest),
                 candles=candles,
                 wait=self._wait,
+                queue_wait=self._queue_wait,
                 claimed=steps.claimed,
             )
         except (RedisError, OSError) as error:
@@ -407,21 +633,22 @@ class BacktestRunner:
         async with self._db.sessions() as session:
             return await BacktestStore(session).model_of(backtest_id) is None
 
-    async def _finish(
+    async def _finish(  # noqa: PLR0913 (what a run stores)
         self,
         backtest_id: str,
         done: Run,
         report: RunReport,
-        blob: bytes,
+        kept: Stored,
         steps: StepRecorder,
         *,
+        blob: bytes,
         held: Mapping[str, pl.DataFrame],
     ) -> None:
-        """Stores the results, and the steps all done, while the backtest is still running and
-        there (its account may have been deleted meanwhile). ``held`` has the candles of the
-        index fund of each benchmark that holds one, by its ID."""
+        """Stores the results (``kept`` the light ones, ``blob`` the predictions), and the steps
+        all done, while the backtest is still running and there (its account may have been
+        deleted meanwhile). ``held`` has the candles of the index fund of each benchmark that
+        holds one, by its ID."""
         benchmark, benchmark_return = main_benchmark(done, held)
-        curves = curves_parquet(done)
         now = _now()
         async with self._db.sessions() as session:
             backtest = await session.get(Backtest, backtest_id, with_for_update=True)
@@ -432,7 +659,8 @@ class BacktestRunner:
             backtest.stats = shown
             backtest.report = report.model_dump(mode="json")
             backtest.predictions = blob
-            backtest.curves = curves
+            backtest.series, backtest.trades = kept.series, kept.trades
+            backtest.curves = kept.curves
             backtest.total_return = shown["total_return"]
             backtest.buy_and_hold_return = shown["buy_and_hold_return"]
             backtest.benchmark_return = benchmark_return
@@ -482,6 +710,20 @@ async def _backtest(spec: RunSpec, candles: pl.DataFrame, predictions: pl.DataFr
         )
     except NothingToTest as error:
         raise RunFailed("no-predictions", str(error)) from error
+
+
+def _covers(candles: pl.DataFrame, manifest: Manifest, start: int) -> bool:
+    """Whether the model's input from ``candles`` has a sample on the first candle at or after
+    ``start``; also True without such a candle, or when the input cannot be built (the worker
+    then says why). A sample at a candle needs no later one, so the candles up to it do."""
+    first = candles.filter(pl.col("ts") >= start).get_column("ts").head(1)
+    if first.is_empty():
+        return True
+    try:
+        made = build_input(candles.filter(pl.col("ts") <= first[0]), manifest)
+    except ValueError:
+        return True
+    return made.ts.len() > 0 and made.ts[-1] == first[0]
 
 
 def _source_unavailable(error: SourceUnavailable) -> str:

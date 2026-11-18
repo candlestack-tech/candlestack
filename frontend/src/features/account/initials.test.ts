@@ -4,12 +4,12 @@ import { initials } from './initials';
 
 describe('initials', () => {
   it('takes the first letters of the first and the last word', () => {
-    expect(initials('Arsen Labovich', 'arsen@example.com')).toBe('AL');
+    expect(initials('Ada Lovelace', 'ada@example.com')).toBe('AL');
     expect(initials('Filip  Jozef  Hodoň', 'f@example.com')).toBe('FH');
   });
 
   it('takes one letter of a one-word name, in upper case', () => {
-    expect(initials('arsenlabovich', 'arsen@example.com')).toBe('A');
+    expect(initials('adalovelace', 'ada@example.com')).toBe('A');
   });
 
   it('takes the first letter of the email when the name is empty', () => {

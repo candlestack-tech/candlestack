@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  ARSEN,
+  ADA,
   backtest,
   dashboardAnswer,
   failedBacktest,
@@ -85,14 +85,14 @@ const rowsOf = (name: string) =>
     );
 
 async function open(answers: object) {
-  stubApi({ ...sessionWithPreferences(ARSEN), ...answers });
+  stubApi({ ...sessionWithPreferences(ADA), ...answers });
   return renderApp('/dashboard');
 }
 
 describe('the dashboard of a new account', () => {
   it('welcomes the user with two steps to start and nothing else', async () => {
     await open({ ...dashboardAnswer(), ...modelsAnswer([]) });
-    await vi.waitFor(() => expect(heading()).toBe('Welcome, Arsen Labovich'));
+    await vi.waitFor(() => expect(heading()).toBe('Welcome, Ada Lovelace'));
     expect(screen.getByText('Your account is ready.')).toBeDefined();
     expect(widgets()).toEqual(['Get started']);
     expect(widget('Get started').getByText('2 steps')).toBeDefined();
@@ -129,7 +129,7 @@ describe('the dashboard of a new account', () => {
     cleanup();
 
     await open({ 'GET /api/v1/dashboard': { status: 503, body: { detail: 'Down.' } }, ...modelsAnswer([]) });
-    await vi.waitFor(() => expect(heading()).toBe('Welcome back, Arsen Labovich'));
+    await vi.waitFor(() => expect(heading()).toBe('Welcome back, Ada Lovelace'));
     expect(screen.getByText('Down.')).toBeDefined();
   });
 });
@@ -137,7 +137,7 @@ describe('the dashboard of a new account', () => {
 describe('the dashboard of an account with backtests', () => {
   it('welcomes the user back with the quick actions and every widget', async () => {
     await open({ ...dashboardAnswer(FULL), ...modelsAnswer([LSTM]) });
-    await vi.waitFor(() => expect(heading()).toBe('Welcome back, Arsen Labovich'));
+    await vi.waitFor(() => expect(heading()).toBe('Welcome back, Ada Lovelace'));
     expect(screen.getByRole('heading', { level: 1 }).parentElement?.querySelector('p')).toBeNull();
     expect(
       ['New backtest', 'Upload model', 'Compare backtests'].map(
@@ -291,7 +291,13 @@ describe('the dashboard of an account with backtests', () => {
       '★draft.kerasKeras–3 backtests',
       '★other.kerasin 25×23 → 1 · Keras–0 backtests',
     ]);
-    expect(starred.getByRole('link', { name: 'my-tsmixer.keras' }).getAttribute('href')).toBe('/models');
+    // Each row opens its model's page (#467).
+    expect(rows.map((row) => within(row!).getByRole('link').getAttribute('href'))).toEqual([
+      '/models/mdl_7f3k2m9qx4',
+      '/models/mdl_a2b3c4d5e6',
+      '/models/mdl_q7r8s9t2u3',
+      '/models/mdl_o',
+    ]);
     expect(starred.queryByRole('link', { name: /More/ })).toBeNull();
   });
 
@@ -310,6 +316,28 @@ describe('the dashboard of an account with backtests', () => {
         .map((head) => head.textContent);
     expect(mono('Last backtests')).toEqual(['Return', 'Sharpe']);
     expect(mono('Best backtests')).toEqual(['Sharpe ↓', 'Return', 'Drawdown', 'Win rate']);
+  });
+
+  // #465: on a phone the page never scrolls sideways and the names stay readable.
+  it('keeps the tables’ hidden words inside the boxes they scroll in', async () => {
+    await open({ ...dashboardAnswer(FULL), ...modelsAnswer([]) });
+    await screen.findByRole('region', { name: 'Best backtests' });
+    for (const name of ['Last backtests', 'Best backtests']) {
+      const box = widget(name).getByRole('table').parentElement;
+      expect(box?.className.split(' ')).toEqual(expect.arrayContaining(['relative', 'overflow-x-auto']));
+    }
+  });
+
+  it('hides the instruments of Last backtests in a narrow card, and keeps When on one line', async () => {
+    await open({ ...dashboardAnswer(FULL), ...modelsAnswer([]) });
+    await screen.findByRole('region', { name: 'Last backtests' });
+    const classes = (index: number) =>
+      widget('Last backtests')
+        .getAllByRole('row')
+        .map((row) => row.children[index]?.className.split(' '));
+    for (const cell of classes(1)) expect(cell).toContain('@max-[440px]:hidden');
+    for (const cell of classes(4)) expect(cell).toContain('@max-[520px]:hidden');
+    expect(classes(4)[0]).toContain('min-w-[104px]');
   });
 
   it('writes the widgets’ hints in the design’s hint style', async () => {

@@ -121,7 +121,7 @@ function Empty({ search }: { search: ExperimentsSearch }) {
     <EmptyCard
       icon={<Search className="size-5" />}
       title={search.q ? `Nothing matches “${search.q}”` : 'Nothing matches these filters'}
-      hint="Search by name, instrument, model or author, like Orion, NVDA, kagi or Tymur."
+      hint="Search by name, instrument, model or author, like Orion, NVDA, kagi or Ada."
       action={
         <Button
           type="button"

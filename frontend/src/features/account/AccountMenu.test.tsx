@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { meQueryOptions } from '@/api';
-import { ARSEN, NOT_SIGNED_IN, session, stubApi } from '@/test/api';
+import { ADA, NOT_SIGNED_IN, session, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 
 afterEach(() => {
@@ -20,11 +20,11 @@ async function openMenu() {
 
 describe('AccountMenu', () => {
   it('shows who is signed in, then Settings, Home page, API docs and Sign out', async () => {
-    stubApi(session(ARSEN));
+    stubApi(session(ADA));
     await renderApp('/dashboard');
     const { menu } = await openMenu();
-    expect(menu.textContent).toContain('Arsen Labovich');
-    expect(menu.textContent).toContain('arsen@example.com');
+    expect(menu.textContent).toContain('Ada Lovelace');
+    expect(menu.textContent).toContain('ada@example.com');
     const items = within(menu).getAllByRole('menuitem');
     expect(items.map((item) => item.textContent)).toEqual(['Settings', 'Home page', 'API docs', 'Sign out']);
     expect(items.map((item) => item.getAttribute('href'))).toEqual(['/settings', '/', '/api/v1/docs', null]);
@@ -35,7 +35,7 @@ describe('AccountMenu', () => {
   });
 
   it('opens Settings', async () => {
-    stubApi(session(ARSEN));
+    stubApi(session(ADA));
     const { router } = await renderApp('/dashboard');
     const { user, menu } = await openMenu();
     await user.click(within(menu).getByRole('menuitem', { name: 'Settings' }));
@@ -43,7 +43,7 @@ describe('AccountMenu', () => {
   });
 
   it('signs out: ends the session, forgets the user and goes to the home page', async () => {
-    const fetch = stubApi({ ...session(ARSEN), 'POST /api/v1/auth/sign-out': { status: 204 } });
+    const fetch = stubApi({ ...session(ADA), 'POST /api/v1/auth/sign-out': { status: 204 } });
     const { router, queryClient } = await renderApp('/models');
     const { user, menu } = await openMenu();
     await user.click(within(menu).getByRole('menuitem', { name: 'Sign out' }));
@@ -57,7 +57,7 @@ describe('AccountMenu', () => {
   });
 
   it('signs out also when the session had already ended', async () => {
-    stubApi({ ...session(ARSEN), 'POST /api/v1/auth/sign-out': NOT_SIGNED_IN });
+    stubApi({ ...session(ADA), 'POST /api/v1/auth/sign-out': NOT_SIGNED_IN });
     const { router, queryClient } = await renderApp('/models');
     const { user, menu } = await openMenu();
     await user.click(within(menu).getByRole('menuitem', { name: 'Sign out' }));
@@ -68,7 +68,7 @@ describe('AccountMenu', () => {
 
   it('keeps the user signed in on the page when the API cannot sign out, to try again', async () => {
     const fetch = stubApi({
-      ...session(ARSEN),
+      ...session(ADA),
       'POST /api/v1/auth/sign-out': { status: 503, body: { detail: 'Down for a minute.' } },
     });
     const { router, queryClient } = await renderApp('/models');
@@ -80,17 +80,17 @@ describe('AccountMenu', () => {
     );
     await vi.waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
     expect(router.state.location.pathname).toBe('/models');
-    expect(queryClient.getQueryData(meQueryOptions().queryKey)).toEqual(ARSEN);
+    expect(queryClient.getQueryData(meQueryOptions().queryKey)).toEqual(ADA);
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Models');
 
-    stubApi({ ...session(ARSEN), 'POST /api/v1/auth/sign-out': { status: 204 } });
+    stubApi({ ...session(ADA), 'POST /api/v1/auth/sign-out': { status: 204 } });
     const again = await openMenu();
     await again.user.click(within(again.menu).getByRole('menuitem', { name: 'Sign out' }));
     await vi.waitFor(() => expect(router.state.location.pathname).toBe('/'));
   });
 
   it('is in the public header too, beside Dashboard', async () => {
-    stubApi(session(ARSEN));
+    stubApi(session(ADA));
     await renderApp('/');
     const header = within(screen.getByRole('banner'));
     expect(header.getByRole('link', { name: 'Dashboard' }).getAttribute('href')).toBe('/dashboard');

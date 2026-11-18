@@ -1,5 +1,6 @@
-import { Link } from '@tanstack/react-router';
+import { Link, useRouterState } from '@tanstack/react-router';
 import { LayoutGrid } from 'lucide-react';
+import { useEffect, useRef } from 'react';
 
 import { HINT } from '@/components/Hint';
 import { BacktestsIcon, ExperimentsIcon, InstrumentsIcon, ModelsIcon, SettingsIcon } from '@/components/icons';
@@ -29,13 +30,42 @@ function useCounts(): Partial<Record<(typeof SECTIONS)[number]['to'], number>> {
   return { '/backtests': dashboard?.counts.all, '/experiments': dashboard?.experiments.total, '/models': models };
 }
 
+// The row of sections up to 980 px scrolls the open one into its middle, so Settings at its end is
+// not off the screen of a phone; again while its sections widen (the font and the counts
+// arriving). As a column nothing scrolls.
+function useOpenInView() {
+  const nav = useRef<HTMLElement>(null);
+  const pathname = useRouterState({ select: ({ location }) => location.pathname });
+  useEffect(() => {
+    const strip = nav.current;
+    if (!strip) return;
+    const center = () => {
+      const open = strip.querySelector('[aria-current="page"]');
+      if (!open || strip.scrollWidth <= strip.clientWidth) return;
+      const box = strip.getBoundingClientRect();
+      const item = open.getBoundingClientRect();
+      strip.scrollLeft += item.left - box.left - (box.width - item.width) / 2;
+    };
+    center();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(center);
+    for (const section of strip.children) observer.observe(section);
+    return () => {
+      observer.disconnect();
+    };
+  }, [pathname]);
+  return nav;
+}
+
 // The workspace's sections beside the page (mockups/app, direction D): a 200 px card, the storage
 // and the data note under a line at its foot. Up to 980 px wide it lies above the page as a row
 // that scrolls sideways, without a scrollbar and without the foot.
 export function Sidebar() {
   const counts = useCounts();
+  const nav = useOpenInView();
   return (
     <nav
+      ref={nav}
       aria-label="Workspace"
       className="flex flex-col gap-0.5 rounded-lg border bg-card p-2 max-[980px]:flex-row max-[980px]:overflow-x-auto max-[980px]:p-1 max-[980px]:[scrollbar-width:none] max-[980px]:[&::-webkit-scrollbar]:hidden"
     >

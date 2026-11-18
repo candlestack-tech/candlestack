@@ -149,6 +149,16 @@ def test_a_sweep_queues_ordinary_backtests_and_ranks_them_once_all_ended(ada, bo
     # Others read it without the sweep, which only its author can open.
     assert bob.document(ids[0]).json()["backtest"]["sweep_id"] is None
     assert ada.document(ids[0]).json()["backtest"]["sweep_id"] == sweep["id"]
+    # The list of sweeps has it with its best backtest, and the list of backtests its own.
+    [listed] = ada.request("GET", SWEEPS).json()["sweeps"]
+    assert (listed["id"], listed["done"], listed["progress"]) == (
+        sweep["id"],
+        True,
+        finished["progress"],
+    )
+    assert (listed["best"]["id"], listed["best"]["value"]) == (ranked[0]["id"], ranked[0]["value"])
+    assert ada.backtests(sweep_id=sweep["id"]).json()["total"] == 3
+    assert bob.request("GET", SWEEPS).json()["sweeps"] == []
 
 
 @pytest.mark.usefixtures("worker")
@@ -250,3 +260,45 @@ def test_another_users_sweep_is_not_found(ada, bob) -> None:
     problem(sweep_of(bob, sweep_id), 404, "not-found")
     problem(sweep_of(ada, "sw_nothere000"), 404, "not-found")
     assert sweep_of(ada, sweep_id).status_code == 200
+
+
+def test_the_list_of_sweeps_is_newest_first_in_pages(ada, bob, sql) -> None:
+    for number, user in enumerate([ada, ada, ada, bob], start=1):
+        sql(
+            "INSERT INTO sweeps (id, user_id, metric, grid, created_at) VALUES (:id, :user_id, "
+            "'win_rate', '[]', now() + make_interval(mins => :number))",
+            id=f"sw_{number:010d}",
+            user_id=user.id,
+            number=number,
+        )
+    ada.backtest(1, win_rate=0.4)
+    ada.backtest(2, win_rate=0.7)
+    ada.backtest(3, status="failed")
+    ada.backtest(4)
+    # The best is read from the statistics each run stored, as the ranking reads them.
+    sql("UPDATE backtests SET stats = jsonb_build_object('win_rate', win_rate)")
+    sql("UPDATE backtests SET sweep_id = 'sw_0000000001' WHERE number IN (1, 2, 3)")
+    sql("UPDATE backtests SET sweep_id = 'sw_0000000003', status = 'queued' WHERE number = 4")
+
+    first = ada.request("GET", SWEEPS, params={"per_page": 2})
+    second = ada.request("GET", SWEEPS, params={"per_page": 2, "page": 2}).json()
+
+    assert first.status_code == 200
+    assert first.headers["cache-control"] == "no-store"
+    page = first.json()
+    assert [each["id"] for each in page["sweeps"]] == ["sw_0000000003", "sw_0000000002"]
+    assert (page["total"], page["pages"], second["page"]) == (3, 2, 2)
+    [oldest] = second["sweeps"]
+    assert oldest["id"] == "sw_0000000001"
+    assert (oldest["count"], oldest["done"], oldest["metric"]) == (3, True, "win_rate")
+    assert oldest["progress"] == {"queued": 0, "running": 0, "finished": 2, "failed": 1}
+    assert oldest["best"] == {
+        "id": f"bt_{ada.id[4:8]}000002",
+        "number": 2,
+        "name": "Backtest B",
+        "value": 0.7,
+    }
+    queued, empty = page["sweeps"]
+    assert (queued["done"], queued["best"], queued["progress"]["queued"]) == (False, None, 1)
+    assert (empty["count"], empty["done"], empty["best"]) == (0, True, None)
+    assert ada.request("GET", SWEEPS, params={"per_page": 101}).status_code == 422

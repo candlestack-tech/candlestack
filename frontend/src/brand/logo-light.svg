@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 174 32" role="img" aria-label="CandleStack">
   <style>
-    .a { fill: #0f766e; }
-    .b { fill: #fafaf9; }
+    .a { fill: #3cc7a6; }
+    .b { fill: #0d0f11; }
     .c { fill: #141414; }
   </style>
   <rect class="a" width="32" height="32" rx="7"/>

@@ -76,4 +76,16 @@ describe("the backtest page's chart", () => {
     expect(link.options.color).toBe(LIGHT.accent);
     expect(link.data).toHaveLength(2);
   });
+
+  // #465: on a phone the legend takes four lines over the price.
+  it('keeps the legend’s room free at the top of the price pane, up to half of it', () => {
+    const view = new TradesChartView(box(), DARK);
+    // The fake's price pane is 300 px high.
+    view.keepTop(120);
+    expect(charts.scales.right).toEqual({ scaleMargins: { top: 0.4, bottom: 0.2 } });
+    view.keepTop(40);
+    expect(charts.scales.right).toEqual({ scaleMargins: { top: 0.24, bottom: 0.2 } });
+    view.keepTop(400);
+    expect(charts.scales.right).toEqual({ scaleMargins: { top: 0.5, bottom: 0.2 } });
+  });
 });

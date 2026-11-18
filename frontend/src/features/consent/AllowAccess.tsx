@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Lock } from 'lucide-react';
-import { useState } from 'react';
+import { Globe, Info, Lock } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 import {
   ApiError,
@@ -43,7 +43,7 @@ function scopeRows(request: AuthorizationRequest): ScopeRow[] {
 // meanwhile (401) turns the page into its sign-in.
 function useDecision(requestId: string) {
   const queryClient = useQueryClient();
-  return useMutation({
+  const decision = useMutation({
     mutationFn: (allow: Scope[] | null) =>
       decideAuthorizationRequest(
         requestId,
@@ -54,6 +54,17 @@ function useDecision(requestId: string) {
       if (error instanceof ApiError && error.status === 401) queryClient.setQueryData(meQueryOptions().queryKey, null);
     },
   });
+  // Back from the app, the browser may restore this page as it was left, decided: offer the
+  // buttons again (a decided request then says it has expired).
+  const { reset } = decision;
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) reset();
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, [reset]);
+  return decision;
 }
 
 const problemOf = (error: Error | null) => (error instanceof ApiError ? error.problem : undefined);
@@ -75,7 +86,19 @@ function useScopeChoice(rows: ScopeRow[]) {
 
 type WhoProps = { client: AppClient; me: Me; disabled: boolean; onNotYou: () => void };
 
-// .cn-top: the app and CandleStack linked, who asks from where, and as whom.
+// Who vouches for the app's name: the host of the client ID metadata document that names it, else
+// nobody, as an app that registered itself picks its own name.
+function NamedBy({ documentHost }: { documentHost: string | null }) {
+  const Icon = documentHost === null ? Info : Globe;
+  return (
+    <p className="mt-1.5 flex items-center justify-center gap-1.5 text-[12.5px] text-muted-foreground">
+      <Icon aria-hidden="true" className="size-3.5 flex-none" />
+      {documentHost === null ? 'Named by the app itself, not checked' : `Named by ${documentHost}`}
+    </p>
+  );
+}
+
+// .cn-top: the app and CandleStack linked, who asks from where, who names it, and as whom.
 function WhoAsks({ client, me, disabled, onNotYou }: WhoProps) {
   return (
     <div className="flex flex-col items-center gap-3.5 text-center">
@@ -83,6 +106,7 @@ function WhoAsks({ client, me, disabled, onNotYou }: WhoProps) {
       <div>
         <h1 className={TITLE}>{client.name} wants access to your CandleStack account</h1>
         <p className={LEAD}>From {client.redirect_host}. It acts as you with what you allow here.</p>
+        <NamedBy documentHost={client.document_host} />
       </div>
       <span className="inline-flex flex-wrap items-center justify-center gap-2 text-[13px] text-muted-foreground">
         <Avatar user={me} className="size-5 text-[9px]" />
@@ -100,10 +124,15 @@ function WhoAsks({ client, me, disabled, onNotYou }: WhoProps) {
   );
 }
 
-type ChoiceProps = { client: AppClient; rows: ScopeRow[]; choice: ReturnType<typeof useScopeChoice> };
+type ChoiceProps = {
+  client: AppClient;
+  rows: ScopeRow[];
+  choice: ReturnType<typeof useScopeChoice>;
+  disabled: boolean;
+};
 
 // .scs in plain words, then what an app can never do.
-function ScopeChoices({ client, rows, choice }: ChoiceProps) {
+function ScopeChoices({ client, rows, choice, disabled }: ChoiceProps) {
   return (
     <>
       <fieldset className="m-0 min-w-0 border-0 p-0">
@@ -114,6 +143,7 @@ function ScopeChoices({ client, rows, choice }: ChoiceProps) {
               key={item.scope}
               {...item}
               plain
+              disabled={disabled}
               on={choice.isOn(item.scope)}
               onToggle={() => choice.toggle(item.scope)}
             />
@@ -152,8 +182,9 @@ type Props = { requestId: string; request: AuthorizationRequest; me: Me };
 
 // #consent: who asks, from where, as whom; the scopes in plain words with their boxes, what an app
 // can never do, Cancel and Allow, and where the browser goes then. The host is named, as anyone
-// can register an app called Claude. Not you? signs out and shows the sign-in on this page. A
-// request that ended meanwhile says so; an account off the beta list gets the sign-in page's words.
+// can register an app called Claude, and so is the host that names the app, if any. Not you? signs
+// out and shows the sign-in on this page. A request that ended meanwhile says so; an account off
+// the beta list gets the sign-in page's words.
 export function AllowAccess({ requestId, request, me }: Props) {
   const { client } = request;
   const rows = scopeRows(request);
@@ -182,7 +213,7 @@ export function AllowAccess({ requestId, request, me }: Props) {
         disabled={busy || switchAccount.isPending}
         onNotYou={() => switchAccount.mutate()}
       />
-      <ScopeChoices client={client} rows={rows} choice={choice} />
+      <ScopeChoices client={client} rows={rows} choice={choice} disabled={busy} />
       {error && <ErrorNote>{error.message}</ErrorNote>}
       <Decide busy={busy} onCancel={() => decision.mutate(null)} onAllow={() => decision.mutate(choice.granted())} />
       <p className={cn(HINT, 'text-center')}>

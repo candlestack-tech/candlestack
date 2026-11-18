@@ -5,7 +5,7 @@ import { vi } from 'vitest';
 
 import { createAppRouter } from '@/router';
 
-import { ARSEN, sessionWithPreferences, stubApi } from './api';
+import { ADA, sessionWithPreferences, stubApi } from './api';
 
 // The browser in `zone`, as viewerTimeZone reads it, so a time on the viewer's clock reads the same
 // on every machine. vi.restoreAllMocks() takes it back.
@@ -51,7 +51,7 @@ export async function renderApp(url: string) {
 // and warms it up, which takes seconds while every test file starts at once. In beforeAll, which
 // may take longer than a test, so the tests time only what they test.
 export async function warmUpSettings() {
-  stubApi(sessionWithPreferences(ARSEN));
+  stubApi(sessionWithPreferences(ADA));
   await renderApp('/settings/backtest-defaults');
   cleanup();
   vi.unstubAllGlobals();

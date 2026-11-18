@@ -41,6 +41,7 @@ def test_health_with_redis_unreachable(database_url: str) -> None:
         "commit": "unknown",
         "redis": "error",
         "postgres": "ok",
+        "runner": "ok",
     }
 
 

@@ -3,7 +3,7 @@ import { cleanup, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ARSEN, backtest, backtestsAnswer, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, backtest, backtestsAnswer, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
 
 // The Filters panel of the Backtests page: Show and Model.
@@ -40,7 +40,7 @@ const asked = (fetch: ReturnType<typeof stubApi>) =>
 describe('the Filters of the Backtests page', () => {
   it('filters by Show and Model, keeping the panel open', async () => {
     const fetch = stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       ...backtestsAnswer(PAGE),
       ...backtestsAnswer({ ...PAGE, backtests: [TEN], total: 1 }, '?show=starred'),
       ...backtestsAnswer({ ...PAGE, backtests: [TEN], total: 1 }, '?show=starred&model=blesk-novol-8.keras'),
@@ -63,7 +63,7 @@ describe('the Filters of the Backtests page', () => {
   });
 
   it('pops the Filters panel open from its corner and closes it at once, 8 px under each heading', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
+    stubApi({ ...sessionWithPreferences(ADA), ...backtestsAnswer(PAGE) });
     await renderApp('/backtests');
     await screen.findByText('#12');
     const button = screen.getByRole('button', { name: 'Filters: All backtests' });
@@ -89,7 +89,7 @@ describe('the Filters of the Backtests page', () => {
   });
 
   it('ends a model name too long for the Filters panel in an ellipsis, its count still beside it', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
+    stubApi({ ...sessionWithPreferences(ADA), ...backtestsAnswer(PAGE) });
     await renderApp('/backtests');
     await screen.findByText('#12');
     await userEvent.click(screen.getByRole('button', { name: 'Filters: All backtests' }));
@@ -105,7 +105,7 @@ describe('the Filters of the Backtests page', () => {
   });
 
   it('lights an entry of the Filters panel under the pointer, and where the focus is only once keys are used', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...backtestsAnswer(PAGE) });
+    stubApi({ ...sessionWithPreferences(ADA), ...backtestsAnswer(PAGE) });
     await renderApp('/backtests');
     await screen.findByText('#12');
     await userEvent.click(screen.getByRole('button', { name: 'Filters: All backtests' }));

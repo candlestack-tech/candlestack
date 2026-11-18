@@ -17,7 +17,7 @@ import { heldManifest, type ManifestStep, type ModelStep } from './useUpload';
 
 // The three steps of the upload (mockups/app, dModalBody), each in the state it is in.
 
-const MANIFEST_DOCS = 'https://candlestack.tech/docs/manifest';
+const MANIFEST_DOCS = 'https://candlestack.tech/docs/manifest/';
 const ONNX_EXPORT = 'https://onnx.ai/onnx/intro/converters.html';
 
 const mono = (text: string) => <span className="font-mono">{text}</span>;

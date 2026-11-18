@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { meQueryOptions, type Me } from '@/api';
 import { Header } from '@/components/Header';
-import { ARSEN } from '@/test/api';
+import { ADA } from '@/test/api';
 import { classes } from '@/test/markup';
 
 // The theme reads the page's <html>, which a server render has not.
@@ -52,15 +52,15 @@ describe('Header', () => {
   });
 
   it('marks Product on the home page', async () => {
-    const html = await render('/', ARSEN);
+    const html = await render('/', ADA);
     expect(isOn(html, 'Product')).toBe(true);
     expect(isOn(html, 'Instruments')).toBe(false);
   });
 
   it('links Instruments into the app for a signed-in user, marked on the list and on an instrument', async () => {
-    expect(await render('/', ARSEN)).toMatch(/<a [^>]*href="\/instruments"[^>]*>Instruments<\/a>/);
+    expect(await render('/', ADA)).toMatch(/<a [^>]*href="\/instruments"[^>]*>Instruments<\/a>/);
     for (const url of ['/instruments?q=btc', '/instrument/crypto:BTCUSDT']) {
-      const html = await render(url, ARSEN);
+      const html = await render(url, ADA);
       expect(isOn(html, 'Instruments')).toBe(true);
       expect(isOn(html, 'Product')).toBe(false);
     }
@@ -99,7 +99,7 @@ describe('Header', () => {
   });
 
   it('shows Dashboard and the avatar instead to a signed-in user', async () => {
-    const html = await render('/instruments', ARSEN);
+    const html = await render('/instruments', ADA);
     expect(html).toMatch(/<a [^>]*href="\/dashboard"[^>]*>Dashboard<\/a>/);
     expect(html).toMatch(/<button [^>]*aria-label="Account"[^>]*><span [^>]*>AL<\/span><\/button>/);
     expect(html).not.toContain('>Sign in</a>');

@@ -200,7 +200,7 @@ export function SortChip({ search }: { search: ExperimentsSearch }) {
   );
 }
 
-// The author of "More by Tymur": the initials and the name, and the cross that shows everyone.
+// The author of "More by Alan": the initials and the name, and the cross that shows everyone.
 function AuthorChip({ name }: { name: string }) {
   const apply = useApply();
   return (

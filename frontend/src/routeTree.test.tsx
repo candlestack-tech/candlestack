@@ -3,7 +3,7 @@ import { cleanup, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ARSEN, dashboardAnswer, modelsAnswer, session, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, dashboardAnswer, modelsAnswer, session, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp } from '@/test/app';
 import { BTC } from '@/test/instruments';
 
@@ -55,9 +55,9 @@ describe('the signed-in pages', () => {
   });
 
   it('show the app shell to a signed-in user: header, sidebar, title, footer', async () => {
-    stubApi({ ...session(ARSEN), ...dashboardAnswer({ counts: { all: 1, starred: 0, failed: 0, public: 0 } }) });
+    stubApi({ ...session(ADA), ...dashboardAnswer({ counts: { all: 1, starred: 0, failed: 0, public: 0 } }) });
     await renderApp('/dashboard');
-    await vi.waitFor(() => expect(heading()).toBe('Welcome back, Arsen Labovich'));
+    await vi.waitFor(() => expect(heading()).toBe('Welcome back, Ada Lovelace'));
     expect(screen.getByRole('link', { name: 'CandleStack dashboard' }).getAttribute('href')).toBe('/dashboard');
     expect(screen.getByRole('link', { name: 'New backtest' }).getAttribute('href')).toBe('/backtests/new');
     expect(screen.getByRole('button', { name: 'Account' }).textContent).toBe('AL');
@@ -66,7 +66,7 @@ describe('the signed-in pages', () => {
   });
 
   it('mark the open section in the sidebar', async () => {
-    stubApi(session(ARSEN));
+    stubApi(session(ADA));
     await renderApp('/models');
     const sidebar = within(screen.getByRole('navigation', { name: 'Workspace' }));
     const links = sidebar.getAllByRole('link');
@@ -83,7 +83,7 @@ describe('the signed-in pages', () => {
   });
 
   it('show the instrument list beside the sidebar, Instruments marked, its search kept', async () => {
-    stubApi(session(ARSEN));
+    stubApi(session(ADA));
     const { router } = await renderApp('/instruments?q=btc&market=crypto');
     expect(heading()).toBe('Instruments');
     expect(router.state.location.search).toEqual({ q: 'btc', market: 'crypto' });
@@ -95,7 +95,7 @@ describe('the signed-in pages', () => {
 
   it('show an instrument full width under the app header, its back link to the list', async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       'GET /api/v1/data/instruments/crypto%3ABTCUSDT': { status: 200, body: BTC },
     });
     const { router } = await renderApp('/instrument/crypto:BTCUSDT?tf=1d');
@@ -118,7 +118,7 @@ describe('the signed-in pages', () => {
 
   it('lead from an instrument that cannot load back to the list, not the public home page', async () => {
     stubApi({
-      ...sessionWithPreferences(ARSEN),
+      ...sessionWithPreferences(ADA),
       'GET /api/v1/data/instruments/crypto%3ANOPE': { status: 404, body: { detail: 'No instrument crypto:NOPE.' } },
     });
     await renderApp('/instrument/crypto:NOPE');
@@ -129,14 +129,14 @@ describe('the signed-in pages', () => {
   });
 
   it('note under the sidebar that market data is delayed', async () => {
-    stubApi(session(ARSEN));
+    stubApi(session(ADA));
     await renderApp('/backtests');
     const sidebar = screen.getByRole('navigation', { name: 'Workspace' });
     expect(within(sidebar).getByText('Market data delayed 15 min').tagName).toBe('P');
   });
 
   it('give each page only its title row for now', async () => {
-    stubApi(session(ARSEN));
+    stubApi(session(ADA));
     await renderApp('/settings');
     expect(heading()).toBe('Settings');
     expect(screen.getByText('Your account and how new backtests start')).toBeDefined();
@@ -144,7 +144,7 @@ describe('the signed-in pages', () => {
   });
 
   it('open the builder from New backtest, without the sidebar, its back link to where it was opened', async () => {
-    stubApi({ ...sessionWithPreferences(ARSEN), ...modelsAnswer([]) });
+    stubApi({ ...sessionWithPreferences(ADA), ...modelsAnswer([]) });
     const { router } = await renderApp('/models');
     const user = userEvent.setup();
     await user.click(screen.getByRole('link', { name: 'New backtest' }));
@@ -202,7 +202,7 @@ describe('the sign-in page', () => {
       ['/signin?next=https%3A%2F%2Fevil.example', '/dashboard'],
     ];
     for (const [url, landing] of cases) {
-      stubApi(session(ARSEN));
+      stubApi(session(ADA));
       const { router } = await renderApp(url ?? '');
       expect([url, router.state.location.href]).toEqual([url, landing]);
       cleanup();
@@ -281,7 +281,7 @@ describe('the home page', () => {
   });
 
   it('sends an old link to the list with its search on to /instruments, in place of itself', async () => {
-    stubApi(session(ARSEN));
+    stubApi(session(ADA));
     const { router } = await renderApp('/?q=btc&market=crypto&exchange=BINANCE&sort=gainers&page=2');
     expect(router.state.location.pathname).toBe('/instruments');
     expect(router.state.location.search).toEqual({
@@ -295,7 +295,7 @@ describe('the home page', () => {
   });
 
   it('replaces the old link in the history, so Back skips it', async () => {
-    stubApi(session(ARSEN));
+    stubApi(session(ADA));
     const { router } = await renderApp('/dashboard');
     await router.navigate({ href: '/?q=btc' });
     await vi.waitFor(() => expect(router.state.location.pathname).toBe('/instruments'));
@@ -317,7 +317,7 @@ describe('the home page', () => {
 describe('an unknown address', () => {
   it('shows the public Page not found, also under a signed-in path', async () => {
     for (const url of ['/nope', '/dashboard/nope']) {
-      stubApi(session(ARSEN));
+      stubApi(session(ADA));
       await renderApp(url);
       expect(heading()).toBe('Page not found');
       expect(screen.getByRole('navigation', { name: 'Main' })).toBeDefined();

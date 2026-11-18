@@ -30,6 +30,10 @@ export class ApiError extends Error {
   }
 }
 
+// What was asked for is gone (deleted in another tab, say) or never was: the API answers 404
+// not-found.
+export const isGone = (error: unknown) => error instanceof ApiError && error.status === 404;
+
 // What to show for a failed request. The API's own check of a request (422 `validation`) names
 // its fields and rules ("body 'name': String should match pattern ..."), which tells the user
 // nothing: the page says in `fallback` what did not work instead.

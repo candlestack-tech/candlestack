@@ -4,7 +4,7 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { BacktestDocument } from '@/api';
-import { ARSEN, problem, sessionWithPreferences, stubApi } from '@/test/api';
+import { ADA, problem, sessionWithPreferences, stubApi } from '@/test/api';
 import { renderApp, viewerIn } from '@/test/app';
 import { queuedDocument, runningDocument } from '@/test/runs';
 
@@ -46,7 +46,7 @@ afterEach(() => {
 type Answers = Parameters<typeof stubApi>[0];
 
 async function openPage(answers: Answers) {
-  const all: Answers = { ...sessionWithPreferences(ARSEN), ...answers };
+  const all: Answers = { ...sessionWithPreferences(ADA), ...answers };
   const fetch = stubApi(all);
   const app = await renderApp(PAGE);
   return { ...app, fetch, all };

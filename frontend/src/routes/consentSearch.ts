@@ -24,3 +24,12 @@ export const consentPath = (request: string) => `${CONSENT_PAGE}?${new URLSearch
 // browser to /signin?next=<the consent page>; the consent page has its own sign-in, which names
 // the app, so the sign-in page passes it on.
 export const isConsentPath = (path: string) => URL.parse(path, 'https://app.invalid')?.pathname === CONSENT_PAGE;
+
+// The request of a consent page `path` names, or undefined for another page or a broken ID: the
+// sign-in page names the app when the beta list turned away a sign-in that started there.
+export function consentRequestOf(path: string | undefined): string | undefined {
+  const url = path === undefined ? null : URL.parse(path, 'https://app.invalid');
+  if (url?.pathname !== CONSENT_PAGE) return undefined;
+  const request = url.searchParams.get('request');
+  return request !== null && REQUEST_ID.test(request) ? request : undefined;
+}

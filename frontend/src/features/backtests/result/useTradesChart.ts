@@ -60,10 +60,11 @@ export function useChartEvents(view: TradesChartView | null, { candles, seconds 
   }, [candles, seconds]);
   useEffect(() => {
     if (!view) return;
-    let frame = 0;
+    // The pending frame, in an object: the lint reads a reassigned `let` as render state.
+    const pending = { frame: 0 };
     const onRange = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
+      cancelAnimationFrame(pending.frame);
+      pending.frame = requestAnimationFrame(() => {
         const { candles: now, seconds: length } = latest.current;
         // Drawing the arrows tells of a range change too: only a real move makes a new view.
         const next = now && viewOf(view.chart.timeScale().getVisibleLogicalRange(), now, length);
@@ -77,7 +78,7 @@ export function useChartEvents(view: TradesChartView | null, { candles, seconds 
     view.chart.timeScale().subscribeSizeChange(onRange);
     view.chart.subscribeCrosshairMove(onMove);
     return () => {
-      cancelAnimationFrame(frame);
+      cancelAnimationFrame(pending.frame);
       view.chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange);
       view.chart.timeScale().unsubscribeSizeChange(onRange);
       view.chart.unsubscribeCrosshairMove(onMove);

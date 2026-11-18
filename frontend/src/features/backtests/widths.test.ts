@@ -36,12 +36,14 @@ describe('the widths of the backtest columns (#315)', () => {
   });
 
   // The Backtests table at the page's full width (1200 px and up: 928 px beside the sidebar) with
-  // every column: the backtest takes the rest, which holds the star's 24 px (28 px less its
-  // margins), 6 px, a name of 150 px (backtest-names), 6 px, "#999" in Geist Mono at 11.5 px
-  // (6.9 px a figure), 6 px and the 14 px globe of a public backtest.
-  it('leave a name 150 px in the Backtests table at its full width (#376)', () => {
+  // every column and the checkboxes before them: the backtest takes the rest, which holds the
+  // star's 24 px (28 px less its margins), 6 px, a name of 120 px (150 px before the checkboxes,
+  // backtest-names), 6 px, "#999" in Geist Mono at 11.5 px (6.9 px a figure), 6 px and the 14 px
+  // globe of a public backtest.
+  it('leave a name 120 px in the Backtests table at its full width (#376)', () => {
     const columns = [WIDTH.instruments, WIDTH.model, WIDTH.return, WIDTH.sharpe, WIDTH.maxDrawdown, WIDTH.when];
-    const rest = 928 - columns.reduce((sum, each) => sum + width(each), 0) - width(WIDTH.compare) - PADDING;
-    expect(rest).toBeGreaterThanOrEqual(24 + 6 + 150 + 6 + '#999'.length * 6.9 + 6 + 14);
+    const fixed = columns.reduce((sum, each) => sum + width(each), 0) + width(WIDTH.compare) + width(WIDTH.select);
+    const rest = 928 - fixed - PADDING;
+    expect(rest).toBeGreaterThanOrEqual(24 + 6 + 120 + 6 + '#999'.length * 6.9 + 6 + 14);
   });
 });
