@@ -3,7 +3,7 @@ import type { DateStyle } from '@/lib/dates';
 
 import { CandleChart } from './CandleChart';
 import { CandlesError } from './CandlesError';
-import { timeZoneNote } from './time';
+import { dayNote, timeZoneNote } from './time';
 import { useCandleHistory, type CandleHistory } from './useCandleHistory';
 
 // "1 candle is missing …" or "3 candles are missing …".
@@ -13,15 +13,15 @@ function gapsNote(count: number): string {
 }
 
 function Status({
-  timeZone,
+  clockNote,
   history: { isLoadingOlder, hasOlder, gapsTotal },
 }: {
-  timeZone: string;
+  clockNote: string;
   history: CandleHistory;
 }) {
   const notes = [
     isLoadingOlder ? 'Loading older candles…' : hasOlder ? 'Scroll left for older candles.' : 'All history is loaded.',
-    timeZoneNote(timeZone),
+    clockNote,
   ];
   // The chart joins sessions, so a hole in the data would not show. Say so.
   if (gapsTotal > 0) notes.push(gapsNote(gapsTotal));
@@ -72,7 +72,10 @@ export function InstrumentCandles({ instrument, timeframe, dateStyle }: Props) {
             daily={timeframe === '1d'}
             onNearLeftEdge={history.loadOlder}
           />
-          <Status timeZone={dateStyle.timeZone} history={history} />
+          <Status
+            clockNote={timeframe === '1d' ? dayNote(instrument.market) : timeZoneNote(dateStyle.timeZone)}
+            history={history}
+          />
         </>
       )}
     </section>

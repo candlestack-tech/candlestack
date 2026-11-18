@@ -1,9 +1,15 @@
+import type { Market } from '@/api';
 import { NEW_YORK, calendarDay, formatDate, formatShortDay, formatTime, monthName, type DateStyle } from '@/lib/dates';
 
 // Under the chart, so nobody has to guess which clock the axis uses. Any zone but New York is the
 // viewer's own.
 export function timeZoneNote(timeZone: string): string {
   return timeZone === NEW_YORK ? 'Times are New York time.' : `Times are your time (${timeZone}).`;
+}
+
+// Under a daily chart, which writes each candle's day in the market's zone (dayZone), not times.
+export function dayNote(market: Market): string {
+  return market === 'stock' ? 'Days are New York trading days.' : 'Days are UTC days.';
 }
 
 // The kinds of tick marks lightweight-charts asks a label for (its TickMarkType enum).
@@ -33,4 +39,11 @@ export function crosshairFormatter(style: DateStyle) {
 // The label under the crosshair of a chart of days: the date alone.
 export function dayFormatter(style: DateStyle) {
   return (seconds: number): string => formatDate(new Date(seconds * 1000), style);
+}
+
+// The zone of a market's days, in which a daily candle or the first day of data is written: a
+// stock's session is a New York day, a crypto day runs 00:00-24:00 UTC (docs/data.md, 4h and 1d).
+// In the user's zone, a crypto day would read as the day before west of UTC.
+export function dayZone(market: Market): string {
+  return market === 'stock' ? NEW_YORK : 'UTC';
 }
