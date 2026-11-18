@@ -13,6 +13,15 @@ export function TryBacktest() {
   );
 }
 
+// Down to the Agents section, beside Try Backtest in the hero.
+export function ConnectAgent() {
+  return (
+    <Button asChild variant="outline" className={cn(BUTTON_SIZES.lg, OUTLINE_BUTTON)}>
+      <a href="#agents">Connect an agent</a>
+    </Button>
+  );
+}
+
 const BROWSE = cn(BUTTON_SIZES.default, OUTLINE_BUTTON, 'mt-4');
 
 // The instrument list is in the app (#340): signed out, the way there is the sign-in page, which

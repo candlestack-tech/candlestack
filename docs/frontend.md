@@ -136,18 +136,26 @@ minute.
 
 ## Home page
 
-`/` is the public start page (#199), approved in the design repository (`mockups/home`).
+`/` is the public start page (#199), approved in the design repository (`mockups/home`, updated
+in `mockups/home-update`, #478).
 `src/pages/HomePage.tsx` puts together its parts from `src/features/home/`:
 
-- a headline with Try Backtest over the pipeline of a run: market data, the three layers
-  (representation, model, decision) and the results;
+- a headline with Try Backtest and Connect an agent (down to the agents) over the pipeline of a
+  run: market data, the three layers (representation, model, decision) and the results;
 - the three layers you can swap, each with what it offers;
 - the markets with an example of the instrument list (`ExampleInstruments.tsx`): five rows of
   sample figures written in the code, each with its real icon, in the list's style, nothing in
   them a link, under an "EXAMPLE" line. Market data is for signed-in accounts only (#340), so
   the home page asks the API for none. Sign in to browse leads to `/signin?next=/instruments`;
   signed in, Browse instruments to the list;
-- compare and public experiments, both shown as "Coming soon".
+- compare, with a sample comparison (`ExampleCompare.tsx`);
+- agents (`Agents.tsx`): the AI clients that connect to the MCP server, by their logos
+  (`src/components/clientLogos.tsx`), Install the server (the website's install guide) and the
+  API reference, beside a sample session with the server's tools;
+- the public experiments: Open Experiments leads to `/experiments`, beside three example cards
+  in the style of the page's.
+
+Every example is sample figures written in the code under an "EXAMPLE" line, never market data.
 
 The instrument list (`/instruments`) and the instrument pages (`/instrument/$id`) are part of the
 signed-in app ([Sign-in](#sign-in)). The list sits beside the sidebar: the title, four facts,
@@ -155,10 +163,11 @@ then the search, the filters and the table ([Instrument list](#instrument-list))
 takes the whole width like a backtest, its back link "Instruments" returning to the list's last
 search (`BackToList.tsx`).
 
-The header links Product (`/`), Instruments (signed in only) and the API docs of the same host,
-so stage links to stage. Sign in and Try Backtest (also the hero's) lead to the sign-in page; signed in, the
+The header links Product (`/`), Instruments (signed in only), the docs on the website
+(`candlestack.tech/docs`, also first in the footer) and the API docs of the same host, so stage
+links to stage. Sign in and Try Backtest (also the hero's) lead to the sign-in page; signed in, the
 header shows Dashboard and the avatar with its menu instead ([Sign-in](#sign-in)). Below `sm` the
-nav goes, and Sign in below `md`: with the nav, the row needs about 675 px.
+nav keeps only Docs, and Sign in goes below `md`: with the nav, the row needs about 675 px.
 
 The 40 px grid behind the pages is stronger than the website's (0.09 light, 0.075 dark). The
 footer, the cards and the list's table are solid on it, so it never shows through them.
@@ -219,8 +228,6 @@ without a scrollbar, the foot left out, the open section scrolled into its middl
 The avatar is the user's initials (`initials.ts`), never a provider picture; its menu
 (`src/features/account/AccountMenu.tsx`) is a shadcn/ui DropdownMenu with Settings, Home page,
 API docs and, in red, Sign out. New backtest is a link to the builder ([Backtest builder](#backtest-builder)).
-`ComingSoonDialog` is a shadcn/ui Dialog with the home page's Coming soon card over a sketch, for
-every part of the app that is not built yet.
 Icons are lucide's where lucide draws the design's icon; the others (Backtests, Models,
 Instruments, Settings, Home page, the moon) are drawn from the mockup in `src/components/icons.tsx`. The
 mockups' button looks (`.btn`, `.btn.ghost`, `.btn.pri`) are class constants on shadcn's Button

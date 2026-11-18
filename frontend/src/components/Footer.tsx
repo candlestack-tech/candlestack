@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 
 // Where to read more about CandleStack. A new tab, so following one does not lose the page.
 const links = [
+  { name: 'Docs', href: 'https://candlestack.tech/docs' },
   // Same origin, so stage links to the stage API.
   { name: 'API docs', href: '/api/v1/docs' },
   { name: 'Status', href: 'https://ops.candlestack.tech' },

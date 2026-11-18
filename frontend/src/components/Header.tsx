@@ -18,28 +18,32 @@ function sectionOf(pathname: string): Section | undefined {
 
 const NAV = 'text-muted-foreground hover:text-foreground';
 const ON = 'font-medium text-foreground';
+const PHONE_HIDDEN = 'max-sm:hidden';
 
-// No room on a phone: the logo leads home. Instruments only signed in: the list is in the app,
-// market data being for signed-in accounts only (#340).
+// No room on a phone for more than Docs: the logo leads home. Instruments only signed in: the list
+// is in the app, market data being for signed-in accounts only (#340).
 function MainNav() {
   const section = useRouterState({ select: (state) => sectionOf(state.location.pathname) });
   const signedIn = Boolean(useMe());
   return (
-    <nav aria-label="Main" className="flex gap-[18px] text-sm max-sm:hidden">
-      <Link to="/" className={cn(NAV, section === 'product' && ON)}>
+    <nav aria-label="Main" className="flex gap-[18px] text-sm">
+      <Link to="/" className={cn(NAV, PHONE_HIDDEN, section === 'product' && ON)}>
         Product
       </Link>
       {signedIn && (
         <Link
           to="/instruments"
           activeOptions={{ includeSearch: false }}
-          className={cn(NAV, section === 'instruments' && ON)}
+          className={cn(NAV, PHONE_HIDDEN, section === 'instruments' && ON)}
         >
           Instruments
         </Link>
       )}
+      <a href="https://candlestack.tech/docs" target="_blank" rel="noopener" className={NAV}>
+        Docs
+      </a>
       {/* Same origin, so stage links to the stage API. */}
-      <a href="/api/v1/docs" target="_blank" rel="noopener" className={NAV}>
+      <a href="/api/v1/docs" target="_blank" rel="noopener" className={cn(NAV, PHONE_HIDDEN)}>
         API
       </a>
     </nav>
@@ -80,7 +84,7 @@ function Actions() {
   );
 }
 
-// The public pages' header: Product, Instruments signed in, and the API docs.
+// The public pages' header: Product, Instruments signed in, the docs and the API docs.
 export function Header() {
   return (
     <HeaderBar home="/" homeLabel="CandleStack home">

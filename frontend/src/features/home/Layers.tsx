@@ -8,8 +8,8 @@ const LAYERS: Layer[] = [
   {
     eyebrow: 'Layer 1 · Representation',
     title: 'How prices become input',
-    text: 'Turn raw candles into what your model reads: windows or bricks, with normalized indicators.',
-    badges: ['Time windows', 'Renko'],
+    text: 'Turn raw candles into what your model reads. Windows, Renko bricks or Kagi lines, with normalized indicators.',
+    badges: ['Time windows', 'Renko', 'Kagi'],
   },
   {
     eyebrow: 'Layer 2 · Model',
@@ -20,8 +20,8 @@ const LAYERS: Layer[] = [
   {
     eyebrow: 'Layer 3 · Decision',
     title: 'How predictions become trades',
-    text: 'Thresholds, direction, stop loss, smoothing, position size and costs.',
-    badges: ['Threshold', 'Long only', 'Stop loss', 'Smoothing', 'Sizing'],
+    text: 'Pick a rule, then set direction, stop loss, smoothing, position size and costs.',
+    badges: ['Threshold', 'Hysteresis', 'K-means'],
   },
 ];
 
